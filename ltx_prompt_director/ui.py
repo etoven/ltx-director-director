@@ -326,7 +326,8 @@ class SettingsDialog(QDialog):
 
 
 class ProjectDetailsDialog(QDialog):
-    def __init__(self, suggested_description: str, parent=None, name: str = "", collection: str = "", collections: list[str] | None = None):
+    def __init__(self, suggested_description: str, parent=None, name: str = "", collection: str = "", collections: list[str] | None = None,
+                 thumbnail_options: list[tuple[str, str]] | None = None, thumbnail_data: str = "", thumbnail_source: str = ""):
         super().__init__(parent)
         self.setWindowTitle("Save project to library")
         self.setMinimumWidth(430)
@@ -345,9 +346,40 @@ class ProjectDetailsDialog(QDialog):
             self.collection.addItem(value, value)
         if collection:
             self.collection.setCurrentText(collection)
+        self.thumbnail_data = thumbnail_data
+        self.thumbnail_source = thumbnail_source
+        self.thumbnail_options = thumbnail_options or []
+        thumbnail_box = QWidget()
+        thumbnail_layout = QVBoxLayout(thumbnail_box)
+        thumbnail_layout.setContentsMargins(0, 0, 0, 0)
+        self.thumbnail_list = QListWidget()
+        self.thumbnail_list.setViewMode(QListWidget.ViewMode.IconMode)
+        self.thumbnail_list.setFlow(QListWidget.Flow.LeftToRight)
+        self.thumbnail_list.setWrapping(False)
+        self.thumbnail_list.setIconSize(QSize(104, 104))
+        self.thumbnail_list.setFixedHeight(148)
+        self.thumbnail_list.setSpacing(6)
+        for index, (label, value) in enumerate(self.thumbnail_options):
+            item = QListWidgetItem(QIcon(self._thumbnail_pixmap(value)), label)
+            item.setData(Qt.ItemDataRole.UserRole, (f"segment:{index}", value))
+            item.setSizeHint(QSize(116, 132))
+            self.thumbnail_list.addItem(item)
+            if self.thumbnail_source == f"segment:{index}" or (not self.thumbnail_source and index == 0):
+                self.thumbnail_list.setCurrentItem(item)
+        if self.thumbnail_source == "custom" and self.thumbnail_data:
+            item = QListWidgetItem(QIcon(self._thumbnail_pixmap(self.thumbnail_data)), "Custom")
+            item.setData(Qt.ItemDataRole.UserRole, ("custom", self.thumbnail_data))
+            item.setSizeHint(QSize(116, 132))
+            self.thumbnail_list.addItem(item)
+            self.thumbnail_list.setCurrentItem(item)
+        self.custom_thumbnail_button = QPushButton("Upload custom thumbnail…")
+        self.custom_thumbnail_button.clicked.connect(self.choose_custom_thumbnail)
+        thumbnail_layout.addWidget(self.thumbnail_list)
+        thumbnail_layout.addWidget(self.custom_thumbnail_button)
         form.addRow("Name", self.name)
         form.addRow("Description", self.description)
         form.addRow("Collection", self.collection)
+        form.addRow("Thumbnail", thumbnail_box)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
@@ -362,6 +394,44 @@ class ProjectDetailsDialog(QDialog):
     def collection_name(self) -> str:
         value = self.collection.currentText().strip()
         return "" if value == "No collection" else value
+
+    @staticmethod
+    def _thumbnail_pixmap(value: str) -> QPixmap:
+        pixmap = pixmap_from_data_url(value)
+        if pixmap.isNull():
+            return pixmap
+        scaled = pixmap.scaled(104, 104, Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation)
+        return scaled.copy(max(0, (scaled.width() - 104) // 2), max(0, (scaled.height() - 104) // 2), 104, 104)
+
+    def choose_custom_thumbnail(self) -> None:
+        initial = self.parent().settings.value("last_media_dir", str(Path.home()))
+        paths = choose_media_files(self, False, str(initial))
+        if not paths:
+            return
+        path = paths[0]
+        self.parent().settings.setValue("last_media_dir", str(Path(path).parent))
+        custom_data = data_url(path, max_edge=720, quality=90)
+        if not custom_data:
+            QMessageBox.warning(self, "Thumbnail unavailable", "That image could not be used as a thumbnail.")
+            return
+        for row in range(self.thumbnail_list.count()):
+            item = self.thumbnail_list.item(row)
+            if (item.data(Qt.ItemDataRole.UserRole) or ("", ""))[0] == "custom":
+                self.thumbnail_list.takeItem(row)
+                break
+        item = QListWidgetItem(QIcon(self._thumbnail_pixmap(custom_data)), "Custom")
+        item.setData(Qt.ItemDataRole.UserRole, ("custom", custom_data))
+        item.setSizeHint(QSize(116, 132))
+        self.thumbnail_list.addItem(item)
+        self.thumbnail_list.setCurrentItem(item)
+
+    def selected_thumbnail(self) -> tuple[str, str]:
+        item = self.thumbnail_list.currentItem()
+        if item:
+            return item.data(Qt.ItemDataRole.UserRole)
+        if self.thumbnail_options:
+            return "segment:0", self.thumbnail_options[0][1]
+        return self.thumbnail_source, self.thumbnail_data
 
 
 class MainWindow(QMainWindow):
@@ -805,7 +875,8 @@ class MainWindow(QMainWindow):
         meta["savedAt"] = datetime.now(timezone.utc).isoformat()
         meta["duration"] = self.total_duration()
         meta["segmentCount"] = len(self.segments)
-        meta["thumbnailData"] = data_url(self.segments[0].preview_path, max_edge=360, quality=84)
+        if not meta.get("thumbnailSource"):
+            meta["thumbnailData"] = data_url(self.segments[0].preview_path, max_edge=360, quality=84)
         payload = self.project_payload()
         payload["library"] = {key: meta.get(key, "") for key in ("id", "name", "description", "collection", "savedAt")}
         Path(meta["projectPath"]).write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -869,16 +940,29 @@ class MainWindow(QMainWindow):
         if not meta or meta.get("kind") != "project":
             return
         collections = [str(record.get("collection")) for record in self.library_records() if record.get("collection")]
+        try:
+            stored_payload = json.loads(Path(meta["projectPath"]).read_text(encoding="utf-8"))
+            thumbnail_options = [
+                (f"Segment {index + 1}", str(frame.get("previewData", "")))
+                for index, frame in enumerate(stored_payload.get("frames", [])) if frame.get("previewData")
+            ]
+        except (OSError, ValueError, TypeError):
+            thumbnail_options = []
         dialog = ProjectDetailsDialog(
             str(meta.get("description", "")), self, name=str(meta.get("name", "")),
             collection=str(meta.get("collection", "")), collections=collections,
+            thumbnail_options=thumbnail_options, thumbnail_data=str(meta.get("thumbnailData", "")),
+            thumbnail_source=str(meta.get("thumbnailSource", "")),
         )
         if not dialog.exec():
             return
+        thumbnail_source, thumbnail_data = dialog.selected_thumbnail()
         meta.update({
             "name": dialog.name.text().strip(),
             "description": dialog.description.toPlainText().strip(),
             "collection": dialog.collection_name(),
+            "thumbnailSource": thumbnail_source,
+            "thumbnailData": thumbnail_data,
             "savedAt": datetime.now(timezone.utc).isoformat(),
         })
         meta.pop("kind", None)
