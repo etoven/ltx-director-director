@@ -17,6 +17,8 @@ Each WebM initially occupies one second. Image segments initially occupy five se
 - Right-click a card to replace its media, mark it as a start/end frame, or delete it.
 - Replacing media preserves the segment prompt, timing, role, and position.
 
+Use the **Scale** slider to zoom the timeline horizontally, or select **Auto fit** to fit the complete sequence into the available width. Drag the bar along the bottom edge of the timeline downward to enlarge segment previews; previews preserve the complete image beneath their separate header row.
+
 ## 3. Configure Magic Build
 
 Open **AI Settings**, select Gemini or OpenAI, choose the Gemini model when applicable, and enter the corresponding API key.
@@ -27,6 +29,8 @@ Magic Build options:
 
 - **SFX** adds synchronized Foley, impact, material, ambience, and transformation sound directions.
 - **Vocals** adds supported breathing, exertion, cries, or dialogue direction without inventing dialogue wording.
+- **HDR** places `(4K, HDR, Realistic)` at the beginning of the global prompt.
+- **Reduce Music** instructs the model to place a setting-specific `[SOUND]: Ambient …` line after the quality header. Supplying environmental ambience helps discourage unwanted generated music.
 
 Enter optional Director's Intent, then select **Magic Build**. The result contains exactly one prompt for every timeline segment and one global prompt.
 
@@ -36,8 +40,11 @@ Select **Projects** in the toolbar to open the left project-library panel. The p
 
 - **Save Current** adds the working timeline to the library. The first save asks for a project name and description; later saves update it directly.
 - **Open** or double-clicking a project restores its complete embedded workspace.
+- **Edit** changes a project's name, description, or collection.
 - **Delete** permanently removes the selected project from the local library after confirmation.
 - Search matches words in both project names and descriptions.
+
+Assigning a collection groups related projects into a folder-like tile. Its cover is a 2×2 grid made from the four most recently saved member thumbnails. Open the collection to see its projects; select **↑ UP** to return to the top-level library. Collected projects appear only inside their collection.
 
 Library projects are stored in the operating system's per-user application-data directory. They use the same self-contained media format as Project Export, while lightweight metadata keeps the visual gallery responsive.
 
@@ -45,13 +52,13 @@ Library projects are stored in the operating system's per-user application-data 
 
 **LTX Director Export** creates a timeline JSON containing timing in 24 FPS frames, prompts, roles, thumbnails, global prompt, and video metadata. Complete WebM content is embedded in `videoB64` so the portable file retains the source video.
 
-**LTX Director Import** restores supported image and WebM segments. Audio, motion, LoRA, and retake tracks are intentionally ignored.
+**Open** restores supported image and WebM segments from an LTXDirector JSON file. Audio, motion, LoRA, and retake tracks are intentionally ignored.
 
 All LTX Director and native project import/export actions use the same operating-system picker integration as Add Media: KDialog on KDE Plasma, Zenity on GNOME, and native dialogs on Windows and macOS.
 
 ## 6. Native project files
 
-**Project Export** creates `*.ltxproject.json`, preserving the complete editable workspace:
+**Project Export** creates a `.LTXD` file, preserving the complete editable workspace:
 
 - Segment order, roles, prompts, and durations
 - Image and WebM media
@@ -59,8 +66,10 @@ All LTX Director and native project import/export actions use the same operating
 - Director's Intent
 - Global prompt
 - SFX and Vocals settings
+- HDR and Reduce Music settings
+- Timeline scale and preview-panel height
 
-**Project Import** restores that workspace. API keys are deliberately excluded.
+**Import** restores that workspace. API keys are deliberately excluded. Older `*.ltxproject.json` project files are accepted for backward compatibility.
 
 ## Troubleshooting
 

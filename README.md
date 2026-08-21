@@ -8,11 +8,11 @@
 
 LTX Director - Director turns a folder of reference frames into a structured LTX Video 2.3 sequence:
 
-1. Add images or WebM clips and arrange them directly on the visual timeline.
+1. Start a project, add images or WebM clips, and arrange them directly on the visual timeline.
 2. Mark each segment as a start frame or end frame, then drag its edge to set the duration.
 3. Describe the overall scene in **Director's Intent** and optionally enable SFX or vocals.
 4. Run **Magic Build** to refine timing and generate a focused prompt for every segment.
-5. Review the shared global continuity prompt, then export the sequence for the ComfyUI LTXDirector node.
+5. Review the shared global continuity prompt, then export the sequence as JSON for the ComfyUI LTXDirector node.
 
 ![Timeline, frame roles, duration controls, and Magic Build](docs/images/timeline-and-magic-build.png)
 
@@ -27,9 +27,9 @@ LTX Director - Director turns a folder of reference frames into a structured LTX
 The app is designed around moving a prepared sequence into [LTXDirector for ComfyUI](https://github.com/WhatDreamsCost/WhatDreamsCost-ComfyUI), where generation and final timeline work take place.
 
 - **LTX Director Export** writes an LTXDirector-compatible JSON file containing the supported timeline segments, timing, start/end-frame roles, per-segment prompts, global prompt, and referenced media. WebM segments remain complete videos in the export even though Magic Build sends only a single optimized preview frame to the vision model.
-- **LTX Director Import** brings supported LTXDirector JSON data back into the desktop timeline for further prompt and timing work.
-- **Project Export** saves the complete editable LTX Director - Director project, including embedded media and app-specific state. Use this format when you intend to reopen the project in this app.
-- **Project Import** restores that complete project without requiring the original media files to remain in their previous locations.
+- **Open** brings supported LTXDirector JSON data back into the desktop timeline for further prompt and timing work.
+- **Project Export** saves the complete editable LTX Director - Director project as a `.LTXD` file, including embedded media and app-specific state. Use this format when you intend to reopen the project in this app.
+- **Import** restores a `.LTXD` project without requiring the original media files to remain in their previous locations. Legacy project JSON files remain readable.
 
 In short: use **Project Export** for lossless editing and safekeeping; use **LTX Director Export** when the sequence is ready to move into ComfyUI.
 
@@ -38,6 +38,7 @@ In short: use **Project Export** for lossless editing and safekeeping; use **LTX
 - Native PySide6 interface for Linux, Windows, and macOS
 - Web-app-matched dark editor layout with compact toolbar and stacked prompt panels
 - Numbered timeline ruler with duration-proportional segment widths
+- Adjustable timeline scale, one-click auto fit, and vertically resizable previews
 - Drag-to-reorder horizontal timeline
 - One-second minimum segment duration in 0.5-second increments
 - Right-click replace, role assignment, and deletion
@@ -46,10 +47,10 @@ In short: use **Project Export** for lossless editing and safekeeping; use **LTX
 - WebM support with a preview captured at the start of the final second
 - Only one optimized frame per WebM is sent to vision AI
 - Gemini and OpenAI support with local key storage
-- Independent SFX and Vocals Magic Build controls
+- Independent SFX, Vocals, HDR, and Reduce Music controls
 - LTX Director-compatible JSON import/export
 - Complete portable project import/export, including embedded media
-- Searchable local project library with large visual thumbnails
+- Searchable local project library with large visual thumbnails and collection folders
 - No server, database, account, or telemetry
 
 ## Quick start from source
@@ -80,7 +81,7 @@ python3 -m pip install --upgrade "$(wget -qO- https://api.github.com/repos/etove
 Or download the `.whl` file from the latest GitHub release, then install it with:
 
 ```bash
-python3 -m pip install ./ltx_prompt_director-1.5.0-py3-none-any.whl
+python3 -m pip install ./ltx_prompt_director-1.6.0-py3-none-any.whl
 ```
 
 You can also install a locally built wheel from the repository:

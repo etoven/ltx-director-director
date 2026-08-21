@@ -12,24 +12,33 @@ from .models import Segment
 GEMINI_MODELS = ["gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite"]
 
 
-def build_prompts(segments: list[Segment], provider: str, model: str, api_key: str, intent: str, sfx: bool, vocals: bool) -> dict:
+def build_prompts(segments: list[Segment], provider: str, model: str, api_key: str, intent: str, sfx: bool, vocals: bool, hdr: bool, reduce_music: bool) -> dict:
     images = [{"name": item.name, "role": item.role, "image": data_url(item.preview_path, max_edge=384)} for item in segments]
-    rules = _rules(len(images), intent, sfx, vocals)
+    rules = _rules(len(images), intent, sfx, vocals, hdr, reduce_music)
     if provider == "openai":
         return _openai(images, api_key, rules)
     return _gemini(images, api_key, model, rules)
 
 
-def _rules(count: int, intent: str, sfx: bool, vocals: bool) -> str:
+def _rules(count: int, intent: str, sfx: bool, vocals: bool, hdr: bool, reduce_music: bool) -> str:
     audio = (
         ("Include concise synchronized SFX grounded in visible motion, materials and ambience. " if sfx else "Do not include SFX, Foley or ambience directions. ")
         + ("Include vocal direction only when visible action or user intent supports it; never invent dialogue wording. " if vocals else "Do not include speech, dialogue, breathing, cries or other vocal directions. ")
     )
-    return f"""You are LTXDirector, an expert prompt planner for LTX Video 2.3. Analyze all {count} supplied frames in order.
+    quality_rule = "Begin globalPrompt with exactly: (4K, HDR, Realistic). " if hdr else "Do not add a parenthesized quality header to globalPrompt. "
+    if reduce_music:
+        position = "Immediately after the quality header" if hdr else "At the beginning of globalPrompt"
+        sound_rule = f"{position}, include a setting-specific line in exactly this format: [SOUND]: Ambient <describe the room or environment ambience only>. This ambience line is required and must not request music. "
+    else:
+        sound_rule = "Do not add a [SOUND] ambience header unless the user explicitly requests one. "
+    global_format = quality_rule + sound_rule
+    return f"""EXPECTED SEGMENT COUNT: {count}
+
+You are LTXDirector, an expert prompt planner for LTX Video 2.3. Analyze all {count} supplied frames in order.
 Return exactly one segment per frame; never add, remove, merge or reorder. A start frame is the exact opening frame and an end frame is the exact target.
 Write production-ready natural-language prompts describing visible subject, action, expression, physical change, secondary motion, environment and camera behavior. Infer transitions only from adjacent frames. Preserve identity, outfit, scene, lighting, angle, composition, aspect ratio and style. Use a stationary camera unless the frames clearly demand otherwise. Require gradual motion, overlapping progression, direct continuity and no cross-fade. Do not invent visual facts.
 Assign 1.0-12.0 seconds in 0.5-second increments according to motion complexity. {audio}
-The globalPrompt contains persistent subject, scene, camera, lighting, style, continuity and negative constraints only.
+The globalPrompt contains persistent subject, scene, camera, lighting, style, continuity and negative constraints only. {global_format}
 User intent: {intent or 'Infer motion only from the ordered frames.'}
 Return strict JSON: {{"segments":[{{"duration":5,"prompt":"..."}}],"globalPrompt":"..."}}"""
 
@@ -72,4 +81,3 @@ def _validate(raw: str, expected: int) -> dict:
     if not isinstance(result.get("segments"), list) or len(result["segments"]) != expected:
         raise ValueError("The AI returned the wrong segment count. Run Magic Build again.")
     return result
-
