@@ -37,7 +37,13 @@ Windows activation:
 
 ## Install from a wheel
 
-Download the `.whl` file from the latest GitHub release, then install it with:
+### One-line Linux install
+
+```bash
+wget -qO /tmp/ltx-prompt-director.whl https://raw.githubusercontent.com/etoven/ltx-director-director/main/dist/ltx_prompt_director-1.3.1-py3-none-any.whl && python3 -m pip install /tmp/ltx-prompt-director.whl
+```
+
+Or download the `.whl` file from the latest GitHub release, then install it with:
 
 ```bash
 python3 -m pip install ./ltx_prompt_director-1.3.1-py3-none-any.whl
