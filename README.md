@@ -2,6 +2,26 @@
 
 A native Python desktop timeline and AI prompt builder for LTX Video 2.3. Arrange image and WebM reference segments, assign start/end-frame roles, refine timing, and generate one prompt per segment plus a global continuity prompt with Gemini or OpenAI.
 
+![LTX Director - Director application overview](docs/images/ltx-director-director-overview.png)
+
+## What it does
+
+LTX Director - Director turns a folder of reference frames into a structured LTX Video 2.3 sequence:
+
+1. Add images or WebM clips and arrange them directly on the visual timeline.
+2. Mark each segment as a start frame or end frame, then drag its edge to set the duration.
+3. Describe the overall scene in **Director's Intent** and optionally enable SFX or vocals.
+4. Run **Magic Build** to refine timing and generate a focused prompt for every segment.
+5. Review the shared global continuity prompt, then export to LTX Director or save the complete editable project.
+
+![Timeline, frame roles, duration controls, and Magic Build](docs/images/timeline-and-magic-build.png)
+
+*Duration-scaled segments make the full sequence readable at a glance. Frames can be reordered, resized, replaced, assigned a role, or deleted without leaving the timeline.*
+
+![Generated segment and global prompts](docs/images/generated-prompts.png)
+
+*Magic Build creates the selected segment's motion prompt and a global prompt that keeps subject identity, setting, lighting, camera, and style consistent across the sequence.*
+
 ## Highlights
 
 - Native PySide6 interface for Linux, Windows, and macOS
