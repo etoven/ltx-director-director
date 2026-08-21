@@ -20,7 +20,7 @@ A native Python desktop timeline and AI prompt builder for LTX Video 2.3. Arrang
 - Complete portable project import/export, including embedded media
 - No server, database, account, or telemetry
 
-## Quick start
+## Quick start from source
 
 ```bash
 python3 -m venv .venv
@@ -34,6 +34,44 @@ Windows activation:
 ```powershell
 .venv\Scripts\activate
 ```
+
+## Install from a wheel
+
+Download the `.whl` file from the latest GitHub release, then install it with:
+
+```bash
+python3 -m pip install ./ltx_prompt_director-1.3.1-py3-none-any.whl
+```
+
+You can also install a locally built wheel from the repository:
+
+```bash
+python3 -m pip install ./dist/ltx_prompt_director-*.whl
+```
+
+Launch the installed application with:
+
+```bash
+ltx-prompt-director
+```
+
+Using a virtual environment is recommended if you do not want to install the package into your user Python environment.
+
+## Linux desktop shortcut
+
+After installing the wheel or package, add LTX Prompt Director to your desktop environment's application menu:
+
+```bash
+ltx-prompt-director-install-desktop
+```
+
+The shortcut is installed for the current user. You may need to reopen the application launcher before it appears. To remove it later:
+
+```bash
+ltx-prompt-director-uninstall-desktop
+```
+
+The app also attempts to install the per-user shortcut automatically on its first Linux launch.
 
 See [install.md](install.md) for platform setup and [usage.md](usage.md) for the complete workflow.
 
