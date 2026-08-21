@@ -37,10 +37,12 @@ Windows activation:
 
 ## Install from a wheel
 
-### One-line Linux install
+### One-line Linux install or update
+
+This automatically finds the wheel attached to the latest GitHub release and installs or upgrades it:
 
 ```bash
-wget -qO /tmp/ltx-prompt-director.whl https://raw.githubusercontent.com/etoven/ltx-director-director/main/dist/ltx_prompt_director-1.3.1-py3-none-any.whl && python3 -m pip install /tmp/ltx-prompt-director.whl
+python3 -m pip install --upgrade "$(wget -qO- https://api.github.com/repos/etoven/ltx-director-director/releases/latest | sed -n 's/.*"browser_download_url": "\(.*\.whl\)".*/\1/p' | head -n 1)"
 ```
 
 Or download the `.whl` file from the latest GitHub release, then install it with:
