@@ -9,7 +9,7 @@ import imageio.v2 as imageio
 from PIL import Image
 
 
-APP_CACHE = Path(tempfile.gettempdir()) / "ltx-prompt-director"
+APP_CACHE = Path(tempfile.gettempdir()) / "ltx-director-director"
 APP_CACHE.mkdir(parents=True, exist_ok=True)
 
 
@@ -65,4 +65,3 @@ def prepare_media(path: str) -> tuple[str, str, int | None, int | None]:
 
 def _image_mime(path: Path) -> str:
     return {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp", ".gif": "image/gif"}.get(path.suffix.lower(), "image/png")
-

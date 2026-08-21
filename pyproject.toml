@@ -4,12 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ltx-prompt-director"
-version = "1.3.1"
-description = "Native timeline prompt builder for LTX Video 2.3"
+version = "1.4.0"
+description = "LTX Director - Director: native timeline prompt builder for LTX Video 2.3"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
-authors = [{name = "LTX Prompt Director contributors"}]
+authors = [{name = "LTX Director - Director contributors"}]
 dependencies = [
   "PySide6-Essentials>=6.8,<7",
   "Pillow>=10.4,<12",
@@ -19,6 +19,10 @@ dependencies = [
 ]
 
 [project.scripts]
+ltx-director-director = "ltx_prompt_director.__main__:main"
+ltx-director-director-install-desktop = "ltx_prompt_director.desktop:install_main"
+ltx-director-director-uninstall-desktop = "ltx_prompt_director.desktop:uninstall_main"
+# Compatibility aliases retained so existing installs and shortcuts keep working.
 ltx-prompt-director = "ltx_prompt_director.__main__:main"
 ltx-prompt-director-install-desktop = "ltx_prompt_director.desktop:install_main"
 ltx-prompt-director-uninstall-desktop = "ltx_prompt_director.desktop:uninstall_main"

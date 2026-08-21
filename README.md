@@ -1,4 +1,4 @@
-# LTX Prompt Director
+# LTX Director - Director
 
 A native Python desktop timeline and AI prompt builder for LTX Video 2.3. Arrange image and WebM reference segments, assign start/end-frame roles, refine timing, and generate one prompt per segment plus a global continuity prompt with Gemini or OpenAI.
 
@@ -42,13 +42,13 @@ Windows activation:
 This automatically finds the wheel attached to the latest GitHub release, installs or upgrades it, and creates the Linux desktop shortcut:
 
 ```bash
-python3 -m pip install --upgrade "$(wget -qO- https://api.github.com/repos/etoven/ltx-director-director/releases/latest | sed -n 's/.*"browser_download_url": "\(.*\.whl\)".*/\1/p' | head -n 1)" && ltx-prompt-director-install-desktop
+python3 -m pip install --upgrade "$(wget -qO- https://api.github.com/repos/etoven/ltx-director-director/releases/latest | sed -n 's/.*"browser_download_url": "\(.*\.whl\)".*/\1/p' | head -n 1)" && ltx-director-director-install-desktop
 ```
 
 Or download the `.whl` file from the latest GitHub release, then install it with:
 
 ```bash
-python3 -m pip install ./ltx_prompt_director-1.3.1-py3-none-any.whl
+python3 -m pip install ./ltx_prompt_director-1.4.0-py3-none-any.whl
 ```
 
 You can also install a locally built wheel from the repository:
@@ -60,23 +60,23 @@ python3 -m pip install ./dist/ltx_prompt_director-*.whl
 Launch the installed application with:
 
 ```bash
-ltx-prompt-director
+ltx-director-director
 ```
 
 Using a virtual environment is recommended if you do not want to install the package into your user Python environment.
 
 ## Linux desktop shortcut
 
-After installing the wheel or package, add LTX Prompt Director to your desktop environment's application menu:
+After installing the wheel or package, add LTX Director - Director to your desktop environment's application menu:
 
 ```bash
-ltx-prompt-director-install-desktop
+ltx-director-director-install-desktop
 ```
 
 The shortcut is installed for the current user. You may need to reopen the application launcher before it appears. To remove it later:
 
 ```bash
-ltx-prompt-director-uninstall-desktop
+ltx-director-director-uninstall-desktop
 ```
 
 The app also attempts to install the per-user shortcut automatically on its first Linux launch.

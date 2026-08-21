@@ -264,7 +264,7 @@ class SettingsDialog(QDialog):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("LTX 2.3 Prompt Director")
+        self.setWindowTitle("LTX Director - Director")
         self.setWindowIcon(QIcon(str(files("ltx_prompt_director").joinpath("assets/icon.png"))))
         self.resize(1450, 900)
         self.settings = QSettings()
@@ -722,7 +722,7 @@ class MainWindow(QMainWindow):
         if not self.segments:
             return
         directory = Path(self.settings.value("last_document_dir", str(Path.home())))
-        path = choose_document_save(self, "Project Export", str(directory / "ltx_prompt_director_project.ltxproject.json"), "LTX Prompt Director Project (*.ltxproject.json *.json)")
+        path = choose_document_save(self, "Project Export", str(directory / "ltx_director_director_project.ltxproject.json"), "LTX Director - Director Project (*.ltxproject.json *.json)")
         if not path:
             return
         if not path.lower().endswith((".ltxproject.json", ".json")):
@@ -734,19 +734,19 @@ class MainWindow(QMainWindow):
             value["previewData"] = data_url(segment.preview_path)
             value["sourceData"] = data_url(segment.media_path) if Path(segment.media_path).exists() else None
             frames.append(value)
-        payload = {"app": "ltx-prompt-director-python", "projectVersion": 1, "globalPrompt": self.global_prompt.toPlainText(), "directorIntent": self.intent.text(), "magicBuild": {"sfx": self.sfx.isChecked(), "vocals": self.vocals.isChecked()}, "frames": frames}
+        payload = {"app": "ltx-director-director", "projectVersion": 1, "globalPrompt": self.global_prompt.toPlainText(), "directorIntent": self.intent.text(), "magicBuild": {"sfx": self.sfx.isChecked(), "vocals": self.vocals.isChecked()}, "frames": frames}
         Path(path).write_text(json.dumps(payload, indent=2), encoding="utf-8")
         self.statusBar().showMessage(f"Project saved: {path}")
 
     def import_project(self) -> None:
-        path = choose_document_open(self, "Project Import", self.settings.value("last_document_dir", str(Path.home())), "LTX Prompt Director Project (*.ltxproject.json *.json)")
+        path = choose_document_open(self, "Project Import", self.settings.value("last_document_dir", str(Path.home())), "LTX Director - Director Project (*.ltxproject.json *.json)")
         if not path:
             return
         self.settings.setValue("last_document_dir", str(Path(path).parent))
         try:
             payload = json.loads(Path(path).read_text(encoding="utf-8"))
-            if payload.get("app") != "ltx-prompt-director-python":
-                raise ValueError("This is not a native LTX Prompt Director project file.")
+            if payload.get("app") not in {"ltx-director-director", "ltx-prompt-director-python"}:
+                raise ValueError("This is not an LTX Director - Director project file.")
             loaded = []
             for index, raw in enumerate(payload.get("frames", [])[:MAX_SEGMENTS]):
                 preview_path = APP_CACHE / f"project-{index}-{Path(path).stem}.jpg"

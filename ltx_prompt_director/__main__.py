@@ -1,6 +1,19 @@
 import sys
 
 
+def migrate_settings() -> None:
+    """Preserve saved keys and preferences across the application rename."""
+    from PySide6.QtCore import QSettings
+
+    current = QSettings()
+    if current.allKeys():
+        return
+    legacy = QSettings("LTXPromptDirector", "LTX Prompt Director")
+    for key in legacy.allKeys():
+        current.setValue(key, legacy.value(key))
+    current.sync()
+
+
 def main() -> int:
     try:
         from PySide6.QtWidgets import QApplication
@@ -22,8 +35,9 @@ def main() -> int:
         except OSError as error:
             print(f"Desktop entry installation skipped: {error}", file=sys.stderr)
     app = QApplication(sys.argv)
-    app.setApplicationName("LTX Prompt Director")
-    app.setOrganizationName("LTXPromptDirector")
+    app.setApplicationName("LTX Director - Director")
+    app.setOrganizationName("LTXDirectorDirector")
+    migrate_settings()
     window = MainWindow()
     window.show()
     return app.exec()

@@ -14,8 +14,8 @@ WebM decoding is supplied by `imageio-ffmpeg`; a separate system FFmpeg installa
 ## Linux
 
 ```bash
-git clone https://github.com/YOUR-ACCOUNT/ltx-prompt-director.git
-cd ltx-prompt-director
+git clone https://github.com/etoven/ltx-director-director.git
+cd ltx-director-director
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
@@ -38,8 +38,8 @@ sudo apt install libegl1
 ## Windows
 
 ```powershell
-git clone https://github.com/YOUR-ACCOUNT/ltx-prompt-director.git
-cd ltx-prompt-director
+git clone https://github.com/etoven/ltx-director-director.git
+cd ltx-director-director
 py -m venv .venv
 .venv\Scripts\activate
 python -m pip install --upgrade pip
@@ -50,8 +50,8 @@ python -m ltx_prompt_director
 ## macOS
 
 ```bash
-git clone https://github.com/YOUR-ACCOUNT/ltx-prompt-director.git
-cd ltx-prompt-director
+git clone https://github.com/etoven/ltx-director-director.git
+cd ltx-director-director
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
@@ -63,24 +63,24 @@ python -m ltx_prompt_director
 
 ```bash
 python -m pip install .
-ltx-prompt-director
+ltx-director-director
 ```
 
 On Linux, the first launch automatically installs:
 
-- `~/.local/share/applications/ltx-prompt-director.desktop`
-- `~/.local/share/icons/hicolor/256x256/apps/ltx-prompt-director.png`
+- `~/.local/share/applications/ltx-director-director.desktop`
+- `~/.local/share/icons/hicolor/256x256/apps/ltx-director-director.png`
 
 No root access is required. To install or refresh it manually:
 
 ```bash
-ltx-prompt-director-install-desktop
+ltx-director-director-install-desktop
 ```
 
 To remove the launcher and icon:
 
 ```bash
-ltx-prompt-director-uninstall-desktop
+ltx-director-director-uninstall-desktop
 ```
 
 ## Build distributable Python packages
