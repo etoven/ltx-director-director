@@ -30,7 +30,18 @@ Magic Build options:
 
 Enter optional Director's Intent, then select **Magic Build**. The result contains exactly one prompt for every timeline segment and one global prompt.
 
-## 4. LTX Director files
+## 4. Project library
+
+Select **Projects** in the toolbar to open the left project-library panel. The panel provides a searchable gallery with a large square thumbnail and short description for every saved project.
+
+- **Save Current** adds the working timeline to the library. The first save asks for a project name and description; later saves update it directly.
+- **Open** or double-clicking a project restores its complete embedded workspace.
+- **Delete** permanently removes the selected project from the local library after confirmation.
+- Search matches words in both project names and descriptions.
+
+Library projects are stored in the operating system's per-user application-data directory. They use the same self-contained media format as Project Export, while lightweight metadata keeps the visual gallery responsive.
+
+## 5. LTX Director files
 
 **LTX Director Export** creates a timeline JSON containing timing in 24 FPS frames, prompts, roles, thumbnails, global prompt, and video metadata. Complete WebM content is embedded in `videoB64` so the portable file retains the source video.
 
@@ -38,7 +49,7 @@ Enter optional Director's Intent, then select **Magic Build**. The result contai
 
 All LTX Director and native project import/export actions use the same operating-system picker integration as Add Media: KDialog on KDE Plasma, Zenity on GNOME, and native dialogs on Windows and macOS.
 
-## 5. Native project files
+## 6. Native project files
 
 **Project Export** creates `*.ltxproject.json`, preserving the complete editable workspace:
 

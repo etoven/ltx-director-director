@@ -1,17 +1,20 @@
 from __future__ import annotations
 
+import base64
 import json
 import shutil
 import subprocess
 import sys
+from datetime import datetime, timezone
 from importlib.resources import files
 from pathlib import Path
+from uuid import uuid4
 
-from PySide6.QtCore import QObject, QRunnable, QSettings, QSize, Qt, QThreadPool, Signal
+from PySide6.QtCore import QObject, QRunnable, QSettings, QSize, QStandardPaths, Qt, QThreadPool, Signal
 from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
-    QFileDialog, QFormLayout, QFrame, QHBoxLayout, QLabel, QLineEdit,
+    QDockWidget, QFileDialog, QFormLayout, QFrame, QHBoxLayout, QLabel, QLineEdit,
     QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox, QPushButton,
     QSizePolicy, QStatusBar, QTextEdit, QToolBar, QVBoxLayout, QWidget,
 )
@@ -23,6 +26,22 @@ from .models import Segment
 FPS = 24
 MAX_SECONDS = 60.0
 MAX_SEGMENTS = 16
+
+
+def project_library_path() -> Path:
+    root = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppDataLocation)
+    path = Path(root) / "projects"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def pixmap_from_data_url(value: str) -> QPixmap:
+    pixmap = QPixmap()
+    try:
+        pixmap.loadFromData(base64.b64decode(value.split(",", 1)[1]))
+    except (IndexError, ValueError):
+        pass
+    return pixmap
 
 
 def choose_media_files(parent: QWidget, multiple: bool, initial: str) -> list[str]:
@@ -261,6 +280,32 @@ class SettingsDialog(QDialog):
         super().accept()
 
 
+class ProjectDetailsDialog(QDialog):
+    def __init__(self, suggested_description: str, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Save project to library")
+        self.setMinimumWidth(430)
+        form = QFormLayout(self)
+        self.name = QLineEdit()
+        self.name.setPlaceholderText("Project name")
+        self.description = QTextEdit()
+        self.description.setPlaceholderText("Short description shown in the project library")
+        self.description.setPlainText(suggested_description[:240])
+        self.description.setFixedHeight(90)
+        form.addRow("Name", self.name)
+        form.addRow("Description", self.description)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        form.addRow(buttons)
+
+    def accept(self) -> None:
+        if not self.name.text().strip():
+            QMessageBox.warning(self, "Project name required", "Enter a name for this project.")
+            return
+        super().accept()
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -270,15 +315,20 @@ class MainWindow(QMainWindow):
         self.settings = QSettings()
         self.session_keys = {"gemini": self.settings.value("gemini_key", ""), "openai": self.settings.value("openai_key", "")}
         self.segments: list[Segment] = []
+        self.current_project_id: str | None = None
         self.thread_pool = QThreadPool.globalInstance()
         self._loading = False
         self._build_ui()
         self._apply_theme()
 
     def _build_ui(self) -> None:
+        self._build_project_dock()
         toolbar = QToolBar("Project")
         toolbar.setMovable(False)
         self.addToolBar(toolbar)
+        projects_action = self.project_dock.toggleViewAction()
+        projects_action.setText("Projects")
+        toolbar.addAction(projects_action)
         for label, callback in [
             ("Add Media", self.add_media), ("LTX Director Import", self.import_ltx),
             ("Project Import", self.import_project), ("Delete selected", self.delete_selected),
@@ -452,6 +502,57 @@ class MainWindow(QMainWindow):
         self.setStatusBar(QStatusBar())
         self.update_summary()
 
+    def _build_project_dock(self) -> None:
+        self.project_dock = QDockWidget("PROJECT LIBRARY", self)
+        self.project_dock.setObjectName("projectDock")
+        self.project_dock.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea)
+        self.project_dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetClosable)
+        self.project_dock.setMinimumWidth(290)
+        self.project_dock.setMaximumWidth(350)
+
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(9, 9, 9, 9)
+        layout.setSpacing(8)
+        intro = QLabel("Saved projects")
+        intro.setObjectName("projectLibraryTitle")
+        layout.addWidget(intro)
+        self.project_search = QLineEdit()
+        self.project_search.setPlaceholderText("Search projects…")
+        self.project_search.setClearButtonEnabled(True)
+        self.project_search.textChanged.connect(self.filter_projects)
+        layout.addWidget(self.project_search)
+
+        self.project_list = QListWidget()
+        self.project_list.setObjectName("projectList")
+        self.project_list.setViewMode(QListWidget.ViewMode.IconMode)
+        self.project_list.setFlow(QListWidget.Flow.TopToBottom)
+        self.project_list.setWrapping(False)
+        self.project_list.setResizeMode(QListWidget.ResizeMode.Adjust)
+        self.project_list.setMovement(QListWidget.Movement.Static)
+        self.project_list.setIconSize(QSize(230, 230))
+        self.project_list.setSpacing(8)
+        self.project_list.itemDoubleClicked.connect(lambda *_: self.open_library_project())
+        layout.addWidget(self.project_list, 1)
+
+        buttons = QHBoxLayout()
+        self.save_library_button = QPushButton("Save Current")
+        self.save_library_button.setObjectName("librarySave")
+        self.save_library_button.clicked.connect(self.save_library_project)
+        open_button = QPushButton("Open")
+        open_button.clicked.connect(self.open_library_project)
+        delete_button = QPushButton("Delete")
+        delete_button.setObjectName("libraryDelete")
+        delete_button.clicked.connect(self.delete_library_project)
+        buttons.addWidget(self.save_library_button, 1)
+        buttons.addWidget(open_button)
+        buttons.addWidget(delete_button)
+        layout.addLayout(buttons)
+        self.project_dock.setWidget(panel)
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.project_dock)
+        self.project_dock.hide()
+        self.refresh_project_library()
+
     def _apply_theme(self) -> None:
         self.setStyleSheet("""
         QMainWindow,QWidget{background:#24292c;color:#d9dcde;font:11px Arial} QToolBar{background:#303537;border:0;spacing:6px;padding:5px}
@@ -466,7 +567,131 @@ class MainWindow(QMainWindow):
         #sectionLabel{color:#939ca1;font-size:8px;letter-spacing:1px} #muted{color:#879095;font-size:9px} #promptPanel{background:#252728;border:1px solid #101213;border-radius:3px}
         QTextEdit{background:#252728;border:0;color:#e1e4e5;font:11px 'Courier New';padding:4px} #magicButton{background:#3b6f9c;border-color:#4f83ae;font-weight:bold}
         #audioToggle:checked{background:#285c3d;border-color:#4c9b6a;color:#c9f4d6} #copyButton{border:0;background:transparent;color:#aeb5b8} QStatusBar{background:#1b1e1f;color:#7f898d}
+        QDockWidget{background:#191d1f;color:#d9dcde;font-weight:bold} QDockWidget::title{background:#1b2022;border-bottom:1px solid #0e1011;padding:8px;text-align:left}
+        #projectLibraryTitle{font-size:15px;font-weight:bold;color:#f0f2f3} #projectList{background:#151819;border:1px solid #0e1011;padding:5px}
+        #projectList::item{background:#24282a;border:1px solid #3b4144;border-radius:4px;padding:7px;color:#dce0e2} #projectList::item:hover{border-color:#6488a1;background:#2b3134} #projectList::item:selected{border:2px solid #69a5d0;background:#29343a}
+        #librarySave{background:#3b6f9c;border-color:#4f83ae;font-weight:bold} #libraryDelete:hover{background:#713d3d;border-color:#9b5656}
         """)
+
+    def refresh_project_library(self, select_id: str | None = None) -> None:
+        selected = select_id or self.current_project_id
+        self.project_list.clear()
+        records = []
+        for path in project_library_path().glob("*.meta.json"):
+            try:
+                meta = json.loads(path.read_text(encoding="utf-8"))
+                if Path(meta.get("projectPath", "")).is_file():
+                    records.append(meta)
+            except (OSError, ValueError, TypeError):
+                continue
+        records.sort(key=lambda value: value.get("savedAt", ""), reverse=True)
+        selected_item = None
+        for meta in records:
+            name = str(meta.get("name") or "Untitled project")
+            description = " ".join(str(meta.get("description") or "No description").split())
+            if len(description) > 105:
+                description = description[:102] + "…"
+            item = QListWidgetItem(f"{name}\n{description}")
+            item.setData(Qt.ItemDataRole.UserRole, meta)
+            item.setToolTip(f"{name}\n\n{meta.get('description', '')}")
+            item.setSizeHint(QSize(255, 292))
+            pixmap = pixmap_from_data_url(str(meta.get("thumbnailData", "")))
+            if not pixmap.isNull():
+                scaled = pixmap.scaled(230, 230, Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation)
+                x = max(0, (scaled.width() - 230) // 2)
+                y = max(0, (scaled.height() - 230) // 2)
+                item.setIcon(QIcon(scaled.copy(x, y, 230, 230)))
+            self.project_list.addItem(item)
+            if meta.get("id") == selected:
+                selected_item = item
+        if selected_item:
+            self.project_list.setCurrentItem(selected_item)
+        self.filter_projects(self.project_search.text())
+
+    def filter_projects(self, query: str) -> None:
+        terms = query.casefold().split()
+        for row in range(self.project_list.count()):
+            item = self.project_list.item(row)
+            meta = item.data(Qt.ItemDataRole.UserRole) or {}
+            haystack = f"{meta.get('name', '')} {meta.get('description', '')}".casefold()
+            item.setHidden(not all(term in haystack for term in terms))
+
+    def selected_library_project(self) -> dict | None:
+        item = self.project_list.currentItem()
+        return item.data(Qt.ItemDataRole.UserRole) if item else None
+
+    def save_library_project(self) -> None:
+        if not self.segments:
+            QMessageBox.information(self, "Nothing to save", "Add at least one image or WebM segment first.")
+            return
+        root = project_library_path()
+        meta = None
+        if self.current_project_id:
+            meta_path = root / f"{self.current_project_id}.meta.json"
+            if meta_path.exists():
+                try:
+                    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    meta = None
+        if not meta:
+            dialog = ProjectDetailsDialog(self.intent.text(), self)
+            if not dialog.exec():
+                return
+            project_id = uuid4().hex
+            meta = {
+                "id": project_id,
+                "name": dialog.name.text().strip(),
+                "description": dialog.description.toPlainText().strip(),
+                "projectPath": str(root / f"{project_id}.ltxproject.json"),
+            }
+            self.current_project_id = project_id
+        meta["savedAt"] = datetime.now(timezone.utc).isoformat()
+        meta["duration"] = self.total_duration()
+        meta["segmentCount"] = len(self.segments)
+        meta["thumbnailData"] = data_url(self.segments[0].preview_path, max_edge=360, quality=84)
+        payload = self.project_payload()
+        payload["library"] = {key: meta[key] for key in ("id", "name", "description", "savedAt")}
+        Path(meta["projectPath"]).write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        (root / f"{meta['id']}.meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+        self.refresh_project_library(meta["id"])
+        self.project_dock.show()
+        self.statusBar().showMessage(f"Project saved to library: {meta['name']}")
+
+    def open_library_project(self) -> None:
+        meta = self.selected_library_project()
+        if not meta:
+            return
+        try:
+            payload = json.loads(Path(meta["projectPath"]).read_text(encoding="utf-8"))
+            self.load_project_payload(payload)
+            self.current_project_id = str(meta["id"])
+            self.statusBar().showMessage(f"Project opened: {meta['name']}")
+        except Exception as error:
+            QMessageBox.critical(self, "Project open failed", str(error))
+
+    def delete_library_project(self) -> None:
+        meta = self.selected_library_project()
+        if not meta:
+            return
+        answer = QMessageBox.question(
+            self,
+            "Delete project",
+            f"Delete ‘{meta.get('name', 'this project')}’ from the local project library?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        project_path = Path(meta.get("projectPath", ""))
+        meta_path = project_library_path() / f"{meta.get('id')}.meta.json"
+        if project_path.is_file():
+            project_path.unlink()
+        if meta_path.is_file():
+            meta_path.unlink()
+        if self.current_project_id == meta.get("id"):
+            self.current_project_id = None
+        self.refresh_project_library()
+        self.statusBar().showMessage(f"Project deleted: {meta.get('name', 'Untitled project')}")
 
     def total_duration(self) -> float:
         return sum(item.duration for item in self.segments)
@@ -714,9 +939,46 @@ class MainWindow(QMainWindow):
                 raise ValueError("No supported embedded image or WebM segments were found.")
             self.segments = loaded
             self.global_prompt.setPlainText(payload.get("global_prompt") or payload.get("timeline", {}).get("global_prompt", ""))
+            self.current_project_id = None
             self.refresh_timeline()
         except Exception as error:
             QMessageBox.critical(self, "Import failed", str(error))
+
+    def project_payload(self) -> dict:
+        frames = []
+        for segment in self.segments:
+            value = segment.to_dict()
+            value["previewData"] = data_url(segment.preview_path)
+            value["sourceData"] = data_url(segment.media_path) if Path(segment.media_path).exists() else None
+            frames.append(value)
+        return {"app": "ltx-director-director", "projectVersion": 1, "globalPrompt": self.global_prompt.toPlainText(), "directorIntent": self.intent.text(), "magicBuild": {"sfx": self.sfx.isChecked(), "vocals": self.vocals.isChecked()}, "frames": frames}
+
+    def load_project_payload(self, payload: dict) -> None:
+        if payload.get("app") not in {"ltx-director-director", "ltx-prompt-director-python"}:
+            raise ValueError("This is not an LTX Director - Director project file.")
+        loaded = []
+        cache_key = uuid4().hex[:10]
+        for index, original in enumerate(payload.get("frames", [])[:MAX_SEGMENTS]):
+            raw = dict(original)
+            preview_path = APP_CACHE / f"project-{cache_key}-{index}.jpg"
+            write_data_url(raw["previewData"], preview_path)
+            media_path = preview_path
+            if raw.get("sourceData"):
+                suffix = ".webm" if raw.get("kind") == "video" else Path(raw.get("name", "image.png")).suffix or ".png"
+                media_path = APP_CACHE / f"project-source-{cache_key}-{index}{suffix}"
+                write_data_url(raw["sourceData"], media_path)
+            raw.update({"preview_path": str(preview_path), "media_path": str(media_path)})
+            for key in ("previewData", "sourceData"):
+                raw.pop(key, None)
+            loaded.append(Segment.from_dict(raw))
+        if not loaded:
+            raise ValueError("Project contains no supported media.")
+        self.segments = loaded
+        self.global_prompt.setPlainText(payload.get("globalPrompt", ""))
+        self.intent.setText(payload.get("directorIntent", ""))
+        self.sfx.setChecked(bool(payload.get("magicBuild", {}).get("sfx")))
+        self.vocals.setChecked(bool(payload.get("magicBuild", {}).get("vocals")))
+        self.refresh_timeline()
 
     def export_project(self) -> None:
         if not self.segments:
@@ -728,13 +990,7 @@ class MainWindow(QMainWindow):
         if not path.lower().endswith((".ltxproject.json", ".json")):
             path += ".ltxproject.json"
         self.settings.setValue("last_document_dir", str(Path(path).parent))
-        frames = []
-        for segment in self.segments:
-            value = segment.to_dict()
-            value["previewData"] = data_url(segment.preview_path)
-            value["sourceData"] = data_url(segment.media_path) if Path(segment.media_path).exists() else None
-            frames.append(value)
-        payload = {"app": "ltx-director-director", "projectVersion": 1, "globalPrompt": self.global_prompt.toPlainText(), "directorIntent": self.intent.text(), "magicBuild": {"sfx": self.sfx.isChecked(), "vocals": self.vocals.isChecked()}, "frames": frames}
+        payload = self.project_payload()
         Path(path).write_text(json.dumps(payload, indent=2), encoding="utf-8")
         self.statusBar().showMessage(f"Project saved: {path}")
 
@@ -745,28 +1001,8 @@ class MainWindow(QMainWindow):
         self.settings.setValue("last_document_dir", str(Path(path).parent))
         try:
             payload = json.loads(Path(path).read_text(encoding="utf-8"))
-            if payload.get("app") not in {"ltx-director-director", "ltx-prompt-director-python"}:
-                raise ValueError("This is not an LTX Director - Director project file.")
-            loaded = []
-            for index, raw in enumerate(payload.get("frames", [])[:MAX_SEGMENTS]):
-                preview_path = APP_CACHE / f"project-{index}-{Path(path).stem}.jpg"
-                write_data_url(raw["previewData"], preview_path)
-                media_path = preview_path
-                if raw.get("sourceData"):
-                    suffix = ".webm" if raw.get("kind") == "video" else Path(raw.get("name", "image.png")).suffix or ".png"
-                    media_path = APP_CACHE / f"project-source-{index}{suffix}"
-                    write_data_url(raw["sourceData"], media_path)
-                raw.update({"preview_path": str(preview_path), "media_path": str(media_path)})
-                for key in ("previewData", "sourceData"):
-                    raw.pop(key, None)
-                loaded.append(Segment.from_dict(raw))
-            if not loaded:
-                raise ValueError("Project contains no supported media.")
-            self.segments = loaded
-            self.global_prompt.setPlainText(payload.get("globalPrompt", ""))
-            self.intent.setText(payload.get("directorIntent", ""))
-            self.sfx.setChecked(bool(payload.get("magicBuild", {}).get("sfx")))
-            self.vocals.setChecked(bool(payload.get("magicBuild", {}).get("vocals")))
-            self.refresh_timeline()
+            self.load_project_payload(payload)
+            self.current_project_id = None
+            self.statusBar().showMessage(f"Project imported: {path}")
         except Exception as error:
             QMessageBox.critical(self, "Project import failed", str(error))

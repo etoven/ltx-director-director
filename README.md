@@ -49,6 +49,7 @@ In short: use **Project Export** for lossless editing and safekeeping; use **LTX
 - Independent SFX and Vocals Magic Build controls
 - LTX Director-compatible JSON import/export
 - Complete portable project import/export, including embedded media
+- Searchable local project library with large visual thumbnails
 - No server, database, account, or telemetry
 
 ## Quick start from source
