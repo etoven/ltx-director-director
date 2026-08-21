@@ -39,10 +39,10 @@ Windows activation:
 
 ### One-line Linux install or update
 
-This automatically finds the wheel attached to the latest GitHub release and installs or upgrades it:
+This automatically finds the wheel attached to the latest GitHub release, installs or upgrades it, and creates the Linux desktop shortcut:
 
 ```bash
-python3 -m pip install --upgrade "$(wget -qO- https://api.github.com/repos/etoven/ltx-director-director/releases/latest | sed -n 's/.*"browser_download_url": "\(.*\.whl\)".*/\1/p' | head -n 1)"
+python3 -m pip install --upgrade "$(wget -qO- https://api.github.com/repos/etoven/ltx-director-director/releases/latest | sed -n 's/.*"browser_download_url": "\(.*\.whl\)".*/\1/p' | head -n 1)" && ltx-prompt-director-install-desktop
 ```
 
 Or download the `.whl` file from the latest GitHub release, then install it with:
