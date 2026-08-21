@@ -1,6 +1,6 @@
 # LTX Director - Director
 
-A native Python desktop timeline and AI prompt builder for LTX Video 2.3. Arrange image and WebM reference segments, assign start/end-frame roles, refine timing, and generate one prompt per segment plus a global continuity prompt with Gemini or OpenAI.
+**LTX Director - Director** is a native companion app for the [LTXDirector custom node for ComfyUI](https://github.com/WhatDreamsCost/WhatDreamsCost-ComfyUI). Its primary purpose is to prepare image and WebM timelines outside ComfyUI, use Gemini or OpenAI to build LTX Video 2.3 prompts, and export the finished sequence directly into LTXDirector.
 
 ![LTX Director - Director application overview](docs/images/ltx-director-director-overview.png)
 
@@ -12,7 +12,7 @@ LTX Director - Director turns a folder of reference frames into a structured LTX
 2. Mark each segment as a start frame or end frame, then drag its edge to set the duration.
 3. Describe the overall scene in **Director's Intent** and optionally enable SFX or vocals.
 4. Run **Magic Build** to refine timing and generate a focused prompt for every segment.
-5. Review the shared global continuity prompt, then export to LTX Director or save the complete editable project.
+5. Review the shared global continuity prompt, then export the sequence for the ComfyUI LTXDirector node.
 
 ![Timeline, frame roles, duration controls, and Magic Build](docs/images/timeline-and-magic-build.png)
 
@@ -21,6 +21,17 @@ LTX Director - Director turns a folder of reference frames into a structured LTX
 ![Generated segment and global prompts](docs/images/generated-prompts.png)
 
 *Magic Build creates the selected segment's motion prompt and a global prompt that keeps subject identity, setting, lighting, camera, and style consistent across the sequence.*
+
+## Export-first workflow
+
+The app is designed around moving a prepared sequence into [LTXDirector for ComfyUI](https://github.com/WhatDreamsCost/WhatDreamsCost-ComfyUI), where generation and final timeline work take place.
+
+- **LTX Director Export** writes an LTXDirector-compatible JSON file containing the supported timeline segments, timing, start/end-frame roles, per-segment prompts, global prompt, and referenced media. WebM segments remain complete videos in the export even though Magic Build sends only a single optimized preview frame to the vision model.
+- **LTX Director Import** brings supported LTXDirector JSON data back into the desktop timeline for further prompt and timing work.
+- **Project Export** saves the complete editable LTX Director - Director project, including embedded media and app-specific state. Use this format when you intend to reopen the project in this app.
+- **Project Import** restores that complete project without requiring the original media files to remain in their previous locations.
+
+In short: use **Project Export** for lossless editing and safekeeping; use **LTX Director Export** when the sequence is ready to move into ComfyUI.
 
 ## Highlights
 
