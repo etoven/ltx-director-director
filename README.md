@@ -22,6 +22,14 @@ LTX Director - Director turns a folder of reference frames into a structured LTX
 
 *Magic Build creates the selected segment's motion prompt and a global prompt that keeps subject identity, setting, lighting, camera, and style consistent across the sequence.*
 
+## Project library
+
+Save working projects directly into the searchable project library and organize related work into collections. Project cards can use the first segment automatically, any segment's starting frame, or a custom uploaded thumbnail.
+
+![Choose a segment frame or custom project thumbnail](docs/images/project-thumbnail-picker.png)
+
+*Edit Project Details provides a visual thumbnail picker while preserving the automatic first-segment fallback for projects that do not define one.*
+
 ## Export-first workflow
 
 The app is designed around moving a prepared sequence into [LTXDirector for ComfyUI](https://github.com/WhatDreamsCost/WhatDreamsCost-ComfyUI), where generation and final timeline work take place.
