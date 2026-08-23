@@ -1065,18 +1065,25 @@ class MainWindow(QMainWindow):
     def _build_ui(self) -> None:
         self._build_project_dock()
         toolbar = QToolBar("Project")
+        toolbar.setObjectName("mainToolbar")
         toolbar.setMovable(False)
         self.addToolBar(toolbar)
         projects_action = self.project_dock.toggleViewAction()
         projects_action.setText("Projects")
         toolbar.addAction(projects_action)
-        for label, callback in [
-            ("New Project", self.new_project), ("Add Media", self.add_media), ("Open", self.import_ltx),
-            ("Import", self.import_project), ("Delete selected", self.delete_selected),
-        ]:
-            action = QAction(label, self)
-            action.triggered.connect(callback)
-            toolbar.addAction(action)
+        toolbar.addSeparator()
+        action_groups = [
+            (("New Project", self.new_project), ("Add Media", self.add_media)),
+            (("Open", self.import_ltx), ("Import", self.import_project)),
+            (("Delete selected", self.delete_selected),),
+        ]
+        for group_index, group in enumerate(action_groups):
+            for label, callback in group:
+                action = QAction(label, self)
+                action.triggered.connect(callback)
+                toolbar.addAction(action)
+            if group_index < len(action_groups) - 1:
+                toolbar.addSeparator()
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         toolbar.addWidget(spacer)
@@ -1085,6 +1092,7 @@ class MainWindow(QMainWindow):
         self.provider_button.clicked.connect(self.open_settings)
         self.update_provider_button()
         toolbar.addWidget(self.provider_button)
+        toolbar.addSeparator()
         for label, callback in [("LTX Director Export", self.export_ltx), ("Project Export", self.export_project)]:
             action = QAction(label, self)
             action.triggered.connect(callback)
@@ -1233,11 +1241,17 @@ class MainWindow(QMainWindow):
         self.sequence_bar.setObjectName("sequenceBar")
         outer.addWidget(self.sequence_bar)
 
-        self.director_controls = QHBoxLayout()
-        self.director_controls.setSpacing(8)
+        director_panel = QFrame()
+        director_panel.setObjectName("directorPanel")
+        self.director_controls = QVBoxLayout(director_panel)
+        self.director_controls.setContentsMargins(10, 8, 10, 8)
+        self.director_controls.setSpacing(7)
+        intent_row = QHBoxLayout()
+        intent_row.setContentsMargins(0, 0, 0, 0)
+        intent_row.setSpacing(8)
         intent_label = QLabel("DIRECTOR'S INTENT")
-        intent_label.setObjectName("sectionLabel")
-        self.director_controls.addWidget(intent_label)
+        intent_label.setObjectName("panelTitle")
+        intent_row.addWidget(intent_label)
         self.intent = QLineEdit()
         intent_example = (
             "Tip: You can request the total sequence length here. Example: Total sequence length: 20 seconds. "
@@ -1271,13 +1285,22 @@ class MainWindow(QMainWindow):
         self.magic_button.clicked.connect(self.magic_build)
         for button in (self.sfx, self.spoken_dialog, self.hdr, self.reduce_music, self.magic_button):
             button.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
-        self.director_controls.addWidget(self.intent, 1)
-        self.director_controls.addWidget(self.sfx)
-        self.director_controls.addWidget(self.spoken_dialog)
-        self.director_controls.addWidget(self.hdr)
-        self.director_controls.addWidget(self.reduce_music)
-        self.director_controls.addWidget(self.magic_button)
-        outer.addLayout(self.director_controls)
+        intent_row.addWidget(self.intent, 1)
+        intent_row.addWidget(self.magic_button)
+        self.director_controls.addLayout(intent_row)
+        options_row = QHBoxLayout()
+        options_row.setContentsMargins(0, 0, 0, 0)
+        options_row.setSpacing(6)
+        options_label = QLabel("PROMPT OPTIONS")
+        options_label.setObjectName("groupLabel")
+        options_row.addWidget(options_label)
+        options_row.addWidget(self.sfx)
+        options_row.addWidget(self.spoken_dialog)
+        options_row.addWidget(self.hdr)
+        options_row.addWidget(self.reduce_music)
+        options_row.addStretch()
+        self.director_controls.addLayout(options_row)
+        outer.addWidget(director_panel)
 
         segment_panel = QFrame()
         segment_panel.setObjectName("promptPanel")
@@ -1312,15 +1335,22 @@ class MainWindow(QMainWindow):
         self.start_button.clicked.connect(lambda: self.set_role("start"))
         self.end_button.clicked.connect(lambda: self.set_role("end"))
         self.segment_header.addStretch()
-        self.segment_header.addWidget(self.frame_number)
-        self.segment_header.addWidget(self.start_button)
-        self.segment_header.addWidget(self.end_button)
+        segment_meta = QFrame()
+        segment_meta.setObjectName("segmentMetaBar")
+        segment_meta_layout = QHBoxLayout(segment_meta)
+        segment_meta_layout.setContentsMargins(5, 3, 5, 3)
+        segment_meta_layout.setSpacing(6)
+        segment_meta_layout.addWidget(self.frame_number)
+        segment_meta_layout.addWidget(self.start_button)
+        segment_meta_layout.addWidget(self.end_button)
         duration_label = QLabel("DURATION")
         duration_label.setObjectName("timelineControlLabel")
-        self.segment_header.addWidget(duration_label)
-        self.segment_header.addWidget(self.duration_control)
+        segment_meta_layout.addWidget(duration_label)
+        segment_meta_layout.addWidget(self.duration_control)
+        self.segment_header.addWidget(segment_meta)
         segment_layout.addLayout(self.segment_header)
         self.segment_prompt = QTextEdit()
+        self.segment_prompt.setObjectName("promptEditor")
         self.segment_prompt.textChanged.connect(self.save_prompt)
         segment_layout.addWidget(self.segment_prompt)
         segment_footer = QHBoxLayout()
@@ -1351,6 +1381,7 @@ class MainWindow(QMainWindow):
         global_header.addWidget(self.applied_label)
         global_layout.addLayout(global_header)
         self.global_prompt = QTextEdit()
+        self.global_prompt.setObjectName("promptEditor")
         self.global_prompt.textChanged.connect(self.update_counts)
         self.global_prompt.textChanged.connect(self.mark_dirty)
         global_layout.addWidget(self.global_prompt)
@@ -1398,7 +1429,11 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(9, 9, 9, 9)
         layout.setSpacing(8)
-        header = QHBoxLayout()
+        library_controls = QFrame()
+        library_controls.setObjectName("libraryControls")
+        header = QHBoxLayout(library_controls)
+        header.setContentsMargins(6, 5, 6, 5)
+        header.setSpacing(6)
         self.collection_up = QPushButton("↑ UP")
         self.collection_up.setVisible(False)
         self.collection_up.clicked.connect(self.leave_collection)
@@ -1432,8 +1467,9 @@ class MainWindow(QMainWindow):
         header.addWidget(self.project_icon_button)
         header.addWidget(self.collection_up)
         header.addStretch()
-        layout.addLayout(header)
+        layout.addWidget(library_controls)
         self.project_search = QLineEdit()
+        self.project_search.setObjectName("projectSearch")
         self.project_search.setPlaceholderText("Search projects…")
         self.project_search.setClearButtonEnabled(True)
         self.project_search.textChanged.connect(self.filter_projects)
@@ -1458,8 +1494,10 @@ class MainWindow(QMainWindow):
         self.save_library_button.setObjectName("librarySave")
         self.save_library_button.clicked.connect(self.save_library_project)
         open_button = QPushButton("Open")
+        open_button.setObjectName("librarySecondary")
         open_button.clicked.connect(self.open_library_project)
         edit_button = QPushButton("Edit")
+        edit_button.setObjectName("librarySecondary")
         edit_button.clicked.connect(self.edit_library_project)
         delete_button = QPushButton("Delete")
         delete_button.setObjectName("libraryDelete")
@@ -1552,8 +1590,9 @@ class MainWindow(QMainWindow):
             return max(1, round(size * scale))
 
         theme = """
-        QMainWindow,QWidget{background:#24292c;color:#d9dcde;font:11px Arial} QMainWindow::separator{width:__DOCK_GRIP_WIDTH__px;height:__DOCK_GRIP_WIDTH__px;background:transparent;background-image:url("__DOCK_GRIP_IMAGE__");background-repeat:no-repeat;background-position:center} QMainWindow::separator:hover{background-color:rgba(88,118,134,35)} QToolBar{background:#303537;border:0;spacing:6px;padding:5px}
+        QMainWindow,QWidget{background:#24292c;color:#d9dcde;font:11px Arial} QMainWindow::separator{width:__DOCK_GRIP_WIDTH__px;height:__DOCK_GRIP_WIDTH__px;background:transparent;background-image:url("__DOCK_GRIP_IMAGE__");background-repeat:no-repeat;background-position:center} QMainWindow::separator:hover{background-color:rgba(88,118,134,35)} QToolBar{background:#1b2023;border:0;border-bottom:1px solid #111517;spacing:3px;padding:5px} QToolBar::separator{background:#394247;width:1px;margin:7px 5px}
         QToolButton,QPushButton,QComboBox,QSpinBox,QDoubleSpinBox,QLineEdit{background:#303436;border:1px solid #101213;border-radius:3px;padding:3px 7px;min-height:19px}
+        #mainToolbar QToolButton{background:transparent;border:1px solid transparent;border-radius:4px;padding:5px 9px;color:#c5cdd1} #mainToolbar QToolButton:hover{background:#2b3438;border-color:#3a464c;color:#f3f7f9} #mainToolbar QToolButton:pressed{background:#17232a;border-color:#477d99;color:#bde6fb} #toolbarButton{background:#23343d;border:1px solid #385667;border-radius:5px;color:#c4e8fb;font-weight:bold}
         QToolButton:hover,QPushButton:hover{background:#41474a} QToolButton:pressed,QPushButton:pressed{background:#202729;border-color:#79a8c5} QLineEdit{background:#1e2122}
         QSpinBox,QDoubleSpinBox{padding-right:__SPIN_PAD__px} QSpinBox::up-button,QDoubleSpinBox::up-button{subcontrol-origin:border;subcontrol-position:top right;width:__SPIN_BUTTON__px;background:#3b4347;border:0;border-left:1px solid #171a1c;border-bottom:1px solid #202527;border-top-right-radius:3px} QSpinBox::down-button,QDoubleSpinBox::down-button{subcontrol-origin:border;subcontrol-position:bottom right;width:__SPIN_BUTTON__px;background:#343b3f;border:0;border-left:1px solid #171a1c;border-top:1px solid #202527;border-bottom-right-radius:3px}
         QSpinBox::up-button:hover,QDoubleSpinBox::up-button:hover,QSpinBox::down-button:hover,QDoubleSpinBox::down-button:hover{background:#506471} QSpinBox::up-button:pressed,QDoubleSpinBox::up-button:pressed,QSpinBox::down-button:pressed,QDoubleSpinBox::down-button:pressed{background:#274e66} QSpinBox::up-arrow,QDoubleSpinBox::up-arrow,QSpinBox::down-arrow,QDoubleSpinBox::down-arrow{width:__ARROW_SIZE__px;height:__ARROW_SIZE__px}
@@ -1572,14 +1611,15 @@ class MainWindow(QMainWindow):
         #timelineHeightHandle{background:transparent;border:0} #timelineHeightHandle:hover{background:rgba(88,118,134,35);border:0}
         #promptSplitter::handle{background:transparent;border:0} #promptSplitter::handle:hover{background:rgba(88,118,134,35);border:0}
         #segmentPreview{background:#17191a;border-top:1px solid #34383a}
-        #addTile{border:1px dashed #596065;background:#111415;color:#828b90;font-size:10px} #sequenceBar{background:#1c1f20;border:1px solid #0e1011;border-radius:3px;padding:12px;font-weight:bold}
-        #sectionLabel{color:#939ca1;font-size:8px;letter-spacing:1px} #muted{color:#879095;font-size:9px} #promptPanel{background:#252728;border:1px solid #101213;border-radius:3px}
-        QTextEdit{background:#252728;border:0;color:#e1e4e5;font:11px 'Courier New';padding:4px} #magicButton{background:#3b6f9c;border-color:#4f83ae;font-weight:bold}
-        #audioToggle:checked,#qualityToggle:checked,#frameToggle:checked{background:#285c3d;border-color:#4c9b6a;color:#c9f4d6} #copyButton{min-height:0;padding:1px 4px;margin:0;border:0;background:transparent;color:#aeb5b8} #copyButton:hover{background:#303a3f;color:#e5f4fc;border:0} #copyButton:pressed{background:#1b2429;color:#8fd3f7;border:0} QStatusBar{background:#1b1e1f;color:#7f898d}
+        #addTile{border:1px dashed #596065;background:#111415;color:#828b90;font-size:10px} #sequenceBar{background:#181e21;border:1px solid #303a3f;border-left:3px solid #4e91b4;border-radius:5px;padding:10px 12px;color:#cbd7dd;font-weight:bold}
+        #directorPanel{background:#1d2326;border:1px solid #354047;border-radius:6px} #panelTitle{background:transparent;color:#b8d9e9;border:0;font-size:10px;font-weight:bold;letter-spacing:1px} #groupLabel{background:transparent;color:#71838c;border:0;font-size:8px;font-weight:bold;letter-spacing:1px;padding-right:4px}
+        #sectionLabel{color:#8ebbd1;font-size:8px;font-weight:bold;letter-spacing:1px} #muted{color:#879095;font-size:9px} #promptPanel{background:#202527;border:1px solid #374044;border-radius:6px} #segmentMetaBar{background:#1a2023;border:1px solid #303a3f;border-radius:5px}
+        QTextEdit{background:#252728;border:0;color:#e1e4e5;font:11px 'Courier New';padding:4px} #promptEditor{background:#202527;border:0;color:#e1e4e5;padding:7px} #magicButton{background:#3b78a5;border:1px solid #5b9bc6;border-radius:5px;color:#f4fbff;font-weight:bold;padding-left:12px;padding-right:12px} #magicButton:hover{background:#4b8dbd;border-color:#8bc6ea} #magicButton:pressed{background:#285b7c}
+        #audioToggle,#qualityToggle,#frameToggle{background:transparent;border:1px solid #455057;color:#b8c0c4} #audioToggle:hover,#qualityToggle:hover,#frameToggle:hover{background:#293236;border-color:#65747c;color:#eef3f5} #audioToggle:checked,#qualityToggle:checked,#frameToggle:checked{background:#244d37;border-color:#4c9b6a;color:#c9f4d6} #copyButton{min-height:0;padding:1px 4px;margin:0;border:0;background:transparent;color:#aeb5b8} #copyButton:hover{background:#303a3f;color:#e5f4fc;border:0} #copyButton:pressed{background:#1b2429;color:#8fd3f7;border:0} QStatusBar{background:#171c1e;color:#7f898d;border-top:1px solid #30383c}
         QDockWidget{background:#191d1f;color:#d9dcde;font-weight:bold} QDockWidget::title{background:#1b2022;border-bottom:1px solid #0e1011;padding:8px;text-align:left}
-        #projectLibraryTitle,#magicOverlayTitle{font-size:15px;font-weight:bold;color:#f0f2f3} #projectList{background:#151819;border:1px solid #0e1011;padding:10px}
-        #projectList::item{background:#24282a;border:1px solid #3b4144;border-radius:4px;margin:4px;padding:7px;color:#dce0e2} #projectList::item:hover{border-color:#6488a1;background:#2b3134} #projectList::item:selected{border:2px solid #69a5d0;background:#29343a}
-        #librarySave{background:#3b6f9c;border-color:#4f83ae;font-weight:bold} #librarySave:hover{background:#5596ca;border-color:#8bc8f5;color:#fff} #librarySave:pressed{background:#214865;border:1px solid #b9e1ff;color:#fff} #libraryDelete:hover{background:#713d3d;border-color:#9b5656}
+        #projectLibraryTitle,#magicOverlayTitle{font-size:15px;font-weight:bold;color:#f0f2f3} #libraryControls{background:#1c2225;border:1px solid #343e43;border-radius:5px} #projectSearch{background:#171c1e;border:1px solid #343d41;border-radius:5px;padding-left:10px} #projectSearch:focus{border-color:#4d829d;background:#1b2225} #projectList{background:#15191b;border:1px solid #30383c;border-radius:5px;padding:10px}
+        #projectList::item{background:#22282b;border:1px solid #363f43;border-radius:6px;margin:4px;padding:7px;color:#dce0e2} #projectList::item:hover{border-color:#6488a1;background:#293136} #projectList::item:selected{border:2px solid #69a5d0;background:#27343b}
+        #librarySave{background:#3b78a5;border-color:#5994bd;font-weight:bold} #librarySave:hover{background:#5596ca;border-color:#8bc8f5;color:#fff} #librarySave:pressed{background:#214865;border:1px solid #b9e1ff;color:#fff} #librarySecondary{background:transparent;border-color:#3d484e;color:#bfc7cb} #librarySecondary:hover{background:#30393d;border-color:#596a73;color:#fff} #libraryDelete{background:transparent;border-color:#4b3b3b;color:#c8b7b7} #libraryDelete:hover{background:#713d3d;border-color:#9b5656;color:#fff}
         QMenu{background:#252a2c;border:1px solid #596267;padding:4px} QMenu::item{padding:7px 28px 7px 12px;border-radius:3px} QMenu::item:selected{background:#3b6f9c;color:#fff} QMenu::separator{height:1px;background:#4b5255;margin:4px 7px}
         QScrollBar:vertical{background:#171b1d;width:12px;margin:0;border:0;border-radius:6px} QScrollBar::handle:vertical{background:#46545c;min-height:28px;margin:2px;border-radius:4px} QScrollBar::handle:vertical:hover{background:#63869b} QScrollBar::handle:vertical:pressed{background:#74a8c6}
         QScrollBar:horizontal{background:#171b1d;height:12px;margin:0;border:0;border-radius:6px} QScrollBar::handle:horizontal{background:#46545c;min-width:28px;margin:2px;border-radius:4px} QScrollBar::handle:horizontal:hover{background:#63869b} QScrollBar::handle:horizontal:pressed{background:#74a8c6}
