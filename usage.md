@@ -44,14 +44,14 @@ Enter optional Director's Intent, then select **Magic Build**. The empty field i
 
 ## 4. Project library
 
-Select **Projects** in the toolbar to open the left project-library panel. The panel provides a searchable gallery with a large square thumbnail and short description for every saved project.
+Select **Projects** in the toolbar to open the left project-library panel. The panel provides a searchable gallery with a square thumbnail and short description for every saved project. Drag the dotted grip on the panel's right edge to change its width. The **Icons** menu at the top selects Small, Medium, or Large cards and remembers that choice; cards wrap from left to right whenever the panel is wide enough for additional columns.
 
 - **Save Current** adds the working timeline to the library. The first save asks for a project name and description; later saves update it directly.
 - **Open** or double-clicking a project restores its complete embedded workspace.
 - **Edit** changes a project's name, description, or collection.
 - **Delete** permanently removes the selected project from the local library after confirmation.
 - Search matches words in both project names and descriptions.
-- Choose **Title A–Z**, **Title Z–A**, or **Custom** sorting. Dragging a project or collection tile automatically switches to Custom mode. Reordering uses neighboring-tile midpoint thresholds and edge auto-scrolling to prevent tiles from bouncing between positions.
+- Choose **Title A–Z**, **Title Z–A**, or **Custom** sorting. Dragging a project or collection tile automatically switches to Custom mode. Reordering follows the tile under the cursor in both rows and columns and retains edge auto-scrolling.
 
 Several library projects can remain open as live in-memory workspaces. Clicking another project preserves the current project's latest segments, prompts, output dimensions, options, and timeline view without writing them to disk. A yellow dot in the project's upper-left corner marks unsaved changes. **Save Current** writes only the active workspace and clears its yellow dot; other unsaved workspaces remain intact for the lifetime of the application.
 

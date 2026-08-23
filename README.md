@@ -24,7 +24,7 @@ LTX Director - Director turns a folder of reference frames into a structured LTX
 
 ## Project library
 
-Save working projects directly into the searchable project library and organize related work into collections. Project cards can use the first segment automatically, any segment's starting frame, or a custom uploaded thumbnail.
+Save working projects directly into the searchable project library and organize related work into collections. Resize the panel from its dotted right-edge grip, then choose Small, Medium, or Large icons from the control at the top. Tiles wrap left-to-right as room becomes available, while project cards can use the first segment automatically, any segment's starting frame, or a custom uploaded thumbnail.
 
 ![Choose a segment frame or custom project thumbnail](docs/images/project-thumbnail-picker.png)
 
@@ -62,7 +62,7 @@ In short: use **Project Export** for lossless editing and safekeeping; use **LTX
 - Independent SFX, Spoken Dialog, HDR, and Reduce Music controls
 - LTX Director-compatible JSON import/export
 - Complete portable project import/export, including embedded media
-- Searchable local project library with large visual thumbnails, collection folders, title sorting, and stable custom drag ordering
+- Searchable, resizable local project library with selectable thumbnail sizes, a responsive wrapping grid, collection folders, title sorting, and stable custom drag ordering
 - Automatic Custom-sort activation when a project tile is dragged
 - Multiple live in-memory project workspaces with yellow unsaved-change indicators
 - Persistent window, dialog, and project-panel placement
@@ -97,7 +97,7 @@ python3 -m pip install --upgrade "$(wget -qO- https://api.github.com/repos/etove
 Or download the `.whl` file from the latest GitHub release, then install it with:
 
 ```bash
-python3 -m pip install ./ltx_prompt_director-1.7.12-py3-none-any.whl
+python3 -m pip install ./ltx_prompt_director-1.7.13-py3-none-any.whl
 ```
 
 You can also install a locally built wheel from the repository:

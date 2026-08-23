@@ -12,7 +12,7 @@ from importlib.resources import files
 from pathlib import Path
 from uuid import uuid4
 
-from PySide6.QtCore import QEasingCurve, QEventLoop, QItemSelectionModel, QObject, QRunnable, QRectF, QSettings, QSize, QStandardPaths, Qt, QThreadPool, QTimer, QVariantAnimation, Signal
+from PySide6.QtCore import QEasingCurve, QEventLoop, QObject, QRunnable, QRectF, QSettings, QSize, QStandardPaths, Qt, QThreadPool, QTimer, QVariantAnimation, Signal
 from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
@@ -310,22 +310,12 @@ class ProjectListWidget(QListWidget):
         elif position.y() > self.viewport().height() - edge:
             self.verticalScrollBar().setValue(self.verticalScrollBar().value() + 24)
 
-        target = self._drag_row
-        if self._drag_row > 0:
-            previous = self.item(self._drag_row - 1)
-            previous_center = self.visualItemRect(previous).center().y()
-            if position.y() < previous_center:
-                target = self._drag_row - 1
-        if target == self._drag_row and self._drag_row < self.count() - 1:
-            following = self.item(self._drag_row + 1)
-            following_center = self.visualItemRect(following).center().y()
-            if position.y() > following_center:
-                target = self._drag_row + 1
+        hovered = self.indexAt(position)
+        target = hovered.row() if hovered.isValid() else self._drag_row
         if target != self._drag_row:
             item = self.takeItem(self._drag_row)
             self.insertItem(target, item)
             item.setSelected(True)
-            self.selectionModel().setCurrentIndex(self.indexFromItem(item), QItemSelectionModel.SelectionFlag.NoUpdate)
             self._drag_row = target
             self.order_changed.emit()
         event.accept()
@@ -656,6 +646,73 @@ class TimelineHeightHandle(QFrame):
             event.accept()
 
 
+class ProjectPanelWidthHandle(QFrame):
+    width_changed = Signal(int)
+    finished = Signal()
+
+    def __init__(self, current_width: int):
+        super().__init__()
+        self.current_width = current_width
+        self.start_width = current_width
+        self.start_x: float | None = None
+        self.scale_factor = 1.0
+        self.setObjectName("projectPanelWidthHandle")
+        self.set_scale(1.0)
+        self.setCursor(Qt.CursorShape.SizeHorCursor)
+        self.setToolTip("Drag to resize the project library")
+
+    def set_scale(self, scale: float) -> None:
+        self.scale_factor = max(.75, min(2.0, scale))
+        self.setFixedWidth(round(14 * self.scale_factor))
+        self.update()
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        active = self.start_x is not None
+        color = QColor("#9fd8fa") if active else QColor("#71838d") if self.underMouse() else QColor("#4f5c63")
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(color)
+        diameter = max(3.0, 3.2 * self.scale_factor)
+        spacing = 8 * self.scale_factor
+        center_x = self.width() / 2
+        center_y = self.height() / 2
+        for index in range(-3, 4):
+            painter.drawEllipse(QRectF(center_x - diameter / 2, center_y + index * spacing - diameter / 2, diameter, diameter))
+
+    def enterEvent(self, event) -> None:
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        self.update()
+        super().leaveEvent(event)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.start_x = event.globalPosition().x()
+            self.start_width = self.current_width
+            self.grabMouse()
+            self.update()
+            event.accept()
+
+    def mouseMoveEvent(self, event):
+        if self.start_x is not None:
+            value = max(280, min(900, int(self.start_width + event.globalPosition().x() - self.start_x)))
+            self.current_width = value
+            self.width_changed.emit(value)
+            event.accept()
+
+    def mouseReleaseEvent(self, event):
+        if self.start_x is not None:
+            self.start_x = None
+            self.releaseMouse()
+            self.update()
+            self.finished.emit()
+            event.accept()
+
+
 class SegmentCard(QFrame):
     duration_changed = Signal(float)
     delete_requested = Signal()
@@ -965,6 +1022,9 @@ class MainWindow(QMainWindow):
         self.project_dirty = False
         self.project_sessions: dict[str, dict] = {}
         self.current_collection: str | None = None
+        self.project_panel_width = max(280, min(900, self.settings.value("project_panel_width", 330, int)))
+        saved_icon_size = self.settings.value("project_icon_size", 230, int)
+        self.project_icon_size = min((96, 156, 230), key=lambda size: abs(size - saved_icon_size))
         self.pixels_per_second = 65
         self.timeline_height = 184
         self.thread_pool = QThreadPool.globalInstance()
@@ -978,6 +1038,7 @@ class MainWindow(QMainWindow):
             self.restoreGeometry(geometry)
         if state:
             self.restoreState(state)
+        QTimer.singleShot(0, lambda: self.set_project_panel_width(self.project_panel_width, persist=False))
         self.update_window_title()
 
     def _build_ui(self) -> None:
@@ -1271,8 +1332,8 @@ class MainWindow(QMainWindow):
             | QDockWidget.DockWidgetFeature.DockWidgetMovable
             | QDockWidget.DockWidgetFeature.DockWidgetFloatable
         )
-        self.project_dock.setMinimumWidth(290)
-        self.project_dock.setMaximumWidth(350)
+        self.project_dock.setMinimumWidth(280)
+        self.project_dock.setMaximumWidth(900)
 
         panel = QWidget()
         layout = QVBoxLayout(panel)
@@ -1286,6 +1347,8 @@ class MainWindow(QMainWindow):
         self.project_library_title.setObjectName("projectLibraryTitle")
         header.addWidget(self.collection_up)
         header.addWidget(self.project_library_title, 1)
+        layout.addLayout(header)
+        controls = QHBoxLayout()
         self.project_sort = QComboBox()
         self.project_sort.addItem("Title A–Z", "title_asc")
         self.project_sort.addItem("Title Z–A", "title_desc")
@@ -1294,8 +1357,20 @@ class MainWindow(QMainWindow):
         self.project_sort.setCurrentIndex(max(0, self.project_sort.findData(saved_sort)))
         self.project_sort.setToolTip("Sort projects by title or drag tiles in Custom mode")
         self.project_sort.currentIndexChanged.connect(self.project_sort_changed)
-        header.addWidget(self.project_sort)
-        layout.addLayout(header)
+        controls.addWidget(self.project_sort, 1)
+        self.project_icon_button = QPushButton()
+        self.project_icon_button.setObjectName("projectIconButton")
+        self.project_icon_button.setToolTip("Set project and collection thumbnail size")
+        icon_menu = QMenu(self.project_icon_button)
+        self.project_icon_actions: dict[int, QAction] = {}
+        for label, size in (("Small", 96), ("Medium", 156), ("Large", 230)):
+            action = icon_menu.addAction(label)
+            action.setCheckable(True)
+            action.triggered.connect(lambda checked=False, value=size: self.set_project_icon_size(value))
+            self.project_icon_actions[size] = action
+        self.project_icon_button.setMenu(icon_menu)
+        controls.addWidget(self.project_icon_button)
+        layout.addLayout(controls)
         self.project_search = QLineEdit()
         self.project_search.setPlaceholderText("Search projects…")
         self.project_search.setClearButtonEnabled(True)
@@ -1305,11 +1380,10 @@ class MainWindow(QMainWindow):
         self.project_list = ProjectListWidget()
         self.project_list.setObjectName("projectList")
         self.project_list.setViewMode(QListWidget.ViewMode.IconMode)
-        self.project_list.setFlow(QListWidget.Flow.TopToBottom)
-        self.project_list.setWrapping(False)
+        self.project_list.setFlow(QListWidget.Flow.LeftToRight)
+        self.project_list.setWrapping(True)
         self.project_list.setResizeMode(QListWidget.ResizeMode.Adjust)
         self.project_list.setMovement(QListWidget.Movement.Static)
-        self.project_list.setIconSize(QSize(230, 230))
         self.project_list.setSpacing(8)
         self.project_list.itemClicked.connect(self.activate_clicked_project)
         self.project_list.itemDoubleClicked.connect(lambda *_: self.open_library_project())
@@ -1333,10 +1407,55 @@ class MainWindow(QMainWindow):
         buttons.addWidget(edit_button)
         buttons.addWidget(delete_button)
         layout.addLayout(buttons)
-        self.project_dock.setWidget(panel)
+        self.update_project_icon_controls()
+        dock_content = QWidget()
+        dock_layout = QHBoxLayout(dock_content)
+        dock_layout.setContentsMargins(0, 0, 0, 0)
+        dock_layout.setSpacing(0)
+        dock_layout.addWidget(panel, 1)
+        self.project_width_handle = ProjectPanelWidthHandle(self.project_panel_width)
+        self.project_width_handle.width_changed.connect(self.set_project_panel_width)
+        dock_layout.addWidget(self.project_width_handle)
+        self.project_dock.setWidget(dock_content)
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.project_dock)
+        self.project_dock.visibilityChanged.connect(self.project_dock_visibility_changed)
         self.project_dock.hide()
         self.refresh_project_library()
+
+    def project_dock_visibility_changed(self, visible: bool) -> None:
+        if visible:
+            QTimer.singleShot(0, lambda: self.set_project_panel_width(self.project_panel_width, persist=False))
+
+    def set_project_panel_width(self, width: int, persist: bool = True) -> None:
+        width = max(280, min(900, int(width)))
+        self.project_panel_width = width
+        if hasattr(self, "project_width_handle"):
+            self.project_width_handle.current_width = width
+        if self.project_dock.isFloating():
+            self.project_dock.resize(width, self.project_dock.height())
+        else:
+            self.resizeDocks([self.project_dock], [width], Qt.Orientation.Horizontal)
+        if persist:
+            self.settings.setValue("project_panel_width", width)
+
+    def update_project_icon_controls(self) -> None:
+        labels = {96: "Small", 156: "Medium", 230: "Large"}
+        self.project_icon_button.setText(f"Icons: {labels[self.project_icon_size]}")
+        for size, action in self.project_icon_actions.items():
+            action.setChecked(size == self.project_icon_size)
+        card_width = self.project_icon_size + 22
+        card_height = self.project_icon_size + 68
+        self.project_list.setIconSize(QSize(self.project_icon_size, self.project_icon_size))
+        self.project_list.setGridSize(QSize(card_width, card_height))
+
+    def set_project_icon_size(self, size: int) -> None:
+        size = min((96, 156, 230), key=lambda value: abs(value - int(size)))
+        if size == self.project_icon_size:
+            return
+        self.project_icon_size = size
+        self.settings.setValue("project_icon_size", size)
+        self.update_project_icon_controls()
+        self.refresh_project_library(preserve_scroll=False)
 
     def _apply_theme(self) -> None:
         scale = max(75, min(200, self.settings.value("ui_text_scale", 100, int))) / 100
@@ -1349,7 +1468,7 @@ class MainWindow(QMainWindow):
 
         theme = """
         QMainWindow,QWidget{background:#24292c;color:#d9dcde;font:11px Arial} QToolBar{background:#303537;border:0;spacing:6px;padding:5px}
-        QToolButton,QPushButton,QComboBox,QSpinBox,QDoubleSpinBox,QLineEdit{background:#303436;border:1px solid #101213;border-radius:3px;padding:5px 8px;min-height:20px}
+        QToolButton,QPushButton,QComboBox,QSpinBox,QDoubleSpinBox,QLineEdit{background:#303436;border:1px solid #101213;border-radius:3px;padding:3px 7px;min-height:19px}
         QToolButton:hover,QPushButton:hover{background:#41474a} QToolButton:pressed,QPushButton:pressed{background:#202729;border-color:#79a8c5} QLineEdit{background:#1e2122}
         QSpinBox,QDoubleSpinBox{padding-right:__SPIN_PAD__px} QSpinBox::up-button,QDoubleSpinBox::up-button{subcontrol-origin:border;subcontrol-position:top right;width:__SPIN_BUTTON__px;background:#3b4347;border:0;border-left:1px solid #171a1c;border-bottom:1px solid #202527;border-top-right-radius:3px} QSpinBox::down-button,QDoubleSpinBox::down-button{subcontrol-origin:border;subcontrol-position:bottom right;width:__SPIN_BUTTON__px;background:#343b3f;border:0;border-left:1px solid #171a1c;border-top:1px solid #202527;border-bottom-right-radius:3px}
         QSpinBox::up-button:hover,QDoubleSpinBox::up-button:hover,QSpinBox::down-button:hover,QDoubleSpinBox::down-button:hover{background:#506471} QSpinBox::up-button:pressed,QDoubleSpinBox::up-button:pressed,QSpinBox::down-button:pressed,QDoubleSpinBox::down-button:pressed{background:#274e66} QSpinBox::up-arrow,QDoubleSpinBox::up-arrow,QSpinBox::down-arrow,QDoubleSpinBox::down-arrow{width:__ARROW_SIZE__px;height:__ARROW_SIZE__px}
@@ -1362,6 +1481,7 @@ class MainWindow(QMainWindow):
         #tileDelete{padding:0;min-height:0;max-height:20px;background:#454849;color:#ddd;border:0} #tileDelete:hover{background:#a94444;color:#fff;border:1px solid #e07878} #tileTitle{background:#242627;padding:3px;font-size:9px} #tileDuration{color:#a2a7a9;font-size:8px}
         #resizeHandle{background:#606669;border-left:1px solid #9ca2a4} #resizeHandle:hover{background:#8aa6b7;border-left:2px solid #d8edf8}
         #timelineHeightHandle{background:transparent;border:0} #timelineHeightHandle:hover{background:rgba(88,118,134,35);border:0}
+        #projectPanelWidthHandle{background:transparent;border:0} #projectPanelWidthHandle:hover{background:rgba(88,118,134,35);border:0}
         #segmentPreview{background:#17191a;border-top:1px solid #34383a}
         #addTile{border:1px dashed #596065;background:#111415;color:#828b90;font-size:10px} #sequenceBar{background:#1c1f20;border:1px solid #0e1011;border-radius:3px;padding:12px;font-weight:bold}
         #sectionLabel{color:#939ca1;font-size:8px;letter-spacing:1px} #muted{color:#879095;font-size:9px} #promptPanel{background:#252728;border:1px solid #101213;border-radius:3px}
@@ -1370,7 +1490,7 @@ class MainWindow(QMainWindow):
         QDockWidget{background:#191d1f;color:#d9dcde;font-weight:bold} QDockWidget::title{background:#1b2022;border-bottom:1px solid #0e1011;padding:8px;text-align:left}
         #projectLibraryTitle,#magicOverlayTitle{font-size:15px;font-weight:bold;color:#f0f2f3} #projectList{background:#151819;border:1px solid #0e1011;padding:5px}
         #projectList::item{background:#24282a;border:1px solid #3b4144;border-radius:4px;padding:7px;color:#dce0e2} #projectList::item:hover{border-color:#6488a1;background:#2b3134} #projectList::item:selected{border:2px solid #69a5d0;background:#29343a}
-        #librarySave{background:#3b6f9c;border-color:#4f83ae;font-weight:bold} #librarySave:hover{background:#5596ca;border-color:#8bc8f5;color:#fff} #librarySave:pressed{background:#214865;border:2px solid #b9e1ff;color:#fff;padding:4px 7px 3px 9px} #libraryDelete:hover{background:#713d3d;border-color:#9b5656}
+        #librarySave{background:#3b6f9c;border-color:#4f83ae;font-weight:bold} #librarySave:hover{background:#5596ca;border-color:#8bc8f5;color:#fff} #librarySave:pressed{background:#214865;border:1px solid #b9e1ff;color:#fff} #libraryDelete:hover{background:#713d3d;border-color:#9b5656}
         QMenu{background:#252a2c;border:1px solid #596267;padding:4px} QMenu::item{padding:7px 28px 7px 12px;border-radius:3px} QMenu::item:selected{background:#3b6f9c;color:#fff} QMenu::separator{height:1px;background:#4b5255;margin:4px 7px}
         QScrollBar:vertical{background:#171b1d;width:12px;margin:0;border:0;border-radius:6px} QScrollBar::handle:vertical{background:#46545c;min-height:28px;margin:2px;border-radius:4px} QScrollBar::handle:vertical:hover{background:#63869b} QScrollBar::handle:vertical:pressed{background:#74a8c6}
         QScrollBar:horizontal{background:#171b1d;height:12px;margin:0;border:0;border-radius:6px} QScrollBar::handle:horizontal{background:#46545c;min-width:28px;margin:2px;border-radius:4px} QScrollBar::handle:horizontal:hover{background:#63869b} QScrollBar::handle:horizontal:pressed{background:#74a8c6}
@@ -1379,8 +1499,7 @@ class MainWindow(QMainWindow):
         theme = theme.replace("font:11px Arial", f"font:{scaled(11)}px Arial")
         theme = theme.replace("font:11px 'Courier New'", f"font:{scaled(11)}px 'Courier New'")
         theme = theme.replace("spacing:6px;padding:5px", f"spacing:{metric(6)}px;padding:{metric(5)}px")
-        theme = theme.replace("padding:5px 8px;min-height:20px", f"padding:{metric(5)}px {metric(8)}px;min-height:{metric(20)}px")
-        theme = theme.replace("padding:4px 7px 3px 9px", f"padding:{metric(4)}px {metric(7)}px {metric(3)}px {metric(9)}px")
+        theme = theme.replace("padding:3px 7px;min-height:19px", f"padding:{metric(3)}px {metric(7)}px;min-height:{metric(19)}px")
         theme = theme.replace("width:12px;margin:0", f"width:{metric(12)}px;margin:0")
         theme = theme.replace("height:12px;margin:0", f"height:{metric(12)}px;margin:0")
         theme = theme.replace("min-height:28px;margin:2px", f"min-height:{metric(28)}px;margin:{metric(2)}px")
@@ -1398,8 +1517,9 @@ class MainWindow(QMainWindow):
         self.segment_header.setSpacing(metric(8))
         self.ruler.setFixedHeight(metric(28))
         self.timeline_height_handle.set_scale(scale)
+        self.project_width_handle.set_scale(scale)
         for button in (self.provider_button, self.sfx, self.spoken_dialog, self.hdr, self.reduce_music, self.magic_button, self.start_button, self.end_button):
-            button.setMinimumWidth(button.fontMetrics().horizontalAdvance(button.text()) + metric(22))
+            button.setMinimumWidth(button.fontMetrics().horizontalAdvance(button.text()) + metric(18))
         self.output_width.setMinimumWidth(metric(92))
         self.output_height.setMinimumWidth(metric(92))
         self.duration_spin.setMinimumWidth(metric(78))
@@ -1450,14 +1570,16 @@ class MainWindow(QMainWindow):
                 item = QListWidgetItem(f"{name}\n{len(members)} project{'s' if len(members) != 1 else ''}")
                 item.setData(Qt.ItemDataRole.UserRole, {"kind": "collection", "name": name, "description": meta["description"]})
                 item.setToolTip(f"Collection: {name}")
-                item.setSizeHint(QSize(255, 292))
-                collection_cover = self.collection_pixmap(members[:4])
+                item.setSizeHint(QSize(self.project_icon_size + 22, self.project_icon_size + 68))
+                collection_cover = self.collection_pixmap(members[:4], self.project_icon_size)
                 if any(self.project_is_dirty(str(member.get("id", ""))) for member in members):
                     painter = QPainter(collection_cover)
                     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-                    painter.setPen(QPen(QColor("#5a4300"), 3))
+                    dot_size = max(10, round(self.project_icon_size * .078))
+                    dot_margin = max(5, round(self.project_icon_size * .039))
+                    painter.setPen(QPen(QColor("#5a4300"), max(1, round(self.project_icon_size * .013))))
                     painter.setBrush(QColor("#ffd83d"))
-                    painter.drawEllipse(9, 9, 18, 18)
+                    painter.drawEllipse(dot_margin, dot_margin, dot_size, dot_size)
                     painter.end()
                 item.setIcon(QIcon(collection_cover))
                 self.project_list.addItem(item)
@@ -1469,20 +1591,22 @@ class MainWindow(QMainWindow):
             item = QListWidgetItem(f"{name}\n{description}")
             item.setData(Qt.ItemDataRole.UserRole, {**meta, "kind": "project"})
             item.setToolTip(f"{name}\n\n{meta.get('description', '')}")
-            item.setSizeHint(QSize(255, 292))
+            item.setSizeHint(QSize(self.project_icon_size + 22, self.project_icon_size + 68))
             pixmap = pixmap_from_data_url(str(meta.get("thumbnailData", "")))
             if pixmap.isNull():
-                pixmap = QPixmap(230, 230)
+                pixmap = QPixmap(self.project_icon_size, self.project_icon_size)
                 pixmap.fill(QColor("#171a1b"))
             else:
-                pixmap = self.square_pixmap(pixmap, 230)
+                pixmap = self.square_pixmap(pixmap, self.project_icon_size)
             if self.project_is_dirty(str(meta.get("id", ""))):
                 pixmap = pixmap.copy()
                 painter = QPainter(pixmap)
                 painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-                painter.setPen(QPen(QColor("#5a4300"), 3))
+                dot_size = max(10, round(self.project_icon_size * .078))
+                dot_margin = max(5, round(self.project_icon_size * .039))
+                painter.setPen(QPen(QColor("#5a4300"), max(1, round(self.project_icon_size * .013))))
                 painter.setBrush(QColor("#ffd83d"))
-                painter.drawEllipse(9, 9, 18, 18)
+                painter.drawEllipse(dot_margin, dot_margin, dot_size, dot_size)
                 painter.end()
             item.setIcon(QIcon(pixmap))
             self.project_list.addItem(item)
@@ -1555,18 +1679,22 @@ class MainWindow(QMainWindow):
         scaled = pixmap.scaled(size, size, Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation)
         return scaled.copy(max(0, (scaled.width() - size) // 2), max(0, (scaled.height() - size) // 2), size, size)
 
-    def collection_pixmap(self, members: list[dict]) -> QPixmap:
-        result = QPixmap(230, 230)
+    def collection_pixmap(self, members: list[dict], size: int) -> QPixmap:
+        result = QPixmap(size, size)
         result.fill(QColor("#101314"))
         painter = QPainter(result)
-        cells = ((0, 0), (117, 0), (0, 117), (117, 117))
+        gap = max(2, round(size * .017))
+        cell = (size - gap) // 2
+        second = cell + gap
+        cells = ((0, 0), (second, 0), (0, second), (second, second))
         for member, (x, y) in zip(members, cells):
             pixmap = pixmap_from_data_url(str(member.get("thumbnailData", "")))
             if not pixmap.isNull():
-                painter.drawPixmap(x, y, self.square_pixmap(pixmap, 113))
-        painter.setPen(QPen(QColor("#657078"), 2))
-        painter.drawLine(115, 0, 115, 230)
-        painter.drawLine(0, 115, 230, 115)
+                painter.drawPixmap(x, y, self.square_pixmap(pixmap, cell))
+        painter.setPen(QPen(QColor("#657078"), gap))
+        divider = cell + gap // 2
+        painter.drawLine(divider, 0, divider, size)
+        painter.drawLine(0, divider, size, divider)
         painter.end()
         return result
 
