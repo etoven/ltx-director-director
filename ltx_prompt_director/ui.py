@@ -12,7 +12,7 @@ from importlib.resources import files
 from pathlib import Path
 from uuid import uuid4
 
-from PySide6.QtCore import QEasingCurve, QEventLoop, QObject, QRunnable, QRectF, QSettings, QSize, QStandardPaths, Qt, QThreadPool, QTimer, QVariantAnimation, Signal
+from PySide6.QtCore import QEasingCurve, QEvent, QEventLoop, QObject, QRunnable, QRectF, QSettings, QSize, QStandardPaths, Qt, QThreadPool, QTimer, QVariantAnimation, Signal
 from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
@@ -640,73 +640,6 @@ class TimelineHeightHandle(QFrame):
     def mouseReleaseEvent(self, event):
         if self.start_y is not None:
             self.start_y = None
-            self.releaseMouse()
-            self.update()
-            self.finished.emit()
-            event.accept()
-
-
-class ProjectPanelWidthHandle(QFrame):
-    width_changed = Signal(int)
-    finished = Signal()
-
-    def __init__(self, current_width: int):
-        super().__init__()
-        self.current_width = current_width
-        self.start_width = current_width
-        self.start_x: float | None = None
-        self.scale_factor = 1.0
-        self.setObjectName("projectPanelWidthHandle")
-        self.set_scale(1.0)
-        self.setCursor(Qt.CursorShape.SizeHorCursor)
-        self.setToolTip("Drag to resize the project library")
-
-    def set_scale(self, scale: float) -> None:
-        self.scale_factor = max(.75, min(2.0, scale))
-        self.setFixedWidth(round(14 * self.scale_factor))
-        self.update()
-
-    def paintEvent(self, event) -> None:
-        super().paintEvent(event)
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        active = self.start_x is not None
-        color = QColor("#9fd8fa") if active else QColor("#71838d") if self.underMouse() else QColor("#4f5c63")
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(color)
-        diameter = max(3.0, 3.2 * self.scale_factor)
-        spacing = 8 * self.scale_factor
-        center_x = self.width() / 2
-        center_y = self.height() / 2
-        for index in range(-3, 4):
-            painter.drawEllipse(QRectF(center_x - diameter / 2, center_y + index * spacing - diameter / 2, diameter, diameter))
-
-    def enterEvent(self, event) -> None:
-        self.update()
-        super().enterEvent(event)
-
-    def leaveEvent(self, event) -> None:
-        self.update()
-        super().leaveEvent(event)
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
-            self.start_x = event.globalPosition().x()
-            self.start_width = self.current_width
-            self.grabMouse()
-            self.update()
-            event.accept()
-
-    def mouseMoveEvent(self, event):
-        if self.start_x is not None:
-            value = max(280, min(900, int(self.start_width + event.globalPosition().x() - self.start_x)))
-            self.current_width = value
-            self.width_changed.emit(value)
-            event.accept()
-
-    def mouseReleaseEvent(self, event):
-        if self.start_x is not None:
-            self.start_x = None
             self.releaseMouse()
             self.update()
             self.finished.emit()
@@ -1470,15 +1403,8 @@ class MainWindow(QMainWindow):
         buttons.addWidget(delete_button)
         layout.addLayout(buttons)
         self.update_project_icon_controls()
-        dock_content = QWidget()
-        dock_layout = QHBoxLayout(dock_content)
-        dock_layout.setContentsMargins(0, 0, 0, 0)
-        dock_layout.setSpacing(0)
-        dock_layout.addWidget(panel, 1)
-        self.project_width_handle = ProjectPanelWidthHandle(self.project_panel_width)
-        self.project_width_handle.width_changed.connect(self.set_project_panel_width)
-        dock_layout.addWidget(self.project_width_handle)
-        self.project_dock.setWidget(dock_content)
+        self.project_dock.setWidget(panel)
+        self.project_dock.installEventFilter(self)
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.project_dock)
         self.project_dock.visibilityChanged.connect(self.project_dock_visibility_changed)
         self.project_dock.hide()
@@ -1491,8 +1417,6 @@ class MainWindow(QMainWindow):
     def set_project_panel_width(self, width: int, persist: bool = True) -> None:
         width = max(280, min(900, int(width)))
         self.project_panel_width = width
-        if hasattr(self, "project_width_handle"):
-            self.project_width_handle.current_width = width
         if self.project_dock.isFloating():
             self.project_dock.resize(width, self.project_dock.height())
         else:
@@ -1530,6 +1454,14 @@ class MainWindow(QMainWindow):
     def save_prompt_splitter_sizes(self, *_args) -> None:
         self.settings.setValue("prompt_splitter_sizes", json.dumps(self.prompt_splitter.sizes()))
 
+    def eventFilter(self, watched, event) -> bool:
+        if watched is getattr(self, "project_dock", None) and event.type() == QEvent.Type.Resize:
+            width = self.project_dock.width()
+            if 280 <= width <= 900:
+                self.project_panel_width = width
+                self.settings.setValue("project_panel_width", width)
+        return super().eventFilter(watched, event)
+
     def _apply_theme(self) -> None:
         scale = max(75, min(200, self.settings.value("ui_text_scale", 100, int))) / 100
 
@@ -1540,7 +1472,7 @@ class MainWindow(QMainWindow):
             return max(1, round(size * scale))
 
         theme = """
-        QMainWindow,QWidget{background:#24292c;color:#d9dcde;font:11px Arial} QMainWindow::separator{width:0;height:0;background:transparent} QToolBar{background:#303537;border:0;spacing:6px;padding:5px}
+        QMainWindow,QWidget{background:#24292c;color:#d9dcde;font:11px Arial} QMainWindow::separator{width:__DOCK_GRIP_WIDTH__px;height:__DOCK_GRIP_WIDTH__px;background:transparent;background-image:url("__DOCK_GRIP_IMAGE__");background-repeat:no-repeat;background-position:center} QMainWindow::separator:hover{background-color:rgba(88,118,134,35)} QToolBar{background:#303537;border:0;spacing:6px;padding:5px}
         QToolButton,QPushButton,QComboBox,QSpinBox,QDoubleSpinBox,QLineEdit{background:#303436;border:1px solid #101213;border-radius:3px;padding:3px 7px;min-height:19px}
         QToolButton:hover,QPushButton:hover{background:#41474a} QToolButton:pressed,QPushButton:pressed{background:#202729;border-color:#79a8c5} QLineEdit{background:#1e2122}
         QSpinBox,QDoubleSpinBox{padding-right:__SPIN_PAD__px} QSpinBox::up-button,QDoubleSpinBox::up-button{subcontrol-origin:border;subcontrol-position:top right;width:__SPIN_BUTTON__px;background:#3b4347;border:0;border-left:1px solid #171a1c;border-bottom:1px solid #202527;border-top-right-radius:3px} QSpinBox::down-button,QDoubleSpinBox::down-button{subcontrol-origin:border;subcontrol-position:bottom right;width:__SPIN_BUTTON__px;background:#343b3f;border:0;border-left:1px solid #171a1c;border-top:1px solid #202527;border-bottom-right-radius:3px}
@@ -1554,7 +1486,6 @@ class MainWindow(QMainWindow):
         #tileDelete{padding:0;min-height:0;max-height:20px;background:#454849;color:#ddd;border:0} #tileDelete:hover{background:#a94444;color:#fff;border:1px solid #e07878} #tileTitle{background:#242627;padding:3px;font-size:9px} #tileDuration{color:#a2a7a9;font-size:8px}
         #resizeHandle{background:#606669;border-left:1px solid #9ca2a4} #resizeHandle:hover{background:#8aa6b7;border-left:2px solid #d8edf8}
         #timelineHeightHandle{background:transparent;border:0} #timelineHeightHandle:hover{background:rgba(88,118,134,35);border:0}
-        #projectPanelWidthHandle{background:transparent;border:0} #projectPanelWidthHandle:hover{background:rgba(88,118,134,35);border:0}
         #promptSplitter::handle{background:transparent;border:0} #promptSplitter::handle:hover{background:rgba(88,118,134,35);border:0}
         #segmentPreview{background:#17191a;border-top:1px solid #34383a}
         #addTile{border:1px dashed #596065;background:#111415;color:#828b90;font-size:10px} #sequenceBar{background:#1c1f20;border:1px solid #0e1011;border-radius:3px;padding:12px;font-weight:bold}
@@ -1583,6 +1514,8 @@ class MainWindow(QMainWindow):
         theme = theme.replace("__ARROW_SIZE__", str(metric(8)))
         theme = theme.replace("__SLIDER_GROOVE__", str(metric(6))).replace("__SLIDER_RADIUS__", str(metric(3)))
         theme = theme.replace("__SLIDER_HANDLE__", str(metric(16))).replace("__SLIDER_MARGIN__", str(metric(6))).replace("__SLIDER_HANDLE_RADIUS__", str(metric(8)))
+        dock_grip = str(files("ltx_prompt_director").joinpath("assets/dock-grip.png")).replace("\\", "/")
+        theme = theme.replace("__DOCK_GRIP_WIDTH__", str(metric(14))).replace("__DOCK_GRIP_IMAGE__", dock_grip)
         for size in (15, 10, 9, 8):
             theme = theme.replace(f"font-size:{size}px", f"font-size:{scaled(size)}px")
         self.setStyleSheet(theme)
@@ -1591,7 +1524,6 @@ class MainWindow(QMainWindow):
         self.segment_header.setSpacing(metric(8))
         self.ruler.setFixedHeight(metric(28))
         self.timeline_height_handle.set_scale(scale)
-        self.project_width_handle.set_scale(scale)
         self.prompt_splitter.set_scale(scale)
         self.project_list.setSpacing(metric(4))
         for button in (self.provider_button, self.sfx, self.spoken_dialog, self.hdr, self.reduce_music, self.magic_button, self.start_button, self.end_button):
