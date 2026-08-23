@@ -40,6 +40,11 @@ def _requested_single_frame_duration(intent: str) -> float | None:
         match = re.search(pattern, text, re.I)
         if match:
             return max(1.0, min(60.0, round(float(match.group(1)) * 2) / 2))
+    # In a one-frame sequence, a lone seconds value is unambiguously the requested
+    # segment length even when phrased conversationally (for example, "make it 20s").
+    seconds = re.findall(r"\b(\d+(?:\.\d+)?)\s*[- ]?(?:seconds?|secs?|s)\b", text, re.I)
+    if len(seconds) == 1:
+        return max(1.0, min(60.0, round(float(seconds[0]) * 2) / 2))
     return None
 
 
