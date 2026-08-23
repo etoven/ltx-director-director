@@ -1325,7 +1325,7 @@ class MainWindow(QMainWindow):
         self.requested_length.setSpecialValueText("Auto")
         self.requested_length.setToolTip("Requested total sequence length; Auto lets Magic Build choose")
         self.requested_length.valueChanged.connect(self.mark_dirty)
-        nationality_label = QLabel("SPEAKER NATIONALITY")
+        nationality_label = QLabel("SPEAKER / ACCENT")
         nationality_label.setObjectName("groupLabel")
         self.speaker_nationality = QComboBox()
         self.speaker_nationality.setEditable(True)
@@ -1335,7 +1335,7 @@ class MainWindow(QMainWindow):
             "Chinese", "Brazilian", "Mexican",
         ])
         self.speaker_nationality.setCurrentIndex(0)
-        self.speaker_nationality.setToolTip("Speaker nationality or language context used only when Spoken Dialog is enabled")
+        self.speaker_nationality.setToolTip("Speaker nationality, language, or exact accent used only when Spoken Dialog is enabled; this field is editable")
         self.speaker_nationality.currentTextChanged.connect(self.mark_dirty)
         self.speaker_nationality.setEnabled(False)
         options_row.addWidget(length_label)
@@ -2626,11 +2626,13 @@ class MainWindow(QMainWindow):
             if nationality.casefold() == "(image/context provided)".casefold():
                 lines.append(
                     "Speaker nationality/language context: use only reliable context explicitly visible in the image or stated in Director's Intent, such as readable language or an unambiguous setting. "
-                    "Do not infer nationality from physical appearance alone; when context is insufficient, use culturally neutral natural dialogue."
+                    "Do not infer nationality from physical appearance alone; when context is insufficient, use culturally neutral natural dialogue. "
+                    "In every Spoken Dialog clause, explicitly state the spoken language and a suitable natural accent beside the quoted words rather than asking LTX Video to infer an accent from nationality."
                 )
             else:
                 lines.append(
-                    f"Speaker nationality: {nationality}. Use this to guide natural word choice, language and vocal delivery without stereotypes or caricature."
+                    f"Speaker nationality: {nationality}. Use this to guide natural word choice, language and vocal delivery without stereotypes or caricature. "
+                    "Translate this context into an explicit spoken language and specific natural regional accent beside the quoted words in every Spoken Dialog clause; do not leave accent inference to LTX Video."
                 )
         return "\n\n".join(lines)
 
