@@ -20,8 +20,27 @@ def build_prompts(segments: list[Segment], provider: str, model: str, api_key: s
     images = [{"name": item.name, "role": item.role, "image": data_url(item.preview_path, max_edge=384)} for item in segments]
     rules = _rules(len(images), intent, sfx, spoken_dialog, hdr, reduce_music)
     if provider == "openai":
-        return _openai(images, api_key, rules, timeout, sfx, spoken_dialog)
-    return _gemini(images, api_key, model, rules, timeout, sfx, spoken_dialog)
+        result = _openai(images, api_key, rules, timeout, sfx, spoken_dialog)
+    else:
+        result = _gemini(images, api_key, model, rules, timeout, sfx, spoken_dialog)
+    requested_duration = _requested_single_frame_duration(intent) if len(images) == 1 else None
+    if requested_duration is not None:
+        result["segments"][0]["duration"] = requested_duration
+    return result
+
+
+def _requested_single_frame_duration(intent: str) -> float | None:
+    """Read an explicit one-frame duration so provider drift cannot override user intent."""
+    text = str(intent or "")
+    patterns = (
+        r"\b(?:total|scene|sequence|segment|frame)(?:\s+(?:duration|length))?\s*(?:of|is|:|=)?\s*(\d+(?:\.\d+)?)\s*(?:seconds?|secs?|s)\b",
+        r"\b(\d+(?:\.\d+)?)\s*[- ]?(?:seconds?|secs?)\s+(?:scene|sequence|segment|frame)\b",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, re.I)
+        if match:
+            return max(1.0, min(60.0, round(float(match.group(1)) * 2) / 2))
+    return None
 
 
 def _rules(count: int, intent: str, sfx: bool, spoken_dialog: bool, hdr: bool, reduce_music: bool) -> str:
@@ -43,17 +62,20 @@ def _rules(count: int, intent: str, sfx: bool, spoken_dialog: bool, hdr: bool, r
             "If it is labeled END FRAME, guide plausible preceding action toward that target state, resolve exactly into it and stop there; do not continue beyond it. "
             "Use User intent as the primary source of desired action, with conservative supporting motion inferred from visible pose, expression, environment and physical cause-and-effect. "
             "Describe time-based motion across the segment rather than merely inventorying the still image. Do not require or refer to a missing adjacent frame. "
+            "If User intent specifies a total scene or segment duration, return that duration exactly in the single segment, from 1.0 up to 60.0 seconds. "
             "The JSON must still use a segments array containing exactly one object; never return a singular segment object or a bare segment."
         )
+        duration_rule = "Normally assign 1.0-12.0 seconds according to motion complexity; an explicit User-intent duration overrides that recommendation up to 60.0 seconds."
     else:
         frame_planning_rule = "Infer transitions only from adjacent frames."
+        duration_rule = "Assign 1.0-12.0 seconds in 0.5-second increments according to motion complexity."
     return f"""EXPECTED SEGMENT COUNT: {count}
 
 You are LTXDirector, an expert prompt planner for LTX Video 2.3. Analyze all {count} supplied frames in order.
 Return exactly one segment per frame; never add, remove, merge or reorder. A start frame is the exact opening frame and an end frame is the exact target.
 Write production-ready natural-language prompts describing visible subject, action, expression, physical change, secondary motion, environment and camera behavior. {frame_planning_rule} Preserve identity, outfit, scene, lighting, angle, composition, aspect ratio and style. Use a stationary camera unless the frames clearly demand otherwise. Require gradual motion, overlapping progression, direct continuity and no cross-fade. Do not invent visual facts.
 Treat the creative guidance above as defaults. When User intent explicitly requests something different, follow the user's instruction. User intent overrides conflicting creative defaults, but not the required segment count, frame order, start/end-frame meaning or strict JSON schema.
-Assign 1.0-12.0 seconds in 0.5-second increments according to motion complexity. {audio}
+{duration_rule} Use 0.5-second increments. {audio}
 The globalPrompt contains persistent subject, scene, camera, lighting, style, continuity and negative constraints only. {global_format}
 User intent: {intent or 'Infer motion only from the ordered frames.'}
 Return strict JSON: {{"segments":[{{"duration":5,"prompt":"..."}}],"globalPrompt":"..."}}"""
@@ -72,8 +94,35 @@ def _gemini(images: list[dict], key: str, model: str, rules: str, timeout: int, 
     )
     response.raise_for_status()
     data = response.json()
-    raw = "".join(part.get("text", "") for part in data["candidates"][0]["content"]["parts"])
+    raw = _gemini_response_text(data)
     return _validate(raw, len(images), sfx, spoken_dialog)
+
+
+def _gemini_response_text(data: object) -> str:
+    """Extract Gemini text without leaking response-shape KeyErrors into the UI."""
+    if not isinstance(data, dict):
+        raise AIResponseFormatError("Gemini returned an invalid response envelope. Magic Build will retry.")
+    feedback = data.get("promptFeedback")
+    block_reason = feedback.get("blockReason") if isinstance(feedback, dict) else None
+    candidates = data.get("candidates")
+    if not isinstance(candidates, list) or not candidates:
+        detail = f" ({block_reason})" if block_reason else ""
+        raise AIResponseFormatError(f"Gemini returned no response candidate{detail}. Magic Build will retry.")
+    candidate = candidates[0]
+    if not isinstance(candidate, dict):
+        raise AIResponseFormatError("Gemini returned an invalid response candidate. Magic Build will retry.")
+    content = candidate.get("content")
+    response_parts = content.get("parts") if isinstance(content, dict) else None
+    if not isinstance(response_parts, list) or not response_parts:
+        finish_reason = candidate.get("finishReason")
+        detail = f" ({finish_reason})" if finish_reason else ""
+        raise AIResponseFormatError(f"Gemini returned no generated text{detail}. Magic Build will retry.")
+    raw = "".join(part.get("text", "") for part in response_parts if isinstance(part, dict))
+    if not raw.strip():
+        finish_reason = candidate.get("finishReason")
+        detail = f" ({finish_reason})" if finish_reason else ""
+        raise AIResponseFormatError(f"Gemini returned empty generated text{detail}. Magic Build will retry.")
+    return raw
 
 
 def _openai(images: list[dict], key: str, rules: str, timeout: int, sfx: bool, spoken_dialog: bool) -> dict:
@@ -116,7 +165,8 @@ def _validate(raw: str, expected: int, require_sfx: bool = False, require_spoken
         match = re.search(r"\d+(?:\.\d+)?", str(duration_value))
         if not match:
             raise AIResponseFormatError("The AI returned an invalid segment duration. Magic Build will retry.")
-        duration = max(1.0, min(12.0, round(float(match.group()) * 2) / 2))
+        maximum_duration = 60.0 if expected == 1 else 12.0
+        duration = max(1.0, min(maximum_duration, round(float(match.group()) * 2) / 2))
         normalized_segments.append({"duration": duration, "prompt": prompt.strip()})
     global_prompt = result.get("globalPrompt") or result.get("global_prompt") or result.get("global")
     if not isinstance(global_prompt, str) or not global_prompt.strip():

@@ -545,12 +545,13 @@ class ResizeHandle(QFrame):
     preview = Signal(float)
     finished = Signal()
 
-    def __init__(self, duration: float, pixels_per_second: int):
+    def __init__(self, duration: float, pixels_per_second: int, maximum_duration: float = 12.0):
         super().__init__()
         self.duration = duration
         self.start_duration = duration
         self.start_x: float | None = None
         self.pixels_per_second = pixels_per_second
+        self.maximum_duration = maximum_duration
         self.setObjectName("resizeHandle")
         # Keep a comfortable hit target while drawing only a slim dotted grip.
         self.setFixedWidth(12)
@@ -590,7 +591,7 @@ class ResizeHandle(QFrame):
 
     def mouseMoveEvent(self, event):
         if self.start_x is not None:
-            value = max(1, min(12, round((self.start_duration + (event.globalPosition().x() - self.start_x) / self.pixels_per_second) * 2) / 2))
+            value = max(1, min(self.maximum_duration, round((self.start_duration + (event.globalPosition().x() - self.start_x) / self.pixels_per_second) * 2) / 2))
             if value != self.duration:
                 self.duration = value
                 self.preview.emit(value)
@@ -720,7 +721,7 @@ class SegmentCard(QFrame):
     delete_requested = Signal()
     resize_finished = Signal()
 
-    def __init__(self, segment: Segment, preview_height: int, pixels_per_second: int):
+    def __init__(self, segment: Segment, preview_height: int, pixels_per_second: int, maximum_duration: float = 12.0):
         super().__init__()
         self.segment = segment
         self.setCursor(Qt.CursorShape.OpenHandCursor)
@@ -740,8 +741,8 @@ class SegmentCard(QFrame):
         badges.setContentsMargins(0, 0, 0, 0)
         kind = QLabel("WEBM" if segment.kind == "video" else "IMAGE")
         kind.setObjectName("mediaBadge")
-        role = QLabel(segment.role.upper())
-        role.setObjectName("roleBadge")
+        self.role_badge = QLabel(segment.role.upper())
+        self.role_badge.setObjectName("roleBadge")
         close = QPushButton("×")
         close.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
         close.setObjectName("tileDelete")
@@ -750,7 +751,7 @@ class SegmentCard(QFrame):
         close.clicked.connect(self.delete_requested)
         badges.addWidget(kind)
         badges.addStretch()
-        badges.addWidget(role)
+        badges.addWidget(self.role_badge)
         badges.addWidget(close)
         layout.addLayout(badges)
         self.preview = QLabel()
@@ -768,7 +769,7 @@ class SegmentCard(QFrame):
         self.duration_label.setObjectName("tileDuration")
         layout.addWidget(self.duration_label)
         self.outer_layout.addWidget(self.content, 1)
-        self.resize_handle = ResizeHandle(segment.duration, pixels_per_second)
+        self.resize_handle = ResizeHandle(segment.duration, pixels_per_second, maximum_duration)
         self.resize_handle.preview.connect(self._preview_duration)
         self.resize_handle.finished.connect(self.resize_finished)
         self.outer_layout.addWidget(self.resize_handle)
@@ -776,6 +777,11 @@ class SegmentCard(QFrame):
 
     def set_timeline_edges(self, first: bool, last: bool) -> None:
         self.outer_layout.setContentsMargins(0 if first else 1, 0, 0 if last else 1, 0)
+
+    def set_role(self, role: str) -> None:
+        """Update the visible role without recreating the timeline card."""
+        self.segment.role = role
+        self.role_badge.setText(role.upper())
 
     def update_layout(self, preview_height: int, pixels_per_second: int) -> None:
         height = max(80, preview_height)
@@ -2264,7 +2270,7 @@ class MainWindow(QMainWindow):
                 item.setData(Qt.ItemDataRole.UserRole, segment.id)
                 item.setSizeHint(QSize(max(48, int(segment.duration * self.pixels_per_second)), card_height))
                 self.timeline.addItem(item)
-                card = SegmentCard(segment, preview_height, self.pixels_per_second)
+                card = SegmentCard(segment, preview_height, self.pixels_per_second, MAX_SECONDS if len(self.segments) == 1 else 12.0)
                 card.duration_changed.connect(lambda value, sid=segment.id: self.change_duration(sid, value))
                 card.delete_requested.connect(lambda sid=segment.id: self.delete_by_id(sid))
                 card.resize_finished.connect(lambda sid=segment.id: self.finish_resize(sid))
@@ -2340,6 +2346,8 @@ class MainWindow(QMainWindow):
     def load_editor(self, row: int) -> None:
         self._loading = True
         segment = self.current_segment()
+        self.duration_spin.setMaximum(MAX_SECONDS if len(self.segments) == 1 else 12.0)
+        self.duration_spin.setToolTip(f"Segment duration in seconds (1–{int(self.duration_spin.maximum())})")
         self.segment_prompt.setPlainText(segment.prompt if segment else "")
         self.start_button.setEnabled(bool(segment))
         self.end_button.setEnabled(bool(segment))
@@ -2375,6 +2383,8 @@ class MainWindow(QMainWindow):
         if not segment:
             return
         self.duration_spin.blockSignals(True)
+        self.duration_spin.setMaximum(MAX_SECONDS if len(self.segments) == 1 else 12.0)
+        self.duration_spin.setToolTip(f"Segment duration in seconds (1–{int(self.duration_spin.maximum())})")
         self.duration_spin.setValue(segment.duration)
         self.duration_spin.blockSignals(False)
 
@@ -2390,10 +2400,22 @@ class MainWindow(QMainWindow):
             self.update_timeline_layout()
 
     def set_role(self, role: str) -> None:
-        if self.current_segment():
-            self.current_segment().role = role
-            self.mark_dirty()
-            self.refresh_timeline(self.timeline.currentRow())
+        segment = self.current_segment()
+        if not segment:
+            return
+        segment.role = role
+        row = self.timeline.currentRow()
+        item = self.timeline.item(row)
+        card = self.timeline.itemWidget(item) if item else None
+        if isinstance(card, SegmentCard):
+            card.set_role(role)
+        self.start_button.blockSignals(True)
+        self.end_button.blockSignals(True)
+        self.start_button.setChecked(role == "start")
+        self.end_button.setChecked(role == "end")
+        self.start_button.blockSignals(False)
+        self.end_button.blockSignals(False)
+        self.mark_dirty()
 
     def change_duration(self, segment_id: str, value: float) -> None:
         self.autofit_tail_extension = 0
@@ -2562,7 +2584,8 @@ class MainWindow(QMainWindow):
         generated_segments = result["segments"]
         for index, (segment, generated) in enumerate(zip(self.segments, generated_segments)):
             segment.prompt = str(generated.get("prompt", segment.prompt))
-            recommended = max(1, min(12, round(float(generated.get("duration", segment.duration)) * 2) / 2))
+            maximum_duration = MAX_SECONDS if len(generated_segments) == 1 else 12.0
+            recommended = max(1, min(maximum_duration, round(float(generated.get("duration", segment.duration)) * 2) / 2))
             reserve = max(0, len(generated_segments) - index - 1)
             target = max(1, min(recommended, remaining - reserve))
             target_durations.append(target)
