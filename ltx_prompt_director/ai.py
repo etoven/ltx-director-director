@@ -32,11 +32,21 @@ def _rules(count: int, intent: str, sfx: bool, spoken_dialog: bool, hdr: bool, r
     else:
         sound_rule = "Do not add a [SOUND] ambience header unless the user explicitly requests one. "
     global_format = quality_rule + sound_rule
+    if count == 1:
+        frame_planning_rule = (
+            "SINGLE-FRAME MODE: Treat the supplied frame as a strong visual anchor, not as a complete motion description. "
+            "If it is labeled START FRAME, begin exactly from it and guide coherent action forward from that starting state; do not invent action before it. "
+            "If it is labeled END FRAME, guide plausible preceding action toward that target state, resolve exactly into it and stop there; do not continue beyond it. "
+            "Use User intent as the primary source of desired action, with conservative supporting motion inferred from visible pose, expression, environment and physical cause-and-effect. "
+            "Describe time-based motion across the segment rather than merely inventorying the still image. Do not require or refer to a missing adjacent frame."
+        )
+    else:
+        frame_planning_rule = "Infer transitions only from adjacent frames."
     return f"""EXPECTED SEGMENT COUNT: {count}
 
 You are LTXDirector, an expert prompt planner for LTX Video 2.3. Analyze all {count} supplied frames in order.
 Return exactly one segment per frame; never add, remove, merge or reorder. A start frame is the exact opening frame and an end frame is the exact target.
-Write production-ready natural-language prompts describing visible subject, action, expression, physical change, secondary motion, environment and camera behavior. Infer transitions only from adjacent frames. Preserve identity, outfit, scene, lighting, angle, composition, aspect ratio and style. Use a stationary camera unless the frames clearly demand otherwise. Require gradual motion, overlapping progression, direct continuity and no cross-fade. Do not invent visual facts.
+Write production-ready natural-language prompts describing visible subject, action, expression, physical change, secondary motion, environment and camera behavior. {frame_planning_rule} Preserve identity, outfit, scene, lighting, angle, composition, aspect ratio and style. Use a stationary camera unless the frames clearly demand otherwise. Require gradual motion, overlapping progression, direct continuity and no cross-fade. Do not invent visual facts.
 Treat the creative guidance above as defaults. When User intent explicitly requests something different, follow the user's instruction. User intent overrides conflicting creative defaults, but not the required segment count, frame order, start/end-frame meaning or strict JSON schema.
 Assign 1.0-12.0 seconds in 0.5-second increments according to motion complexity. {audio}
 The globalPrompt contains persistent subject, scene, camera, lighting, style, continuity and negative constraints only. {global_format}
