@@ -1308,12 +1308,12 @@ class MainWindow(QMainWindow):
         intent_row.addWidget(self.intent, 1)
         intent_row.addWidget(self.magic_button, 0, Qt.AlignmentFlag.AlignTop)
         self.director_controls.addLayout(intent_row)
-        options_row = QHBoxLayout()
-        options_row.setContentsMargins(0, 0, 0, 0)
-        options_row.setSpacing(6)
-        options_label = QLabel("PROMPT OPTIONS")
-        options_label.setObjectName("groupLabel")
-        options_row.addWidget(options_label)
+        planning_row = QHBoxLayout()
+        planning_row.setContentsMargins(0, 0, 0, 0)
+        planning_row.setSpacing(6)
+        planning_label = QLabel("DIRECTION SETTINGS")
+        planning_label.setObjectName("groupLabel")
+        planning_row.addWidget(planning_label)
         length_label = QLabel("TOTAL LENGTH")
         length_label.setObjectName("groupLabel")
         self.requested_length = QDoubleSpinBox()
@@ -1325,25 +1325,47 @@ class MainWindow(QMainWindow):
         self.requested_length.setSpecialValueText("Auto")
         self.requested_length.setToolTip("Requested total sequence length; Auto lets Magic Build choose")
         self.requested_length.valueChanged.connect(self.mark_dirty)
-        nationality_label = QLabel("SPEAKER / ACCENT")
-        nationality_label.setObjectName("groupLabel")
-        self.speaker_nationality = QComboBox()
-        self.speaker_nationality.setEditable(True)
-        self.speaker_nationality.addItems([
-            "(Image/context provided)", "American", "British", "Canadian", "Australian",
-            "Indian", "French", "German", "Spanish", "Italian", "Japanese", "Korean",
-            "Chinese", "Brazilian", "Mexican",
+        language_label = QLabel("LANGUAGE")
+        language_label.setObjectName("groupLabel")
+        self.speaker_language = QComboBox()
+        self.speaker_language.setEditable(True)
+        self.speaker_language.addItems([
+            "(Image/context provided)", "English", "Spanish", "French", "German", "Italian",
+            "Portuguese", "Japanese", "Korean", "Mandarin Chinese", "Hindi", "Arabic", "Russian",
         ])
-        self.speaker_nationality.setCurrentIndex(0)
-        self.speaker_nationality.setToolTip("Speaker nationality, language, or exact accent used only when Spoken Dialog is enabled; this field is editable")
-        self.speaker_nationality.currentTextChanged.connect(self.mark_dirty)
-        self.speaker_nationality.setEnabled(False)
-        options_row.addWidget(length_label)
-        options_row.addWidget(self.requested_length)
+        self.speaker_language.setCurrentIndex(0)
+        self.speaker_language.setToolTip("Spoken language used when Spoken Dialog is enabled; this field is editable")
+        self.speaker_language.currentTextChanged.connect(self.mark_dirty)
+        self.speaker_language.setEnabled(False)
+        accent_label = QLabel("ACCENT")
+        accent_label.setObjectName("groupLabel")
+        self.speaker_accent = QComboBox()
+        self.speaker_accent.setEditable(True)
+        self.speaker_accent.addItems([
+            "(Image/context provided)", "Neutral", "General American", "British RP", "Yorkshire",
+            "Australian", "Canadian", "Irish", "Scottish", "Indian English", "Mexican Spanish",
+            "Castilian Spanish", "Brazilian Portuguese", "European Portuguese",
+        ])
+        self.speaker_accent.setCurrentIndex(0)
+        self.speaker_accent.setToolTip("Exact regional accent used when Spoken Dialog is enabled; this field is editable")
+        self.speaker_accent.currentTextChanged.connect(self.mark_dirty)
+        self.speaker_accent.setEnabled(False)
+        planning_row.addWidget(length_label)
+        planning_row.addWidget(self.requested_length)
+        planning_row.addWidget(language_label)
+        planning_row.addWidget(self.speaker_language)
+        planning_row.addWidget(accent_label)
+        planning_row.addWidget(self.speaker_accent)
+        planning_row.addStretch()
+        self.director_controls.addLayout(planning_row)
+        options_row = QHBoxLayout()
+        options_row.setContentsMargins(0, 0, 0, 0)
+        options_row.setSpacing(6)
+        options_label = QLabel("PROMPT OPTIONS")
+        options_label.setObjectName("groupLabel")
+        options_row.addWidget(options_label)
         options_row.addWidget(self.sfx)
         options_row.addWidget(self.spoken_dialog)
-        options_row.addWidget(nationality_label)
-        options_row.addWidget(self.speaker_nationality)
         options_row.addWidget(self.hdr)
         options_row.addWidget(self.reduce_music)
         options_row.addStretch()
@@ -1701,7 +1723,8 @@ class MainWindow(QMainWindow):
         self.ui_scale_spin.setFixedWidth(metric(82))
         self.intent.setFixedHeight(metric(72))
         self.requested_length.setFixedWidth(metric(82))
-        self.speaker_nationality.setMinimumWidth(metric(180))
+        self.speaker_language.setMinimumWidth(metric(170))
+        self.speaker_accent.setMinimumWidth(metric(170))
         self.director_controls.setSpacing(metric(8))
         self.segment_header.setSpacing(metric(8))
         self.ruler.setFixedHeight(metric(28))
@@ -1913,7 +1936,8 @@ class MainWindow(QMainWindow):
             "globalPrompt": self.global_prompt.toPlainText(),
             "directorIntent": self.intent.toPlainText(),
             "requestedLength": self.requested_length.value(),
-            "speakerNationality": self.speaker_nationality.currentText(),
+            "speakerLanguage": self.speaker_language.currentText(),
+            "speakerAccent": self.speaker_accent.currentText(),
             "sfx": self.sfx.isChecked(),
             "spokenDialog": self.spoken_dialog.isChecked(),
             "hdr": self.hdr.isChecked(),
@@ -1939,7 +1963,8 @@ class MainWindow(QMainWindow):
         self.global_prompt.setPlainText(str(state.get("globalPrompt", "")))
         self.intent.setPlainText(str(state.get("directorIntent", "")))
         self.requested_length.setValue(float(state.get("requestedLength", 0)))
-        self.speaker_nationality.setCurrentText(str(state.get("speakerNationality", "(Image/context provided)")))
+        self.speaker_language.setCurrentText(str(state.get("speakerLanguage", "(Image/context provided)")))
+        self.speaker_accent.setCurrentText(str(state.get("speakerAccent", state.get("speakerNationality", "(Image/context provided)"))))
         self.sfx.setChecked(bool(state.get("sfx")))
         self.spoken_dialog.setChecked(bool(state.get("spokenDialog")))
         self.hdr.setChecked(bool(state.get("hdr")))
@@ -2182,7 +2207,8 @@ class MainWindow(QMainWindow):
         self.current_project_name = "Untitled"
         self.intent.clear()
         self.requested_length.setValue(0)
-        self.speaker_nationality.setCurrentText("(Image/context provided)")
+        self.speaker_language.setCurrentText("(Image/context provided)")
+        self.speaker_accent.setCurrentText("(Image/context provided)")
         self.segment_prompt.clear()
         self.global_prompt.clear()
         self.sfx.setChecked(False)
@@ -2600,7 +2626,8 @@ class MainWindow(QMainWindow):
         self._apply_theme()
 
     def update_spoken_dialog_controls(self, checked: bool) -> None:
-        self.speaker_nationality.setEnabled(checked)
+        self.speaker_language.setEnabled(checked)
+        self.speaker_accent.setEnabled(checked)
         self.mark_dirty()
 
     def build_director_request(self) -> str:
@@ -2622,18 +2649,21 @@ class MainWindow(QMainWindow):
                     "Distribute this duration across the supplied segments according to action complexity; the returned segment durations must add up to exactly this total."
                 )
         if self.spoken_dialog.isChecked():
-            nationality = self.speaker_nationality.currentText().strip() or "(Image/context provided)"
-            if nationality.casefold() == "(image/context provided)".casefold():
+            context_default = "(Image/context provided)"
+            language = self.speaker_language.currentText().strip() or context_default
+            accent = self.speaker_accent.currentText().strip() or context_default
+            lines.append(f"Speaker language selection: {language}. Speaker accent selection: {accent}.")
+            if language.casefold() == context_default.casefold():
                 lines.append(
-                    "Speaker nationality/language context: use only reliable context explicitly visible in the image or stated in Director's Intent, such as readable language or an unambiguous setting. "
-                    "Do not infer nationality from physical appearance alone; when context is insufficient, use culturally neutral natural dialogue. "
-                    "In every Spoken Dialog clause, explicitly state the spoken language and a suitable natural accent beside the quoted words rather than asking LTX Video to infer an accent from nationality."
+                    "Determine the spoken language only from reliable context explicitly visible in the image or stated in Director's Intent, such as readable language or an unambiguous setting; otherwise use a culturally neutral language appropriate to the request."
                 )
-            else:
+            if accent.casefold() == context_default.casefold():
                 lines.append(
-                    f"Speaker nationality: {nationality}. Use this to guide natural word choice, language and vocal delivery without stereotypes or caricature. "
-                    "Translate this context into an explicit spoken language and specific natural regional accent beside the quoted words in every Spoken Dialog clause; do not leave accent inference to LTX Video."
+                    "Determine the accent only from reliable explicit context, never from physical appearance alone; when context is insufficient, use a neutral natural accent for the selected language."
                 )
+            lines.append(
+                "In every Spoken Dialog clause, state the selected or context-supported language and accent directly beside the quoted words. Do not leave language or accent inference to LTX Video, and avoid stereotypes or caricature."
+            )
         return "\n\n".join(lines)
 
     def magic_build(self) -> None:
@@ -2800,7 +2830,8 @@ class MainWindow(QMainWindow):
             self.global_prompt.setPlainText(payload.get("global_prompt") or payload.get("timeline", {}).get("global_prompt", ""))
             self.intent.clear()
             self.requested_length.setValue(0)
-            self.speaker_nationality.setCurrentText("(Image/context provided)")
+            self.speaker_language.setCurrentText("(Image/context provided)")
+            self.speaker_accent.setCurrentText("(Image/context provided)")
             self.current_project_id = None
             self.current_project_name = Path(path).stem
             self.update_window_title()
@@ -2816,7 +2847,7 @@ class MainWindow(QMainWindow):
             value["previewData"] = data_url(segment.preview_path)
             value["sourceData"] = data_url(segment.media_path) if Path(segment.media_path).exists() else None
             frames.append(value)
-        return {"app": "ltx-director-director", "projectVersion": 4, "globalPrompt": self.global_prompt.toPlainText(), "directorIntent": self.intent.toPlainText(), "directionOptions": {"requestedLength": self.requested_length.value(), "speakerNationality": self.speaker_nationality.currentText()}, "magicBuild": {"sfx": self.sfx.isChecked(), "spokenDialog": self.spoken_dialog.isChecked(), "hdr": self.hdr.isChecked(), "reduceMusic": self.reduce_music.isChecked()}, "output": {"width": self.output_width.value(), "height": self.output_height.value()}, "timelineView": {"scale": self.pixels_per_second, "height": self.timeline_height}, "frames": frames}
+        return {"app": "ltx-director-director", "projectVersion": 5, "globalPrompt": self.global_prompt.toPlainText(), "directorIntent": self.intent.toPlainText(), "directionOptions": {"requestedLength": self.requested_length.value(), "speakerLanguage": self.speaker_language.currentText(), "speakerAccent": self.speaker_accent.currentText()}, "magicBuild": {"sfx": self.sfx.isChecked(), "spokenDialog": self.spoken_dialog.isChecked(), "hdr": self.hdr.isChecked(), "reduceMusic": self.reduce_music.isChecked()}, "output": {"width": self.output_width.value(), "height": self.output_height.value()}, "timelineView": {"scale": self.pixels_per_second, "height": self.timeline_height}, "frames": frames}
 
     def load_project_payload(self, payload: dict) -> None:
         if payload.get("app") not in {"ltx-director-director", "ltx-prompt-director-python"}:
@@ -2844,7 +2875,8 @@ class MainWindow(QMainWindow):
         self.intent.setPlainText(payload.get("directorIntent", ""))
         direction_options = payload.get("directionOptions", {})
         self.requested_length.setValue(float(direction_options.get("requestedLength", 0)))
-        self.speaker_nationality.setCurrentText(str(direction_options.get("speakerNationality", "(Image/context provided)")))
+        self.speaker_language.setCurrentText(str(direction_options.get("speakerLanguage", "(Image/context provided)")))
+        self.speaker_accent.setCurrentText(str(direction_options.get("speakerAccent", direction_options.get("speakerNationality", "(Image/context provided)"))))
         self.sfx.setChecked(bool(payload.get("magicBuild", {}).get("sfx")))
         magic = payload.get("magicBuild", {})
         self.spoken_dialog.setChecked(bool(magic.get("spokenDialog", magic.get("vocals", False))))
