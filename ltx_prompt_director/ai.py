@@ -20,32 +20,8 @@ def build_prompts(segments: list[Segment], provider: str, model: str, api_key: s
     images = [{"name": item.name, "role": item.role, "image": data_url(item.preview_path, max_edge=384)} for item in segments]
     rules = _rules(len(images), intent, sfx, spoken_dialog, hdr, reduce_music)
     if provider == "openai":
-        result = _openai(images, api_key, rules, timeout, sfx, spoken_dialog)
-    else:
-        result = _gemini(images, api_key, model, rules, timeout, sfx, spoken_dialog)
-    requested_duration = _requested_single_frame_duration(intent) if len(images) == 1 else None
-    if requested_duration is not None:
-        result["segments"][0]["duration"] = requested_duration
-    return result
-
-
-def _requested_single_frame_duration(intent: str) -> float | None:
-    """Read an explicit one-frame duration so provider drift cannot override user intent."""
-    text = str(intent or "")
-    patterns = (
-        r"\b(?:total|scene|sequence|segment|frame)(?:\s+(?:duration|length))?\s*(?:of|is|:|=)?\s*(\d+(?:\.\d+)?)\s*(?:seconds?|secs?|s)\b",
-        r"\b(\d+(?:\.\d+)?)\s*[- ]?(?:seconds?|secs?)\s+(?:scene|sequence|segment|frame)\b",
-    )
-    for pattern in patterns:
-        match = re.search(pattern, text, re.I)
-        if match:
-            return max(1.0, min(60.0, round(float(match.group(1)) * 2) / 2))
-    # In a one-frame sequence, a lone seconds value is unambiguously the requested
-    # segment length even when phrased conversationally (for example, "make it 20s").
-    seconds = re.findall(r"\b(\d+(?:\.\d+)?)\s*[- ]?(?:seconds?|secs?|s)\b", text, re.I)
-    if len(seconds) == 1:
-        return max(1.0, min(60.0, round(float(seconds[0]) * 2) / 2))
-    return None
+        return _openai(images, api_key, rules, timeout, sfx, spoken_dialog)
+    return _gemini(images, api_key, model, rules, timeout, sfx, spoken_dialog)
 
 
 def _rules(count: int, intent: str, sfx: bool, spoken_dialog: bool, hdr: bool, reduce_music: bool) -> str:
@@ -74,7 +50,13 @@ def _rules(count: int, intent: str, sfx: bool, spoken_dialog: bool, hdr: bool, r
     else:
         frame_planning_rule = "Infer transitions only from adjacent frames."
         duration_rule = "Assign 1.0-12.0 seconds in 0.5-second increments according to motion complexity."
+    authoritative_intent = intent.strip() or "Infer motion only from the ordered frames."
     return f"""EXPECTED SEGMENT COUNT: {count}
+
+AUTHORITATIVE DIRECTOR'S INTENT:
+{authoritative_intent}
+
+Before planning, identify every explicit constraint in Director's Intent—including requested duration, timing, action, pacing, camera, audio and ending state—and obey all of them. These constraints are mandatory, not suggestions. For a single-frame sequence, an explicitly requested total or scene duration is the duration of that one segment and must be returned exactly.
 
 You are LTXDirector, an expert prompt planner for LTX Video 2.3. Analyze all {count} supplied frames in order.
 Return exactly one segment per frame; never add, remove, merge or reorder. A start frame is the exact opening frame and an end frame is the exact target.
@@ -82,7 +64,7 @@ Write production-ready natural-language prompts describing visible subject, acti
 Treat the creative guidance above as defaults. When User intent explicitly requests something different, follow the user's instruction. User intent overrides conflicting creative defaults, but not the required segment count, frame order, start/end-frame meaning or strict JSON schema.
 {duration_rule} Use 0.5-second increments. {audio}
 The globalPrompt contains persistent subject, scene, camera, lighting, style, continuity and negative constraints only. {global_format}
-User intent: {intent or 'Infer motion only from the ordered frames.'}
+Recheck the JSON against AUTHORITATIVE DIRECTOR'S INTENT before returning it. Correct any duration or prompt that fails an explicit constraint.
 Return strict JSON: {{"segments":[{{"duration":5,"prompt":"..."}}],"globalPrompt":"..."}}"""
 
 
