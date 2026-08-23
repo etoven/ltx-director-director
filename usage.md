@@ -2,7 +2,7 @@
 
 ## 1. Add and arrange media
 
-Select **Add Media** and choose up to 16 PNG, JPEG, WebP, GIF, or WebM files. On KDE Plasma the application invokes `kdialog` directly, ensuring the standard KDE picker and its preview support are used. GNOME uses `zenity`; Windows and macOS use their system dialogs. The last folder is remembered. Drag timeline cards horizontally to reorder them.
+Select **Add Media** and choose up to 16 PNG, JPEG, WebP, GIF, or WebM files, or drag supported files directly onto the timeline. The timeline gains a bright border while it is an active drop target. On KDE Plasma the application invokes `kdialog` directly, ensuring the standard KDE picker and its preview support are used. GNOME uses `zenity`; Windows and macOS use their system dialogs. The last folder is remembered. Drag timeline cards horizontally to reorder them.
 
 For WebM input, the application captures the first frame of the clip's final second. This becomes the visible timeline thumbnail and the only frame sent to AI. The complete WebM remains attached to the segment for project and LTX Director exports.
 
@@ -14,7 +14,7 @@ Each WebM initially occupies one second. Image segments initially occupy five se
 - Change duration with the card control in 0.5-second increments.
 - Drag the highlighted handle on the card's right edge to resize it directly. The cursor changes to a horizontal-resize indicator over the handle.
 - The rest of the tile uses an open-hand cursor and can be dragged to move the segment.
-- Right-click a card to replace its media, mark it as a start/end frame, or delete it.
+- Right-click a card to replace its media, instantly export the complete source media, mark it as a start/end frame, or delete it. **Export image** or **Export video** copies only that segment's underlying media file directly to the folder configured in Application Settings—no prompts, metadata, or dialog. It initially uses the operating system's Downloads folder and creates collision-safe `<project name> - Segment 01.ext` filenames.
 - Replacing media preserves the segment prompt, timing, role, and position.
 
 Use the **Scale** slider to zoom the timeline horizontally, or select **Auto fit** to fit the complete sequence into the available width. Drag the bar along the bottom edge of the timeline downward to enlarge segment previews; previews preserve the complete image beneath their separate header row.
@@ -28,11 +28,11 @@ Enable persistent storage only on a trusted computer. Keys are stored with Qt's 
 Magic Build options:
 
 - **SFX** adds synchronized Foley, impact, material, ambience, and transformation sound directions.
-- **Vocals** adds supported breathing, exertion, cries, or dialogue direction without inventing dialogue wording.
+- **Spoken Dialog** allows supported spoken-dialog direction without inventing exact dialogue wording.
 - **HDR** places `(4K, HDR, Realistic)` at the beginning of the global prompt.
 - **Reduce Music** instructs the model to place a setting-specific `[SOUND]: Ambient …` line after the quality header. Supplying environmental ambience helps discourage unwanted generated music.
 
-Enter optional Director's Intent, then select **Magic Build**. The result contains exactly one prompt for every timeline segment and one global prompt.
+Enter optional Director's Intent, then select **Magic Build**. A modal animated directing display prevents conflicting edits while the operation runs and reports automatic retry attempts. The default timeout is 400 seconds with two additional retries; both values are configurable in AI Settings. The result contains exactly one prompt for every timeline segment and one global prompt. Recommended durations ease smoothly into their new timeline widths instead of snapping instantly.
 
 ## 4. Project library
 
@@ -43,6 +43,7 @@ Select **Projects** in the toolbar to open the left project-library panel. The p
 - **Edit** changes a project's name, description, or collection.
 - **Delete** permanently removes the selected project from the local library after confirmation.
 - Search matches words in both project names and descriptions.
+- Choose **Title A–Z**, **Title Z–A**, or **Custom** sorting. Custom mode unlocks project tiles for drag-and-drop ordering within the current collection or root view.
 
 Assigning a collection groups related projects into a folder-like tile. Its cover is a 2×2 grid made from the four most recently saved member thumbnails. Open the collection to see its projects; select **↑ UP** to return to the top-level library. Collected projects appear only inside their collection.
 
@@ -50,7 +51,7 @@ Library projects are stored in the operating system's per-user application-data 
 
 ## 5. LTX Director files
 
-**LTX Director Export** creates a timeline JSON containing timing in 24 FPS frames, prompts, roles, thumbnails, global prompt, and video metadata. Complete WebM content is embedded in `videoB64` so the portable file retains the source video.
+Set the desired output width and height in the timeline header. Values are normalized to 32-pixel increments. **LTX Director Export** writes them to `settings.custom_width` and `settings.custom_height` along with timing in 24 FPS frames, prompts, roles, thumbnails, global prompt, and video metadata. Complete WebM content is embedded in `videoB64` so the portable file retains the source video.
 
 **Open** restores supported image and WebM segments from an LTXDirector JSON file. Audio, motion, LoRA, and retake tracks are intentionally ignored.
 
@@ -65,11 +66,14 @@ All LTX Director and native project import/export actions use the same operating
 - WebM preview and trim metadata
 - Director's Intent
 - Global prompt
-- SFX and Vocals settings
+- SFX and Spoken Dialog settings
 - HDR and Reduce Music settings
+- Output width and height
 - Timeline scale and preview-panel height
 
 **Import** restores that workspace. API keys are deliberately excluded. Older `*.ltxproject.json` project files are accepted for backward compatibility.
+
+Export dialogs default to the active project name, producing `<project name>.json` or `<project name>.LTXD` as appropriate.
 
 ## Troubleshooting
 

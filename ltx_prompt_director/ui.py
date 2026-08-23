@@ -2,24 +2,26 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 import shutil
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from importlib.resources import files
 from pathlib import Path
 from uuid import uuid4
 
-from PySide6.QtCore import QObject, QRunnable, QSettings, QSize, QStandardPaths, Qt, QThreadPool, Signal
+from PySide6.QtCore import QEasingCurve, QObject, QRunnable, QRectF, QSettings, QSize, QStandardPaths, Qt, QThreadPool, QTimer, QVariantAnimation, Signal
 from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
     QDockWidget, QFileDialog, QFormLayout, QFrame, QHBoxLayout, QLabel, QLineEdit,
     QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox, QPushButton,
-    QSizePolicy, QSlider, QStatusBar, QTextEdit, QToolBar, QVBoxLayout, QWidget,
+    QSizePolicy, QSlider, QSpinBox, QStatusBar, QTextEdit, QToolBar, QVBoxLayout, QWidget,
 )
 
-from .ai import GEMINI_MODELS, build_prompts
+from .ai import GEMINI_MODELS, build_prompts, retryable_connection_error
 from .media import APP_CACHE, data_url, prepare_media, write_data_url
 from .models import Segment
 
@@ -33,6 +35,11 @@ def project_library_path() -> Path:
     path = Path(root) / "projects"
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def safe_export_name(value: str) -> str:
+    cleaned = re.sub(r'[\\/:*?"<>|\x00-\x1f]+', "-", value).strip(" .-")
+    return cleaned or "Untitled"
 
 
 def pixmap_from_data_url(value: str) -> QPixmap:
@@ -93,22 +100,165 @@ def choose_document_save(parent: QWidget, title: str, suggested: str, name_filte
     return file
 
 
+def choose_directory(parent: QWidget, title: str, initial: str) -> str:
+    if sys.platform.startswith("linux") and shutil.which("kdialog"):
+        result = subprocess.run(["kdialog", "--title", title, "--getexistingdirectory", initial], capture_output=True, text=True, check=False)
+        return result.stdout.strip() if result.returncode == 0 else ""
+    if sys.platform.startswith("linux") and shutil.which("zenity"):
+        result = subprocess.run(["zenity", "--file-selection", "--directory", f"--title={title}", f"--filename={initial.rstrip('/')}/"], capture_output=True, text=True, check=False)
+        return result.stdout.strip() if result.returncode == 0 else ""
+    return QFileDialog.getExistingDirectory(parent, title, initial)
+
+
 class WorkerSignals(QObject):
     finished = Signal(object)
     failed = Signal(str)
+    progress = Signal(int, int, str)
 
 
 class MagicWorker(QRunnable):
-    def __init__(self, args: tuple):
+    def __init__(self, args: tuple, retries: int):
         super().__init__()
         self.args = args
+        self.retries = retries
         self.signals = WorkerSignals()
 
     def run(self) -> None:
-        try:
-            self.signals.finished.emit(build_prompts(*self.args))
-        except Exception as error:
-            self.signals.failed.emit(str(error))
+        attempts = self.retries + 1
+        for attempt in range(1, attempts + 1):
+            try:
+                self.signals.progress.emit(attempt, attempts, "Analyzing frames and directing motion…")
+                self.signals.finished.emit(build_prompts(*self.args))
+                return
+            except Exception as error:
+                if attempt >= attempts or not retryable_connection_error(error):
+                    self.signals.failed.emit(str(error))
+                    return
+                self.signals.progress.emit(attempt + 1, attempts, "Connection stumbled—rewinding for another take…")
+                time.sleep(min(2 ** attempt, 8))
+
+
+class TimelineListWidget(QListWidget):
+    files_dropped = Signal(list)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAcceptDrops(True)
+
+    @staticmethod
+    def _media_paths(event) -> list[str]:
+        if not event.mimeData().hasUrls():
+            return []
+        supported = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".webm"}
+        return [url.toLocalFile() for url in event.mimeData().urls() if url.isLocalFile() and Path(url.toLocalFile()).suffix.lower() in supported]
+
+    def dragEnterEvent(self, event) -> None:
+        if self._media_paths(event):
+            self.setProperty("dropActive", True)
+            self.style().unpolish(self)
+            self.style().polish(self)
+            event.acceptProposedAction()
+            return
+        super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event) -> None:
+        if self._media_paths(event):
+            event.acceptProposedAction()
+            return
+        super().dragMoveEvent(event)
+
+    def dragLeaveEvent(self, event) -> None:
+        self._clear_drop_state()
+        super().dragLeaveEvent(event)
+
+    def dropEvent(self, event) -> None:
+        paths = self._media_paths(event)
+        self._clear_drop_state()
+        if paths:
+            self.files_dropped.emit(paths)
+            event.acceptProposedAction()
+            return
+        super().dropEvent(event)
+
+    def _clear_drop_state(self) -> None:
+        self.setProperty("dropActive", False)
+        self.style().unpolish(self)
+        self.style().polish(self)
+
+
+class MagicSpinner(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.angle = 0
+        self.setFixedSize(150, 150)
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.advance)
+        self.timer.start(45)
+
+    def advance(self) -> None:
+        self.angle = (self.angle + 8) % 360
+        self.update()
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        center = self.rect().center()
+        painter.translate(center)
+        painter.rotate(self.angle)
+        for index in range(10):
+            painter.save()
+            painter.rotate(index * 36)
+            alpha = 55 + index * 20
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(90, 176, 235, min(255, alpha)))
+            painter.drawEllipse(QRectF(-4, -61, 8, 18))
+            painter.restore()
+        painter.rotate(-self.angle)
+        painter.setPen(QPen(QColor("#d9efff"), 3))
+        painter.setBrush(QColor("#27343c"))
+        painter.drawRoundedRect(QRectF(-31, -23, 62, 46), 8, 8)
+        painter.setPen(QPen(QColor("#79c8ff"), 2))
+        for x in (-19, 0, 19):
+            painter.drawLine(x, -16, x + 8, -6)
+            painter.drawLine(x + 8, -6, x, 4)
+        painter.setPen(QColor("#fff2a8"))
+        painter.setFont(self.font())
+        painter.drawText(QRectF(-30, 6, 60, 15), Qt.AlignmentFlag.AlignCenter, "DIRECTING")
+
+
+class MagicBuildDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Magic Build")
+        self.setWindowModality(Qt.WindowModality.ApplicationModal)
+        self.setModal(True)
+        self.setFixedSize(390, 290)
+        self.setWindowFlag(Qt.WindowType.WindowCloseButtonHint, False)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(28, 20, 28, 24)
+        layout.addStretch()
+        spinner = MagicSpinner(self)
+        layout.addWidget(spinner, 0, Qt.AlignmentFlag.AlignCenter)
+        self.title = QLabel("✦ Magic Build is directing your sequence")
+        self.title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.title.setStyleSheet("font-size:15px;font-weight:bold;color:#d9efff")
+        self.detail = QLabel("Analyzing frames and directing motion…")
+        self.detail.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.detail.setWordWrap(True)
+        self.attempt = QLabel("")
+        self.attempt.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.attempt.setObjectName("muted")
+        layout.addWidget(self.title)
+        layout.addWidget(self.detail)
+        layout.addWidget(self.attempt)
+        layout.addStretch()
+
+    def update_attempt(self, current: int, total: int, detail: str) -> None:
+        self.detail.setText(detail)
+        self.attempt.setText(f"Attempt {current} of {total}" if total > 1 else "")
+
+    def reject(self) -> None:
+        pass
 
 
 class TimelineRuler(QWidget):
@@ -241,6 +391,7 @@ class SegmentCard(QFrame):
         close.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
         close.setObjectName("tileDelete")
         close.setFixedSize(20, 20)
+        close.setCursor(Qt.CursorShape.ArrowCursor)
         close.clicked.connect(self.delete_requested)
         badges.addWidget(kind)
         badges.addStretch()
@@ -287,7 +438,7 @@ class SettingsDialog(QDialog):
     def __init__(self, settings: QSettings, parent=None):
         super().__init__(parent)
         self.settings = settings
-        self.setWindowTitle("AI Provider Settings")
+        self.setWindowTitle("Application Settings")
         form = QFormLayout(self)
         self.provider = QComboBox()
         self.provider.addItems(["gemini", "openai"])
@@ -301,20 +452,48 @@ class SettingsDialog(QDialog):
         self.openai.setEchoMode(QLineEdit.EchoMode.Password)
         self.remember = QCheckBox("Store API keys persistently on this computer")
         self.remember.setChecked(settings.value("remember_keys", False, bool))
+        self.timeout = QSpinBox()
+        self.timeout.setRange(30, 900)
+        self.timeout.setSingleStep(10)
+        self.timeout.setSuffix(" seconds")
+        self.timeout.setValue(settings.value("api_timeout", 400, int))
+        self.retries = QSpinBox()
+        self.retries.setRange(0, 10)
+        self.retries.setValue(settings.value("api_retries", 2, int))
+        self.retries.setToolTip("Additional attempts after the initial API request")
+        downloads = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DownloadLocation) or str(Path.home())
+        self.segment_save_dir = QLineEdit(str(settings.value("segment_export_dir", settings.value("segment_save_dir", downloads))))
+        self.segment_save_browse = QPushButton("Browse…")
+        self.segment_save_browse.clicked.connect(self.choose_segment_save_directory)
+        save_directory_row = QWidget()
+        save_directory_layout = QHBoxLayout(save_directory_row)
+        save_directory_layout.setContentsMargins(0, 0, 0, 0)
+        save_directory_layout.addWidget(self.segment_save_dir, 1)
+        save_directory_layout.addWidget(self.segment_save_browse)
         form.addRow("Provider", self.provider)
         form.addRow("Gemini model", self.model)
         form.addRow("Gemini API key", self.gemini)
         form.addRow("OpenAI API key", self.openai)
+        form.addRow("API timeout", self.timeout)
+        form.addRow("Connection retries", self.retries)
+        form.addRow("Default segment export folder", save_directory_row)
         form.addRow("", self.remember)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         form.addRow(buttons)
+        geometry = settings.value("dialogs/settings_geometry")
+        if geometry:
+            self.restoreGeometry(geometry)
 
     def accept(self) -> None:
         self.settings.setValue("provider", self.provider.currentText())
         self.settings.setValue("gemini_model", self.model.currentText())
         self.settings.setValue("remember_keys", self.remember.isChecked())
+        self.settings.setValue("api_timeout", self.timeout.value())
+        self.settings.setValue("api_retries", self.retries.value())
+        self.settings.setValue("segment_export_dir", self.segment_save_dir.text().strip())
+        self.settings.setValue("dialogs/settings_geometry", self.saveGeometry())
         if self.remember.isChecked():
             self.settings.setValue("gemini_key", self.gemini.text().strip())
             self.settings.setValue("openai_key", self.openai.text().strip())
@@ -323,6 +502,15 @@ class SettingsDialog(QDialog):
             self.settings.remove("openai_key")
         self.parent().session_keys = {"gemini": self.gemini.text().strip(), "openai": self.openai.text().strip()}
         super().accept()
+
+    def choose_segment_save_directory(self) -> None:
+        selected = choose_directory(self, "Choose default segment export folder", self.segment_save_dir.text().strip() or str(Path.home()))
+        if selected:
+            self.segment_save_dir.setText(selected)
+
+    def reject(self) -> None:
+        self.settings.setValue("dialogs/settings_geometry", self.saveGeometry())
+        super().reject()
 
 
 class ProjectDetailsDialog(QDialog):
@@ -384,12 +572,20 @@ class ProjectDetailsDialog(QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         form.addRow(buttons)
+        geometry = parent.settings.value("dialogs/project_details_geometry") if parent else None
+        if geometry:
+            self.restoreGeometry(geometry)
 
     def accept(self) -> None:
         if not self.name.text().strip():
             QMessageBox.warning(self, "Project name required", "Enter a name for this project.")
             return
+        self.parent().settings.setValue("dialogs/project_details_geometry", self.saveGeometry())
         super().accept()
+
+    def reject(self) -> None:
+        self.parent().settings.setValue("dialogs/project_details_geometry", self.saveGeometry())
+        super().reject()
 
     def collection_name(self) -> str:
         value = self.collection.currentText().strip()
@@ -453,6 +649,12 @@ class MainWindow(QMainWindow):
         self._loading = False
         self._build_ui()
         self._apply_theme()
+        geometry = self.settings.value("window/geometry")
+        state = self.settings.value("window/state")
+        if geometry:
+            self.restoreGeometry(geometry)
+        if state:
+            self.restoreState(state)
         self.update_window_title()
 
     def _build_ui(self) -> None:
@@ -498,6 +700,26 @@ class MainWindow(QMainWindow):
         timeline_controls.setContentsMargins(8, 5, 8, 3)
         timeline_controls.addWidget(QLabel("TIMELINE"))
         timeline_controls.addStretch()
+        timeline_controls.addWidget(QLabel("Output"))
+        self.output_width = QSpinBox()
+        self.output_width.setRange(256, 4096)
+        self.output_width.setSingleStep(32)
+        self.output_width.setValue(1280)
+        self.output_width.setSuffix(" px")
+        self.output_width.setToolTip("LTX Director custom output width")
+        self.output_width.valueChanged.connect(self.mark_dirty)
+        self.output_width.editingFinished.connect(self.normalize_output_dimensions)
+        self.output_height = QSpinBox()
+        self.output_height.setRange(256, 4096)
+        self.output_height.setSingleStep(32)
+        self.output_height.setValue(704)
+        self.output_height.setSuffix(" px")
+        self.output_height.setToolTip("LTX Director custom output height")
+        self.output_height.valueChanged.connect(self.mark_dirty)
+        self.output_height.editingFinished.connect(self.normalize_output_dimensions)
+        timeline_controls.addWidget(self.output_width)
+        timeline_controls.addWidget(QLabel("×"))
+        timeline_controls.addWidget(self.output_height)
         timeline_controls.addWidget(QLabel("Scale"))
         self.timeline_scale = QSlider(Qt.Orientation.Horizontal)
         self.timeline_scale.setRange(20, 160)
@@ -526,7 +748,9 @@ class MainWindow(QMainWindow):
         main_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         main_label.setFixedWidth(145)
         track_row.addWidget(main_label)
-        self.timeline = QListWidget()
+        self.timeline = TimelineListWidget()
+        self.timeline.setObjectName("timeline")
+        self.timeline.setProperty("dropActive", False)
         self.timeline.setViewMode(QListWidget.ViewMode.ListMode)
         self.timeline.setFlow(QListWidget.Flow.LeftToRight)
         self.timeline.setWrapping(False)
@@ -539,6 +763,7 @@ class MainWindow(QMainWindow):
         self.timeline.customContextMenuRequested.connect(self.timeline_menu)
         self.timeline.currentRowChanged.connect(self.load_editor)
         self.timeline.model().rowsMoved.connect(lambda *_: self.sync_order())
+        self.timeline.files_dropped.connect(self.add_media_paths)
         self.timeline.horizontalScrollBar().valueChanged.connect(self.ruler.set_offset)
         track_row.addWidget(self.timeline, 1)
         self.add_tile = QPushButton("＋\nAdd media\n60.0s available")
@@ -573,10 +798,11 @@ class MainWindow(QMainWindow):
         self.sfx.setCheckable(True)
         self.sfx.setObjectName("audioToggle")
         self.sfx.toggled.connect(self.mark_dirty)
-        self.vocals = QPushButton("Vocals")
-        self.vocals.setCheckable(True)
-        self.vocals.setObjectName("audioToggle")
-        self.vocals.toggled.connect(self.mark_dirty)
+        self.spoken_dialog = QPushButton("Spoken Dialog")
+        self.spoken_dialog.setCheckable(True)
+        self.spoken_dialog.setObjectName("audioToggle")
+        self.spoken_dialog.setToolTip("Allow Magic Build to include spoken-dialog direction when supported by the scene")
+        self.spoken_dialog.toggled.connect(self.mark_dirty)
         self.hdr = QPushButton("HDR")
         self.hdr.setCheckable(True)
         self.hdr.setObjectName("qualityToggle")
@@ -593,7 +819,7 @@ class MainWindow(QMainWindow):
         self.magic_button.clicked.connect(self.magic_build)
         controls.addWidget(self.intent, 1)
         controls.addWidget(self.sfx)
-        controls.addWidget(self.vocals)
+        controls.addWidget(self.spoken_dialog)
         controls.addWidget(self.hdr)
         controls.addWidget(self.reduce_music)
         controls.addWidget(self.magic_button)
@@ -676,8 +902,12 @@ class MainWindow(QMainWindow):
     def _build_project_dock(self) -> None:
         self.project_dock = QDockWidget("PROJECT LIBRARY", self)
         self.project_dock.setObjectName("projectDock")
-        self.project_dock.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea)
-        self.project_dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetClosable)
+        self.project_dock.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea)
+        self.project_dock.setFeatures(
+            QDockWidget.DockWidgetFeature.DockWidgetClosable
+            | QDockWidget.DockWidgetFeature.DockWidgetMovable
+            | QDockWidget.DockWidgetFeature.DockWidgetFloatable
+        )
         self.project_dock.setMinimumWidth(290)
         self.project_dock.setMaximumWidth(350)
 
@@ -693,6 +923,15 @@ class MainWindow(QMainWindow):
         self.project_library_title.setObjectName("projectLibraryTitle")
         header.addWidget(self.collection_up)
         header.addWidget(self.project_library_title, 1)
+        self.project_sort = QComboBox()
+        self.project_sort.addItem("Title A–Z", "title_asc")
+        self.project_sort.addItem("Title Z–A", "title_desc")
+        self.project_sort.addItem("Custom", "custom")
+        saved_sort = self.settings.value("project_sort_mode", "title_asc")
+        self.project_sort.setCurrentIndex(max(0, self.project_sort.findData(saved_sort)))
+        self.project_sort.setToolTip("Sort projects by title or drag tiles in Custom mode")
+        self.project_sort.currentIndexChanged.connect(self.project_sort_changed)
+        header.addWidget(self.project_sort)
         layout.addLayout(header)
         self.project_search = QLineEdit()
         self.project_search.setPlaceholderText("Search projects…")
@@ -710,6 +949,7 @@ class MainWindow(QMainWindow):
         self.project_list.setIconSize(QSize(230, 230))
         self.project_list.setSpacing(8)
         self.project_list.itemDoubleClicked.connect(lambda *_: self.open_library_project())
+        self.project_list.model().rowsMoved.connect(lambda *_: self.save_custom_project_order())
         layout.addWidget(self.project_list, 1)
 
         buttons = QHBoxLayout()
@@ -740,6 +980,7 @@ class MainWindow(QMainWindow):
         QToolButton:hover,QPushButton:hover{background:#41474a} QToolButton{min-height:20px} QLineEdit{background:#1e2122}
         #timelineShell{background:#0d0f10;border:1px solid #323638;border-radius:3px} #mainTrackLabel{background:#191c1d;border-right:1px solid #34383a;font-weight:bold}
         QListWidget{background:#0d0f10;border:0;padding-top:26px} QListWidget::item{border:1px solid #696b6c;background:#252728;margin:0} QListWidget::item:selected{border:2px solid #f1f1f1;background:#293034}
+        #timeline[dropActive="true"]{border:3px solid #68b9ee;background:#13232c} #timeline[dropActive="false"]{border:1px solid #323638}
         #segmentCard{background:#252728;border:0} #mediaBadge{background:#e5e5e5;color:#262626;font-weight:bold;padding:2px} #roleBadge{background:#36393a;color:#eee;padding:2px}
         #tileDelete{padding:0;background:#454849;color:#ddd;border:0} #tileTitle{background:#242627;padding:3px;font-size:9px} #tileDuration{color:#a2a7a9;font-size:8px}
         #resizeHandle{background:#606669;border-left:1px solid #9ca2a4} #resizeHandle:hover{background:#8aa6b7;border-left:2px solid #d8edf8}
@@ -762,21 +1003,37 @@ class MainWindow(QMainWindow):
         self.collection_up.setVisible(bool(self.current_collection))
         self.project_library_title.setText(self.current_collection or "Saved projects")
         visible_records = [record for record in records if record.get("collection", "") == (self.current_collection or "")]
+        entries: list[dict] = [{**record, "kind": "project"} for record in visible_records]
         if not self.current_collection:
             collections: dict[str, list[dict]] = {}
             for record in records:
                 if record.get("collection"):
                     collections.setdefault(str(record["collection"]), []).append(record)
-            for name, members in sorted(collections.items(), key=lambda pair: pair[0].casefold()):
+            for name, members in collections.items():
                 members.sort(key=lambda value: value.get("savedAt", ""), reverse=True)
+                entries.append({"kind": "collection", "name": name, "description": f"{len(members)} projects", "members": members})
+        mode = self.project_sort.currentData() if hasattr(self, "project_sort") else "title_asc"
+        reverse = mode == "title_desc"
+        if mode in {"title_asc", "title_desc"}:
+            entries.sort(key=lambda value: str(value.get("name", "")).casefold(), reverse=reverse)
+        else:
+            order = self.custom_project_order()
+            positions = {key: index for index, key in enumerate(order)}
+            entries.sort(key=lambda value: (positions.get(self.project_entry_key(value), len(positions)), str(value.get("name", "")).casefold()))
+        self.project_list.setDragDropMode(QListWidget.DragDropMode.InternalMove if mode == "custom" else QListWidget.DragDropMode.NoDragDrop)
+        self.project_list.setMovement(QListWidget.Movement.Snap if mode == "custom" else QListWidget.Movement.Static)
+        selected_item = None
+        for meta in entries:
+            if meta.get("kind") == "collection":
+                name = str(meta["name"])
+                members = meta["members"]
                 item = QListWidgetItem(f"{name}\n{len(members)} project{'s' if len(members) != 1 else ''}")
-                item.setData(Qt.ItemDataRole.UserRole, {"kind": "collection", "name": name, "description": f"{len(members)} projects"})
+                item.setData(Qt.ItemDataRole.UserRole, {"kind": "collection", "name": name, "description": meta["description"]})
                 item.setToolTip(f"Collection: {name}")
                 item.setSizeHint(QSize(255, 292))
                 item.setIcon(QIcon(self.collection_pixmap(members[:4])))
                 self.project_list.addItem(item)
-        selected_item = None
-        for meta in visible_records:
+                continue
             name = str(meta.get("name") or "Untitled project")
             description = " ".join(str(meta.get("description") or "No description").split())
             if len(description) > 105:
@@ -794,6 +1051,32 @@ class MainWindow(QMainWindow):
         if selected_item:
             self.project_list.setCurrentItem(selected_item)
         self.filter_projects(self.project_search.text())
+
+    @staticmethod
+    def project_entry_key(meta: dict) -> str:
+        return f"collection:{meta.get('name', '')}" if meta.get("kind") == "collection" else f"project:{meta.get('id', '')}"
+
+    def custom_order_settings_key(self) -> str:
+        return f"project_custom_order/{self.current_collection or '__root__'}"
+
+    def custom_project_order(self) -> list[str]:
+        try:
+            value = json.loads(str(self.settings.value(self.custom_order_settings_key(), "[]")))
+            return value if isinstance(value, list) else []
+        except (ValueError, TypeError):
+            return []
+
+    def save_custom_project_order(self) -> None:
+        if not hasattr(self, "project_sort") or self.project_sort.currentData() != "custom":
+            return
+        order = []
+        for row in range(self.project_list.count()):
+            order.append(self.project_entry_key(self.project_list.item(row).data(Qt.ItemDataRole.UserRole) or {}))
+        self.settings.setValue(self.custom_order_settings_key(), json.dumps(order))
+
+    def project_sort_changed(self) -> None:
+        self.settings.setValue("project_sort_mode", self.project_sort.currentData())
+        self.refresh_project_library()
 
     def library_records(self) -> list[dict]:
         records = []
@@ -981,6 +1264,12 @@ class MainWindow(QMainWindow):
     def update_window_title(self) -> None:
         self.setWindowTitle(f"LTX Director - Director :: {self.current_project_name}")
 
+    def closeEvent(self, event) -> None:
+        self.settings.setValue("window/geometry", self.saveGeometry())
+        self.settings.setValue("window/state", self.saveState())
+        self.settings.sync()
+        super().closeEvent(event)
+
     def mark_dirty(self, *_args) -> None:
         if not self._loading:
             self.project_dirty = True
@@ -1003,9 +1292,11 @@ class MainWindow(QMainWindow):
         self.segment_prompt.clear()
         self.global_prompt.clear()
         self.sfx.setChecked(False)
-        self.vocals.setChecked(False)
+        self.spoken_dialog.setChecked(False)
         self.hdr.setChecked(False)
         self.reduce_music.setChecked(False)
+        self.output_width.setValue(1280)
+        self.output_height.setValue(704)
         self._loading = False
         self.project_dirty = False
         self.refresh_timeline()
@@ -1045,12 +1336,25 @@ class MainWindow(QMainWindow):
     def total_duration(self) -> float:
         return sum(item.duration for item in self.segments)
 
+    def normalize_output_dimensions(self) -> None:
+        for field in (self.output_width, self.output_height):
+            normalized = max(256, min(4096, round(field.value() / 32) * 32))
+            if field.value() != normalized:
+                field.setValue(normalized)
+
     def add_media(self) -> None:
         paths = choose_media_files(self, True, self.settings.value("last_media_dir", str(Path.home())))
         if not paths:
             return
+        self.add_media_paths(paths)
+
+    def add_media_paths(self, paths: list[str]) -> None:
+        paths = [path for path in paths if Path(path).is_file()]
+        if not paths:
+            return
         self.settings.setValue("last_media_dir", str(Path(paths[0]).parent))
         room = MAX_SECONDS - self.total_duration()
+        added = 0
         for path in paths[: max(0, MAX_SEGMENTS - len(self.segments))]:
             if room < 1:
                 break
@@ -1059,10 +1363,12 @@ class MainWindow(QMainWindow):
                 duration = 1.0 if kind == "video" else min(5.0, room)
                 self.segments.append(Segment(Path(path).name, path, preview, kind, "end" if len(self.segments) % 2 else "start", duration=duration, media_duration_frames=frames, trim_start=trim))
                 room -= duration
+                added += 1
             except Exception as error:
                 QMessageBox.warning(self, "Media error", f"{Path(path).name}: {error}")
         self.mark_dirty()
         self.refresh_timeline(len(self.segments) - 1)
+        self.statusBar().showMessage(f"Added {added} media file{'s' if added != 1 else ''}")
 
     def refresh_timeline(self, selected: int = 0) -> None:
         self._loading = True
@@ -1167,13 +1473,42 @@ class MainWindow(QMainWindow):
         if not item:
             return
         self.timeline.setCurrentItem(item)
+        segment = self.current_segment()
         menu = QMenu(self)
         menu.addAction("Replace media", self.replace_selected)
+        menu.addAction("Export video" if segment and segment.kind == "video" else "Export image", self.export_selected_segment)
         menu.addAction("Set as start frame", lambda: self.set_role("start"))
         menu.addAction("Set as end frame", lambda: self.set_role("end"))
         menu.addSeparator()
         menu.addAction("Delete segment", self.delete_selected)
         menu.exec(self.timeline.mapToGlobal(point))
+
+    def export_selected_segment(self) -> None:
+        segment = self.current_segment()
+        if not segment:
+            return
+        downloads = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DownloadLocation) or str(Path.home())
+        directory = Path(str(self.settings.value("segment_export_dir", self.settings.value("segment_save_dir", downloads))))
+        suffix = ".webm" if segment.kind == "video" else (Path(segment.name).suffix or Path(segment.media_path).suffix or ".png")
+        source = Path(segment.media_path)
+        if not source.is_file():
+            QMessageBox.warning(self, "Media unavailable", "The complete source media for this segment is not available.")
+            return
+        try:
+            directory.mkdir(parents=True, exist_ok=True)
+            row = max(0, self.timeline.currentRow()) + 1
+            base = f"{safe_export_name(self.current_project_name)} - Segment {row:02d}"
+            destination = directory / f"{base}{suffix}"
+            counter = 2
+            while destination.exists() and source.resolve() != destination.resolve():
+                destination = directory / f"{base} ({counter}){suffix}"
+                counter += 1
+            if source.resolve() != destination.resolve():
+                shutil.copy2(source, destination)
+            self.settings.setValue("segment_export_dir", str(destination.parent))
+            self.statusBar().showMessage(f"Segment exported: {destination}")
+        except OSError as error:
+            QMessageBox.critical(self, "Export failed", str(error))
 
     def replace_selected(self) -> None:
         segment = self.current_segment()
@@ -1225,18 +1560,35 @@ class MainWindow(QMainWindow):
             return
         self.magic_button.setEnabled(False)
         self.statusBar().showMessage("Magic Build is analyzing optimized preview frames…")
+        timeout = self.settings.value("api_timeout", 400, int)
+        retries = self.settings.value("api_retries", 2, int)
+        self.magic_dialog = MagicBuildDialog(self)
+        self.magic_dialog.update_attempt(1, retries + 1, "Analyzing frames and directing motion…")
+        self.magic_dialog.show()
         worker = MagicWorker((
             self.segments.copy(), provider, self.settings.value("gemini_model", GEMINI_MODELS[0]), key,
-            self.intent.text(), self.sfx.isChecked(), self.vocals.isChecked(), self.hdr.isChecked(), self.reduce_music.isChecked(),
-        ))
+            self.intent.text(), self.sfx.isChecked(), self.spoken_dialog.isChecked(), self.hdr.isChecked(), self.reduce_music.isChecked(), timeout,
+        ), retries)
+        worker.signals.progress.connect(self.magic_progress)
         worker.signals.finished.connect(self.magic_finished)
         worker.signals.failed.connect(self.magic_failed)
         self.thread_pool.start(worker)
 
+    def magic_progress(self, attempt: int, total: int, detail: str) -> None:
+        if getattr(self, "magic_dialog", None):
+            self.magic_dialog.update_attempt(attempt, total, detail)
+
     def magic_finished(self, result: dict) -> None:
-        for segment, generated in zip(self.segments, result["segments"]):
+        target_durations = []
+        remaining = MAX_SECONDS
+        generated_segments = result["segments"]
+        for index, (segment, generated) in enumerate(zip(self.segments, generated_segments)):
             segment.prompt = str(generated.get("prompt", segment.prompt))
-            segment.duration = max(1, round(float(generated.get("duration", segment.duration)) * 2) / 2)
+            recommended = max(1, min(12, round(float(generated.get("duration", segment.duration)) * 2) / 2))
+            reserve = max(0, len(generated_segments) - index - 1)
+            target = max(1, min(recommended, remaining - reserve))
+            target_durations.append(target)
+            remaining -= target
         global_prompt = str(result.get("globalPrompt", "")).strip()
         quality = "(4K, HDR, Realistic)"
         if self.hdr.isChecked() and not global_prompt.startswith(quality):
@@ -1249,11 +1601,48 @@ class MainWindow(QMainWindow):
         self.global_prompt.setPlainText(global_prompt)
         self.mark_dirty()
         self.magic_button.setEnabled(True)
-        self.refresh_timeline(self.timeline.currentRow())
+        if getattr(self, "magic_dialog", None):
+            self.magic_dialog.done(QDialog.DialogCode.Accepted)
+            self.magic_dialog = None
+        self.animate_timeline_durations(target_durations)
         self.statusBar().showMessage("Magic Build complete")
+
+    def animate_timeline_durations(self, target_durations: list[float]) -> None:
+        if not self.segments or self.timeline.count() != len(self.segments):
+            for segment, target in zip(self.segments, target_durations):
+                segment.duration = target
+            self.refresh_timeline(self.timeline.currentRow())
+            return
+        selected = self.timeline.currentRow()
+        start_widths = [self.timeline.item(row).sizeHint().width() for row in range(self.timeline.count())]
+        target_widths = [max(48, int(duration * self.pixels_per_second)) for duration in target_durations]
+        for segment, target in zip(self.segments, target_durations):
+            segment.duration = target
+        animation = QVariantAnimation(self)
+        animation.setDuration(950)
+        animation.setStartValue(0.0)
+        animation.setEndValue(1.0)
+        animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+        def resize_tiles(progress: float) -> None:
+            for row, (start, target) in enumerate(zip(start_widths, target_widths)):
+                item = self.timeline.item(row)
+                item.setSizeHint(QSize(round(start + (target - start) * progress), max(152, self.timeline_height - 32)))
+                card = self.timeline.itemWidget(item)
+                if card and hasattr(card, "duration_label"):
+                    card.duration_label.setText(f"{target_durations[row]:.1f}s")
+            self.timeline.doItemsLayout()
+
+        animation.valueChanged.connect(resize_tiles)
+        animation.finished.connect(lambda: self.refresh_timeline(selected))
+        self.duration_animation = animation
+        animation.start()
 
     def magic_failed(self, message: str) -> None:
         self.magic_button.setEnabled(True)
+        if getattr(self, "magic_dialog", None):
+            self.magic_dialog.done(QDialog.DialogCode.Rejected)
+            self.magic_dialog = None
         QMessageBox.critical(self, "Magic Build failed", message)
         self.statusBar().showMessage("Magic Build failed")
 
@@ -1261,7 +1650,7 @@ class MainWindow(QMainWindow):
         if not self.segments:
             return
         directory = Path(self.settings.value("last_document_dir", str(Path.home())))
-        path = choose_document_save(self, "LTX Director Export", str(directory / "ltx_director_export.json"), "LTX Director JSON (*.json)")
+        path = choose_document_save(self, "LTX Director Export", str(directory / f"{safe_export_name(self.current_project_name)}.json"), "LTX Director JSON (*.json)")
         if not path:
             return
         if not path.lower().endswith(".json"):
@@ -1279,7 +1668,8 @@ class MainWindow(QMainWindow):
             timeline.append(record)
             cursor += length
         global_prompt = self.global_prompt.toPlainText()
-        payload = {"version": 1, "settings": {"start_second": 0, "end_second": cursor / FPS, "duration_seconds": cursor / FPS, "start_frame": 0, "end_frame": cursor, "duration_frames": cursor, "epsilon": .99, "use_custom_audio": False, "use_custom_motion": False, "inpaint_audio": False, "frame_rate": FPS, "display_mode": "seconds", "custom_width": 1280, "custom_height": 704, "resize_method": "maintain aspect ratio", "divisible_by": 32, "img_compression": 0, "override_audio": False}, "global_prompt": global_prompt, "retake_global_prompt": "", "timeline": {"mainTrackEnabled": True, "audioTrackEnabled": False, "motionTrackEnabled": False, "showFilenames": True, "overrideAudio": False, "inpaint_audio": False, "propHeight": 163, "globalPropHeight": 124, "global_prompt": global_prompt, "retake_global_prompt": "", "retakeMode": False, "retakeStart": 0, "retakeLength": 0, "retakePrompt": "", "retakeStrength": 1, "retakeVideo": None, "normalStartFrame": 0, "normalDurationFrames": cursor, "segments": timeline, "motionSegments": [], "audioSegments": []}}
+        self.normalize_output_dimensions()
+        payload = {"version": 1, "settings": {"start_second": 0, "end_second": cursor / FPS, "duration_seconds": cursor / FPS, "start_frame": 0, "end_frame": cursor, "duration_frames": cursor, "epsilon": .99, "use_custom_audio": False, "use_custom_motion": False, "inpaint_audio": False, "frame_rate": FPS, "display_mode": "seconds", "custom_width": self.output_width.value(), "custom_height": self.output_height.value(), "resize_method": "maintain aspect ratio", "divisible_by": 32, "img_compression": 0, "override_audio": False}, "global_prompt": global_prompt, "retake_global_prompt": "", "timeline": {"mainTrackEnabled": True, "audioTrackEnabled": False, "motionTrackEnabled": False, "showFilenames": True, "overrideAudio": False, "inpaint_audio": False, "propHeight": 163, "globalPropHeight": 124, "global_prompt": global_prompt, "retake_global_prompt": "", "retakeMode": False, "retakeStart": 0, "retakeLength": 0, "retakePrompt": "", "retakeStrength": 1, "retakeVideo": None, "normalStartFrame": 0, "normalDurationFrames": cursor, "segments": timeline, "motionSegments": [], "audioSegments": []}}
         Path(path).write_text(json.dumps(payload, indent=2), encoding="utf-8")
         self.statusBar().showMessage(f"LTX Director export saved: {path}")
 
@@ -1310,6 +1700,10 @@ class MainWindow(QMainWindow):
             if not loaded:
                 raise ValueError("No supported embedded image or WebM segments were found.")
             self.segments = loaded
+            settings = payload.get("settings", {})
+            self.output_width.setValue(int(settings.get("custom_width", 1280)))
+            self.output_height.setValue(int(settings.get("custom_height", 704)))
+            self.normalize_output_dimensions()
             self.global_prompt.setPlainText(payload.get("global_prompt") or payload.get("timeline", {}).get("global_prompt", ""))
             self.current_project_id = None
             self.current_project_name = Path(path).stem
@@ -1326,7 +1720,7 @@ class MainWindow(QMainWindow):
             value["previewData"] = data_url(segment.preview_path)
             value["sourceData"] = data_url(segment.media_path) if Path(segment.media_path).exists() else None
             frames.append(value)
-        return {"app": "ltx-director-director", "projectVersion": 2, "globalPrompt": self.global_prompt.toPlainText(), "directorIntent": self.intent.text(), "magicBuild": {"sfx": self.sfx.isChecked(), "vocals": self.vocals.isChecked(), "hdr": self.hdr.isChecked(), "reduceMusic": self.reduce_music.isChecked()}, "timelineView": {"scale": self.pixels_per_second, "height": self.timeline_height}, "frames": frames}
+        return {"app": "ltx-director-director", "projectVersion": 3, "globalPrompt": self.global_prompt.toPlainText(), "directorIntent": self.intent.text(), "magicBuild": {"sfx": self.sfx.isChecked(), "spokenDialog": self.spoken_dialog.isChecked(), "hdr": self.hdr.isChecked(), "reduceMusic": self.reduce_music.isChecked()}, "output": {"width": self.output_width.value(), "height": self.output_height.value()}, "timelineView": {"scale": self.pixels_per_second, "height": self.timeline_height}, "frames": frames}
 
     def load_project_payload(self, payload: dict) -> None:
         if payload.get("app") not in {"ltx-director-director", "ltx-prompt-director-python"}:
@@ -1353,9 +1747,14 @@ class MainWindow(QMainWindow):
         self.global_prompt.setPlainText(payload.get("globalPrompt", ""))
         self.intent.setText(payload.get("directorIntent", ""))
         self.sfx.setChecked(bool(payload.get("magicBuild", {}).get("sfx")))
-        self.vocals.setChecked(bool(payload.get("magicBuild", {}).get("vocals")))
+        magic = payload.get("magicBuild", {})
+        self.spoken_dialog.setChecked(bool(magic.get("spokenDialog", magic.get("vocals", False))))
         self.hdr.setChecked(bool(payload.get("magicBuild", {}).get("hdr")))
         self.reduce_music.setChecked(bool(payload.get("magicBuild", {}).get("reduceMusic")))
+        output = payload.get("output", {})
+        self.output_width.setValue(int(output.get("width", 1280)))
+        self.output_height.setValue(int(output.get("height", 704)))
+        self.normalize_output_dimensions()
         view = payload.get("timelineView", {})
         self.timeline_height = max(184, min(430, int(view.get("height", self.timeline_height))))
         self.timeline_height_handle.current_height = self.timeline_height
@@ -1369,7 +1768,7 @@ class MainWindow(QMainWindow):
         if not self.segments:
             return
         directory = Path(self.settings.value("last_document_dir", str(Path.home())))
-        path = choose_document_save(self, "Project Export", str(directory / "ltx_director_director_project.LTXD"), "LTX Director - Director Project (*.LTXD *.ltxd)")
+        path = choose_document_save(self, "Project Export", str(directory / f"{safe_export_name(self.current_project_name)}.LTXD"), "LTX Director - Director Project (*.LTXD *.ltxd)")
         if not path:
             return
         if not path.lower().endswith(".ltxd"):
