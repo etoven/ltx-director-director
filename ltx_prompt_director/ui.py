@@ -1216,6 +1216,7 @@ class MainWindow(QMainWindow):
         self.timeline.customContextMenuRequested.connect(self.timeline_menu)
         self.timeline.currentRowChanged.connect(self.load_editor)
         self.timeline.currentRowChanged.connect(self.update_timeline_selection_style)
+        self.timeline.itemClicked.connect(self.reload_clicked_segment)
         self.timeline.model().rowsMoved.connect(lambda *_: self.sync_order())
         self.timeline.files_dropped.connect(self.add_media_paths)
         self.timeline.horizontalScrollBar().valueChanged.connect(self.ruler.set_offset)
@@ -1907,7 +1908,7 @@ class MainWindow(QMainWindow):
         self.current_collection = None
         self.refresh_project_library(preserve_scroll=False)
 
-    def save_library_project(self) -> None:
+    def save_library_project(self, automatic: bool = False) -> None:
         if not self.segments:
             QMessageBox.information(self, "Nothing to save", "Add at least one image or WebM segment first.")
             return
@@ -1921,18 +1922,37 @@ class MainWindow(QMainWindow):
                 except (OSError, ValueError):
                     meta = None
         if not meta:
-            collections = [str(record.get("collection")) for record in self.library_records() if record.get("collection")]
-            dialog = ProjectDetailsDialog(self.intent.text(), self, collection=self.current_collection or "", collections=collections)
-            if not dialog.exec():
-                return
             project_id = uuid4().hex
-            meta = {
-                "id": project_id,
-                "name": dialog.name.text().strip(),
-                "description": dialog.description.toPlainText().strip(),
-                "collection": dialog.collection_name(),
-                "projectPath": str(root / f"{project_id}.LTXD"),
-            }
+            if automatic:
+                intent = " ".join(self.intent.text().split())
+                source_name = Path(self.segments[0].name).stem if self.segments else "Sequence"
+                suggested = re.split(r"[.!?]", intent, maxsplit=1)[0].strip() if intent else source_name
+                suggested = suggested[:52].rstrip(" -—,:;") or "Magic Build"
+                existing_names = {str(record.get("name", "")).casefold() for record in self.library_records()}
+                name = suggested
+                suffix = 2
+                while name.casefold() in existing_names:
+                    name = f"{suggested} ({suffix})"
+                    suffix += 1
+                meta = {
+                    "id": project_id,
+                    "name": name,
+                    "description": intent or f"Magic Build sequence generated from {source_name}.",
+                    "collection": self.current_collection or "",
+                    "projectPath": str(root / f"{project_id}.LTXD"),
+                }
+            else:
+                collections = [str(record.get("collection")) for record in self.library_records() if record.get("collection")]
+                dialog = ProjectDetailsDialog(self.intent.text(), self, collection=self.current_collection or "", collections=collections)
+                if not dialog.exec():
+                    return
+                meta = {
+                    "id": project_id,
+                    "name": dialog.name.text().strip(),
+                    "description": dialog.description.toPlainText().strip(),
+                    "collection": dialog.collection_name(),
+                    "projectPath": str(root / f"{project_id}.LTXD"),
+                }
             self.current_project_id = project_id
             self.current_project_name = meta["name"]
             self.update_window_title()
@@ -2333,6 +2353,22 @@ class MainWindow(QMainWindow):
         self._loading = False
         self.update_counts()
 
+    def reload_clicked_segment(self, item: QListWidgetItem) -> None:
+        """Refresh prompt text when the clicked segment is already selected."""
+        self.refresh_segment_prompt_box(self.timeline.row(item))
+
+    def refresh_segment_prompt_box(self, row: int) -> None:
+        """Update only the segment prompt box, preserving all other editor state."""
+        if not 0 <= row < len(self.segments):
+            return
+        previous_loading = self._loading
+        self._loading = True
+        try:
+            self.segment_prompt.setPlainText(self.segments[row].prompt)
+        finally:
+            self._loading = previous_loading
+        self.update_counts()
+
     def save_prompt(self) -> None:
         if not self._loading and self.current_segment():
             self.current_segment().prompt = self.segment_prompt.toPlainText()
@@ -2532,10 +2568,12 @@ class MainWindow(QMainWindow):
             lines.insert(insertion, "[SOUND]: Ambient environmental room tone matching the visible setting.")
             global_prompt = "\n".join(lines)
         self.global_prompt.setPlainText(global_prompt)
+        self.refresh_segment_prompt_box(self.timeline.currentRow())
         self.mark_dirty()
         self.magic_button.setEnabled(True)
         self.magic_overlay.hide_overlay()
         self.animate_timeline_durations(target_durations)
+        self.save_library_project(automatic=True)
         self.statusBar().showMessage("Magic Build complete")
 
     def animate_timeline_durations(self, target_durations: list[float]) -> None:
