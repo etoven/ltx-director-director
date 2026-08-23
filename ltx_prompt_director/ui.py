@@ -1212,14 +1212,18 @@ class MainWindow(QMainWindow):
         self.segment_prompt.textChanged.connect(self.save_prompt)
         segment_layout.addWidget(self.segment_prompt)
         segment_footer = QHBoxLayout()
+        segment_footer.setContentsMargins(0, 0, 0, 0)
+        segment_footer.setSpacing(0)
         self.segment_count = QLabel("0 characters")
         self.segment_count.setObjectName("muted")
-        copy_segment = QPushButton("□ Copy")
-        copy_segment.setObjectName("copyButton")
-        copy_segment.clicked.connect(lambda: QApplication.clipboard().setText(self.segment_prompt.toPlainText()))
+        self.copy_segment = QPushButton("□ Copy")
+        self.copy_segment.setObjectName("copyButton")
+        self.copy_segment.setFlat(True)
+        self.copy_segment.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.copy_segment.clicked.connect(lambda: QApplication.clipboard().setText(self.segment_prompt.toPlainText()))
         segment_footer.addWidget(self.segment_count)
         segment_footer.addStretch()
-        segment_footer.addWidget(copy_segment)
+        segment_footer.addWidget(self.copy_segment, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         segment_layout.addLayout(segment_footer)
         outer.addWidget(segment_panel, 3)
         global_panel = QFrame()
@@ -1240,14 +1244,18 @@ class MainWindow(QMainWindow):
         self.global_prompt.textChanged.connect(self.mark_dirty)
         global_layout.addWidget(self.global_prompt)
         global_footer = QHBoxLayout()
+        global_footer.setContentsMargins(0, 0, 0, 0)
+        global_footer.setSpacing(0)
         self.global_count = QLabel("0 characters")
         self.global_count.setObjectName("muted")
-        copy_global = QPushButton("□ Copy")
-        copy_global.setObjectName("copyButton")
-        copy_global.clicked.connect(lambda: QApplication.clipboard().setText(self.global_prompt.toPlainText()))
+        self.copy_global = QPushButton("□ Copy")
+        self.copy_global.setObjectName("copyButton")
+        self.copy_global.setFlat(True)
+        self.copy_global.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.copy_global.clicked.connect(lambda: QApplication.clipboard().setText(self.global_prompt.toPlainText()))
         global_footer.addWidget(self.global_count)
         global_footer.addStretch()
-        global_footer.addWidget(copy_global)
+        global_footer.addWidget(self.copy_global, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         global_layout.addLayout(global_footer)
         outer.addWidget(global_panel, 2)
         self.setCentralWidget(root)
@@ -1358,7 +1366,7 @@ class MainWindow(QMainWindow):
         #addTile{border:1px dashed #596065;background:#111415;color:#828b90;font-size:10px} #sequenceBar{background:#1c1f20;border:1px solid #0e1011;border-radius:3px;padding:12px;font-weight:bold}
         #sectionLabel{color:#939ca1;font-size:8px;letter-spacing:1px} #muted{color:#879095;font-size:9px} #promptPanel{background:#252728;border:1px solid #101213;border-radius:3px}
         QTextEdit{background:#252728;border:0;color:#e1e4e5;font:11px 'Courier New';padding:4px} #magicButton{background:#3b6f9c;border-color:#4f83ae;font-weight:bold}
-        #audioToggle:checked,#qualityToggle:checked,#frameToggle:checked{background:#285c3d;border-color:#4c9b6a;color:#c9f4d6} #copyButton{min-height:0;border:0;background:transparent;color:#aeb5b8} QStatusBar{background:#1b1e1f;color:#7f898d}
+        #audioToggle:checked,#qualityToggle:checked,#frameToggle:checked{background:#285c3d;border-color:#4c9b6a;color:#c9f4d6} #copyButton{min-height:0;padding:1px 4px;margin:0;border:0;background:transparent;color:#aeb5b8} #copyButton:hover{background:#303a3f;color:#e5f4fc;border:0} #copyButton:pressed{background:#1b2429;color:#8fd3f7;border:0} QStatusBar{background:#1b1e1f;color:#7f898d}
         QDockWidget{background:#191d1f;color:#d9dcde;font-weight:bold} QDockWidget::title{background:#1b2022;border-bottom:1px solid #0e1011;padding:8px;text-align:left}
         #projectLibraryTitle,#magicOverlayTitle{font-size:15px;font-weight:bold;color:#f0f2f3} #projectList{background:#151819;border:1px solid #0e1011;padding:5px}
         #projectList::item{background:#24282a;border:1px solid #3b4144;border-radius:4px;padding:7px;color:#dce0e2} #projectList::item:hover{border-color:#6488a1;background:#2b3134} #projectList::item:selected{border:2px solid #69a5d0;background:#29343a}
@@ -1395,6 +1403,9 @@ class MainWindow(QMainWindow):
         self.output_width.setMinimumWidth(metric(92))
         self.output_height.setMinimumWidth(metric(92))
         self.duration_spin.setMinimumWidth(metric(78))
+        for button in (self.copy_segment, self.copy_global):
+            button.setFixedHeight(button.fontMetrics().height() + metric(4))
+            button.setMinimumWidth(button.fontMetrics().horizontalAdvance(button.text()) + metric(10))
         if hasattr(self, "timeline_loading"):
             self.timeline_loading.set_scale(scale)
         if hasattr(self, "magic_overlay"):
