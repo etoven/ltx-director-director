@@ -19,6 +19,8 @@ Each WebM initially occupies one second. Image segments initially occupy five se
 
 Use the **Scale** slider to zoom the timeline horizontally, or select **Auto fit** to fit the complete sequence into the available width. Drag the dotted grip centered along the timeline's bottom edge downward to enlarge segment previews; previews preserve the complete image beneath their separate header row.
 
+Mouse-wheel scrolling across the timeline uses short eased horizontal movement instead of jumping by whole tiles. High-resolution touchpad gestures remain direct and track the gesture pixel-for-pixel.
+
 During genuine timeline rebuilds, an animated loading indicator remains visible until every segment preview and control is ready. Timeline zoom, vertical preview resizing, and duration resizing update the existing cards in place without reloading them or displaying the loader.
 
 ## 3. Configure Magic Build

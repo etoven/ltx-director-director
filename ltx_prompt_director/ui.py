@@ -143,7 +143,57 @@ class TimelineListWidget(QListWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._scroll_animation = None
+        self._scroll_target = 0
         self.setAcceptDrops(True)
+        self.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.horizontalScrollBar().setSingleStep(24)
+        self.horizontalScrollBar().sliderPressed.connect(self._cancel_smooth_scroll)
+
+    def wheelEvent(self, event) -> None:
+        bar = self.horizontalScrollBar()
+        pixel_delta = event.pixelDelta()
+        pixels = pixel_delta.x() or pixel_delta.y()
+        if pixels:
+            self._cancel_smooth_scroll()
+            bar.setValue(bar.value() - pixels)
+            self._scroll_target = bar.value()
+            event.accept()
+            return
+        angle_delta = event.angleDelta()
+        degrees = angle_delta.x() or angle_delta.y()
+        if not degrees:
+            super().wheelEvent(event)
+            return
+        base = self._scroll_target if self._scroll_animation else bar.value()
+        distance = round(-(degrees / 120) * 120)
+        self._scroll_target = max(bar.minimum(), min(bar.maximum(), base + distance))
+        if self._scroll_animation:
+            self._scroll_animation.stop()
+        animation = QVariantAnimation(self)
+        animation.setDuration(190)
+        animation.setStartValue(bar.value())
+        animation.setEndValue(self._scroll_target)
+        animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        animation.valueChanged.connect(lambda value: bar.setValue(round(value)))
+        animation.finished.connect(self._smooth_scroll_finished)
+        self._scroll_animation = animation
+        animation.start()
+        event.accept()
+
+    def _cancel_smooth_scroll(self) -> None:
+        if self._scroll_animation:
+            self._scroll_animation.stop()
+            self._scroll_animation = None
+        self._scroll_target = self.horizontalScrollBar().value()
+
+    def _smooth_scroll_finished(self) -> None:
+        self._scroll_animation = None
+        self._scroll_target = self.horizontalScrollBar().value()
+
+    def mousePressEvent(self, event) -> None:
+        self._cancel_smooth_scroll()
+        super().mousePressEvent(event)
 
     @staticmethod
     def _media_paths(event) -> list[str]:
@@ -1293,6 +1343,10 @@ class MainWindow(QMainWindow):
         QMainWindow,QWidget{background:#24292c;color:#d9dcde;font:11px Arial} QToolBar{background:#303537;border:0;spacing:6px;padding:5px}
         QToolButton,QPushButton,QComboBox,QSpinBox,QDoubleSpinBox,QLineEdit{background:#303436;border:1px solid #101213;border-radius:3px;padding:5px 8px;min-height:20px}
         QToolButton:hover,QPushButton:hover{background:#41474a} QToolButton:pressed,QPushButton:pressed{background:#202729;border-color:#79a8c5} QLineEdit{background:#1e2122}
+        QSpinBox,QDoubleSpinBox{padding-right:__SPIN_PAD__px} QSpinBox::up-button,QDoubleSpinBox::up-button{subcontrol-origin:border;subcontrol-position:top right;width:__SPIN_BUTTON__px;background:#3b4347;border:0;border-left:1px solid #171a1c;border-bottom:1px solid #202527;border-top-right-radius:3px} QSpinBox::down-button,QDoubleSpinBox::down-button{subcontrol-origin:border;subcontrol-position:bottom right;width:__SPIN_BUTTON__px;background:#343b3f;border:0;border-left:1px solid #171a1c;border-top:1px solid #202527;border-bottom-right-radius:3px}
+        QSpinBox::up-button:hover,QDoubleSpinBox::up-button:hover,QSpinBox::down-button:hover,QDoubleSpinBox::down-button:hover{background:#506471} QSpinBox::up-button:pressed,QDoubleSpinBox::up-button:pressed,QSpinBox::down-button:pressed,QDoubleSpinBox::down-button:pressed{background:#274e66} QSpinBox::up-arrow,QDoubleSpinBox::up-arrow,QSpinBox::down-arrow,QDoubleSpinBox::down-arrow{width:__ARROW_SIZE__px;height:__ARROW_SIZE__px}
+        QComboBox{padding-right:__COMBO_PAD__px} QComboBox::drop-down{subcontrol-origin:padding;subcontrol-position:top right;width:__COMBO_BUTTON__px;background:#394145;border:0;border-left:1px solid #171a1c;border-top-right-radius:3px;border-bottom-right-radius:3px} QComboBox::drop-down:hover{background:#506471} QComboBox::drop-down:pressed{background:#274e66} QComboBox::down-arrow{width:__ARROW_SIZE__px;height:__ARROW_SIZE__px} QComboBox QAbstractItemView{background:#202527;color:#e1e5e7;border:1px solid #52616a;outline:0;padding:4px;selection-background-color:#3b6f9c;selection-color:#fff}
+        QSlider::groove:horizontal{height:__SLIDER_GROOVE__px;background:#161b1d;border:1px solid #0d1011;border-radius:__SLIDER_RADIUS__px} QSlider::sub-page:horizontal{background:#367da6;border:1px solid #4b9ac6;border-radius:__SLIDER_RADIUS__px} QSlider::add-page:horizontal{background:#161b1d;border-radius:__SLIDER_RADIUS__px} QSlider::handle:horizontal{width:__SLIDER_HANDLE__px;margin:-__SLIDER_MARGIN__px 0;background:#607883;border:2px solid #8fb9cd;border-radius:__SLIDER_HANDLE_RADIUS__px} QSlider::handle:horizontal:hover{background:#78a8be;border-color:#c5ebff} QSlider::handle:horizontal:pressed{background:#4aa3d2;border-color:#e1f6ff}
         #timelineShell{background:#0d0f10;border:1px solid #323638;border-radius:3px} #mainTrackLabel{background:#191c1d;border-right:1px solid #34383a;font-weight:bold}
         QListWidget{background:#0d0f10;border:0;padding-top:26px} QListWidget::item{border:1px solid #696b6c;background:#252728;margin:0} QListWidget::item:selected{border:2px solid #f1f1f1;background:#293034}
         #timeline[dropActive="true"]{border:3px solid #68b9ee;background:#13232c} #timeline[dropActive="false"]{border:1px solid #323638}
@@ -1323,6 +1377,11 @@ class MainWindow(QMainWindow):
         theme = theme.replace("height:12px;margin:0", f"height:{metric(12)}px;margin:0")
         theme = theme.replace("min-height:28px;margin:2px", f"min-height:{metric(28)}px;margin:{metric(2)}px")
         theme = theme.replace("min-width:28px;margin:2px", f"min-width:{metric(28)}px;margin:{metric(2)}px")
+        theme = theme.replace("__SPIN_PAD__", str(metric(30))).replace("__SPIN_BUTTON__", str(metric(23)))
+        theme = theme.replace("__COMBO_PAD__", str(metric(30))).replace("__COMBO_BUTTON__", str(metric(25)))
+        theme = theme.replace("__ARROW_SIZE__", str(metric(8)))
+        theme = theme.replace("__SLIDER_GROOVE__", str(metric(6))).replace("__SLIDER_RADIUS__", str(metric(3)))
+        theme = theme.replace("__SLIDER_HANDLE__", str(metric(16))).replace("__SLIDER_MARGIN__", str(metric(6))).replace("__SLIDER_HANDLE_RADIUS__", str(metric(8)))
         for size in (15, 10, 9, 8):
             theme = theme.replace(f"font-size:{size}px", f"font-size:{scaled(size)}px")
         self.setStyleSheet(theme)
@@ -1886,6 +1945,7 @@ class MainWindow(QMainWindow):
         """Resize existing cards in place without rebuilding media-backed widgets."""
         if not hasattr(self, "timeline"):
             return
+        self.timeline._cancel_smooth_scroll()
         previous_loading = self._loading
         self._loading = True
         try:
