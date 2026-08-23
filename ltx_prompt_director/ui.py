@@ -1391,7 +1391,7 @@ class MainWindow(QMainWindow):
         self.project_list.setWrapping(True)
         self.project_list.setResizeMode(QListWidget.ResizeMode.Adjust)
         self.project_list.setMovement(QListWidget.Movement.Static)
-        self.project_list.setSpacing(8)
+        self.project_list.setSpacing(10)
         self.project_list.itemClicked.connect(self.activate_clicked_project)
         self.project_list.itemDoubleClicked.connect(lambda *_: self.open_library_project())
         self.project_list.drag_started.connect(self.activate_custom_sort_for_drag)
@@ -1450,8 +1450,8 @@ class MainWindow(QMainWindow):
         self.project_icon_button.setText(f"Icons: {labels[self.project_icon_size]}")
         for size, action in self.project_icon_actions.items():
             action.setChecked(size == self.project_icon_size)
-        card_width = self.project_icon_size + 22
-        card_height = self.project_icon_size + 68
+        card_width = self.project_icon_size + 28
+        card_height = self.project_icon_size + 76
         self.project_list.setIconSize(QSize(self.project_icon_size, self.project_icon_size))
         self.project_list.setGridSize(QSize(card_width, card_height))
 
@@ -1495,8 +1495,8 @@ class MainWindow(QMainWindow):
         QTextEdit{background:#252728;border:0;color:#e1e4e5;font:11px 'Courier New';padding:4px} #magicButton{background:#3b6f9c;border-color:#4f83ae;font-weight:bold}
         #audioToggle:checked,#qualityToggle:checked,#frameToggle:checked{background:#285c3d;border-color:#4c9b6a;color:#c9f4d6} #copyButton{min-height:0;padding:1px 4px;margin:0;border:0;background:transparent;color:#aeb5b8} #copyButton:hover{background:#303a3f;color:#e5f4fc;border:0} #copyButton:pressed{background:#1b2429;color:#8fd3f7;border:0} QStatusBar{background:#1b1e1f;color:#7f898d}
         QDockWidget{background:#191d1f;color:#d9dcde;font-weight:bold} QDockWidget::title{background:#1b2022;border-bottom:1px solid #0e1011;padding:8px;text-align:left}
-        #projectLibraryTitle,#magicOverlayTitle{font-size:15px;font-weight:bold;color:#f0f2f3} #projectList{background:#151819;border:1px solid #0e1011;padding:5px}
-        #projectList::item{background:#24282a;border:1px solid #3b4144;border-radius:4px;padding:7px;color:#dce0e2} #projectList::item:hover{border-color:#6488a1;background:#2b3134} #projectList::item:selected{border:2px solid #69a5d0;background:#29343a}
+        #projectLibraryTitle,#magicOverlayTitle{font-size:15px;font-weight:bold;color:#f0f2f3} #projectList{background:#151819;border:1px solid #0e1011;padding:10px}
+        #projectList::item{background:#24282a;border:1px solid #3b4144;border-radius:4px;padding:8px;color:#dce0e2} #projectList::item:hover{border-color:#6488a1;background:#2b3134} #projectList::item:selected{border:2px solid #69a5d0;background:#29343a}
         #librarySave{background:#3b6f9c;border-color:#4f83ae;font-weight:bold} #librarySave:hover{background:#5596ca;border-color:#8bc8f5;color:#fff} #librarySave:pressed{background:#214865;border:1px solid #b9e1ff;color:#fff} #libraryDelete:hover{background:#713d3d;border-color:#9b5656}
         QMenu{background:#252a2c;border:1px solid #596267;padding:4px} QMenu::item{padding:7px 28px 7px 12px;border-radius:3px} QMenu::item:selected{background:#3b6f9c;color:#fff} QMenu::separator{height:1px;background:#4b5255;margin:4px 7px}
         QScrollBar:vertical{background:#171b1d;width:12px;margin:0;border:0;border-radius:6px} QScrollBar::handle:vertical{background:#46545c;min-height:28px;margin:2px;border-radius:4px} QScrollBar::handle:vertical:hover{background:#63869b} QScrollBar::handle:vertical:pressed{background:#74a8c6}
@@ -1525,6 +1525,7 @@ class MainWindow(QMainWindow):
         self.ruler.setFixedHeight(metric(28))
         self.timeline_height_handle.set_scale(scale)
         self.project_width_handle.set_scale(scale)
+        self.project_list.setSpacing(metric(10))
         for button in (self.provider_button, self.sfx, self.spoken_dialog, self.hdr, self.reduce_music, self.magic_button, self.start_button, self.end_button):
             button.setMinimumWidth(button.fontMetrics().horizontalAdvance(button.text()) + metric(18))
         self.output_width.setMinimumWidth(metric(92))
@@ -1577,7 +1578,7 @@ class MainWindow(QMainWindow):
                 item = QListWidgetItem(f"{name}\n{len(members)} project{'s' if len(members) != 1 else ''}")
                 item.setData(Qt.ItemDataRole.UserRole, {"kind": "collection", "name": name, "description": meta["description"]})
                 item.setToolTip(f"Collection: {name}")
-                item.setSizeHint(QSize(self.project_icon_size + 22, self.project_icon_size + 68))
+                item.setSizeHint(QSize(self.project_icon_size + 28, self.project_icon_size + 76))
                 collection_cover = self.collection_pixmap(members[:4], self.project_icon_size)
                 if any(self.project_is_dirty(str(member.get("id", ""))) for member in members):
                     painter = QPainter(collection_cover)
@@ -1598,7 +1599,7 @@ class MainWindow(QMainWindow):
             item = QListWidgetItem(f"{name}\n{description}")
             item.setData(Qt.ItemDataRole.UserRole, {**meta, "kind": "project"})
             item.setToolTip(f"{name}\n\n{meta.get('description', '')}")
-            item.setSizeHint(QSize(self.project_icon_size + 22, self.project_icon_size + 68))
+            item.setSizeHint(QSize(self.project_icon_size + 28, self.project_icon_size + 76))
             pixmap = pixmap_from_data_url(str(meta.get("thumbnailData", "")))
             if pixmap.isNull():
                 pixmap = QPixmap(self.project_icon_size, self.project_icon_size)
