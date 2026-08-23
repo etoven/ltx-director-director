@@ -1200,7 +1200,7 @@ class MainWindow(QMainWindow):
         QDockWidget{background:#191d1f;color:#d9dcde;font-weight:bold} QDockWidget::title{background:#1b2022;border-bottom:1px solid #0e1011;padding:8px;text-align:left}
         #projectLibraryTitle,#magicOverlayTitle{font-size:15px;font-weight:bold;color:#f0f2f3} #projectList{background:#151819;border:1px solid #0e1011;padding:5px}
         #projectList::item{background:#24282a;border:1px solid #3b4144;border-radius:4px;padding:7px;color:#dce0e2} #projectList::item:hover{border-color:#6488a1;background:#2b3134} #projectList::item:selected{border:2px solid #69a5d0;background:#29343a}
-        #librarySave{background:#3b6f9c;border-color:#4f83ae;font-weight:bold} #librarySave:hover{background:#5596ca;border-color:#8bc8f5;color:#fff} #libraryDelete:hover{background:#713d3d;border-color:#9b5656}
+        #librarySave{background:#3b6f9c;border-color:#4f83ae;font-weight:bold} #librarySave:hover{background:#5596ca;border-color:#8bc8f5;color:#fff} #librarySave:pressed{background:#214865;border:2px solid #b9e1ff;color:#fff;padding:4px 7px 3px 9px} #libraryDelete:hover{background:#713d3d;border-color:#9b5656}
         QMenu{background:#252a2c;border:1px solid #596267;padding:4px} QMenu::item{padding:7px 28px 7px 12px;border-radius:3px} QMenu::item:selected{background:#3b6f9c;color:#fff} QMenu::separator{height:1px;background:#4b5255;margin:4px 7px}
         """
         theme = theme.replace("font:11px Arial", f"font:{scaled(11)}px Arial")
