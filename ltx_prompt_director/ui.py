@@ -1030,6 +1030,10 @@ class MainWindow(QMainWindow):
         self.setWindowIcon(QIcon(str(files("ltx_prompt_director").joinpath("assets/icon.png"))))
         self.resize(1450, 900)
         self.settings = QSettings()
+        self._settings_sync_timer = QTimer(self)
+        self._settings_sync_timer.setSingleShot(True)
+        self._settings_sync_timer.setInterval(250)
+        self._settings_sync_timer.timeout.connect(self.settings.sync)
         self.session_keys = {"gemini": self.settings.value("gemini_key", ""), "openai": self.settings.value("openai_key", "")}
         self.segments: list[Segment] = []
         self.current_project_id: str | None = None
@@ -1042,7 +1046,7 @@ class MainWindow(QMainWindow):
         saved_icon_size = self.settings.value("project_icon_size", 230, int)
         self.project_icon_size = min((96, 156, 230), key=lambda size: abs(size - saved_icon_size))
         self.pixels_per_second = 65
-        self.timeline_height = 184
+        self.timeline_height = max(184, min(430, self.settings.value("timeline_panel_height", 184, int)))
         self.thread_pool = QThreadPool.globalInstance()
         self._loading = False
         self._build_ui()
@@ -1055,6 +1059,7 @@ class MainWindow(QMainWindow):
         if state:
             self.restoreState(state)
         QTimer.singleShot(0, lambda: self.set_project_panel_width(self.project_panel_width, persist=False))
+        QTimer.singleShot(0, self.restore_timeline_panel_height)
         self.update_window_title()
 
     def _build_ui(self) -> None:
@@ -1220,7 +1225,7 @@ class MainWindow(QMainWindow):
         timeline_layout.addLayout(track_row)
         self.timeline_height_handle = TimelineHeightHandle(self.timeline_height)
         self.timeline_height_handle.height_changed.connect(self.set_timeline_height)
-        self.timeline_height_handle.finished.connect(self.update_timeline_layout)
+        self.timeline_height_handle.finished.connect(self.finish_timeline_height_resize)
         timeline_layout.addWidget(self.timeline_height_handle)
         outer.addWidget(timeline_shell)
 
@@ -1469,6 +1474,8 @@ class MainWindow(QMainWindow):
         self.project_dock.installEventFilter(self)
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.project_dock)
         self.project_dock.visibilityChanged.connect(self.project_dock_visibility_changed)
+        self.project_dock.dockLocationChanged.connect(lambda *_: self.save_window_panel_state())
+        self.project_dock.topLevelChanged.connect(lambda *_: self.save_window_panel_state())
         self.project_dock.hide()
         self.refresh_project_library()
 
@@ -1485,6 +1492,7 @@ class MainWindow(QMainWindow):
             self.resizeDocks([self.project_dock], [width], Qt.Orientation.Horizontal)
         if persist:
             self.settings.setValue("project_panel_width", width)
+            self.queue_settings_sync()
 
     def update_project_icon_controls(self) -> None:
         labels = {96: "Small", 156: "Medium", 230: "Large"}
@@ -1515,6 +1523,14 @@ class MainWindow(QMainWindow):
 
     def save_prompt_splitter_sizes(self, *_args) -> None:
         self.settings.setValue("prompt_splitter_sizes", json.dumps(self.prompt_splitter.sizes()))
+        self.queue_settings_sync()
+
+    def queue_settings_sync(self) -> None:
+        self._settings_sync_timer.start()
+
+    def save_window_panel_state(self) -> None:
+        self.settings.setValue("window/state", self.saveState())
+        self.queue_settings_sync()
 
     def eventFilter(self, watched, event) -> bool:
         if watched is getattr(self, "project_dock", None) and event.type() == QEvent.Type.Resize:
@@ -1522,6 +1538,8 @@ class MainWindow(QMainWindow):
             if 280 <= width <= 900:
                 self.project_panel_width = width
                 self.settings.setValue("project_panel_width", width)
+                self.settings.setValue("window/state", self.saveState())
+                self.queue_settings_sync()
         return super().eventFilter(watched, event)
 
     def _apply_theme(self) -> None:
@@ -2110,6 +2128,19 @@ class MainWindow(QMainWindow):
         self.add_tile.setFixedHeight(max(152, value - 32))
         self.update_timeline_layout()
         self.mark_dirty()
+
+    def restore_timeline_panel_height(self) -> None:
+        previous_loading = self._loading
+        self._loading = True
+        try:
+            self.set_timeline_height(self.settings.value("timeline_panel_height", self.timeline_height, int))
+        finally:
+            self._loading = previous_loading
+
+    def finish_timeline_height_resize(self) -> None:
+        self.settings.setValue("timeline_panel_height", self.timeline_height)
+        self.queue_settings_sync()
+        self.update_timeline_layout()
 
     def apply_global_prefixes(self) -> None:
         text = self.global_prompt.toPlainText().strip()
