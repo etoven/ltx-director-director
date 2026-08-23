@@ -868,7 +868,12 @@ class MainWindow(QMainWindow):
         intent_label.setObjectName("sectionLabel")
         controls.addWidget(intent_label)
         self.intent = QLineEdit()
-        self.intent.setPlaceholderText("Optional motion, story, or dialogue direction")
+        intent_example = (
+            "Tip: You can request the total sequence length here. Example: Total sequence length: 20 seconds. "
+            "A lost courier discovers a glowing map, crosses the storm, and reaches the beacon at sunrise."
+        )
+        self.intent.setPlaceholderText(intent_example)
+        self.intent.setToolTip(intent_example)
         self.intent.textChanged.connect(self.mark_dirty)
         self.sfx = QPushButton("SFX")
         self.sfx.setCheckable(True)

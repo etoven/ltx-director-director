@@ -32,7 +32,7 @@ Magic Build options:
 - **HDR** places `(4K, HDR, Realistic)` at the beginning of the global prompt.
 - **Reduce Music** instructs the model to place a setting-specific `[SOUND]: Ambient …` line after the quality header. Supplying environmental ambience helps discourage unwanted generated music.
 
-Enter optional Director's Intent, then select **Magic Build**. A blocking animated overlay appears inside the application, prevents conflicting edits while the operation runs, and reports automatic retry attempts without creating another operating-system window. The default timeout is 400 seconds with two additional retries; both values are configurable in Application Settings. The result contains exactly one prompt for every timeline segment and one global prompt. Recommended durations ease smoothly into their new timeline widths instead of snapping instantly.
+Enter optional Director's Intent, then select **Magic Build**. The empty field includes a narrative example and reminds you that it can request a total sequence length, such as `Total sequence length: 20 seconds.` A blocking animated overlay appears inside the application, prevents conflicting edits while the operation runs, and reports automatic retry attempts without creating another operating-system window. The default timeout is 400 seconds with two additional retries; both values are configurable in Application Settings. The result contains exactly one prompt for every timeline segment and one global prompt. Recommended durations ease smoothly into their new timeline widths instead of snapping instantly.
 
 ## 4. Project library
 
