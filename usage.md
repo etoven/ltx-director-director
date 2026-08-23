@@ -46,7 +46,7 @@ Enter optional Director's Intent, then select **Magic Build**. The empty field i
 
 ## 4. Project library
 
-Select **Projects** in the toolbar to open the left project-library panel. The panel provides a searchable gallery with a square thumbnail and short description for every saved project. Drag the dotted grip on the panel's right edge to change its width. The **Icons** menu at the top selects Small, Medium, or Large cards and remembers that choice; cards wrap from left to right whenever the panel is wide enough for additional columns.
+Select **Projects** in the toolbar to open the left project-library panel. The panel provides a searchable gallery with a square thumbnail and short description for every saved project. Sort, Icons, the conditional **↑ UP** control, and the current library or collection title share one compact header row, leaving Search directly beneath it. Drag the dotted grip on the panel's right edge to change its width. The **Icons** menu selects Small, Medium, or Large cards and remembers that choice; cards wrap from left to right whenever the panel is wide enough for additional columns.
 
 - **Save Current** adds the working timeline to the library. The first save asks for a project name and description; later saves update it directly.
 - **Open** or double-clicking a project restores its complete embedded workspace.
