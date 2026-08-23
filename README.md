@@ -66,7 +66,7 @@ In short: use **Project Export** for lossless editing and safekeeping; use **LTX
 - Searchable, resizable local project library with selectable thumbnail sizes, a responsive wrapping grid, collection folders, title sorting, and stable custom drag ordering
 - Automatic Custom-sort activation when a project tile is dragged
 - Multiple live in-memory project workspaces with yellow unsaved-change indicators
-- Persistent window, dialog, and project-panel placement
+- Persistent window, dialog, and project-panel placement and width, with automatic reopening of the last active library project
 - Persistent 75–200% UI text scaling for easier reading on high-DPI displays
 - No server, database, account, or telemetry
 
@@ -98,7 +98,7 @@ python3 -m pip install --upgrade "$(wget -qO- https://api.github.com/repos/etove
 Or download the `.whl` file from the latest GitHub release, then install it with:
 
 ```bash
-python3 -m pip install ./ltx_prompt_director-1.11.0-py3-none-any.whl
+python3 -m pip install ./ltx_prompt_director-1.11.1-py3-none-any.whl
 ```
 
 You can also install a locally built wheel from the repository:

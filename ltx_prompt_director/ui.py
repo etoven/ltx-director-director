@@ -1060,6 +1060,7 @@ class MainWindow(QMainWindow):
         self.project_sessions: dict[str, dict] = {}
         self.current_collection: str | None = None
         self.autofit_tail_extension = 0
+        self._restoring_layout = True
         self.project_panel_width = max(280, min(900, self.settings.value("project_panel_width", 330, int)))
         saved_icon_size = self.settings.value("project_icon_size", 230, int)
         self.project_icon_size = min((96, 156, 230), key=lambda size: abs(size - saved_icon_size))
@@ -1076,8 +1077,9 @@ class MainWindow(QMainWindow):
             self.restoreGeometry(geometry)
         if state:
             self.restoreState(state)
-        QTimer.singleShot(0, lambda: self.set_project_panel_width(self.project_panel_width, persist=False))
+        QTimer.singleShot(0, self.restore_project_panel_width)
         QTimer.singleShot(0, self.restore_timeline_panel_height)
+        QTimer.singleShot(0, self.restore_last_project)
         self.update_window_title()
 
     def _build_ui(self) -> None:
@@ -1343,7 +1345,7 @@ class MainWindow(QMainWindow):
         self.speaker_accent.setEditable(True)
         self.speaker_accent.addItems([
             "(Image/context provided)", "Neutral", "General American", "British RP", "Yorkshire",
-            "Australian", "Canadian", "Irish", "Scottish", "Indian English", "Mexican Spanish",
+            "Australian", "Canadian", "Irish", "Scottish", "Indian English", "Asian (Chinese)", "Mexican Spanish",
             "Castilian Spanish", "Brazilian Portuguese", "European Portuguese",
         ])
         self.speaker_accent.setCurrentIndex(0)
@@ -1591,6 +1593,14 @@ class MainWindow(QMainWindow):
         if visible:
             QTimer.singleShot(0, lambda: self.set_project_panel_width(self.project_panel_width, persist=False))
 
+    def restore_project_panel_width(self) -> None:
+        """Restore the saved dock width without startup resize events overwriting it."""
+        self.set_project_panel_width(self.project_panel_width, persist=False)
+        QTimer.singleShot(0, self.finish_layout_restore)
+
+    def finish_layout_restore(self) -> None:
+        self._restoring_layout = False
+
     def set_project_panel_width(self, width: int, persist: bool = True) -> None:
         width = max(280, min(900, int(width)))
         self.project_panel_width = width
@@ -1641,7 +1651,7 @@ class MainWindow(QMainWindow):
         self.queue_settings_sync()
 
     def eventFilter(self, watched, event) -> bool:
-        if watched is getattr(self, "project_dock", None) and event.type() == QEvent.Type.Resize:
+        if watched is getattr(self, "project_dock", None) and event.type() == QEvent.Type.Resize and not self._restoring_layout:
             width = self.project_dock.width()
             if 280 <= width <= 900:
                 self.project_panel_width = width
@@ -2052,6 +2062,8 @@ class MainWindow(QMainWindow):
         }
         self.refresh_project_library(meta["id"])
         self.project_dock.show()
+        self.settings.setValue("last_project_id", str(meta["id"]))
+        self.queue_settings_sync()
         self.statusBar().showMessage(f"Project saved to library: {meta['name']}")
 
     def open_library_project(self) -> None:
@@ -2086,6 +2098,8 @@ class MainWindow(QMainWindow):
             }
             self.update_window_title()
             self.refresh_project_library(project_id)
+            self.settings.setValue("last_project_id", project_id)
+            self.queue_settings_sync()
             self.statusBar().showMessage(f"Project opened: {meta['name']}")
         except Exception as error:
             self._loading = False
@@ -2119,6 +2133,25 @@ class MainWindow(QMainWindow):
             self.project_dirty = True
         self.refresh_project_library()
         self.statusBar().showMessage(f"Project deleted: {meta.get('name', 'Untitled project')}")
+
+    def restore_last_project(self) -> None:
+        """Open the saved library project that was active at the previous shutdown."""
+        project_id = str(self.settings.value("last_project_id", "") or "")
+        if not project_id:
+            return
+        meta = next((record for record in self.library_records() if str(record.get("id", "")) == project_id), None)
+        if not meta:
+            self.settings.remove("last_project_id")
+            return
+        self.current_collection = str(meta.get("collection", "")) or None
+        self.refresh_project_library(project_id, preserve_scroll=False)
+        for row in range(self.project_list.count()):
+            item = self.project_list.item(row)
+            value = item.data(Qt.ItemDataRole.UserRole) or {}
+            if value.get("kind") == "project" and str(value.get("id", "")) == project_id:
+                self.project_list.setCurrentItem(item)
+                self.open_library_project()
+                return
 
     def edit_library_project(self) -> None:
         meta = self.selected_library_project()
@@ -2169,6 +2202,13 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"LTX Director - Director :: {self.current_project_name}")
 
     def closeEvent(self, event) -> None:
+        if hasattr(self, "project_dock") and 280 <= self.project_dock.width() <= 900:
+            self.project_panel_width = self.project_dock.width()
+            self.settings.setValue("project_panel_width", self.project_panel_width)
+        if self.current_project_id:
+            self.settings.setValue("last_project_id", self.current_project_id)
+        else:
+            self.settings.remove("last_project_id")
         self.settings.setValue("window/geometry", self.saveGeometry())
         self.settings.setValue("window/state", self.saveState())
         self.settings.sync()
