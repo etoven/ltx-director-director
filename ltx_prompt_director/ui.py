@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
     QDockWidget, QFileDialog, QFormLayout, QFrame, QHBoxLayout, QLabel, QLineEdit,
     QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox, QPushButton,
-    QSizePolicy, QSlider, QSpinBox, QStatusBar, QTextEdit, QToolBar, QVBoxLayout, QWidget,
+    QSizePolicy, QSlider, QSpinBox, QSplitter, QSplitterHandle, QStatusBar, QTextEdit, QToolBar, QVBoxLayout, QWidget,
 )
 
 from .ai import GEMINI_MODELS, build_prompts, retryable_connection_error
@@ -713,6 +713,49 @@ class ProjectPanelWidthHandle(QFrame):
             event.accept()
 
 
+class DottedPromptSplitterHandle(QSplitterHandle):
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        scale = getattr(self.splitter(), "scale_factor", 1.0)
+        color = QColor("#71838d") if self.underMouse() else QColor("#4f5c63")
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(color)
+        diameter = max(3.0, 3.2 * scale)
+        spacing = 8 * scale
+        center_x = self.width() / 2
+        center_y = self.height() / 2
+        for index in range(-3, 4):
+            painter.drawEllipse(QRectF(center_x + index * spacing - diameter / 2, center_y - diameter / 2, diameter, diameter))
+
+    def enterEvent(self, event) -> None:
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        self.update()
+        super().leaveEvent(event)
+
+
+class DottedPromptSplitter(QSplitter):
+    def __init__(self, parent=None):
+        super().__init__(Qt.Orientation.Vertical, parent)
+        self.scale_factor = 1.0
+        self.setObjectName("promptSplitter")
+        self.setChildrenCollapsible(False)
+        self.set_scale(1.0)
+
+    def createHandle(self) -> QSplitterHandle:
+        return DottedPromptSplitterHandle(self.orientation(), self)
+
+    def set_scale(self, scale: float) -> None:
+        self.scale_factor = max(.75, min(2.0, scale))
+        self.setHandleWidth(round(14 * self.scale_factor))
+        for index in range(1, self.count()):
+            self.handle(index).update()
+
+
 class SegmentCard(QFrame):
     duration_changed = Signal(float)
     delete_requested = Signal()
@@ -1033,6 +1076,7 @@ class MainWindow(QMainWindow):
         self.project_dirty = False
         self.project_sessions: dict[str, dict] = {}
         self.current_collection: str | None = None
+        self.autofit_tail_extension = 0
         self.project_panel_width = max(280, min(900, self.settings.value("project_panel_width", 330, int)))
         saved_icon_size = self.settings.value("project_icon_size", 230, int)
         self.project_icon_size = min((96, 156, 230), key=lambda size: abs(size - saved_icon_size))
@@ -1296,7 +1340,6 @@ class MainWindow(QMainWindow):
         segment_footer.addStretch()
         segment_footer.addWidget(self.copy_segment, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         segment_layout.addLayout(segment_footer)
-        outer.addWidget(segment_panel, 3)
         global_panel = QFrame()
         global_panel.setObjectName("promptPanel")
         global_layout = QVBoxLayout(global_panel)
@@ -1328,7 +1371,16 @@ class MainWindow(QMainWindow):
         global_footer.addStretch()
         global_footer.addWidget(self.copy_global, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         global_layout.addLayout(global_footer)
-        outer.addWidget(global_panel, 2)
+        segment_panel.setMinimumHeight(90)
+        global_panel.setMinimumHeight(90)
+        self.prompt_splitter = DottedPromptSplitter()
+        self.prompt_splitter.addWidget(segment_panel)
+        self.prompt_splitter.addWidget(global_panel)
+        self.prompt_splitter.setStretchFactor(0, 3)
+        self.prompt_splitter.setStretchFactor(1, 2)
+        self.prompt_splitter.splitterMoved.connect(self.save_prompt_splitter_sizes)
+        outer.addWidget(self.prompt_splitter, 1)
+        QTimer.singleShot(0, self.restore_prompt_splitter_sizes)
         self.setCentralWidget(root)
         self.setStatusBar(QStatusBar())
         self.update_summary()
@@ -1467,6 +1519,17 @@ class MainWindow(QMainWindow):
         self.update_project_icon_controls()
         self.refresh_project_library(preserve_scroll=False)
 
+    def restore_prompt_splitter_sizes(self) -> None:
+        try:
+            sizes = json.loads(str(self.settings.value("prompt_splitter_sizes", "[]")))
+        except (ValueError, TypeError):
+            sizes = []
+        if isinstance(sizes, list) and len(sizes) == 2 and all(int(value) > 0 for value in sizes):
+            self.prompt_splitter.setSizes([int(value) for value in sizes])
+
+    def save_prompt_splitter_sizes(self, *_args) -> None:
+        self.settings.setValue("prompt_splitter_sizes", json.dumps(self.prompt_splitter.sizes()))
+
     def _apply_theme(self) -> None:
         scale = max(75, min(200, self.settings.value("ui_text_scale", 100, int))) / 100
 
@@ -1477,7 +1540,7 @@ class MainWindow(QMainWindow):
             return max(1, round(size * scale))
 
         theme = """
-        QMainWindow,QWidget{background:#24292c;color:#d9dcde;font:11px Arial} QToolBar{background:#303537;border:0;spacing:6px;padding:5px}
+        QMainWindow,QWidget{background:#24292c;color:#d9dcde;font:11px Arial} QMainWindow::separator{width:0;height:0;background:transparent} QToolBar{background:#303537;border:0;spacing:6px;padding:5px}
         QToolButton,QPushButton,QComboBox,QSpinBox,QDoubleSpinBox,QLineEdit{background:#303436;border:1px solid #101213;border-radius:3px;padding:3px 7px;min-height:19px}
         QToolButton:hover,QPushButton:hover{background:#41474a} QToolButton:pressed,QPushButton:pressed{background:#202729;border-color:#79a8c5} QLineEdit{background:#1e2122}
         QSpinBox,QDoubleSpinBox{padding-right:__SPIN_PAD__px} QSpinBox::up-button,QDoubleSpinBox::up-button{subcontrol-origin:border;subcontrol-position:top right;width:__SPIN_BUTTON__px;background:#3b4347;border:0;border-left:1px solid #171a1c;border-bottom:1px solid #202527;border-top-right-radius:3px} QSpinBox::down-button,QDoubleSpinBox::down-button{subcontrol-origin:border;subcontrol-position:bottom right;width:__SPIN_BUTTON__px;background:#343b3f;border:0;border-left:1px solid #171a1c;border-top:1px solid #202527;border-bottom-right-radius:3px}
@@ -1492,6 +1555,7 @@ class MainWindow(QMainWindow):
         #resizeHandle{background:#606669;border-left:1px solid #9ca2a4} #resizeHandle:hover{background:#8aa6b7;border-left:2px solid #d8edf8}
         #timelineHeightHandle{background:transparent;border:0} #timelineHeightHandle:hover{background:rgba(88,118,134,35);border:0}
         #projectPanelWidthHandle{background:transparent;border:0} #projectPanelWidthHandle:hover{background:rgba(88,118,134,35);border:0}
+        #promptSplitter::handle{background:transparent;border:0} #promptSplitter::handle:hover{background:rgba(88,118,134,35);border:0}
         #segmentPreview{background:#17191a;border-top:1px solid #34383a}
         #addTile{border:1px dashed #596065;background:#111415;color:#828b90;font-size:10px} #sequenceBar{background:#1c1f20;border:1px solid #0e1011;border-radius:3px;padding:12px;font-weight:bold}
         #sectionLabel{color:#939ca1;font-size:8px;letter-spacing:1px} #muted{color:#879095;font-size:9px} #promptPanel{background:#252728;border:1px solid #101213;border-radius:3px}
@@ -1528,6 +1592,7 @@ class MainWindow(QMainWindow):
         self.ruler.setFixedHeight(metric(28))
         self.timeline_height_handle.set_scale(scale)
         self.project_width_handle.set_scale(scale)
+        self.prompt_splitter.set_scale(scale)
         self.project_list.setSpacing(metric(4))
         for button in (self.provider_button, self.sfx, self.spoken_dialog, self.hdr, self.reduce_music, self.magic_button, self.start_button, self.end_button):
             button.setMinimumWidth(button.fontMetrics().horizontalAdvance(button.text()) + metric(18))
@@ -1994,6 +2059,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("New project ready")
 
     def set_timeline_scale(self, value: int) -> None:
+        self.autofit_tail_extension = 0
         self.pixels_per_second = value
         self.ruler.set_scale(value)
         self.update_timeline_layout()
@@ -2005,8 +2071,16 @@ class MainWindow(QMainWindow):
             return
         available = max(200, self.timeline.viewport().width() - 6)
         fitted = max(20, min(160, int(available / total)))
+        self.timeline_scale.blockSignals(True)
         self.timeline_scale.setValue(fitted)
+        self.timeline_scale.blockSignals(False)
+        self.pixels_per_second = fitted
+        self.ruler.set_scale(fitted)
+        base_width = sum(max(48, int(segment.duration * fitted)) for segment in self.segments)
+        self.autofit_tail_extension = max(0, available - base_width)
+        self.update_timeline_layout()
         self.timeline.horizontalScrollBar().setValue(0)
+        self.mark_dirty()
 
     def maximum_safe_timeline_height(self) -> int:
         """Keep timeline growth inside the current desktop-sized client area."""
@@ -2079,6 +2153,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Added {added} media file{'s' if added != 1 else ''}")
 
     def refresh_timeline(self, selected: int = 0) -> None:
+        self.autofit_tail_extension = 0
         indicator = getattr(self, "timeline_loading", None) if self.segments else None
         if indicator:
             indicator.show_loading()
@@ -2127,7 +2202,10 @@ class MainWindow(QMainWindow):
                 segment = by_id.get(item.data(Qt.ItemDataRole.UserRole))
                 if not segment:
                     continue
-                item.setSizeHint(QSize(max(48, int(segment.duration * self.pixels_per_second)), card_height))
+                width = max(48, int(segment.duration * self.pixels_per_second))
+                if row == self.timeline.count() - 1:
+                    width += self.autofit_tail_extension
+                item.setSizeHint(QSize(width, card_height))
                 card = self.timeline.itemWidget(item)
                 if isinstance(card, SegmentCard):
                     card.set_timeline_edges(row == 0, row == self.timeline.count() - 1)
@@ -2183,6 +2261,7 @@ class MainWindow(QMainWindow):
             self.refresh_timeline(self.timeline.currentRow())
 
     def change_duration(self, segment_id: str, value: float) -> None:
+        self.autofit_tail_extension = 0
         segment = next(item for item in self.segments if item.id == segment_id)
         allowed = min(value, MAX_SECONDS - (self.total_duration() - segment.duration))
         segment.duration = max(1, round(allowed * 2) / 2)
@@ -2363,6 +2442,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Magic Build complete")
 
     def animate_timeline_durations(self, target_durations: list[float]) -> None:
+        self.autofit_tail_extension = 0
         if not self.segments or self.timeline.count() != len(self.segments):
             for segment, target in zip(self.segments, target_durations):
                 segment.duration = target
