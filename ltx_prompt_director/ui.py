@@ -773,7 +773,14 @@ class SegmentCard(QFrame):
         height = max(80, preview_height)
         width = max(36, int(self.segment.duration * pixels_per_second) - 14)
         self.preview.setMinimumHeight(height)
-        self.preview.setPixmap(self.source_pixmap.scaled(width, height, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+        if not self.source_pixmap.isNull():
+            scaled = self.source_pixmap.scaled(
+                width, height, Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            left = max(0, (scaled.width() - width) // 2)
+            top = max(0, (scaled.height() - height) // 2)
+            self.preview.setPixmap(scaled.copy(left, top, width, height))
         self.resize_handle.pixels_per_second = pixels_per_second
         self.resize_handle.duration = self.segment.duration
         self.duration_label.setText(f"{self.segment.duration:.1f}s")
