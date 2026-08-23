@@ -117,10 +117,11 @@ class WorkerSignals(QObject):
 
 
 class MagicWorker(QRunnable):
-    def __init__(self, args: tuple, retries: int):
+    def __init__(self, args: tuple, retries: int, retry_cooldown: int):
         super().__init__()
         self.args = args
         self.retries = retries
+        self.retry_cooldown = max(0, int(retry_cooldown))
         self.signals = WorkerSignals()
 
     def run(self) -> None:
@@ -134,8 +135,11 @@ class MagicWorker(QRunnable):
                 if attempt >= attempts or not retryable_connection_error(error):
                     self.signals.failed.emit(str(error))
                     return
-                self.signals.progress.emit(attempt + 1, attempts, "Provider response stumbled—rewinding for another take…")
-                time.sleep(min(2 ** attempt, 8))
+                for remaining in range(self.retry_cooldown, 0, -1):
+                    self.signals.progress.emit(attempt + 1, attempts, f"Provider response stumbled—retrying in {remaining}s…")
+                    time.sleep(1)
+                if self.retry_cooldown == 0:
+                    self.signals.progress.emit(attempt + 1, attempts, "Provider response stumbled—retrying now…")
 
 
 class TimelineListWidget(QListWidget):
@@ -840,6 +844,12 @@ class SettingsDialog(QDialog):
         self.retries.setRange(0, 10)
         self.retries.setValue(settings.value("api_retries", 2, int))
         self.retries.setToolTip("Additional attempts after the initial API request")
+        self.retry_cooldown = QSpinBox()
+        self.retry_cooldown.setRange(0, 300)
+        self.retry_cooldown.setSingleStep(5)
+        self.retry_cooldown.setSuffix(" seconds")
+        self.retry_cooldown.setValue(settings.value("api_retry_cooldown", 10, int))
+        self.retry_cooldown.setToolTip("Time to wait before each retry; set to 0 to retry immediately")
         text_scale = settings.value("ui_text_scale", 100, int)
         self.ui_text_scale = QSlider(Qt.Orientation.Horizontal)
         self.ui_text_scale.setRange(75, 200)
@@ -873,6 +883,7 @@ class SettingsDialog(QDialog):
         form.addRow("OpenAI API key", self.openai)
         form.addRow("API timeout", self.timeout)
         form.addRow("Connection retries", self.retries)
+        form.addRow("Retry cooldown", self.retry_cooldown)
         form.addRow("UI text scale (DPI)", text_scale_row)
         form.addRow("Default segment export folder", save_directory_row)
         form.addRow("", self.remember)
@@ -890,6 +901,7 @@ class SettingsDialog(QDialog):
         self.settings.setValue("remember_keys", self.remember.isChecked())
         self.settings.setValue("api_timeout", self.timeout.value())
         self.settings.setValue("api_retries", self.retries.value())
+        self.settings.setValue("api_retry_cooldown", self.retry_cooldown.value())
         self.settings.setValue("ui_text_scale", self.ui_text_scale.value())
         self.settings.setValue("segment_export_dir", self.segment_save_dir.text().strip())
         self.settings.setValue("dialogs/settings_geometry", self.saveGeometry())
@@ -2564,12 +2576,13 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Magic Build is analyzing optimized preview frames…")
         timeout = self.settings.value("api_timeout", 400, int)
         retries = self.settings.value("api_retries", 2, int)
+        retry_cooldown = self.settings.value("api_retry_cooldown", 10, int)
         self.magic_overlay.update_attempt(1, retries + 1, "Analyzing frames and directing motion…")
         self.magic_overlay.show_overlay()
         worker = MagicWorker((
             self.segments.copy(), provider, self.settings.value("gemini_model", GEMINI_MODELS[0]), key,
             self.intent.text(), self.sfx.isChecked(), self.spoken_dialog.isChecked(), self.hdr.isChecked(), self.reduce_music.isChecked(), timeout,
-        ), retries)
+        ), retries, retry_cooldown)
         worker.signals.progress.connect(self.magic_progress)
         worker.signals.finished.connect(self.magic_finished)
         worker.signals.failed.connect(self.magic_failed)

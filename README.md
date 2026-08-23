@@ -57,7 +57,7 @@ In short: use **Project Export** for lossless editing and safekeeping; use **LTX
 - Branded application icon and automatic per-user Linux desktop-menu installation
 - WebM support with a preview captured at the start of the final second
 - Only one optimized frame per WebM is sent to vision AI
-- Gemini and OpenAI support with local key storage, configurable 400-second timeout, and transient connection retries
+- Gemini and OpenAI support with local key storage, configurable API timeout, retry count, and cooldown countdown between transient connection retries
 - Blocking in-app Magic Build overlay with custom animation
 - Independent SFX, Spoken Dialog, HDR, and Reduce Music controls
 - LTX Director-compatible JSON import/export
@@ -97,7 +97,7 @@ python3 -m pip install --upgrade "$(wget -qO- https://api.github.com/repos/etove
 Or download the `.whl` file from the latest GitHub release, then install it with:
 
 ```bash
-python3 -m pip install ./ltx_prompt_director-1.8.9-py3-none-any.whl
+python3 -m pip install ./ltx_prompt_director-1.9.0-py3-none-any.whl
 ```
 
 You can also install a locally built wheel from the repository:
