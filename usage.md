@@ -25,7 +25,7 @@ During timeline rebuilds, an animated loading indicator remains visible over the
 
 Open **AI Settings**, select Gemini or OpenAI, choose the Gemini model when applicable, and enter the corresponding API key.
 
-Use **UI text scale (DPI)** in Application Settings to resize text throughout the main window from 75% to 200%. The selected scale is saved and restored on future launches.
+Use the **Text scale** slider in the main toolbar for immediate live adjustment, or the matching **UI text scale (DPI)** slider in Application Settings. Both controls resize text throughout the main window from 75% to 200%, stay synchronized, and restore the selected scale on future launches.
 
 Enable persistent storage only on a trusted computer. Keys are stored with Qt's local application settings and are never written to an exported file.
 
