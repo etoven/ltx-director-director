@@ -723,10 +723,11 @@ class SegmentCard(QFrame):
         self.segment = segment
         self.setCursor(Qt.CursorShape.OpenHandCursor)
         self.setObjectName("segmentCard")
-        outer = QHBoxLayout(self)
-        outer.setContentsMargins(0, 0, 0, 0)
-        outer.setSpacing(0)
+        self.outer_layout = QHBoxLayout(self)
+        self.outer_layout.setContentsMargins(0, 0, 0, 0)
+        self.outer_layout.setSpacing(0)
         content = QWidget()
+        content.setObjectName("segmentCardBody")
         content.setCursor(Qt.CursorShape.OpenHandCursor)
         layout = QVBoxLayout(content)
         layout.setContentsMargins(2, 2, 2, 2)
@@ -762,12 +763,15 @@ class SegmentCard(QFrame):
         self.duration_label.setAlignment(Qt.AlignmentFlag.AlignRight)
         self.duration_label.setObjectName("tileDuration")
         layout.addWidget(self.duration_label)
-        outer.addWidget(content, 1)
+        self.outer_layout.addWidget(content, 1)
         self.resize_handle = ResizeHandle(segment.duration, pixels_per_second)
         self.resize_handle.preview.connect(self._preview_duration)
         self.resize_handle.finished.connect(self.resize_finished)
-        outer.addWidget(self.resize_handle)
+        self.outer_layout.addWidget(self.resize_handle)
         self.update_layout(preview_height, pixels_per_second)
+
+    def set_timeline_edges(self, first: bool, last: bool) -> None:
+        self.outer_layout.setContentsMargins(0 if first else 1, 0, 0 if last else 1, 0)
 
     def update_layout(self, preview_height: int, pixels_per_second: int) -> None:
         height = max(80, preview_height)
@@ -1481,9 +1485,9 @@ class MainWindow(QMainWindow):
         QComboBox{padding-right:__COMBO_PAD__px} QComboBox::drop-down{subcontrol-origin:padding;subcontrol-position:top right;width:__COMBO_BUTTON__px;background:#394145;border:0;border-left:1px solid #171a1c;border-top-right-radius:3px;border-bottom-right-radius:3px} QComboBox::drop-down:hover{background:#506471} QComboBox::drop-down:pressed{background:#274e66} QComboBox::down-arrow{width:__ARROW_SIZE__px;height:__ARROW_SIZE__px} QComboBox QAbstractItemView{background:#202527;color:#e1e5e7;border:1px solid #52616a;outline:0;padding:4px;selection-background-color:#3b6f9c;selection-color:#fff}
         QSlider::groove:horizontal{height:__SLIDER_GROOVE__px;background:#161b1d;border:1px solid #0d1011;border-radius:__SLIDER_RADIUS__px} QSlider::sub-page:horizontal{background:#367da6;border:1px solid #4b9ac6;border-radius:__SLIDER_RADIUS__px} QSlider::add-page:horizontal{background:#161b1d;border-radius:__SLIDER_RADIUS__px} QSlider::handle:horizontal{width:__SLIDER_HANDLE__px;margin:-__SLIDER_MARGIN__px 0;background:#607883;border:2px solid #8fb9cd;border-radius:__SLIDER_HANDLE_RADIUS__px} QSlider::handle:horizontal:hover{background:#78a8be;border-color:#c5ebff} QSlider::handle:horizontal:pressed{background:#4aa3d2;border-color:#e1f6ff}
         #timelineShell{background:#0d0f10;border:1px solid #323638;border-radius:3px} #mainTrackLabel{background:#191c1d;border-right:1px solid #34383a;font-weight:bold}
-        QListWidget{background:#0d0f10;border:0;padding-top:26px} QListWidget::item{border:1px solid #696b6c;background:#252728;margin:0} QListWidget::item:selected{border:2px solid #f1f1f1;background:#293034}
-        #timeline[dropActive="true"]{border:3px solid #68b9ee;background:#13232c} #timeline[dropActive="false"]{border:1px solid #323638}
-        #segmentCard{background:#252728;border:0} #mediaBadge{background:#e5e5e5;color:#262626;font-weight:bold;padding:2px} #roleBadge{background:#36393a;color:#eee;padding:2px}
+        QListWidget{background:#0d0f10;border:0;padding:0} QListWidget::item{border:1px solid #696b6c;background:#252728;margin:0} QListWidget::item:selected{border:2px solid #f1f1f1;background:#293034}
+        #timeline{padding:3px;background:#0d0f10} #timeline::item{background:#0d0f10;border:0} #timeline::item:selected{background:#0d0f10;border:1px solid #f1f1f1} #timeline[dropActive="true"]{border:3px solid #68b9ee;background:#13232c} #timeline[dropActive="false"]{border:1px solid #323638}
+        #segmentCard{background:transparent;border:0} #segmentCardBody{background:#252728;border:0} #mediaBadge{background:#e5e5e5;color:#262626;font-weight:bold;padding:2px} #roleBadge{background:#36393a;color:#eee;padding:2px}
         #tileDelete{padding:0;min-height:0;max-height:20px;background:#454849;color:#ddd;border:0} #tileDelete:hover{background:#a94444;color:#fff;border:1px solid #e07878} #tileTitle{background:#242627;padding:3px;font-size:9px} #tileDuration{color:#a2a7a9;font-size:8px}
         #resizeHandle{background:#606669;border-left:1px solid #9ca2a4} #resizeHandle:hover{background:#8aa6b7;border-left:2px solid #d8edf8}
         #timelineHeightHandle{background:transparent;border:0} #timelineHeightHandle:hover{background:rgba(88,118,134,35);border:0}
@@ -2093,6 +2097,7 @@ class MainWindow(QMainWindow):
                 card.duration_changed.connect(lambda value, sid=segment.id: self.change_duration(sid, value))
                 card.delete_requested.connect(lambda sid=segment.id: self.delete_by_id(sid))
                 card.resize_finished.connect(lambda sid=segment.id: self.finish_resize(sid))
+                card.set_timeline_edges(index == 0, index == len(self.segments) - 1)
                 self.timeline.setItemWidget(item, card)
                 if indicator:
                     indicator.raise_()
@@ -2125,6 +2130,7 @@ class MainWindow(QMainWindow):
                 item.setSizeHint(QSize(max(48, int(segment.duration * self.pixels_per_second)), card_height))
                 card = self.timeline.itemWidget(item)
                 if isinstance(card, SegmentCard):
+                    card.set_timeline_edges(row == 0, row == self.timeline.count() - 1)
                     card.update_layout(preview_height, self.pixels_per_second)
             self.timeline.doItemsLayout()
             self.update_summary()
@@ -2136,6 +2142,7 @@ class MainWindow(QMainWindow):
             return
         by_id = {segment.id: segment for segment in self.segments}
         self.segments = [by_id[self.timeline.item(row).data(Qt.ItemDataRole.UserRole)] for row in range(self.timeline.count())]
+        self.update_timeline_layout()
         self.mark_dirty()
 
     def current_segment(self) -> Segment | None:
