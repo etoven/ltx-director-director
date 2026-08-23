@@ -49,6 +49,8 @@ Several library projects can remain open as live in-memory workspaces. Clicking 
 
 Assigning a collection groups related projects into a folder-like tile. Its cover is a 2×2 grid made from the four most recently saved member thumbnails. Open the collection to see its projects; select **↑ UP** to return to the top-level library. Collected projects appear only inside their collection.
 
+The project library uses smooth per-pixel scrolling. Mouse-wheel movement is eased in short increments instead of jumping an entire project tile, while high-resolution touchpads retain direct pixel scrolling.
+
 Library projects are stored in the operating system's per-user application-data directory. They use the same self-contained media format as Project Export, while lightweight metadata keeps the visual gallery responsive.
 
 ## 5. LTX Director files

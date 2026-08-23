@@ -15,7 +15,7 @@ from uuid import uuid4
 from PySide6.QtCore import QEasingCurve, QObject, QRunnable, QRectF, QSettings, QSize, QStandardPaths, Qt, QThreadPool, QTimer, QVariantAnimation, Signal
 from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
-    QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
+    QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
     QDockWidget, QFileDialog, QFormLayout, QFrame, QHBoxLayout, QLabel, QLineEdit,
     QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox, QPushButton,
     QSizePolicy, QSlider, QSpinBox, QStatusBar, QTextEdit, QToolBar, QVBoxLayout, QWidget,
@@ -195,7 +195,46 @@ class ProjectListWidget(QListWidget):
         self._press_position = None
         self._drag_row = -1
         self._reordering = False
+        self._scroll_animation = None
+        self._scroll_target = 0
         self.setDragDropMode(QListWidget.DragDropMode.NoDragDrop)
+        self.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.verticalScrollBar().setSingleStep(24)
+
+    def wheelEvent(self, event) -> None:
+        bar = self.verticalScrollBar()
+        pixels = event.pixelDelta().y()
+        if pixels:
+            if self._scroll_animation:
+                self._scroll_animation.stop()
+                self._scroll_animation = None
+            bar.setValue(bar.value() - pixels)
+            self._scroll_target = bar.value()
+            event.accept()
+            return
+        degrees = event.angleDelta().y()
+        if not degrees:
+            super().wheelEvent(event)
+            return
+        base = self._scroll_target if self._scroll_animation else bar.value()
+        distance = round(-(degrees / 120) * 96)
+        self._scroll_target = max(bar.minimum(), min(bar.maximum(), base + distance))
+        if self._scroll_animation:
+            self._scroll_animation.stop()
+        animation = QVariantAnimation(self)
+        animation.setDuration(175)
+        animation.setStartValue(bar.value())
+        animation.setEndValue(self._scroll_target)
+        animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        animation.valueChanged.connect(lambda value: bar.setValue(round(value)))
+        animation.finished.connect(self._scroll_finished)
+        self._scroll_animation = animation
+        animation.start()
+        event.accept()
+
+    def _scroll_finished(self) -> None:
+        self._scroll_animation = None
+        self._scroll_target = self.verticalScrollBar().value()
 
     def mousePressEvent(self, event) -> None:
         self._press_position = event.position().toPoint()
