@@ -2,6 +2,10 @@
 
 **LTX Director - Director** is a native companion app for the [LTXDirector custom node for ComfyUI](https://github.com/WhatDreamsCost/WhatDreamsCost-ComfyUI). Its primary purpose is to prepare image and WebM timelines outside ComfyUI, use Gemini or OpenAI to build LTX Video 2.3 prompts, and export the finished sequence directly into LTXDirector.
 
+![LTX Director - Director feature overview](docs/images/feature-overview.png)
+
+*Direct every frame: organize projects, plan a duration-scaled visual timeline, generate production-ready prompts, refine individual segments, and export the result to LTXDirector.*
+
 ![LTX Director - Director application overview](docs/images/ltx-director-director-overview.png)
 
 ## What it does
@@ -20,7 +24,7 @@ LTX Director - Director turns a folder of reference frames into a structured LTX
 
 ![Generated segment and global prompts](docs/images/generated-prompts.png)
 
-*Magic Build creates the selected segment's motion prompt and a global prompt that keeps subject identity, setting, lighting, camera, and style consistent across the sequence.*
+*Magic Build creates every segment's motion prompt and the shared global continuity prompt. Refine Timing and Refine Prompt then provide focused control over the selected segment without rebuilding the sequence.*
 
 ## Project library
 
