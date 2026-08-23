@@ -10,7 +10,7 @@ LTX Director - Director turns a folder of reference frames into a structured LTX
 
 1. Start a project, add images or WebM clips, and arrange them directly on the visual timeline.
 2. Mark each segment as a start frame or end frame, then drag its edge to set the duration.
-3. Describe the overall scene in **Director's Intent** and optionally enable SFX or Spoken Dialog.
+3. Describe the overall scene in the multiline **Director's Intent**, optionally set an exact total sequence length, and enable SFX or Spoken Dialog with speaker context when needed.
 4. Run **Magic Build** to refine timing and generate a focused prompt for every segment.
 5. Review the shared global continuity prompt, then export the sequence as JSON for the ComfyUI LTXDirector node.
 
@@ -60,6 +60,7 @@ In short: use **Project Export** for lossless editing and safekeeping; use **LTX
 - Gemini and OpenAI support with local key storage, configurable API timeout, retry count, and cooldown countdown between transient connection retries
 - Blocking in-app Magic Build overlay with custom animation
 - Independent SFX, Spoken Dialog, HDR, and Reduce Music controls
+- Dedicated total-length and speaker-nationality controls dynamically composed into the authoritative Magic Build request
 - LTX Director-compatible JSON import/export
 - Complete portable project import/export, including embedded media
 - Searchable, resizable local project library with selectable thumbnail sizes, a responsive wrapping grid, collection folders, title sorting, and stable custom drag ordering
@@ -97,7 +98,7 @@ python3 -m pip install --upgrade "$(wget -qO- https://api.github.com/repos/etove
 Or download the `.whl` file from the latest GitHub release, then install it with:
 
 ```bash
-python3 -m pip install ./ltx_prompt_director-1.9.0-py3-none-any.whl
+python3 -m pip install ./ltx_prompt_director-1.10.0-py3-none-any.whl
 ```
 
 You can also install a locally built wheel from the repository:

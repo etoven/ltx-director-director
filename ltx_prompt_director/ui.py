@@ -1271,10 +1271,11 @@ class MainWindow(QMainWindow):
         intent_label = QLabel("DIRECTOR'S INTENT")
         intent_label.setObjectName("panelTitle")
         intent_row.addWidget(intent_label)
-        self.intent = QLineEdit()
+        self.intent = QTextEdit()
+        self.intent.setAcceptRichText(False)
         intent_example = (
-            "Tip: You can request the total sequence length here. Example: Total sequence length: 20 seconds. "
-            "A lost courier discovers a glowing map, crosses the storm, and reaches the beacon at sunrise."
+            "Example: A lost courier discovers a glowing map, crosses the storm, and reaches the beacon at sunrise. "
+            "Describe the narrative, action, pacing, camera, dialogue wording, and ending you want."
         )
         self.intent.setPlaceholderText(intent_example)
         self.intent.setToolTip(intent_example)
@@ -1287,7 +1288,7 @@ class MainWindow(QMainWindow):
         self.spoken_dialog.setCheckable(True)
         self.spoken_dialog.setObjectName("audioToggle")
         self.spoken_dialog.setToolTip("Allow Magic Build to include spoken-dialog direction when supported by the scene")
-        self.spoken_dialog.toggled.connect(self.mark_dirty)
+        self.spoken_dialog.toggled.connect(self.update_spoken_dialog_controls)
         self.hdr = QPushButton("HDR")
         self.hdr.setCheckable(True)
         self.hdr.setObjectName("qualityToggle")
@@ -1305,7 +1306,7 @@ class MainWindow(QMainWindow):
         for button in (self.sfx, self.spoken_dialog, self.hdr, self.reduce_music, self.magic_button):
             button.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         intent_row.addWidget(self.intent, 1)
-        intent_row.addWidget(self.magic_button)
+        intent_row.addWidget(self.magic_button, 0, Qt.AlignmentFlag.AlignTop)
         self.director_controls.addLayout(intent_row)
         options_row = QHBoxLayout()
         options_row.setContentsMargins(0, 0, 0, 0)
@@ -1313,8 +1314,36 @@ class MainWindow(QMainWindow):
         options_label = QLabel("PROMPT OPTIONS")
         options_label.setObjectName("groupLabel")
         options_row.addWidget(options_label)
+        length_label = QLabel("TOTAL LENGTH")
+        length_label.setObjectName("groupLabel")
+        self.requested_length = QDoubleSpinBox()
+        self.requested_length.setObjectName("timelineSpin")
+        self.requested_length.setRange(0, MAX_SECONDS)
+        self.requested_length.setSingleStep(.5)
+        self.requested_length.setDecimals(1)
+        self.requested_length.setSuffix(" s")
+        self.requested_length.setSpecialValueText("Auto")
+        self.requested_length.setToolTip("Requested total sequence length; Auto lets Magic Build choose")
+        self.requested_length.valueChanged.connect(self.mark_dirty)
+        nationality_label = QLabel("SPEAKER NATIONALITY")
+        nationality_label.setObjectName("groupLabel")
+        self.speaker_nationality = QComboBox()
+        self.speaker_nationality.setEditable(True)
+        self.speaker_nationality.addItems([
+            "(Image/context provided)", "American", "British", "Canadian", "Australian",
+            "Indian", "French", "German", "Spanish", "Italian", "Japanese", "Korean",
+            "Chinese", "Brazilian", "Mexican",
+        ])
+        self.speaker_nationality.setCurrentIndex(0)
+        self.speaker_nationality.setToolTip("Speaker nationality or language context used only when Spoken Dialog is enabled")
+        self.speaker_nationality.currentTextChanged.connect(self.mark_dirty)
+        self.speaker_nationality.setEnabled(False)
+        options_row.addWidget(length_label)
+        options_row.addWidget(self.requested_length)
         options_row.addWidget(self.sfx)
         options_row.addWidget(self.spoken_dialog)
+        options_row.addWidget(nationality_label)
+        options_row.addWidget(self.speaker_nationality)
         options_row.addWidget(self.hdr)
         options_row.addWidget(self.reduce_music)
         options_row.addStretch()
@@ -1670,6 +1699,9 @@ class MainWindow(QMainWindow):
         self.output_width.setFixedWidth(metric(104))
         self.output_height.setFixedWidth(metric(104))
         self.ui_scale_spin.setFixedWidth(metric(82))
+        self.intent.setFixedHeight(metric(72))
+        self.requested_length.setFixedWidth(metric(82))
+        self.speaker_nationality.setMinimumWidth(metric(180))
         self.director_controls.setSpacing(metric(8))
         self.segment_header.setSpacing(metric(8))
         self.ruler.setFixedHeight(metric(28))
@@ -1879,7 +1911,9 @@ class MainWindow(QMainWindow):
         return {
             "segments": self.segments,
             "globalPrompt": self.global_prompt.toPlainText(),
-            "directorIntent": self.intent.text(),
+            "directorIntent": self.intent.toPlainText(),
+            "requestedLength": self.requested_length.value(),
+            "speakerNationality": self.speaker_nationality.currentText(),
             "sfx": self.sfx.isChecked(),
             "spokenDialog": self.spoken_dialog.isChecked(),
             "hdr": self.hdr.isChecked(),
@@ -1903,7 +1937,9 @@ class MainWindow(QMainWindow):
         self._loading = True
         self.segments = state.get("segments", [])
         self.global_prompt.setPlainText(str(state.get("globalPrompt", "")))
-        self.intent.setText(str(state.get("directorIntent", "")))
+        self.intent.setPlainText(str(state.get("directorIntent", "")))
+        self.requested_length.setValue(float(state.get("requestedLength", 0)))
+        self.speaker_nationality.setCurrentText(str(state.get("speakerNationality", "(Image/context provided)")))
         self.sfx.setChecked(bool(state.get("sfx")))
         self.spoken_dialog.setChecked(bool(state.get("spokenDialog")))
         self.hdr.setChecked(bool(state.get("hdr")))
@@ -1942,7 +1978,7 @@ class MainWindow(QMainWindow):
         if not meta:
             project_id = uuid4().hex
             if automatic:
-                intent = " ".join(self.intent.text().split())
+                intent = " ".join(self.intent.toPlainText().split())
                 source_name = Path(self.segments[0].name).stem if self.segments else "Sequence"
                 suggested = re.split(r"[.!?]", intent, maxsplit=1)[0].strip() if intent else source_name
                 suggested = suggested[:52].rstrip(" -—,:;") or "Magic Build"
@@ -1961,7 +1997,7 @@ class MainWindow(QMainWindow):
                 }
             else:
                 collections = [str(record.get("collection")) for record in self.library_records() if record.get("collection")]
-                dialog = ProjectDetailsDialog(self.intent.text(), self, collection=self.current_collection or "", collections=collections)
+                dialog = ProjectDetailsDialog(self.intent.toPlainText(), self, collection=self.current_collection or "", collections=collections)
                 if not dialog.exec():
                     return
                 meta = {
@@ -2145,6 +2181,8 @@ class MainWindow(QMainWindow):
         self.current_project_id = None
         self.current_project_name = "Untitled"
         self.intent.clear()
+        self.requested_length.setValue(0)
+        self.speaker_nationality.setCurrentText("(Image/context provided)")
         self.segment_prompt.clear()
         self.global_prompt.clear()
         self.sfx.setChecked(False)
@@ -2561,6 +2599,41 @@ class MainWindow(QMainWindow):
         self.settings.setValue("ui_text_scale", value)
         self._apply_theme()
 
+    def update_spoken_dialog_controls(self, checked: bool) -> None:
+        self.speaker_nationality.setEnabled(checked)
+        self.mark_dirty()
+
+    def build_director_request(self) -> str:
+        """Compose focused planning controls into the authoritative model request."""
+        lines = []
+        creative_intent = self.intent.toPlainText().strip()
+        if creative_intent:
+            lines.append(creative_intent)
+        requested_length = self.requested_length.value()
+        if requested_length > 0:
+            if len(self.segments) == 1:
+                lines.append(
+                    f"Requested total sequence length: {requested_length:.1f} seconds. "
+                    "Because this is a single-frame sequence, return this exact duration for its one segment."
+                )
+            else:
+                lines.append(
+                    f"Requested total sequence length: {requested_length:.1f} seconds. "
+                    "Distribute this duration across the supplied segments according to action complexity; the returned segment durations must add up to exactly this total."
+                )
+        if self.spoken_dialog.isChecked():
+            nationality = self.speaker_nationality.currentText().strip() or "(Image/context provided)"
+            if nationality.casefold() == "(image/context provided)".casefold():
+                lines.append(
+                    "Speaker nationality/language context: use only reliable context explicitly visible in the image or stated in Director's Intent, such as readable language or an unambiguous setting. "
+                    "Do not infer nationality from physical appearance alone; when context is insufficient, use culturally neutral natural dialogue."
+                )
+            else:
+                lines.append(
+                    f"Speaker nationality: {nationality}. Use this to guide natural word choice, language and vocal delivery without stereotypes or caricature."
+                )
+        return "\n\n".join(lines)
+
     def magic_build(self) -> None:
         if not self.segments:
             self.add_media()
@@ -2581,7 +2654,7 @@ class MainWindow(QMainWindow):
         self.magic_overlay.show_overlay()
         worker = MagicWorker((
             self.segments.copy(), provider, self.settings.value("gemini_model", GEMINI_MODELS[0]), key,
-            self.intent.text(), self.sfx.isChecked(), self.spoken_dialog.isChecked(), self.hdr.isChecked(), self.reduce_music.isChecked(), timeout,
+            self.build_director_request(), self.sfx.isChecked(), self.spoken_dialog.isChecked(), self.hdr.isChecked(), self.reduce_music.isChecked(), timeout,
         ), retries, retry_cooldown)
         worker.signals.progress.connect(self.magic_progress)
         worker.signals.finished.connect(self.magic_finished)
@@ -2723,6 +2796,9 @@ class MainWindow(QMainWindow):
             self.output_height.setValue(int(settings.get("custom_height", 704)))
             self.normalize_output_dimensions()
             self.global_prompt.setPlainText(payload.get("global_prompt") or payload.get("timeline", {}).get("global_prompt", ""))
+            self.intent.clear()
+            self.requested_length.setValue(0)
+            self.speaker_nationality.setCurrentText("(Image/context provided)")
             self.current_project_id = None
             self.current_project_name = Path(path).stem
             self.update_window_title()
@@ -2738,7 +2814,7 @@ class MainWindow(QMainWindow):
             value["previewData"] = data_url(segment.preview_path)
             value["sourceData"] = data_url(segment.media_path) if Path(segment.media_path).exists() else None
             frames.append(value)
-        return {"app": "ltx-director-director", "projectVersion": 3, "globalPrompt": self.global_prompt.toPlainText(), "directorIntent": self.intent.text(), "magicBuild": {"sfx": self.sfx.isChecked(), "spokenDialog": self.spoken_dialog.isChecked(), "hdr": self.hdr.isChecked(), "reduceMusic": self.reduce_music.isChecked()}, "output": {"width": self.output_width.value(), "height": self.output_height.value()}, "timelineView": {"scale": self.pixels_per_second, "height": self.timeline_height}, "frames": frames}
+        return {"app": "ltx-director-director", "projectVersion": 4, "globalPrompt": self.global_prompt.toPlainText(), "directorIntent": self.intent.toPlainText(), "directionOptions": {"requestedLength": self.requested_length.value(), "speakerNationality": self.speaker_nationality.currentText()}, "magicBuild": {"sfx": self.sfx.isChecked(), "spokenDialog": self.spoken_dialog.isChecked(), "hdr": self.hdr.isChecked(), "reduceMusic": self.reduce_music.isChecked()}, "output": {"width": self.output_width.value(), "height": self.output_height.value()}, "timelineView": {"scale": self.pixels_per_second, "height": self.timeline_height}, "frames": frames}
 
     def load_project_payload(self, payload: dict) -> None:
         if payload.get("app") not in {"ltx-director-director", "ltx-prompt-director-python"}:
@@ -2763,7 +2839,10 @@ class MainWindow(QMainWindow):
             raise ValueError("Project contains no supported media.")
         self.segments = loaded
         self.global_prompt.setPlainText(payload.get("globalPrompt", ""))
-        self.intent.setText(payload.get("directorIntent", ""))
+        self.intent.setPlainText(payload.get("directorIntent", ""))
+        direction_options = payload.get("directionOptions", {})
+        self.requested_length.setValue(float(direction_options.get("requestedLength", 0)))
+        self.speaker_nationality.setCurrentText(str(direction_options.get("speakerNationality", "(Image/context provided)")))
         self.sfx.setChecked(bool(payload.get("magicBuild", {}).get("sfx")))
         magic = payload.get("magicBuild", {})
         self.spoken_dialog.setChecked(bool(magic.get("spokenDialog", magic.get("vocals", False))))
