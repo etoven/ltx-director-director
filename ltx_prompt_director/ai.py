@@ -20,14 +20,14 @@ def build_prompts(segments: list[Segment], provider: str, model: str, api_key: s
     images = [{"name": item.name, "role": item.role, "image": data_url(item.preview_path, max_edge=384)} for item in segments]
     rules = _rules(len(images), intent, sfx, spoken_dialog, hdr, reduce_music)
     if provider == "openai":
-        return _openai(images, api_key, rules, timeout)
-    return _gemini(images, api_key, model, rules, timeout)
+        return _openai(images, api_key, rules, timeout, sfx, spoken_dialog)
+    return _gemini(images, api_key, model, rules, timeout, sfx, spoken_dialog)
 
 
 def _rules(count: int, intent: str, sfx: bool, spoken_dialog: bool, hdr: bool, reduce_music: bool) -> str:
     audio = (
-        ("Include concise synchronized SFX grounded in visible motion, materials and ambience. " if sfx else "Do not include SFX, Foley or ambience directions. ")
-        + ("Include concise Spoken Dialog direction only when visible action or user intent supports it; never invent exact dialogue wording. " if spoken_dialog else "Do not include spoken dialog, speech, breathing, cries or other vocal directions. ")
+        ("SFX IS ON AND IS A HARD OUTPUT REQUIREMENT: Every segment prompt must include a concise clause beginning exactly `SFX:` with synchronized sound grounded in visible motion and materials. " if sfx else "Do not include SFX, Foley or ambience directions. ")
+        + ("SPOKEN DIALOG IS ON AND IS A HARD OUTPUT REQUIREMENT: Every segment prompt must include a concise clause beginning exactly `Spoken Dialog:` describing vocal intent, delivery or visible vocalization. Do not invent quoted wording unless User intent supplies the exact words. " if spoken_dialog else "Do not include spoken dialog, speech, breathing, cries or other vocal directions. ")
     )
     quality_rule = "Begin globalPrompt with exactly: (4K, HDR, Realistic). " if hdr else "Do not add a parenthesized quality header to globalPrompt. "
     if reduce_music:
@@ -59,7 +59,7 @@ User intent: {intent or 'Infer motion only from the ordered frames.'}
 Return strict JSON: {{"segments":[{{"duration":5,"prompt":"..."}}],"globalPrompt":"..."}}"""
 
 
-def _gemini(images: list[dict], key: str, model: str, rules: str, timeout: int) -> dict:
+def _gemini(images: list[dict], key: str, model: str, rules: str, timeout: int, sfx: bool, spoken_dialog: bool) -> dict:
     parts: list[dict] = [{"text": rules}]
     for index, item in enumerate(images, 1):
         mime, encoded = re.match(r"^data:([^;]+);base64,(.+)$", item["image"], re.S).groups()
@@ -73,10 +73,10 @@ def _gemini(images: list[dict], key: str, model: str, rules: str, timeout: int) 
     response.raise_for_status()
     data = response.json()
     raw = "".join(part.get("text", "") for part in data["candidates"][0]["content"]["parts"])
-    return _validate(raw, len(images))
+    return _validate(raw, len(images), sfx, spoken_dialog)
 
 
-def _openai(images: list[dict], key: str, rules: str, timeout: int) -> dict:
+def _openai(images: list[dict], key: str, rules: str, timeout: int, sfx: bool, spoken_dialog: bool) -> dict:
     content: list[dict] = [{"type": "input_text", "text": rules}]
     for index, item in enumerate(images, 1):
         content.extend([{"type": "input_text", "text": f"IMAGE {index} OF {len(images)} — {item['role'].upper()} FRAME — {item['name']}"}, {"type": "input_image", "image_url": item["image"], "detail": "high"}])
@@ -89,10 +89,10 @@ def _openai(images: list[dict], key: str, rules: str, timeout: int) -> dict:
     response.raise_for_status()
     data = response.json()
     raw = data.get("output_text") or "".join(c.get("text", "") for item in data.get("output", []) for c in item.get("content", []) if c.get("type") == "output_text")
-    return _validate(raw, len(images))
+    return _validate(raw, len(images), sfx, spoken_dialog)
 
 
-def _validate(raw: str, expected: int) -> dict:
+def _validate(raw: str, expected: int, require_sfx: bool = False, require_spoken_dialog: bool = False) -> dict:
     result = _parse_json(raw)
     if expected == 1:
         result = _normalize_single_frame_result(result)
@@ -107,6 +107,11 @@ def _validate(raw: str, expected: int) -> dict:
         prompt = segment.get("prompt") or segment.get("segmentPrompt") or segment.get("segment_prompt")
         if not isinstance(prompt, str) or not prompt.strip():
             raise AIResponseFormatError("The AI returned a segment without a prompt. Magic Build will retry.")
+        prompt_lower = prompt.casefold()
+        if require_sfx and "sfx:" not in prompt_lower:
+            raise AIResponseFormatError("The AI omitted required SFX direction. Magic Build will retry.")
+        if require_spoken_dialog and "spoken dialog:" not in prompt_lower:
+            raise AIResponseFormatError("The AI omitted required Spoken Dialog direction. Magic Build will retry.")
         duration_value = segment.get("duration", 5)
         match = re.search(r"\d+(?:\.\d+)?", str(duration_value))
         if not match:

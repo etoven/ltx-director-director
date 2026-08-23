@@ -2369,6 +2369,15 @@ class MainWindow(QMainWindow):
             self._loading = previous_loading
         self.update_counts()
 
+    def sync_selected_duration_control(self) -> None:
+        """Keep the selected duration control synchronized with AI timing changes."""
+        segment = self.current_segment()
+        if not segment:
+            return
+        self.duration_spin.blockSignals(True)
+        self.duration_spin.setValue(segment.duration)
+        self.duration_spin.blockSignals(False)
+
     def save_prompt(self) -> None:
         if not self._loading and self.current_segment():
             self.current_segment().prompt = self.segment_prompt.toPlainText()
@@ -2587,6 +2596,7 @@ class MainWindow(QMainWindow):
         target_widths = [max(48, int(duration * self.pixels_per_second)) for duration in target_durations]
         for segment, target in zip(self.segments, target_durations):
             segment.duration = target
+        self.sync_selected_duration_control()
         animation = QVariantAnimation(self)
         animation.setDuration(950)
         animation.setStartValue(0.0)
@@ -2601,9 +2611,14 @@ class MainWindow(QMainWindow):
                 if card and hasattr(card, "duration_label"):
                     card.duration_label.setText(f"{target_durations[row]:.1f}s")
             self.timeline.doItemsLayout()
+            self.timeline.viewport().update()
 
         animation.valueChanged.connect(resize_tiles)
-        animation.finished.connect(self.update_timeline_layout)
+        def finish_resize_animation() -> None:
+            self.update_timeline_layout()
+            self.sync_selected_duration_control()
+
+        animation.finished.connect(finish_resize_animation)
         self.duration_animation = animation
         animation.start()
 
