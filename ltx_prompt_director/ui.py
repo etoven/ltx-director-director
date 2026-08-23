@@ -12,7 +12,7 @@ from importlib.resources import files
 from pathlib import Path
 from uuid import uuid4
 
-from PySide6.QtCore import QEasingCurve, QItemSelectionModel, QObject, QRunnable, QRectF, QSettings, QSize, QStandardPaths, Qt, QThreadPool, QTimer, QVariantAnimation, Signal
+from PySide6.QtCore import QEasingCurve, QEventLoop, QItemSelectionModel, QObject, QRunnable, QRectF, QSettings, QSize, QStandardPaths, Qt, QThreadPool, QTimer, QVariantAnimation, Signal
 from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
@@ -352,7 +352,7 @@ class MagicBuildOverlay(QWidget):
         panel_layout.addWidget(self.spinner, 0, Qt.AlignmentFlag.AlignCenter)
         self.title = QLabel("✦ Magic Build is directing your sequence")
         self.title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.title.setStyleSheet("font-size:15px;font-weight:bold;color:#d9efff")
+        self.title.setObjectName("magicOverlayTitle")
         self.detail = QLabel("Analyzing frames and directing motion…")
         self.detail.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.detail.setWordWrap(True)
@@ -388,6 +388,61 @@ class MagicBuildOverlay(QWidget):
 
     def keyPressEvent(self, event) -> None:
         event.accept()
+
+
+class TileLoadingSpinner(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.phase = 0
+        self.setFixedSize(104, 58)
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.advance)
+
+    def advance(self) -> None:
+        self.phase = (self.phase + 1) % 12
+        self.update()
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        active = (self.phase // 4) % 3
+        for index, x in enumerate((4, 38, 72)):
+            lift = -4 if index == active else 0
+            rect = QRectF(x, 10 + lift, 28, 38)
+            painter.setPen(QPen(QColor("#9edaff") if index == active else QColor("#56646c"), 2))
+            painter.setBrush(QColor("#315f7b") if index == active else QColor("#252d31"))
+            painter.drawRoundedRect(rect, 4, 4)
+            painter.setPen(QPen(QColor("#d8f1ff") if index == active else QColor("#78868d"), 2))
+            painter.drawLine(x + 6, 37 + lift, x + 13, 29 + lift)
+            painter.drawLine(x + 13, 29 + lift, x + 22, 39 + lift)
+            painter.drawEllipse(QRectF(x + 18, 17 + lift, 4, 4))
+
+
+class TimelineLoadingOverlay(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setStyleSheet("background:rgba(9,13,15,220);color:#d9efff")
+        layout = QVBoxLayout(self)
+        layout.addStretch()
+        self.spinner = TileLoadingSpinner(self)
+        layout.addWidget(self.spinner, 0, Qt.AlignmentFlag.AlignCenter)
+        label = QLabel("Loading timeline tiles…")
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        label.setStyleSheet("font-weight:bold;color:#d9efff")
+        layout.addWidget(label)
+        layout.addStretch()
+        self.hide()
+
+    def show_loading(self) -> None:
+        self.setGeometry(self.parentWidget().rect())
+        self.raise_()
+        self.spinner.timer.start(80)
+        self.show()
+
+    def hide_loading(self) -> None:
+        self.spinner.timer.stop()
+        self.hide()
 
 
 class TimelineRuler(QWidget):
@@ -590,6 +645,12 @@ class SettingsDialog(QDialog):
         self.retries.setRange(0, 10)
         self.retries.setValue(settings.value("api_retries", 2, int))
         self.retries.setToolTip("Additional attempts after the initial API request")
+        self.ui_text_scale = QSpinBox()
+        self.ui_text_scale.setRange(75, 200)
+        self.ui_text_scale.setSingleStep(10)
+        self.ui_text_scale.setSuffix(" %")
+        self.ui_text_scale.setValue(settings.value("ui_text_scale", 100, int))
+        self.ui_text_scale.setToolTip("Scale text throughout the main application window")
         downloads = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DownloadLocation) or str(Path.home())
         self.segment_save_dir = QLineEdit(str(settings.value("segment_export_dir", settings.value("segment_save_dir", downloads))))
         self.segment_save_browse = QPushButton("Browse…")
@@ -605,6 +666,7 @@ class SettingsDialog(QDialog):
         form.addRow("OpenAI API key", self.openai)
         form.addRow("API timeout", self.timeout)
         form.addRow("Connection retries", self.retries)
+        form.addRow("UI text scale (DPI)", self.ui_text_scale)
         form.addRow("Default segment export folder", save_directory_row)
         form.addRow("", self.remember)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
@@ -621,6 +683,7 @@ class SettingsDialog(QDialog):
         self.settings.setValue("remember_keys", self.remember.isChecked())
         self.settings.setValue("api_timeout", self.timeout.value())
         self.settings.setValue("api_retries", self.retries.value())
+        self.settings.setValue("ui_text_scale", self.ui_text_scale.value())
         self.settings.setValue("segment_export_dir", self.segment_save_dir.text().strip())
         self.settings.setValue("dialogs/settings_geometry", self.saveGeometry())
         if self.remember.isChecked():
@@ -896,6 +959,7 @@ class MainWindow(QMainWindow):
         self.timeline.model().rowsMoved.connect(lambda *_: self.sync_order())
         self.timeline.files_dropped.connect(self.add_media_paths)
         self.timeline.horizontalScrollBar().valueChanged.connect(self.ruler.set_offset)
+        self.timeline_loading = TimelineLoadingOverlay(self.timeline.viewport())
         track_row.addWidget(self.timeline, 1)
         self.add_tile = QPushButton("＋\nAdd media\n60.0s available")
         self.add_tile.setObjectName("addTile")
@@ -1112,7 +1176,12 @@ class MainWindow(QMainWindow):
         self.refresh_project_library()
 
     def _apply_theme(self) -> None:
-        self.setStyleSheet("""
+        scale = max(75, min(200, self.settings.value("ui_text_scale", 100, int))) / 100
+
+        def scaled(size: int) -> int:
+            return max(7, round(size * scale))
+
+        theme = """
         QMainWindow,QWidget{background:#24292c;color:#d9dcde;font:11px Arial} QToolBar{background:#303537;border:0;spacing:6px;padding:5px}
         QToolButton,QPushButton,QComboBox,QDoubleSpinBox,QLineEdit{background:#303436;border:1px solid #101213;border-radius:3px;padding:5px 8px}
         QToolButton:hover,QPushButton:hover{background:#41474a} QToolButton{min-height:20px} QLineEdit{background:#1e2122}
@@ -1129,11 +1198,16 @@ class MainWindow(QMainWindow):
         QTextEdit{background:#252728;border:0;color:#e1e4e5;font:11px 'Courier New';padding:4px} #magicButton{background:#3b6f9c;border-color:#4f83ae;font-weight:bold}
         #audioToggle:checked,#qualityToggle:checked{background:#285c3d;border-color:#4c9b6a;color:#c9f4d6} #copyButton{border:0;background:transparent;color:#aeb5b8} QStatusBar{background:#1b1e1f;color:#7f898d}
         QDockWidget{background:#191d1f;color:#d9dcde;font-weight:bold} QDockWidget::title{background:#1b2022;border-bottom:1px solid #0e1011;padding:8px;text-align:left}
-        #projectLibraryTitle{font-size:15px;font-weight:bold;color:#f0f2f3} #projectList{background:#151819;border:1px solid #0e1011;padding:5px}
+        #projectLibraryTitle,#magicOverlayTitle{font-size:15px;font-weight:bold;color:#f0f2f3} #projectList{background:#151819;border:1px solid #0e1011;padding:5px}
         #projectList::item{background:#24282a;border:1px solid #3b4144;border-radius:4px;padding:7px;color:#dce0e2} #projectList::item:hover{border-color:#6488a1;background:#2b3134} #projectList::item:selected{border:2px solid #69a5d0;background:#29343a}
         #librarySave{background:#3b6f9c;border-color:#4f83ae;font-weight:bold} #librarySave:hover{background:#5596ca;border-color:#8bc8f5;color:#fff} #libraryDelete:hover{background:#713d3d;border-color:#9b5656}
         QMenu{background:#252a2c;border:1px solid #596267;padding:4px} QMenu::item{padding:7px 28px 7px 12px;border-radius:3px} QMenu::item:selected{background:#3b6f9c;color:#fff} QMenu::separator{height:1px;background:#4b5255;margin:4px 7px}
-        """)
+        """
+        theme = theme.replace("font:11px Arial", f"font:{scaled(11)}px Arial")
+        theme = theme.replace("font:11px 'Courier New'", f"font:{scaled(11)}px 'Courier New'")
+        for size in (15, 10, 9, 8):
+            theme = theme.replace(f"font-size:{size}px", f"font-size:{scaled(size)}px")
+        self.setStyleSheet(theme)
 
     def refresh_project_library(self, select_id: str | None = None, preserve_scroll: bool = True) -> None:
         selected = select_id or self.current_project_id
@@ -1644,24 +1718,36 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Added {added} media file{'s' if added != 1 else ''}")
 
     def refresh_timeline(self, selected: int = 0) -> None:
+        indicator = getattr(self, "timeline_loading", None)
+        if indicator:
+            indicator.show_loading()
+            QApplication.processEvents(QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents)
         self._loading = True
-        self.timeline.clear()
-        card_height = max(152, self.timeline_height - 32)
-        preview_height = max(80, card_height - 55)
-        for index, segment in enumerate(self.segments):
-            item = QListWidgetItem()
-            item.setData(Qt.ItemDataRole.UserRole, segment.id)
-            item.setSizeHint(QSize(max(48, int(segment.duration * self.pixels_per_second)), card_height))
-            self.timeline.addItem(item)
-            card = SegmentCard(segment, preview_height, self.pixels_per_second)
-            card.duration_changed.connect(lambda value, sid=segment.id: self.change_duration(sid, value))
-            card.delete_requested.connect(lambda sid=segment.id: self.delete_by_id(sid))
-            card.resize_finished.connect(lambda sid=segment.id: self.finish_resize(sid))
-            self.timeline.setItemWidget(item, card)
-        self._loading = False
-        if self.segments:
-            self.timeline.setCurrentRow(max(0, min(selected, len(self.segments) - 1)))
-        self.update_summary()
+        try:
+            self.timeline.clear()
+            card_height = max(152, self.timeline_height - 32)
+            preview_height = max(80, card_height - 55)
+            for index, segment in enumerate(self.segments):
+                item = QListWidgetItem()
+                item.setData(Qt.ItemDataRole.UserRole, segment.id)
+                item.setSizeHint(QSize(max(48, int(segment.duration * self.pixels_per_second)), card_height))
+                self.timeline.addItem(item)
+                card = SegmentCard(segment, preview_height, self.pixels_per_second)
+                card.duration_changed.connect(lambda value, sid=segment.id: self.change_duration(sid, value))
+                card.delete_requested.connect(lambda sid=segment.id: self.delete_by_id(sid))
+                card.resize_finished.connect(lambda sid=segment.id: self.finish_resize(sid))
+                self.timeline.setItemWidget(item, card)
+                if indicator:
+                    indicator.raise_()
+                    QApplication.processEvents(QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents)
+            self._loading = False
+            if self.segments:
+                self.timeline.setCurrentRow(max(0, min(selected, len(self.segments) - 1)))
+            self.update_summary()
+        finally:
+            self._loading = False
+            if indicator:
+                indicator.hide_loading()
 
     def sync_order(self) -> None:
         if self._loading:
@@ -1818,6 +1904,7 @@ class MainWindow(QMainWindow):
 
     def open_settings(self) -> None:
         if SettingsDialog(self.settings, self).exec():
+            self._apply_theme()
             self.update_provider_button()
 
     def magic_build(self) -> None:

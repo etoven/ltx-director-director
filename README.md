@@ -48,6 +48,7 @@ In short: use **Project Export** for lossless editing and safekeeping; use **LTX
 - Numbered timeline ruler with duration-proportional segment widths
 - Adjustable timeline scale, one-click auto fit, and vertically resizable previews
 - Drag-and-drop media import with a highlighted timeline drop target
+- Animated in-timeline loading indicator while segment tiles are prepared
 - Drag-to-reorder horizontal timeline and smoothly animated AI timing recommendations
 - One-second minimum segment duration in 0.5-second increments
 - Right-click replace, one-click segment export, role assignment, and deletion
@@ -64,6 +65,7 @@ In short: use **Project Export** for lossless editing and safekeeping; use **LTX
 - Automatic Custom-sort activation when a project tile is dragged
 - Multiple live in-memory project workspaces with yellow unsaved-change indicators
 - Persistent window, dialog, and project-panel placement
+- Persistent 75–200% UI text scaling for easier reading on high-DPI displays
 - No server, database, account, or telemetry
 
 ## Quick start from source
@@ -94,7 +96,7 @@ python3 -m pip install --upgrade "$(wget -qO- https://api.github.com/repos/etove
 Or download the `.whl` file from the latest GitHub release, then install it with:
 
 ```bash
-python3 -m pip install ./ltx_prompt_director-1.7.5-py3-none-any.whl
+python3 -m pip install ./ltx_prompt_director-1.7.6-py3-none-any.whl
 ```
 
 You can also install a locally built wheel from the repository:
