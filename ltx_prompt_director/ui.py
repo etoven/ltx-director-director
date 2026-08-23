@@ -552,15 +552,40 @@ class ResizeHandle(QFrame):
         self.start_x: float | None = None
         self.pixels_per_second = pixels_per_second
         self.setObjectName("resizeHandle")
-        self.setFixedWidth(9)
+        # Keep a comfortable hit target while drawing only a slim dotted grip.
+        self.setFixedWidth(12)
         self.setCursor(Qt.CursorShape.SizeHorCursor)
         self.setToolTip("Drag to resize segment (1 second minimum)")
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        active = self.start_x is not None
+        color = QColor("#b9e7ff") if active else QColor("#84aabd") if self.underMouse() else QColor("#52636c")
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(color)
+        diameter = 3.0
+        spacing = 7.0
+        center_x = self.width() / 2
+        center_y = self.height() / 2
+        for index in range(-3, 4):
+            painter.drawEllipse(QRectF(center_x - diameter / 2, center_y + index * spacing - diameter / 2, diameter, diameter))
+
+    def enterEvent(self, event) -> None:
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        self.update()
+        super().leaveEvent(event)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self.start_x = event.globalPosition().x()
             self.start_duration = self.duration
             self.grabMouse()
+            self.update()
             event.accept()
 
     def mouseMoveEvent(self, event):
@@ -575,6 +600,7 @@ class ResizeHandle(QFrame):
         if self.start_x is not None:
             self.start_x = None
             self.releaseMouse()
+            self.update()
             self.finished.emit()
             event.accept()
 
@@ -1340,6 +1366,8 @@ class MainWindow(QMainWindow):
         self.collection_up.clicked.connect(self.leave_collection)
         self.project_library_title = QLabel("Saved projects")
         self.project_library_title.setObjectName("projectLibraryTitle")
+        self.project_library_title.setWordWrap(True)
+        self.project_library_title.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self.project_library_title.setMinimumWidth(0)
         self.project_library_title.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.project_sort = QComboBox()
@@ -1484,7 +1512,7 @@ class MainWindow(QMainWindow):
         #timeline{padding:3px;background:#0d0f10} #timeline::item{background:#0d0f10;border:0} #timeline::item:selected{background:#0d0f10;border:1px solid #f1f1f1} #timeline[dropActive="true"]{border:3px solid #68b9ee;background:#13232c} #timeline[dropActive="false"]{border:1px solid #323638}
         #segmentCard{background:transparent;border:0} #segmentCardBody{background:#252728;border:0} #mediaBadge{background:#e5e5e5;color:#262626;font-weight:bold;padding:2px} #roleBadge{background:#36393a;color:#eee;padding:2px}
         #tileDelete{padding:0;min-height:0;max-height:20px;background:#454849;color:#ddd;border:0} #tileDelete:hover{background:#a94444;color:#fff;border:1px solid #e07878} #tileTitle{background:#242627;padding:3px;font-size:9px} #tileDuration{color:#a2a7a9;font-size:8px}
-        #resizeHandle{background:#606669;border-left:1px solid #9ca2a4} #resizeHandle:hover{background:#8aa6b7;border-left:2px solid #d8edf8}
+        #resizeHandle{background:transparent;border:0} #resizeHandle:hover{background:rgba(88,118,134,35);border:0}
         #timelineHeightHandle{background:transparent;border:0} #timelineHeightHandle:hover{background:rgba(88,118,134,35);border:0}
         #promptSplitter::handle{background:transparent;border:0} #promptSplitter::handle:hover{background:rgba(88,118,134,35);border:0}
         #segmentPreview{background:#17191a;border-top:1px solid #34383a}
