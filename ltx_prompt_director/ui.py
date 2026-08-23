@@ -186,6 +186,58 @@ class TimelineListWidget(QListWidget):
         self.style().polish(self)
 
 
+class ProjectListWidget(QListWidget):
+    drag_started = Signal()
+    order_changed = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._press_position = None
+        self._drag_row = -1
+        self._reordering = False
+        self.setDragDropMode(QListWidget.DragDropMode.NoDragDrop)
+
+    def mousePressEvent(self, event) -> None:
+        self._press_position = event.position().toPoint()
+        self._drag_row = self.indexAt(self._press_position).row()
+        self._reordering = False
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        if not (event.buttons() & Qt.MouseButton.LeftButton) or self._drag_row < 0 or self._press_position is None:
+            super().mouseMoveEvent(event)
+            return
+        if not self._reordering:
+            distance = (event.position().toPoint() - self._press_position).manhattanLength()
+            if distance < QApplication.startDragDistance():
+                return
+            self._reordering = True
+            self.drag_started.emit()
+            self.viewport().setCursor(Qt.CursorShape.ClosedHandCursor)
+        target = self.indexAt(event.position().toPoint()).row()
+        if target < 0:
+            target = self.count() - 1
+        if target != self._drag_row and 0 <= target < self.count():
+            item = self.takeItem(self._drag_row)
+            self.insertItem(target, item)
+            self.setCurrentItem(item)
+            self._drag_row = target
+            self.order_changed.emit()
+        event.accept()
+
+    def mouseReleaseEvent(self, event) -> None:
+        was_reordering = self._reordering
+        self._press_position = None
+        self._drag_row = -1
+        self._reordering = False
+        self.viewport().unsetCursor()
+        if was_reordering:
+            self.order_changed.emit()
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+
 class MagicSpinner(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -226,19 +278,23 @@ class MagicSpinner(QWidget):
         painter.drawText(QRectF(-30, 6, 60, 15), Qt.AlignmentFlag.AlignCenter, "DIRECTING")
 
 
-class MagicBuildDialog(QDialog):
+class MagicBuildOverlay(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Magic Build")
-        self.setWindowModality(Qt.WindowModality.ApplicationModal)
-        self.setModal(True)
-        self.setFixedSize(390, 290)
-        self.setWindowFlag(Qt.WindowType.WindowCloseButtonHint, False)
+        self.setObjectName("magicOverlay")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setStyleSheet("#magicOverlay{background:rgba(5,8,10,205)} #magicOverlayPanel{background:#20282c;border:2px solid #4f83ae;border-radius:12px}")
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(28, 20, 28, 24)
-        layout.addStretch()
-        spinner = MagicSpinner(self)
-        layout.addWidget(spinner, 0, Qt.AlignmentFlag.AlignCenter)
+        panel = QFrame(self)
+        panel.setObjectName("magicOverlayPanel")
+        panel.setFixedSize(390, 290)
+        panel_layout = QVBoxLayout(panel)
+        panel_layout.setContentsMargins(28, 20, 28, 24)
+        panel_layout.addStretch()
+        self.spinner = MagicSpinner(panel)
+        self.spinner.timer.stop()
+        panel_layout.addWidget(self.spinner, 0, Qt.AlignmentFlag.AlignCenter)
         self.title = QLabel("✦ Magic Build is directing your sequence")
         self.title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.title.setStyleSheet("font-size:15px;font-weight:bold;color:#d9efff")
@@ -248,17 +304,35 @@ class MagicBuildDialog(QDialog):
         self.attempt = QLabel("")
         self.attempt.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.attempt.setObjectName("muted")
-        layout.addWidget(self.title)
-        layout.addWidget(self.detail)
-        layout.addWidget(self.attempt)
-        layout.addStretch()
+        panel_layout.addWidget(self.title)
+        panel_layout.addWidget(self.detail)
+        panel_layout.addWidget(self.attempt)
+        panel_layout.addStretch()
+        layout.addWidget(panel, 0, Qt.AlignmentFlag.AlignCenter)
+        self.hide()
 
     def update_attempt(self, current: int, total: int, detail: str) -> None:
         self.detail.setText(detail)
         self.attempt.setText(f"Attempt {current} of {total}" if total > 1 else "")
 
-    def reject(self) -> None:
-        pass
+    def show_overlay(self) -> None:
+        self.setGeometry(self.parentWidget().rect())
+        self.raise_()
+        self.spinner.timer.start(45)
+        self.show()
+        self.setFocus(Qt.FocusReason.ActiveWindowFocusReason)
+        self.grabKeyboard()
+
+    def hide_overlay(self) -> None:
+        self.releaseKeyboard()
+        self.spinner.timer.stop()
+        self.hide()
+
+    def mousePressEvent(self, event) -> None:
+        event.accept()
+
+    def keyPressEvent(self, event) -> None:
+        event.accept()
 
 
 class TimelineRuler(QWidget):
@@ -642,6 +716,7 @@ class MainWindow(QMainWindow):
         self.current_project_id: str | None = None
         self.current_project_name = "Untitled"
         self.project_dirty = False
+        self.project_sessions: dict[str, dict] = {}
         self.current_collection: str | None = None
         self.pixels_per_second = 65
         self.timeline_height = 184
@@ -649,6 +724,7 @@ class MainWindow(QMainWindow):
         self._loading = False
         self._build_ui()
         self._apply_theme()
+        self.magic_overlay = MagicBuildOverlay(self)
         geometry = self.settings.value("window/geometry")
         state = self.settings.value("window/state")
         if geometry:
@@ -939,7 +1015,7 @@ class MainWindow(QMainWindow):
         self.project_search.textChanged.connect(self.filter_projects)
         layout.addWidget(self.project_search)
 
-        self.project_list = QListWidget()
+        self.project_list = ProjectListWidget()
         self.project_list.setObjectName("projectList")
         self.project_list.setViewMode(QListWidget.ViewMode.IconMode)
         self.project_list.setFlow(QListWidget.Flow.TopToBottom)
@@ -948,8 +1024,10 @@ class MainWindow(QMainWindow):
         self.project_list.setMovement(QListWidget.Movement.Static)
         self.project_list.setIconSize(QSize(230, 230))
         self.project_list.setSpacing(8)
+        self.project_list.itemClicked.connect(self.activate_clicked_project)
         self.project_list.itemDoubleClicked.connect(lambda *_: self.open_library_project())
-        self.project_list.model().rowsMoved.connect(lambda *_: self.save_custom_project_order())
+        self.project_list.drag_started.connect(self.activate_custom_sort_for_drag)
+        self.project_list.order_changed.connect(self.save_custom_project_order)
         layout.addWidget(self.project_list, 1)
 
         buttons = QHBoxLayout()
@@ -982,7 +1060,7 @@ class MainWindow(QMainWindow):
         QListWidget{background:#0d0f10;border:0;padding-top:26px} QListWidget::item{border:1px solid #696b6c;background:#252728;margin:0} QListWidget::item:selected{border:2px solid #f1f1f1;background:#293034}
         #timeline[dropActive="true"]{border:3px solid #68b9ee;background:#13232c} #timeline[dropActive="false"]{border:1px solid #323638}
         #segmentCard{background:#252728;border:0} #mediaBadge{background:#e5e5e5;color:#262626;font-weight:bold;padding:2px} #roleBadge{background:#36393a;color:#eee;padding:2px}
-        #tileDelete{padding:0;background:#454849;color:#ddd;border:0} #tileTitle{background:#242627;padding:3px;font-size:9px} #tileDuration{color:#a2a7a9;font-size:8px}
+        #tileDelete{padding:0;background:#454849;color:#ddd;border:0} #tileDelete:hover{background:#a94444;color:#fff;border:1px solid #e07878} #tileTitle{background:#242627;padding:3px;font-size:9px} #tileDuration{color:#a2a7a9;font-size:8px}
         #resizeHandle{background:#606669;border-left:1px solid #9ca2a4} #resizeHandle:hover{background:#8aa6b7;border-left:2px solid #d8edf8}
         #timelineHeightHandle{background:#3d4447;border-top:1px solid #737d82} #timelineHeightHandle:hover{background:#6d8795;border-top:2px solid #d8edf8}
         #segmentPreview{background:#17191a;border-top:1px solid #34383a}
@@ -994,6 +1072,7 @@ class MainWindow(QMainWindow):
         #projectLibraryTitle{font-size:15px;font-weight:bold;color:#f0f2f3} #projectList{background:#151819;border:1px solid #0e1011;padding:5px}
         #projectList::item{background:#24282a;border:1px solid #3b4144;border-radius:4px;padding:7px;color:#dce0e2} #projectList::item:hover{border-color:#6488a1;background:#2b3134} #projectList::item:selected{border:2px solid #69a5d0;background:#29343a}
         #librarySave{background:#3b6f9c;border-color:#4f83ae;font-weight:bold} #libraryDelete:hover{background:#713d3d;border-color:#9b5656}
+        QMenu{background:#252a2c;border:1px solid #596267;padding:4px} QMenu::item{padding:7px 28px 7px 12px;border-radius:3px} QMenu::item:selected{background:#3b6f9c;color:#fff} QMenu::separator{height:1px;background:#4b5255;margin:4px 7px}
         """)
 
     def refresh_project_library(self, select_id: str | None = None) -> None:
@@ -1020,8 +1099,8 @@ class MainWindow(QMainWindow):
             order = self.custom_project_order()
             positions = {key: index for index, key in enumerate(order)}
             entries.sort(key=lambda value: (positions.get(self.project_entry_key(value), len(positions)), str(value.get("name", "")).casefold()))
-        self.project_list.setDragDropMode(QListWidget.DragDropMode.InternalMove if mode == "custom" else QListWidget.DragDropMode.NoDragDrop)
-        self.project_list.setMovement(QListWidget.Movement.Snap if mode == "custom" else QListWidget.Movement.Static)
+        self.project_list.setDragDropMode(QListWidget.DragDropMode.NoDragDrop)
+        self.project_list.setMovement(QListWidget.Movement.Static)
         selected_item = None
         for meta in entries:
             if meta.get("kind") == "collection":
@@ -1031,7 +1110,15 @@ class MainWindow(QMainWindow):
                 item.setData(Qt.ItemDataRole.UserRole, {"kind": "collection", "name": name, "description": meta["description"]})
                 item.setToolTip(f"Collection: {name}")
                 item.setSizeHint(QSize(255, 292))
-                item.setIcon(QIcon(self.collection_pixmap(members[:4])))
+                collection_cover = self.collection_pixmap(members[:4])
+                if any(self.project_is_dirty(str(member.get("id", ""))) for member in members):
+                    painter = QPainter(collection_cover)
+                    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+                    painter.setPen(QPen(QColor("#5a4300"), 3))
+                    painter.setBrush(QColor("#ffd83d"))
+                    painter.drawEllipse(9, 9, 18, 18)
+                    painter.end()
+                item.setIcon(QIcon(collection_cover))
                 self.project_list.addItem(item)
                 continue
             name = str(meta.get("name") or "Untitled project")
@@ -1043,8 +1130,20 @@ class MainWindow(QMainWindow):
             item.setToolTip(f"{name}\n\n{meta.get('description', '')}")
             item.setSizeHint(QSize(255, 292))
             pixmap = pixmap_from_data_url(str(meta.get("thumbnailData", "")))
-            if not pixmap.isNull():
-                item.setIcon(QIcon(self.square_pixmap(pixmap, 230)))
+            if pixmap.isNull():
+                pixmap = QPixmap(230, 230)
+                pixmap.fill(QColor("#171a1b"))
+            else:
+                pixmap = self.square_pixmap(pixmap, 230)
+            if self.project_is_dirty(str(meta.get("id", ""))):
+                pixmap = pixmap.copy()
+                painter = QPainter(pixmap)
+                painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+                painter.setPen(QPen(QColor("#5a4300"), 3))
+                painter.setBrush(QColor("#ffd83d"))
+                painter.drawEllipse(9, 9, 18, 18)
+                painter.end()
+            item.setIcon(QIcon(pixmap))
             self.project_list.addItem(item)
             if meta.get("id") == selected:
                 selected_item = item
@@ -1077,6 +1176,23 @@ class MainWindow(QMainWindow):
     def project_sort_changed(self) -> None:
         self.settings.setValue("project_sort_mode", self.project_sort.currentData())
         self.refresh_project_library()
+
+    def activate_custom_sort_for_drag(self) -> None:
+        if self.project_sort.currentData() == "custom":
+            return
+        current_order = []
+        for row in range(self.project_list.count()):
+            current_order.append(self.project_entry_key(self.project_list.item(row).data(Qt.ItemDataRole.UserRole) or {}))
+        self.settings.setValue(self.custom_order_settings_key(), json.dumps(current_order))
+        self.project_sort.blockSignals(True)
+        self.project_sort.setCurrentIndex(self.project_sort.findData("custom"))
+        self.project_sort.blockSignals(False)
+        self.settings.setValue("project_sort_mode", "custom")
+
+    def activate_clicked_project(self, item: QListWidgetItem) -> None:
+        meta = item.data(Qt.ItemDataRole.UserRole) or {}
+        if meta.get("kind") == "project":
+            self.open_library_project()
 
     def library_records(self) -> list[dict]:
         records = []
@@ -1122,6 +1238,58 @@ class MainWindow(QMainWindow):
         item = self.project_list.currentItem()
         return item.data(Qt.ItemDataRole.UserRole) if item else None
 
+    def project_is_dirty(self, project_id: str) -> bool:
+        if project_id == self.current_project_id:
+            return self.project_dirty
+        return bool(self.project_sessions.get(project_id, {}).get("dirty"))
+
+    def capture_workspace_state(self) -> dict:
+        return {
+            "segments": self.segments,
+            "globalPrompt": self.global_prompt.toPlainText(),
+            "directorIntent": self.intent.text(),
+            "sfx": self.sfx.isChecked(),
+            "spokenDialog": self.spoken_dialog.isChecked(),
+            "hdr": self.hdr.isChecked(),
+            "reduceMusic": self.reduce_music.isChecked(),
+            "outputWidth": self.output_width.value(),
+            "outputHeight": self.output_height.value(),
+            "timelineScale": self.pixels_per_second,
+            "timelineHeight": self.timeline_height,
+        }
+
+    def cache_current_workspace(self) -> None:
+        if not self.current_project_id:
+            return
+        self.project_sessions[self.current_project_id] = {
+            "name": self.current_project_name,
+            "dirty": self.project_dirty,
+            "state": self.capture_workspace_state(),
+        }
+
+    def restore_workspace_state(self, state: dict) -> None:
+        self._loading = True
+        self.segments = state.get("segments", [])
+        self.global_prompt.setPlainText(str(state.get("globalPrompt", "")))
+        self.intent.setText(str(state.get("directorIntent", "")))
+        self.sfx.setChecked(bool(state.get("sfx")))
+        self.spoken_dialog.setChecked(bool(state.get("spokenDialog")))
+        self.hdr.setChecked(bool(state.get("hdr")))
+        self.reduce_music.setChecked(bool(state.get("reduceMusic")))
+        self.output_width.setValue(int(state.get("outputWidth", 1280)))
+        self.output_height.setValue(int(state.get("outputHeight", 704)))
+        self.timeline_height = max(184, min(430, int(state.get("timelineHeight", 184))))
+        self.timeline_height_handle.current_height = self.timeline_height
+        self.set_timeline_height(self.timeline_height)
+        scale = max(20, min(160, int(state.get("timelineScale", 65))))
+        self.timeline_scale.blockSignals(True)
+        self.timeline_scale.setValue(scale)
+        self.timeline_scale.blockSignals(False)
+        self.pixels_per_second = scale
+        self.ruler.set_scale(scale)
+        self._loading = False
+        self.refresh_timeline()
+
     def leave_collection(self) -> None:
         self.current_collection = None
         self.refresh_project_library()
@@ -1165,6 +1333,11 @@ class MainWindow(QMainWindow):
         Path(meta["projectPath"]).write_text(json.dumps(payload, indent=2), encoding="utf-8")
         (root / f"{meta['id']}.meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
         self.project_dirty = False
+        self.project_sessions[str(meta["id"])] = {
+            "name": self.current_project_name,
+            "dirty": False,
+            "state": self.capture_workspace_state(),
+        }
         self.refresh_project_library(meta["id"])
         self.project_dock.show()
         self.statusBar().showMessage(f"Project saved to library: {meta['name']}")
@@ -1178,13 +1351,29 @@ class MainWindow(QMainWindow):
             self.project_search.clear()
             self.refresh_project_library()
             return
+        project_id = str(meta["id"])
+        if project_id == self.current_project_id:
+            return
+        self.cache_current_workspace()
         try:
-            payload = json.loads(Path(meta["projectPath"]).read_text(encoding="utf-8"))
-            self.load_project_payload(payload)
-            self.current_project_id = str(meta["id"])
+            session = self.project_sessions.get(project_id)
+            if session and session.get("state"):
+                self.restore_workspace_state(session["state"])
+                dirty = bool(session.get("dirty"))
+            else:
+                payload = json.loads(Path(meta["projectPath"]).read_text(encoding="utf-8"))
+                self.load_project_payload(payload)
+                dirty = False
+            self.current_project_id = project_id
             self.current_project_name = str(meta["name"])
-            self.project_dirty = False
+            self.project_dirty = dirty
+            self.project_sessions[project_id] = {
+                "name": self.current_project_name,
+                "dirty": dirty,
+                "state": self.capture_workspace_state(),
+            }
             self.update_window_title()
+            self.refresh_project_library(project_id)
             self.statusBar().showMessage(f"Project opened: {meta['name']}")
         except Exception as error:
             self._loading = False
@@ -1212,6 +1401,7 @@ class MainWindow(QMainWindow):
             project_path.unlink()
         if meta_path.is_file():
             meta_path.unlink()
+        self.project_sessions.pop(str(meta.get("id", "")), None)
         if self.current_project_id == meta.get("id"):
             self.current_project_id = None
             self.project_dirty = True
@@ -1258,6 +1448,8 @@ class MainWindow(QMainWindow):
         if self.current_project_id == meta["id"]:
             self.current_project_name = meta["name"]
             self.update_window_title()
+        if str(meta["id"]) in self.project_sessions:
+            self.project_sessions[str(meta["id"])]["name"] = meta["name"]
         self.refresh_project_library(meta["id"])
         self.statusBar().showMessage(f"Project details updated: {meta['name']}")
 
@@ -1270,12 +1462,25 @@ class MainWindow(QMainWindow):
         self.settings.sync()
         super().closeEvent(event)
 
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if hasattr(self, "magic_overlay") and self.magic_overlay.isVisible():
+            self.magic_overlay.setGeometry(self.rect())
+
     def mark_dirty(self, *_args) -> None:
         if not self._loading:
+            was_dirty = self.project_dirty
             self.project_dirty = True
+            if self.current_project_id:
+                session = self.project_sessions.setdefault(self.current_project_id, {"name": self.current_project_name})
+                session["dirty"] = True
+                if not was_dirty and hasattr(self, "project_list"):
+                    self.refresh_project_library(self.current_project_id)
 
     def new_project(self) -> None:
-        if self.segments and self.project_dirty:
+        if self.current_project_id:
+            self.cache_current_workspace()
+        elif self.segments and self.project_dirty:
             answer = QMessageBox.question(
                 self, "Start a new project",
                 "Start a new project? Any changes not saved to the project library or an exported project file will be lost.",
@@ -1562,9 +1767,8 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Magic Build is analyzing optimized preview frames…")
         timeout = self.settings.value("api_timeout", 400, int)
         retries = self.settings.value("api_retries", 2, int)
-        self.magic_dialog = MagicBuildDialog(self)
-        self.magic_dialog.update_attempt(1, retries + 1, "Analyzing frames and directing motion…")
-        self.magic_dialog.show()
+        self.magic_overlay.update_attempt(1, retries + 1, "Analyzing frames and directing motion…")
+        self.magic_overlay.show_overlay()
         worker = MagicWorker((
             self.segments.copy(), provider, self.settings.value("gemini_model", GEMINI_MODELS[0]), key,
             self.intent.text(), self.sfx.isChecked(), self.spoken_dialog.isChecked(), self.hdr.isChecked(), self.reduce_music.isChecked(), timeout,
@@ -1575,8 +1779,7 @@ class MainWindow(QMainWindow):
         self.thread_pool.start(worker)
 
     def magic_progress(self, attempt: int, total: int, detail: str) -> None:
-        if getattr(self, "magic_dialog", None):
-            self.magic_dialog.update_attempt(attempt, total, detail)
+        self.magic_overlay.update_attempt(attempt, total, detail)
 
     def magic_finished(self, result: dict) -> None:
         target_durations = []
@@ -1601,9 +1804,7 @@ class MainWindow(QMainWindow):
         self.global_prompt.setPlainText(global_prompt)
         self.mark_dirty()
         self.magic_button.setEnabled(True)
-        if getattr(self, "magic_dialog", None):
-            self.magic_dialog.done(QDialog.DialogCode.Accepted)
-            self.magic_dialog = None
+        self.magic_overlay.hide_overlay()
         self.animate_timeline_durations(target_durations)
         self.statusBar().showMessage("Magic Build complete")
 
@@ -1640,9 +1841,7 @@ class MainWindow(QMainWindow):
 
     def magic_failed(self, message: str) -> None:
         self.magic_button.setEnabled(True)
-        if getattr(self, "magic_dialog", None):
-            self.magic_dialog.done(QDialog.DialogCode.Rejected)
-            self.magic_dialog = None
+        self.magic_overlay.hide_overlay()
         QMessageBox.critical(self, "Magic Build failed", message)
         self.statusBar().showMessage("Magic Build failed")
 

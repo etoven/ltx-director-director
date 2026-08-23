@@ -56,11 +56,13 @@ In short: use **Project Export** for lossless editing and safekeeping; use **LTX
 - WebM support with a preview captured at the start of the final second
 - Only one optimized frame per WebM is sent to vision AI
 - Gemini and OpenAI support with local key storage, configurable 400-second timeout, and transient connection retries
-- Modal animated Magic Build progress display
+- Blocking in-app Magic Build overlay with custom animation
 - Independent SFX, Spoken Dialog, HDR, and Reduce Music controls
 - LTX Director-compatible JSON import/export
 - Complete portable project import/export, including embedded media
-- Searchable local project library with large visual thumbnails, collection folders, title sorting, and custom drag ordering
+- Searchable local project library with large visual thumbnails, collection folders, title sorting, and stable custom drag ordering
+- Automatic Custom-sort activation when a project tile is dragged
+- Multiple live in-memory project workspaces with yellow unsaved-change indicators
 - Persistent window, dialog, and project-panel placement
 - No server, database, account, or telemetry
 
@@ -92,7 +94,7 @@ python3 -m pip install --upgrade "$(wget -qO- https://api.github.com/repos/etove
 Or download the `.whl` file from the latest GitHub release, then install it with:
 
 ```bash
-python3 -m pip install ./ltx_prompt_director-1.7.0-py3-none-any.whl
+python3 -m pip install ./ltx_prompt_director-1.7.1-py3-none-any.whl
 ```
 
 You can also install a locally built wheel from the repository:

@@ -32,7 +32,7 @@ Magic Build options:
 - **HDR** places `(4K, HDR, Realistic)` at the beginning of the global prompt.
 - **Reduce Music** instructs the model to place a setting-specific `[SOUND]: Ambient …` line after the quality header. Supplying environmental ambience helps discourage unwanted generated music.
 
-Enter optional Director's Intent, then select **Magic Build**. A modal animated directing display prevents conflicting edits while the operation runs and reports automatic retry attempts. The default timeout is 400 seconds with two additional retries; both values are configurable in AI Settings. The result contains exactly one prompt for every timeline segment and one global prompt. Recommended durations ease smoothly into their new timeline widths instead of snapping instantly.
+Enter optional Director's Intent, then select **Magic Build**. A blocking animated overlay appears inside the application, prevents conflicting edits while the operation runs, and reports automatic retry attempts without creating another operating-system window. The default timeout is 400 seconds with two additional retries; both values are configurable in Application Settings. The result contains exactly one prompt for every timeline segment and one global prompt. Recommended durations ease smoothly into their new timeline widths instead of snapping instantly.
 
 ## 4. Project library
 
@@ -43,7 +43,9 @@ Select **Projects** in the toolbar to open the left project-library panel. The p
 - **Edit** changes a project's name, description, or collection.
 - **Delete** permanently removes the selected project from the local library after confirmation.
 - Search matches words in both project names and descriptions.
-- Choose **Title A–Z**, **Title Z–A**, or **Custom** sorting. Custom mode unlocks project tiles for drag-and-drop ordering within the current collection or root view.
+- Choose **Title A–Z**, **Title Z–A**, or **Custom** sorting. Dragging a project tile automatically switches to Custom mode and reorders it through the stable tile-move system within the current collection or root view.
+
+Several library projects can remain open as live in-memory workspaces. Clicking another project preserves the current project's latest segments, prompts, output dimensions, options, and timeline view without writing them to disk. A yellow dot in the project's upper-left corner marks unsaved changes. **Save Current** writes only the active workspace and clears its yellow dot; other unsaved workspaces remain intact for the lifetime of the application.
 
 Assigning a collection groups related projects into a folder-like tile. Its cover is a 2×2 grid made from the four most recently saved member thumbnails. Open the collection to see its projects; select **↑ UP** to return to the top-level library. Collected projects appear only inside their collection.
 
