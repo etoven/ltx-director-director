@@ -94,7 +94,7 @@ python3 -m pip install --upgrade "$(wget -qO- https://api.github.com/repos/etove
 Or download the `.whl` file from the latest GitHub release, then install it with:
 
 ```bash
-python3 -m pip install ./ltx_prompt_director-1.7.4-py3-none-any.whl
+python3 -m pip install ./ltx_prompt_director-1.7.5-py3-none-any.whl
 ```
 
 You can also install a locally built wheel from the repository:

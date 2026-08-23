@@ -12,7 +12,7 @@ from importlib.resources import files
 from pathlib import Path
 from uuid import uuid4
 
-from PySide6.QtCore import QEasingCurve, QObject, QRunnable, QRectF, QSettings, QSize, QStandardPaths, Qt, QThreadPool, QTimer, QVariantAnimation, Signal
+from PySide6.QtCore import QEasingCurve, QItemSelectionModel, QObject, QRunnable, QRectF, QSettings, QSize, QStandardPaths, Qt, QThreadPool, QTimer, QVariantAnimation, Signal
 from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
@@ -274,7 +274,8 @@ class ProjectListWidget(QListWidget):
         if target != self._drag_row:
             item = self.takeItem(self._drag_row)
             self.insertItem(target, item)
-            self.setCurrentItem(item)
+            item.setSelected(True)
+            self.selectionModel().setCurrentIndex(self.indexFromItem(item), QItemSelectionModel.SelectionFlag.NoUpdate)
             self._drag_row = target
             self.order_changed.emit()
         event.accept()
@@ -1130,12 +1131,17 @@ class MainWindow(QMainWindow):
         QDockWidget{background:#191d1f;color:#d9dcde;font-weight:bold} QDockWidget::title{background:#1b2022;border-bottom:1px solid #0e1011;padding:8px;text-align:left}
         #projectLibraryTitle{font-size:15px;font-weight:bold;color:#f0f2f3} #projectList{background:#151819;border:1px solid #0e1011;padding:5px}
         #projectList::item{background:#24282a;border:1px solid #3b4144;border-radius:4px;padding:7px;color:#dce0e2} #projectList::item:hover{border-color:#6488a1;background:#2b3134} #projectList::item:selected{border:2px solid #69a5d0;background:#29343a}
-        #librarySave{background:#3b6f9c;border-color:#4f83ae;font-weight:bold} #libraryDelete:hover{background:#713d3d;border-color:#9b5656}
+        #librarySave{background:#3b6f9c;border-color:#4f83ae;font-weight:bold} #librarySave:hover{background:#5596ca;border-color:#8bc8f5;color:#fff} #libraryDelete:hover{background:#713d3d;border-color:#9b5656}
         QMenu{background:#252a2c;border:1px solid #596267;padding:4px} QMenu::item{padding:7px 28px 7px 12px;border-radius:3px} QMenu::item:selected{background:#3b6f9c;color:#fff} QMenu::separator{height:1px;background:#4b5255;margin:4px 7px}
         """)
 
-    def refresh_project_library(self, select_id: str | None = None) -> None:
+    def refresh_project_library(self, select_id: str | None = None, preserve_scroll: bool = True) -> None:
         selected = select_id or self.current_project_id
+        previous_scroll = self.project_list.verticalScrollBar().value() if preserve_scroll else 0
+        if self.project_list._scroll_animation:
+            self.project_list._scroll_animation.stop()
+            self.project_list._scroll_animation = None
+        self.project_list._scroll_target = previous_scroll
         self.project_list.clear()
         records = self.library_records()
         self.collection_up.setVisible(bool(self.current_collection))
@@ -1209,6 +1215,7 @@ class MainWindow(QMainWindow):
         if selected_item:
             self.project_list.setCurrentItem(selected_item)
         self.filter_projects(self.project_search.text())
+        QTimer.singleShot(0, lambda value=previous_scroll: self.project_list.verticalScrollBar().setValue(value))
 
     @staticmethod
     def project_entry_key(meta: dict) -> str:
@@ -1353,7 +1360,7 @@ class MainWindow(QMainWindow):
 
     def leave_collection(self) -> None:
         self.current_collection = None
-        self.refresh_project_library()
+        self.refresh_project_library(preserve_scroll=False)
 
     def save_library_project(self) -> None:
         if not self.segments:
@@ -1410,7 +1417,7 @@ class MainWindow(QMainWindow):
         if meta.get("kind") == "collection":
             self.current_collection = str(meta["name"])
             self.project_search.clear()
-            self.refresh_project_library()
+            self.refresh_project_library(preserve_scroll=False)
             return
         project_id = str(meta["id"])
         if project_id == self.current_project_id:

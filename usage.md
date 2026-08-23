@@ -51,6 +51,8 @@ Assigning a collection groups related projects into a folder-like tile. Its cove
 
 The project library uses smooth per-pixel scrolling. Mouse-wheel movement is eased in short increments instead of jumping an entire project tile, while high-resolution touchpads retain direct pixel scrolling.
 
+Switching projects preserves the library's current scroll position, so selecting a project cannot pull the viewport away from an in-progress drag. The **Save Current** control and project context menus provide distinct hover feedback before activation.
+
 Library projects are stored in the operating system's per-user application-data directory. They use the same self-contained media format as Project Export, while lightweight metadata keeps the visual gallery responsive.
 
 ## 5. LTX Director files
