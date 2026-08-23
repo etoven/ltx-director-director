@@ -1110,11 +1110,20 @@ class MainWindow(QMainWindow):
         timeline_layout.setContentsMargins(0, 0, 0, 0)
         timeline_layout.setSpacing(0)
         self.timeline_controls = QHBoxLayout()
-        self.timeline_controls.setContentsMargins(8, 5, 8, 3)
+        self.timeline_controls.setContentsMargins(10, 6, 10, 5)
         self.timeline_controls.setSpacing(8)
-        self.timeline_controls.addWidget(QLabel("TIMELINE"))
+        timeline_title = QLabel("TIMELINE")
+        timeline_title.setObjectName("timelineTitle")
+        self.timeline_controls.addWidget(timeline_title)
         self.timeline_controls.addStretch()
-        self.timeline_controls.addWidget(QLabel("Output"))
+        output_label = QLabel("OUTPUT")
+        output_label.setObjectName("timelineControlLabel")
+        self.timeline_controls.addWidget(output_label)
+        self.output_size_control = QFrame()
+        self.output_size_control.setObjectName("outputSizeControl")
+        output_size_layout = QHBoxLayout(self.output_size_control)
+        output_size_layout.setContentsMargins(0, 0, 0, 0)
+        output_size_layout.setSpacing(0)
         self.output_width = QSpinBox()
         self.output_width.setObjectName("timelineSpin")
         self.output_width.setRange(256, 4096)
@@ -1133,10 +1142,16 @@ class MainWindow(QMainWindow):
         self.output_height.setToolTip("LTX Director custom output height")
         self.output_height.valueChanged.connect(self.mark_dirty)
         self.output_height.editingFinished.connect(self.normalize_output_dimensions)
-        self.timeline_controls.addWidget(self.output_width)
-        self.timeline_controls.addWidget(QLabel("×"))
-        self.timeline_controls.addWidget(self.output_height)
-        self.timeline_controls.addWidget(QLabel("Scale"))
+        resolution_separator = QLabel("×")
+        resolution_separator.setObjectName("resolutionSeparator")
+        resolution_separator.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        output_size_layout.addWidget(self.output_width)
+        output_size_layout.addWidget(resolution_separator)
+        output_size_layout.addWidget(self.output_height)
+        self.timeline_controls.addWidget(self.output_size_control)
+        scale_label = QLabel("SCALE")
+        scale_label.setObjectName("timelineControlLabel")
+        self.timeline_controls.addWidget(scale_label)
         self.timeline_scale = QSlider(Qt.Orientation.Horizontal)
         self.timeline_scale.setRange(20, 160)
         self.timeline_scale.setValue(self.pixels_per_second)
@@ -1144,7 +1159,7 @@ class MainWindow(QMainWindow):
         self.timeline_scale.setToolTip("Timeline pixels per second")
         self.timeline_scale.valueChanged.connect(self.set_timeline_scale)
         self.timeline_controls.addWidget(self.timeline_scale)
-        autofit = QPushButton("Auto fit")
+        autofit = QPushButton("↔  Auto fit")
         autofit.setObjectName("timelineButton")
         autofit.clicked.connect(self.autofit_timeline)
         self.timeline_controls.addWidget(autofit)
@@ -1508,6 +1523,10 @@ class MainWindow(QMainWindow):
         QComboBox{padding-right:__COMBO_PAD__px} QComboBox::drop-down{subcontrol-origin:padding;subcontrol-position:top right;width:__COMBO_BUTTON__px;background:#394145;border:0;border-left:1px solid #171a1c;border-top-right-radius:3px;border-bottom-right-radius:3px} QComboBox::drop-down:hover{background:#506471} QComboBox::drop-down:pressed{background:#274e66} QComboBox::down-arrow{width:__ARROW_SIZE__px;height:__ARROW_SIZE__px} QComboBox QAbstractItemView{background:#202527;color:#e1e5e7;border:1px solid #52616a;outline:0;padding:4px;selection-background-color:#3b6f9c;selection-color:#fff}
         QSlider::groove:horizontal{height:__SLIDER_GROOVE__px;background:#161b1d;border:1px solid #0d1011;border-radius:__SLIDER_RADIUS__px} QSlider::sub-page:horizontal{background:#367da6;border:1px solid #4b9ac6;border-radius:__SLIDER_RADIUS__px} QSlider::add-page:horizontal{background:#161b1d;border-radius:__SLIDER_RADIUS__px} QSlider::handle:horizontal{width:__SLIDER_HANDLE__px;margin:-__SLIDER_MARGIN__px 0;background:#607883;border:2px solid #8fb9cd;border-radius:__SLIDER_HANDLE_RADIUS__px} QSlider::handle:horizontal:hover{background:#78a8be;border-color:#c5ebff} QSlider::handle:horizontal:pressed{background:#4aa3d2;border-color:#e1f6ff}
         #timelineShell{background:#0d0f10;border:1px solid #323638;border-radius:3px} #mainTrackLabel{background:#191c1d;border-right:1px solid #34383a;font-weight:bold}
+        #timelineTitle{background:#19262d;color:#b9def2;border:1px solid #304955;border-radius:4px;padding:4px 8px;font-weight:bold;letter-spacing:1px} #timelineControlLabel{background:transparent;color:#7f9099;border:0;font-size:9px;font-weight:bold;letter-spacing:1px}
+        #outputSizeControl{background:#1a2023;border:1px solid #354047;border-radius:5px} #timelineSpin{background:transparent;border:0;border-radius:0;padding-left:9px;padding-right:__TIMELINE_SPIN_PAD__px;color:#e6edf1;font-weight:bold;selection-background-color:#3b6f9c} #timelineSpin:hover{background:#20292d} #timelineSpin:focus{background:#202b30;color:#fff}
+        #timelineSpin::up-button{width:__TIMELINE_SPIN_BUTTON__px;background:transparent;border:0;border-radius:2px;subcontrol-origin:border;subcontrol-position:top right} #timelineSpin::down-button{width:__TIMELINE_SPIN_BUTTON__px;background:transparent;border:0;border-radius:2px;subcontrol-origin:border;subcontrol-position:bottom right} #timelineSpin::up-button:hover,#timelineSpin::down-button:hover{background:#344b57} #timelineSpin::up-button:pressed,#timelineSpin::down-button:pressed{background:#1f668b} #timelineSpin::up-arrow{image:url("__SPIN_UP_IMAGE__");width:__TIMELINE_ARROW__px;height:__TIMELINE_ARROW__px} #timelineSpin::down-arrow{image:url("__SPIN_DOWN_IMAGE__");width:__TIMELINE_ARROW__px;height:__TIMELINE_ARROW__px}
+        #resolutionSeparator{background:transparent;color:#60717a;border:0;padding:0 3px;font-weight:bold} #timelineButton{background:transparent;color:#acd8ef;border:1px solid #3f6679;border-radius:5px;padding:4px 10px;font-weight:bold} #timelineButton:hover{background:#243b46;color:#e0f5ff;border-color:#65a7c7} #timelineButton:pressed{background:#172b35;color:#85c9eb;border-color:#347898}
         QListWidget{background:#0d0f10;border:0;padding:0} QListWidget::item{border:1px solid #696b6c;background:#252728;margin:0} QListWidget::item:selected{border:2px solid #f1f1f1;background:#293034}
         #timeline{padding:3px;background:#0d0f10} #timeline::item{background:#0d0f10;border:0} #timeline::item:selected{background:#0d0f10;border:1px solid #f1f1f1} #timeline[dropActive="true"]{border:3px solid #68b9ee;background:#13232c} #timeline[dropActive="false"]{border:1px solid #323638}
         #segmentCard{background:transparent;border:0} #segmentCardBody{background:#252728;border:0} #mediaBadge{background:#e5e5e5;color:#262626;font-weight:bold;padding:2px} #roleBadge{background:#36393a;color:#eee;padding:2px}
@@ -1544,10 +1563,16 @@ class MainWindow(QMainWindow):
         theme = theme.replace("__SLIDER_HANDLE__", str(metric(16))).replace("__SLIDER_MARGIN__", str(metric(6))).replace("__SLIDER_HANDLE_RADIUS__", str(metric(8)))
         dock_grip = str(files("ltx_prompt_director").joinpath("assets/dock-grip.png")).replace("\\", "/")
         theme = theme.replace("__DOCK_GRIP_WIDTH__", str(metric(14))).replace("__DOCK_GRIP_IMAGE__", dock_grip)
+        spin_up = str(files("ltx_prompt_director").joinpath("assets/spin-up.svg")).replace("\\", "/")
+        spin_down = str(files("ltx_prompt_director").joinpath("assets/spin-down.svg")).replace("\\", "/")
+        theme = theme.replace("__SPIN_UP_IMAGE__", spin_up).replace("__SPIN_DOWN_IMAGE__", spin_down)
+        theme = theme.replace("__TIMELINE_SPIN_PAD__", str(metric(20))).replace("__TIMELINE_SPIN_BUTTON__", str(metric(17))).replace("__TIMELINE_ARROW__", str(metric(8)))
         for size in (15, 10, 9, 8):
             theme = theme.replace(f"font-size:{size}px", f"font-size:{scaled(size)}px")
         self.setStyleSheet(theme)
         self.timeline_controls.setSpacing(metric(8))
+        self.output_width.setFixedWidth(metric(104))
+        self.output_height.setFixedWidth(metric(104))
         self.director_controls.setSpacing(metric(8))
         self.segment_header.setSpacing(metric(8))
         self.ruler.setFixedHeight(metric(28))
