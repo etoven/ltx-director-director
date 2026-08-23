@@ -1179,13 +1179,12 @@ class MainWindow(QMainWindow):
         track_row.addWidget(self.timeline, 1)
         self.add_tile = QPushButton("＋\nAdd media\n60.0s available")
         self.add_tile.setObjectName("addTile")
-        self.add_tile.setFixedSize(112, 126)
+        self.add_tile.setFixedSize(112, max(152, self.timeline_height - 32))
         self.add_tile.clicked.connect(self.add_media)
         add_tile_wrap = QWidget()
-        add_tile_layout = QVBoxLayout(add_tile_wrap)
-        add_tile_layout.setContentsMargins(8, 26, 8, 0)
-        add_tile_layout.addWidget(self.add_tile)
-        add_tile_layout.addStretch()
+        self.add_tile_layout = QVBoxLayout(add_tile_wrap)
+        self.add_tile_layout.setContentsMargins(8, 0, 8, 0)
+        self.add_tile_layout.addWidget(self.add_tile)
         track_row.addWidget(add_tile_wrap)
         timeline_layout.addLayout(track_row)
         self.timeline_height_handle = TimelineHeightHandle(self.timeline_height)
@@ -1391,7 +1390,7 @@ class MainWindow(QMainWindow):
         self.project_list.setWrapping(True)
         self.project_list.setResizeMode(QListWidget.ResizeMode.Adjust)
         self.project_list.setMovement(QListWidget.Movement.Static)
-        self.project_list.setSpacing(10)
+        self.project_list.setSpacing(4)
         self.project_list.itemClicked.connect(self.activate_clicked_project)
         self.project_list.itemDoubleClicked.connect(lambda *_: self.open_library_project())
         self.project_list.drag_started.connect(self.activate_custom_sort_for_drag)
@@ -1496,7 +1495,7 @@ class MainWindow(QMainWindow):
         #audioToggle:checked,#qualityToggle:checked,#frameToggle:checked{background:#285c3d;border-color:#4c9b6a;color:#c9f4d6} #copyButton{min-height:0;padding:1px 4px;margin:0;border:0;background:transparent;color:#aeb5b8} #copyButton:hover{background:#303a3f;color:#e5f4fc;border:0} #copyButton:pressed{background:#1b2429;color:#8fd3f7;border:0} QStatusBar{background:#1b1e1f;color:#7f898d}
         QDockWidget{background:#191d1f;color:#d9dcde;font-weight:bold} QDockWidget::title{background:#1b2022;border-bottom:1px solid #0e1011;padding:8px;text-align:left}
         #projectLibraryTitle,#magicOverlayTitle{font-size:15px;font-weight:bold;color:#f0f2f3} #projectList{background:#151819;border:1px solid #0e1011;padding:10px}
-        #projectList::item{background:#24282a;border:1px solid #3b4144;border-radius:4px;padding:8px;color:#dce0e2} #projectList::item:hover{border-color:#6488a1;background:#2b3134} #projectList::item:selected{border:2px solid #69a5d0;background:#29343a}
+        #projectList::item{background:#24282a;border:1px solid #3b4144;border-radius:4px;margin:4px;padding:7px;color:#dce0e2} #projectList::item:hover{border-color:#6488a1;background:#2b3134} #projectList::item:selected{border:2px solid #69a5d0;background:#29343a}
         #librarySave{background:#3b6f9c;border-color:#4f83ae;font-weight:bold} #librarySave:hover{background:#5596ca;border-color:#8bc8f5;color:#fff} #librarySave:pressed{background:#214865;border:1px solid #b9e1ff;color:#fff} #libraryDelete:hover{background:#713d3d;border-color:#9b5656}
         QMenu{background:#252a2c;border:1px solid #596267;padding:4px} QMenu::item{padding:7px 28px 7px 12px;border-radius:3px} QMenu::item:selected{background:#3b6f9c;color:#fff} QMenu::separator{height:1px;background:#4b5255;margin:4px 7px}
         QScrollBar:vertical{background:#171b1d;width:12px;margin:0;border:0;border-radius:6px} QScrollBar::handle:vertical{background:#46545c;min-height:28px;margin:2px;border-radius:4px} QScrollBar::handle:vertical:hover{background:#63869b} QScrollBar::handle:vertical:pressed{background:#74a8c6}
@@ -1525,12 +1524,14 @@ class MainWindow(QMainWindow):
         self.ruler.setFixedHeight(metric(28))
         self.timeline_height_handle.set_scale(scale)
         self.project_width_handle.set_scale(scale)
-        self.project_list.setSpacing(metric(10))
+        self.project_list.setSpacing(metric(4))
         for button in (self.provider_button, self.sfx, self.spoken_dialog, self.hdr, self.reduce_music, self.magic_button, self.start_button, self.end_button):
             button.setMinimumWidth(button.fontMetrics().horizontalAdvance(button.text()) + metric(18))
         self.output_width.setMinimumWidth(metric(92))
         self.output_height.setMinimumWidth(metric(92))
         self.duration_spin.setMinimumWidth(metric(78))
+        self.add_tile.setFixedWidth(metric(112))
+        self.add_tile_layout.setContentsMargins(metric(8), 0, metric(8), 0)
         for button in (self.copy_segment, self.copy_global):
             button.setFixedHeight(button.fontMetrics().height() + metric(4))
             button.setMinimumWidth(button.fontMetrics().horizontalAdvance(button.text()) + metric(10))
@@ -2003,10 +2004,27 @@ class MainWindow(QMainWindow):
         self.timeline_scale.setValue(fitted)
         self.timeline.horizontalScrollBar().setValue(0)
 
+    def maximum_safe_timeline_height(self) -> int:
+        """Keep timeline growth inside the current desktop-sized client area."""
+        if not hasattr(self, "timeline") or not self.centralWidget():
+            return 430
+        central = self.centralWidget()
+        current = max(1, self.timeline.height())
+        other_minimum = max(0, central.minimumSizeHint().height() - current)
+        available_client_height = central.height()
+        screen = self.screen() or QApplication.primaryScreen()
+        if screen:
+            window_overhead = max(0, self.frameGeometry().height() - central.height())
+            desktop_client_height = max(0, screen.availableGeometry().height() - window_overhead)
+            available_client_height = min(available_client_height, desktop_client_height)
+        return max(184, min(430, available_client_height - other_minimum))
+
     def set_timeline_height(self, value: int) -> None:
+        value = max(184, min(int(value), self.maximum_safe_timeline_height()))
         self.timeline_height = value
+        self.timeline_height_handle.current_height = value
         self.timeline.setFixedHeight(value)
-        self.add_tile.setFixedHeight(max(126, value - 58))
+        self.add_tile.setFixedHeight(max(152, value - 32))
         self.update_timeline_layout()
         self.mark_dirty()
 

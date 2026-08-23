@@ -17,7 +17,7 @@ Each WebM initially occupies one second. Image segments initially occupy five se
 - Right-click a card to replace its media, instantly export the complete source media, mark it as a start/end frame, or delete it. **Export image** or **Export video** copies only that segment's underlying media file directly to the folder configured in Application Settings—no prompts, metadata, or dialog. It initially uses the operating system's Downloads folder and creates collision-safe `<project name> - Segment 01.ext` filenames.
 - Replacing media preserves the segment prompt, timing, role, and position.
 
-Use the **Scale** slider to zoom the timeline horizontally, or select **Auto fit** to fit the complete sequence into the available width. Drag the dotted grip centered along the timeline's bottom edge downward to enlarge segment previews; previews use a centered cover crop beneath their separate header row, filling the expanded tile without empty padding above or below the image.
+Use the **Scale** slider to zoom the timeline horizontally, or select **Auto fit** to fit the complete sequence into the available width. Drag the dotted grip centered along the timeline's bottom edge downward to enlarge segment previews; previews use a centered cover crop beneath their separate header row, filling the expanded tile without empty padding above or below the image. Timeline height is automatically capped against the current window and desktop work area, preventing the lower edge of the application from being pushed beyond the screen.
 
 Mouse-wheel scrolling across the timeline uses short eased horizontal movement instead of jumping by whole tiles. High-resolution touchpad gestures remain direct and track the gesture pixel-for-pixel.
 
