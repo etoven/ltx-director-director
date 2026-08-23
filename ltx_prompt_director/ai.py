@@ -25,9 +25,25 @@ def build_prompts(segments: list[Segment], provider: str, model: str, api_key: s
 
 
 def _rules(count: int, intent: str, sfx: bool, spoken_dialog: bool, hdr: bool, reduce_music: bool) -> str:
+    if spoken_dialog and count == 1:
+        spoken_rule = (
+            "SPOKEN DIALOG IS ON: The single segment must include an appropriate clause beginning exactly `Spoken Dialog:` and containing actual audible words spoken by a visible character. "
+            "Format it as `Spoken Dialog: \"<brief spoken line>\" delivered <tone or performance>.` Preserve exact wording from Director's Intent when supplied; otherwise write a brief natural line consistent with the requested scene. "
+            "When the speaker's mouth is visible, explicitly require accurate lip sync, natural phoneme-shaped mouth articulation and facial performance synchronized to the spoken words; do not animate speech on a closed or non-speaking mouth. "
+            "Breathing, cries, gasps, growls and other wordless vocalizations are not spoken dialog and belong under SFX. "
+        )
+    elif spoken_dialog:
+        spoken_rule = (
+            "SPOKEN DIALOG IS ON: Include spoken dialog in at least one narratively appropriate segment, but do not force it into every segment. Only segments in which a visible character actually speaks should contain a clause beginning exactly `Spoken Dialog:`. "
+            "Each such clause must contain actual audible words, formatted as `Spoken Dialog: \"<brief spoken line>\" delivered <tone or performance>.` Preserve exact wording from Director's Intent when supplied; otherwise write brief natural dialogue consistent with the requested scene and maintain conversational continuity across speaking segments. "
+            "In each speaking segment where the speaker's mouth is visible, explicitly require accurate lip sync, natural phoneme-shaped mouth articulation and facial performance synchronized to the spoken words. Non-speaking segments must not add speech-like mouth movement. "
+            "Breathing, cries, gasps, growls and other wordless vocalizations are not spoken dialog and belong under SFX. "
+        )
+    else:
+        spoken_rule = "Do not include spoken dialog or audible speech. Wordless breathing, cries or other vocal sounds may appear only when SFX is enabled. "
     audio = (
         ("SFX IS ON AND IS A HARD OUTPUT REQUIREMENT: Every segment prompt must include a concise clause beginning exactly `SFX:` with synchronized sound grounded in visible motion and materials. " if sfx else "Do not include SFX, Foley or ambience directions. ")
-        + ("SPOKEN DIALOG IS ON AND IS A HARD OUTPUT REQUIREMENT: Every segment prompt must include a concise clause beginning exactly `Spoken Dialog:` describing vocal intent, delivery or visible vocalization. Do not invent quoted wording unless User intent supplies the exact words. " if spoken_dialog else "Do not include spoken dialog, speech, breathing, cries or other vocal directions. ")
+        + spoken_rule
     )
     quality_rule = "Begin globalPrompt with exactly: (4K, HDR, Realistic). " if hdr else "Do not add a parenthesized quality header to globalPrompt. "
     if reduce_music:
@@ -146,8 +162,6 @@ def _validate(raw: str, expected: int, require_sfx: bool = False, require_spoken
         prompt_lower = prompt.casefold()
         if require_sfx and "sfx:" not in prompt_lower:
             raise AIResponseFormatError("The AI omitted required SFX direction. Magic Build will retry.")
-        if require_spoken_dialog and "spoken dialog:" not in prompt_lower:
-            raise AIResponseFormatError("The AI omitted required Spoken Dialog direction. Magic Build will retry.")
         duration_value = segment.get("duration", 5)
         match = re.search(r"\d+(?:\.\d+)?", str(duration_value))
         if not match:
@@ -155,6 +169,8 @@ def _validate(raw: str, expected: int, require_sfx: bool = False, require_spoken
         maximum_duration = 60.0 if expected == 1 else 12.0
         duration = max(1.0, min(maximum_duration, round(float(match.group()) * 2) / 2))
         normalized_segments.append({"duration": duration, "prompt": prompt.strip()})
+    if require_spoken_dialog and not any("spoken dialog:" in segment["prompt"].casefold() for segment in normalized_segments):
+        raise AIResponseFormatError("The AI omitted requested spoken dialog from the sequence. Magic Build will retry.")
     global_prompt = result.get("globalPrompt") or result.get("global_prompt") or result.get("global")
     if not isinstance(global_prompt, str) or not global_prompt.strip():
         raise AIResponseFormatError("The AI returned no global prompt. Magic Build will retry.")
