@@ -19,13 +19,15 @@ Each WebM initially occupies one second. Image segments initially occupy five se
 
 Use the **Scale** slider to zoom the timeline horizontally, or select **Auto fit** to fit the complete sequence into the available width. Drag the bar along the bottom edge of the timeline downward to enlarge segment previews; previews preserve the complete image beneath their separate header row.
 
-During timeline rebuilds, an animated loading indicator remains visible over the timeline until every segment preview and control is ready.
+During genuine timeline rebuilds, an animated loading indicator remains visible until every segment preview and control is ready. Timeline zoom, vertical preview resizing, and duration resizing update the existing cards in place without reloading them or displaying the loader.
 
 ## 3. Configure Magic Build
 
 Open **AI Settings**, select Gemini or OpenAI, choose the Gemini model when applicable, and enter the corresponding API key.
 
 Use the **Text scale** slider in the main toolbar for immediate live adjustment, or the matching **UI text scale (DPI)** slider in Application Settings. Both controls resize text throughout the main window from 75% to 200%, stay synchronized, and restore the selected scale on future launches.
+
+The Magic Build overlay, its custom animation, and the timeline loading animation scale with the same DPI setting.
 
 Enable persistent storage only on a trusted computer. Keys are stored with Qt's local application settings and are never written to an exported file.
 

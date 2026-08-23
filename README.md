@@ -45,6 +45,7 @@ In short: use **Project Export** for lossless editing and safekeeping; use **LTX
 
 - Native PySide6 interface for Linux, Windows, and macOS
 - Web-app-matched dark editor layout with compact toolbar and stacked prompt panels
+- DPI-aware control spacing with modern rounded scrollbars and consistent button states
 - Numbered timeline ruler with duration-proportional segment widths
 - Adjustable timeline scale, one-click auto fit, and vertically resizable previews
 - Drag-and-drop media import with a highlighted timeline drop target
@@ -96,7 +97,7 @@ python3 -m pip install --upgrade "$(wget -qO- https://api.github.com/repos/etove
 Or download the `.whl` file from the latest GitHub release, then install it with:
 
 ```bash
-python3 -m pip install ./ltx_prompt_director-1.7.8-py3-none-any.whl
+python3 -m pip install ./ltx_prompt_director-1.7.9-py3-none-any.whl
 ```
 
 You can also install a locally built wheel from the repository:

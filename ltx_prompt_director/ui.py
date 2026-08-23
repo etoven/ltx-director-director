@@ -297,7 +297,8 @@ class MagicSpinner(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.angle = 0
-        self.setFixedSize(150, 150)
+        self.scale_factor = 1.0
+        self.set_scale(1.0)
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.advance)
         self.timer.start(45)
@@ -306,9 +307,16 @@ class MagicSpinner(QWidget):
         self.angle = (self.angle + 8) % 360
         self.update()
 
+    def set_scale(self, scale: float) -> None:
+        self.scale_factor = max(.75, min(2.0, scale))
+        side = round(150 * self.scale_factor)
+        self.setFixedSize(side, side)
+        self.update()
+
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        scale = self.scale_factor
         center = self.rect().center()
         painter.translate(center)
         painter.rotate(self.angle)
@@ -318,19 +326,19 @@ class MagicSpinner(QWidget):
             alpha = 55 + index * 20
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(QColor(90, 176, 235, min(255, alpha)))
-            painter.drawEllipse(QRectF(-4, -61, 8, 18))
+            painter.drawEllipse(QRectF(-4 * scale, -61 * scale, 8 * scale, 18 * scale))
             painter.restore()
         painter.rotate(-self.angle)
-        painter.setPen(QPen(QColor("#d9efff"), 3))
+        painter.setPen(QPen(QColor("#d9efff"), 3 * scale))
         painter.setBrush(QColor("#27343c"))
-        painter.drawRoundedRect(QRectF(-31, -23, 62, 46), 8, 8)
-        painter.setPen(QPen(QColor("#79c8ff"), 2))
+        painter.drawRoundedRect(QRectF(-31 * scale, -23 * scale, 62 * scale, 46 * scale), 8 * scale, 8 * scale)
+        painter.setPen(QPen(QColor("#79c8ff"), 2 * scale))
         for x in (-19, 0, 19):
-            painter.drawLine(x, -16, x + 8, -6)
-            painter.drawLine(x + 8, -6, x, 4)
+            painter.drawLine(round(x * scale), round(-16 * scale), round((x + 8) * scale), round(-6 * scale))
+            painter.drawLine(round((x + 8) * scale), round(-6 * scale), round(x * scale), round(4 * scale))
         painter.setPen(QColor("#fff2a8"))
         painter.setFont(self.font())
-        painter.drawText(QRectF(-30, 6, 60, 15), Qt.AlignmentFlag.AlignCenter, "DIRECTING")
+        painter.drawText(QRectF(-30 * scale, 6 * scale, 60 * scale, 15 * scale), Qt.AlignmentFlag.AlignCenter, "DIRECTING")
 
 
 class MagicBuildOverlay(QWidget):
@@ -341,15 +349,13 @@ class MagicBuildOverlay(QWidget):
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setStyleSheet("#magicOverlay{background:rgba(5,8,10,205)} #magicOverlayPanel{background:#20282c;border:2px solid #4f83ae;border-radius:12px}")
         layout = QVBoxLayout(self)
-        panel = QFrame(self)
-        panel.setObjectName("magicOverlayPanel")
-        panel.setFixedSize(390, 290)
-        panel_layout = QVBoxLayout(panel)
-        panel_layout.setContentsMargins(28, 20, 28, 24)
-        panel_layout.addStretch()
-        self.spinner = MagicSpinner(panel)
+        self.panel = QFrame(self)
+        self.panel.setObjectName("magicOverlayPanel")
+        self.panel_layout = QVBoxLayout(self.panel)
+        self.panel_layout.addStretch()
+        self.spinner = MagicSpinner(self.panel)
         self.spinner.timer.stop()
-        panel_layout.addWidget(self.spinner, 0, Qt.AlignmentFlag.AlignCenter)
+        self.panel_layout.addWidget(self.spinner, 0, Qt.AlignmentFlag.AlignCenter)
         self.title = QLabel("✦ Magic Build is directing your sequence")
         self.title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.title.setObjectName("magicOverlayTitle")
@@ -359,12 +365,20 @@ class MagicBuildOverlay(QWidget):
         self.attempt = QLabel("")
         self.attempt.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.attempt.setObjectName("muted")
-        panel_layout.addWidget(self.title)
-        panel_layout.addWidget(self.detail)
-        panel_layout.addWidget(self.attempt)
-        panel_layout.addStretch()
-        layout.addWidget(panel, 0, Qt.AlignmentFlag.AlignCenter)
+        self.panel_layout.addWidget(self.title)
+        self.panel_layout.addWidget(self.detail)
+        self.panel_layout.addWidget(self.attempt)
+        self.panel_layout.addStretch()
+        layout.addWidget(self.panel, 0, Qt.AlignmentFlag.AlignCenter)
+        scale = parent.settings.value("ui_text_scale", 100, int) / 100 if parent and hasattr(parent, "settings") else 1.0
+        self.set_scale(scale)
         self.hide()
+
+    def set_scale(self, scale: float) -> None:
+        scale = max(.75, min(2.0, scale))
+        self.panel.setFixedSize(round(390 * scale), round(290 * scale))
+        self.panel_layout.setContentsMargins(round(28 * scale), round(20 * scale), round(28 * scale), round(24 * scale))
+        self.spinner.set_scale(scale)
 
     def update_attempt(self, current: int, total: int, detail: str) -> None:
         self.detail.setText(detail)
@@ -394,9 +408,15 @@ class TileLoadingSpinner(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.phase = 0
-        self.setFixedSize(104, 58)
+        self.scale_factor = 1.0
+        self.set_scale(1.0)
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.advance)
+
+    def set_scale(self, scale: float) -> None:
+        self.scale_factor = max(.75, min(2.0, scale))
+        self.setFixedSize(round(104 * self.scale_factor), round(58 * self.scale_factor))
+        self.update()
 
     def advance(self) -> None:
         self.phase = (self.phase + 1) % 12
@@ -405,17 +425,18 @@ class TileLoadingSpinner(QWidget):
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        scale = self.scale_factor
         active = (self.phase // 4) % 3
         for index, x in enumerate((4, 38, 72)):
             lift = -4 if index == active else 0
-            rect = QRectF(x, 10 + lift, 28, 38)
-            painter.setPen(QPen(QColor("#9edaff") if index == active else QColor("#56646c"), 2))
+            rect = QRectF(x * scale, (10 + lift) * scale, 28 * scale, 38 * scale)
+            painter.setPen(QPen(QColor("#9edaff") if index == active else QColor("#56646c"), 2 * scale))
             painter.setBrush(QColor("#315f7b") if index == active else QColor("#252d31"))
-            painter.drawRoundedRect(rect, 4, 4)
-            painter.setPen(QPen(QColor("#d8f1ff") if index == active else QColor("#78868d"), 2))
-            painter.drawLine(x + 6, 37 + lift, x + 13, 29 + lift)
-            painter.drawLine(x + 13, 29 + lift, x + 22, 39 + lift)
-            painter.drawEllipse(QRectF(x + 18, 17 + lift, 4, 4))
+            painter.drawRoundedRect(rect, 4 * scale, 4 * scale)
+            painter.setPen(QPen(QColor("#d8f1ff") if index == active else QColor("#78868d"), 2 * scale))
+            painter.drawLine(round((x + 6) * scale), round((37 + lift) * scale), round((x + 13) * scale), round((29 + lift) * scale))
+            painter.drawLine(round((x + 13) * scale), round((29 + lift) * scale), round((x + 22) * scale), round((39 + lift) * scale))
+            painter.drawEllipse(QRectF((x + 18) * scale, (17 + lift) * scale, 4 * scale, 4 * scale))
 
 
 class TimelineLoadingOverlay(QWidget):
@@ -433,6 +454,9 @@ class TimelineLoadingOverlay(QWidget):
         layout.addWidget(label)
         layout.addStretch()
         self.hide()
+
+    def set_scale(self, scale: float) -> None:
+        self.spinner.set_scale(scale)
 
     def show_loading(self) -> None:
         self.setGeometry(self.parentWidget().rect())
@@ -464,14 +488,17 @@ class TimelineRuler(QWidget):
         painter = QPainter(self)
         painter.fillRect(self.rect(), QColor("#17191a"))
         painter.setFont(self.font())
+        label_width = painter.fontMetrics().horizontalAdvance("60.00") + 8
+        label_interval = max(1, (label_width + self.scale - 1) // self.scale)
         for second in range(61):
             x = second * self.scale - self.offset
             if x < -30 or x > self.width() + 30:
                 continue
             painter.setPen(QPen(QColor("#303538")))
             painter.drawLine(x, 12, x, 24)
-            painter.setPen(QColor("#ff5757") if second == 0 else QColor("#788186"))
-            painter.drawText(x + 4, 16, "0" if second == 0 else f"{second}.00")
+            if second == 0 or second % label_interval == 0:
+                painter.setPen(QColor("#ff5757") if second == 0 else QColor("#788186"))
+                painter.drawText(x + 4, 16, "0" if second == 0 else f"{second}.00")
 
 
 class ResizeHandle(QFrame):
@@ -555,6 +582,7 @@ class SegmentCard(QFrame):
 
     def __init__(self, segment: Segment, preview_height: int, pixels_per_second: int):
         super().__init__()
+        self.segment = segment
         self.setCursor(Qt.CursorShape.OpenHandCursor)
         self.setObjectName("segmentCard")
         outer = QHBoxLayout(self)
@@ -582,13 +610,11 @@ class SegmentCard(QFrame):
         badges.addWidget(role)
         badges.addWidget(close)
         layout.addLayout(badges)
-        image = QLabel()
-        image.setObjectName("segmentPreview")
-        image.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        image.setMinimumHeight(max(80, preview_height))
-        preview_width = max(36, int(segment.duration * pixels_per_second) - 14)
-        image.setPixmap(QPixmap(segment.preview_path).scaled(preview_width, max(80, preview_height), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
-        layout.addWidget(image, 1)
+        self.preview = QLabel()
+        self.preview.setObjectName("segmentPreview")
+        self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.source_pixmap = QPixmap(segment.preview_path)
+        layout.addWidget(self.preview, 1)
         title = QLabel(segment.prompt or segment.name)
         title.setToolTip(segment.name)
         title.setWordWrap(False)
@@ -599,10 +625,20 @@ class SegmentCard(QFrame):
         self.duration_label.setObjectName("tileDuration")
         layout.addWidget(self.duration_label)
         outer.addWidget(content, 1)
-        handle = ResizeHandle(segment.duration, pixels_per_second)
-        handle.preview.connect(self._preview_duration)
-        handle.finished.connect(self.resize_finished)
-        outer.addWidget(handle)
+        self.resize_handle = ResizeHandle(segment.duration, pixels_per_second)
+        self.resize_handle.preview.connect(self._preview_duration)
+        self.resize_handle.finished.connect(self.resize_finished)
+        outer.addWidget(self.resize_handle)
+        self.update_layout(preview_height, pixels_per_second)
+
+    def update_layout(self, preview_height: int, pixels_per_second: int) -> None:
+        height = max(80, preview_height)
+        width = max(36, int(self.segment.duration * pixels_per_second) - 14)
+        self.preview.setMinimumHeight(height)
+        self.preview.setPixmap(self.source_pixmap.scaled(width, height, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+        self.resize_handle.pixels_per_second = pixels_per_second
+        self.resize_handle.duration = self.segment.duration
+        self.duration_label.setText(f"{self.segment.duration:.1f}s")
 
     def _preview_duration(self, value: float) -> None:
         self.duration_label.setText(f"{value:.1f}s")
@@ -882,6 +918,7 @@ class MainWindow(QMainWindow):
         spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         toolbar.addWidget(spacer)
         self.provider_button = QPushButton()
+        self.provider_button.setObjectName("toolbarButton")
         self.provider_button.clicked.connect(self.open_settings)
         self.update_provider_button()
         toolbar.addWidget(self.provider_button)
@@ -916,12 +953,14 @@ class MainWindow(QMainWindow):
         timeline_layout = QVBoxLayout(timeline_shell)
         timeline_layout.setContentsMargins(0, 0, 0, 0)
         timeline_layout.setSpacing(0)
-        timeline_controls = QHBoxLayout()
-        timeline_controls.setContentsMargins(8, 5, 8, 3)
-        timeline_controls.addWidget(QLabel("TIMELINE"))
-        timeline_controls.addStretch()
-        timeline_controls.addWidget(QLabel("Output"))
+        self.timeline_controls = QHBoxLayout()
+        self.timeline_controls.setContentsMargins(8, 5, 8, 3)
+        self.timeline_controls.setSpacing(8)
+        self.timeline_controls.addWidget(QLabel("TIMELINE"))
+        self.timeline_controls.addStretch()
+        self.timeline_controls.addWidget(QLabel("Output"))
         self.output_width = QSpinBox()
+        self.output_width.setObjectName("timelineSpin")
         self.output_width.setRange(256, 4096)
         self.output_width.setSingleStep(32)
         self.output_width.setValue(1280)
@@ -930,6 +969,7 @@ class MainWindow(QMainWindow):
         self.output_width.valueChanged.connect(self.mark_dirty)
         self.output_width.editingFinished.connect(self.normalize_output_dimensions)
         self.output_height = QSpinBox()
+        self.output_height.setObjectName("timelineSpin")
         self.output_height.setRange(256, 4096)
         self.output_height.setSingleStep(32)
         self.output_height.setValue(704)
@@ -937,21 +977,22 @@ class MainWindow(QMainWindow):
         self.output_height.setToolTip("LTX Director custom output height")
         self.output_height.valueChanged.connect(self.mark_dirty)
         self.output_height.editingFinished.connect(self.normalize_output_dimensions)
-        timeline_controls.addWidget(self.output_width)
-        timeline_controls.addWidget(QLabel("×"))
-        timeline_controls.addWidget(self.output_height)
-        timeline_controls.addWidget(QLabel("Scale"))
+        self.timeline_controls.addWidget(self.output_width)
+        self.timeline_controls.addWidget(QLabel("×"))
+        self.timeline_controls.addWidget(self.output_height)
+        self.timeline_controls.addWidget(QLabel("Scale"))
         self.timeline_scale = QSlider(Qt.Orientation.Horizontal)
         self.timeline_scale.setRange(20, 160)
         self.timeline_scale.setValue(self.pixels_per_second)
         self.timeline_scale.setFixedWidth(150)
         self.timeline_scale.setToolTip("Timeline pixels per second")
         self.timeline_scale.valueChanged.connect(self.set_timeline_scale)
-        timeline_controls.addWidget(self.timeline_scale)
+        self.timeline_controls.addWidget(self.timeline_scale)
         autofit = QPushButton("Auto fit")
+        autofit.setObjectName("timelineButton")
         autofit.clicked.connect(self.autofit_timeline)
-        timeline_controls.addWidget(autofit)
-        timeline_layout.addLayout(timeline_controls)
+        self.timeline_controls.addWidget(autofit)
+        timeline_layout.addLayout(self.timeline_controls)
         ruler_row = QHBoxLayout()
         ruler_row.setContentsMargins(0, 0, 0, 0)
         ruler_spacer = QWidget()
@@ -1000,7 +1041,7 @@ class MainWindow(QMainWindow):
         timeline_layout.addLayout(track_row)
         self.timeline_height_handle = TimelineHeightHandle(self.timeline_height)
         self.timeline_height_handle.height_changed.connect(self.set_timeline_height)
-        self.timeline_height_handle.finished.connect(lambda: self.refresh_timeline(self.timeline.currentRow()))
+        self.timeline_height_handle.finished.connect(self.update_timeline_layout)
         timeline_layout.addWidget(self.timeline_height_handle)
         outer.addWidget(timeline_shell)
 
@@ -1008,10 +1049,11 @@ class MainWindow(QMainWindow):
         self.sequence_bar.setObjectName("sequenceBar")
         outer.addWidget(self.sequence_bar)
 
-        controls = QHBoxLayout()
+        self.director_controls = QHBoxLayout()
+        self.director_controls.setSpacing(8)
         intent_label = QLabel("DIRECTOR'S INTENT")
         intent_label.setObjectName("sectionLabel")
-        controls.addWidget(intent_label)
+        self.director_controls.addWidget(intent_label)
         self.intent = QLineEdit()
         intent_example = (
             "Tip: You can request the total sequence length here. Example: Total sequence length: 20 seconds. "
@@ -1043,42 +1085,48 @@ class MainWindow(QMainWindow):
         self.magic_button = QPushButton("✦ Magic Build")
         self.magic_button.setObjectName("magicButton")
         self.magic_button.clicked.connect(self.magic_build)
-        controls.addWidget(self.intent, 1)
-        controls.addWidget(self.sfx)
-        controls.addWidget(self.spoken_dialog)
-        controls.addWidget(self.hdr)
-        controls.addWidget(self.reduce_music)
-        controls.addWidget(self.magic_button)
-        outer.addLayout(controls)
+        for button in (self.sfx, self.spoken_dialog, self.hdr, self.reduce_music, self.magic_button):
+            button.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+        self.director_controls.addWidget(self.intent, 1)
+        self.director_controls.addWidget(self.sfx)
+        self.director_controls.addWidget(self.spoken_dialog)
+        self.director_controls.addWidget(self.hdr)
+        self.director_controls.addWidget(self.reduce_music)
+        self.director_controls.addWidget(self.magic_button)
+        outer.addLayout(self.director_controls)
 
         segment_panel = QFrame()
         segment_panel.setObjectName("promptPanel")
         segment_layout = QVBoxLayout(segment_panel)
         segment_layout.setContentsMargins(9, 6, 9, 5)
-        segment_header = QHBoxLayout()
+        self.segment_header = QHBoxLayout()
+        self.segment_header.setSpacing(8)
         segment_label = QLabel("SEGMENT PROMPT")
         segment_label.setObjectName("sectionLabel")
-        segment_header.addWidget(segment_label)
+        self.segment_header.addWidget(segment_label)
         self.frame_number = QLabel("Frame —")
         self.frame_number.setObjectName("muted")
         self.start_button = QPushButton("Start frame")
         self.end_button = QPushButton("End frame")
+        self.start_button.setObjectName("frameToggle")
+        self.end_button.setObjectName("frameToggle")
         self.start_button.setCheckable(True)
         self.end_button.setCheckable(True)
         self.duration_spin = QDoubleSpinBox()
+        self.duration_spin.setObjectName("editorSpin")
         self.duration_spin.setRange(1, 12)
         self.duration_spin.setSingleStep(.5)
         self.duration_spin.setDecimals(1)
         self.duration_spin.valueChanged.connect(self.editor_duration_changed)
         self.start_button.clicked.connect(lambda: self.set_role("start"))
         self.end_button.clicked.connect(lambda: self.set_role("end"))
-        segment_header.addStretch()
-        segment_header.addWidget(self.frame_number)
-        segment_header.addWidget(self.start_button)
-        segment_header.addWidget(self.end_button)
-        segment_header.addWidget(QLabel("Duration"))
-        segment_header.addWidget(self.duration_spin)
-        segment_layout.addLayout(segment_header)
+        self.segment_header.addStretch()
+        self.segment_header.addWidget(self.frame_number)
+        self.segment_header.addWidget(self.start_button)
+        self.segment_header.addWidget(self.end_button)
+        self.segment_header.addWidget(QLabel("Duration"))
+        self.segment_header.addWidget(self.duration_spin)
+        segment_layout.addLayout(self.segment_header)
         self.segment_prompt = QTextEdit()
         self.segment_prompt.textChanged.connect(self.save_prompt)
         segment_layout.addWidget(self.segment_prompt)
@@ -1207,33 +1255,59 @@ class MainWindow(QMainWindow):
         def scaled(size: int) -> int:
             return max(7, round(size * scale))
 
+        def metric(size: int) -> int:
+            return max(1, round(size * scale))
+
         theme = """
         QMainWindow,QWidget{background:#24292c;color:#d9dcde;font:11px Arial} QToolBar{background:#303537;border:0;spacing:6px;padding:5px}
-        QToolButton,QPushButton,QComboBox,QDoubleSpinBox,QLineEdit{background:#303436;border:1px solid #101213;border-radius:3px;padding:5px 8px}
-        QToolButton:hover,QPushButton:hover{background:#41474a} QToolButton{min-height:20px} QLineEdit{background:#1e2122}
+        QToolButton,QPushButton,QComboBox,QSpinBox,QDoubleSpinBox,QLineEdit{background:#303436;border:1px solid #101213;border-radius:3px;padding:5px 8px;min-height:20px}
+        QToolButton:hover,QPushButton:hover{background:#41474a} QToolButton:pressed,QPushButton:pressed{background:#202729;border-color:#79a8c5} QLineEdit{background:#1e2122}
         #timelineShell{background:#0d0f10;border:1px solid #323638;border-radius:3px} #mainTrackLabel{background:#191c1d;border-right:1px solid #34383a;font-weight:bold}
         QListWidget{background:#0d0f10;border:0;padding-top:26px} QListWidget::item{border:1px solid #696b6c;background:#252728;margin:0} QListWidget::item:selected{border:2px solid #f1f1f1;background:#293034}
         #timeline[dropActive="true"]{border:3px solid #68b9ee;background:#13232c} #timeline[dropActive="false"]{border:1px solid #323638}
         #segmentCard{background:#252728;border:0} #mediaBadge{background:#e5e5e5;color:#262626;font-weight:bold;padding:2px} #roleBadge{background:#36393a;color:#eee;padding:2px}
-        #tileDelete{padding:0;background:#454849;color:#ddd;border:0} #tileDelete:hover{background:#a94444;color:#fff;border:1px solid #e07878} #tileTitle{background:#242627;padding:3px;font-size:9px} #tileDuration{color:#a2a7a9;font-size:8px}
+        #tileDelete{padding:0;min-height:0;max-height:20px;background:#454849;color:#ddd;border:0} #tileDelete:hover{background:#a94444;color:#fff;border:1px solid #e07878} #tileTitle{background:#242627;padding:3px;font-size:9px} #tileDuration{color:#a2a7a9;font-size:8px}
         #resizeHandle{background:#606669;border-left:1px solid #9ca2a4} #resizeHandle:hover{background:#8aa6b7;border-left:2px solid #d8edf8}
         #timelineHeightHandle{background:#3d4447;border-top:1px solid #737d82} #timelineHeightHandle:hover{background:#6d8795;border-top:2px solid #d8edf8}
         #segmentPreview{background:#17191a;border-top:1px solid #34383a}
         #addTile{border:1px dashed #596065;background:#111415;color:#828b90;font-size:10px} #sequenceBar{background:#1c1f20;border:1px solid #0e1011;border-radius:3px;padding:12px;font-weight:bold}
         #sectionLabel{color:#939ca1;font-size:8px;letter-spacing:1px} #muted{color:#879095;font-size:9px} #promptPanel{background:#252728;border:1px solid #101213;border-radius:3px}
         QTextEdit{background:#252728;border:0;color:#e1e4e5;font:11px 'Courier New';padding:4px} #magicButton{background:#3b6f9c;border-color:#4f83ae;font-weight:bold}
-        #audioToggle:checked,#qualityToggle:checked{background:#285c3d;border-color:#4c9b6a;color:#c9f4d6} #copyButton{border:0;background:transparent;color:#aeb5b8} QStatusBar{background:#1b1e1f;color:#7f898d}
+        #audioToggle:checked,#qualityToggle:checked,#frameToggle:checked{background:#285c3d;border-color:#4c9b6a;color:#c9f4d6} #copyButton{min-height:0;border:0;background:transparent;color:#aeb5b8} QStatusBar{background:#1b1e1f;color:#7f898d}
         QDockWidget{background:#191d1f;color:#d9dcde;font-weight:bold} QDockWidget::title{background:#1b2022;border-bottom:1px solid #0e1011;padding:8px;text-align:left}
         #projectLibraryTitle,#magicOverlayTitle{font-size:15px;font-weight:bold;color:#f0f2f3} #projectList{background:#151819;border:1px solid #0e1011;padding:5px}
         #projectList::item{background:#24282a;border:1px solid #3b4144;border-radius:4px;padding:7px;color:#dce0e2} #projectList::item:hover{border-color:#6488a1;background:#2b3134} #projectList::item:selected{border:2px solid #69a5d0;background:#29343a}
         #librarySave{background:#3b6f9c;border-color:#4f83ae;font-weight:bold} #librarySave:hover{background:#5596ca;border-color:#8bc8f5;color:#fff} #librarySave:pressed{background:#214865;border:2px solid #b9e1ff;color:#fff;padding:4px 7px 3px 9px} #libraryDelete:hover{background:#713d3d;border-color:#9b5656}
         QMenu{background:#252a2c;border:1px solid #596267;padding:4px} QMenu::item{padding:7px 28px 7px 12px;border-radius:3px} QMenu::item:selected{background:#3b6f9c;color:#fff} QMenu::separator{height:1px;background:#4b5255;margin:4px 7px}
+        QScrollBar:vertical{background:#171b1d;width:12px;margin:0;border:0;border-radius:6px} QScrollBar::handle:vertical{background:#46545c;min-height:28px;margin:2px;border-radius:4px} QScrollBar::handle:vertical:hover{background:#63869b} QScrollBar::handle:vertical:pressed{background:#74a8c6}
+        QScrollBar:horizontal{background:#171b1d;height:12px;margin:0;border:0;border-radius:6px} QScrollBar::handle:horizontal{background:#46545c;min-width:28px;margin:2px;border-radius:4px} QScrollBar::handle:horizontal:hover{background:#63869b} QScrollBar::handle:horizontal:pressed{background:#74a8c6}
+        QScrollBar::add-line,QScrollBar::sub-line{width:0;height:0;background:transparent;border:0} QScrollBar::up-arrow,QScrollBar::down-arrow,QScrollBar::left-arrow,QScrollBar::right-arrow{width:0;height:0;background:transparent} QScrollBar::add-page,QScrollBar::sub-page{background:transparent} QAbstractScrollArea::corner{background:#171b1d;border:0}
         """
         theme = theme.replace("font:11px Arial", f"font:{scaled(11)}px Arial")
         theme = theme.replace("font:11px 'Courier New'", f"font:{scaled(11)}px 'Courier New'")
+        theme = theme.replace("spacing:6px;padding:5px", f"spacing:{metric(6)}px;padding:{metric(5)}px")
+        theme = theme.replace("padding:5px 8px;min-height:20px", f"padding:{metric(5)}px {metric(8)}px;min-height:{metric(20)}px")
+        theme = theme.replace("padding:4px 7px 3px 9px", f"padding:{metric(4)}px {metric(7)}px {metric(3)}px {metric(9)}px")
+        theme = theme.replace("width:12px;margin:0", f"width:{metric(12)}px;margin:0")
+        theme = theme.replace("height:12px;margin:0", f"height:{metric(12)}px;margin:0")
+        theme = theme.replace("min-height:28px;margin:2px", f"min-height:{metric(28)}px;margin:{metric(2)}px")
+        theme = theme.replace("min-width:28px;margin:2px", f"min-width:{metric(28)}px;margin:{metric(2)}px")
         for size in (15, 10, 9, 8):
             theme = theme.replace(f"font-size:{size}px", f"font-size:{scaled(size)}px")
         self.setStyleSheet(theme)
+        self.timeline_controls.setSpacing(metric(8))
+        self.director_controls.setSpacing(metric(8))
+        self.segment_header.setSpacing(metric(8))
+        self.ruler.setFixedHeight(metric(28))
+        for button in (self.provider_button, self.sfx, self.spoken_dialog, self.hdr, self.reduce_music, self.magic_button, self.start_button, self.end_button):
+            button.setMinimumWidth(button.fontMetrics().horizontalAdvance(button.text()) + metric(22))
+        self.output_width.setMinimumWidth(metric(92))
+        self.output_height.setMinimumWidth(metric(92))
+        self.duration_spin.setMinimumWidth(metric(78))
+        if hasattr(self, "timeline_loading"):
+            self.timeline_loading.set_scale(scale)
+        if hasattr(self, "magic_overlay"):
+            self.magic_overlay.set_scale(scale)
 
     def refresh_project_library(self, select_id: str | None = None, preserve_scroll: bool = True) -> None:
         selected = select_id or self.current_project_id
@@ -1679,7 +1753,7 @@ class MainWindow(QMainWindow):
     def set_timeline_scale(self, value: int) -> None:
         self.pixels_per_second = value
         self.ruler.set_scale(value)
-        self.refresh_timeline(self.timeline.currentRow())
+        self.update_timeline_layout()
         self.mark_dirty()
 
     def autofit_timeline(self) -> None:
@@ -1695,6 +1769,7 @@ class MainWindow(QMainWindow):
         self.timeline_height = value
         self.timeline.setFixedHeight(value)
         self.add_tile.setFixedHeight(max(126, value - 58))
+        self.update_timeline_layout()
         self.mark_dirty()
 
     def apply_global_prefixes(self) -> None:
@@ -1744,7 +1819,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Added {added} media file{'s' if added != 1 else ''}")
 
     def refresh_timeline(self, selected: int = 0) -> None:
-        indicator = getattr(self, "timeline_loading", None)
+        indicator = getattr(self, "timeline_loading", None) if self.segments else None
         if indicator:
             indicator.show_loading()
             QApplication.processEvents(QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents)
@@ -1774,6 +1849,30 @@ class MainWindow(QMainWindow):
             self._loading = False
             if indicator:
                 indicator.hide_loading()
+
+    def update_timeline_layout(self) -> None:
+        """Resize existing cards in place without rebuilding media-backed widgets."""
+        if not hasattr(self, "timeline"):
+            return
+        previous_loading = self._loading
+        self._loading = True
+        try:
+            card_height = max(152, self.timeline_height - 32)
+            preview_height = max(80, card_height - 55)
+            by_id = {segment.id: segment for segment in self.segments}
+            for row in range(self.timeline.count()):
+                item = self.timeline.item(row)
+                segment = by_id.get(item.data(Qt.ItemDataRole.UserRole))
+                if not segment:
+                    continue
+                item.setSizeHint(QSize(max(48, int(segment.duration * self.pixels_per_second)), card_height))
+                card = self.timeline.itemWidget(item)
+                if isinstance(card, SegmentCard):
+                    card.update_layout(preview_height, self.pixels_per_second)
+            self.timeline.doItemsLayout()
+            self.update_summary()
+        finally:
+            self._loading = previous_loading
 
     def sync_order(self) -> None:
         if self._loading:
@@ -1811,7 +1910,7 @@ class MainWindow(QMainWindow):
     def editor_duration_changed(self, value: float) -> None:
         if not self._loading and self.current_segment():
             self.change_duration(self.current_segment().id, value)
-            self.refresh_timeline(self.timeline.currentRow())
+            self.update_timeline_layout()
 
     def set_role(self, role: str) -> None:
         if self.current_segment():
@@ -1833,8 +1932,7 @@ class MainWindow(QMainWindow):
         self.update_summary()
 
     def finish_resize(self, segment_id: str) -> None:
-        row = next((index for index, segment in enumerate(self.segments) if segment.id == segment_id), 0)
-        self.refresh_timeline(row)
+        self.update_timeline_layout()
 
     def update_summary(self) -> None:
         total = self.total_duration()
@@ -2006,7 +2104,6 @@ class MainWindow(QMainWindow):
                 segment.duration = target
             self.refresh_timeline(self.timeline.currentRow())
             return
-        selected = self.timeline.currentRow()
         start_widths = [self.timeline.item(row).sizeHint().width() for row in range(self.timeline.count())]
         target_widths = [max(48, int(duration * self.pixels_per_second)) for duration in target_durations]
         for segment, target in zip(self.segments, target_durations):
@@ -2027,7 +2124,7 @@ class MainWindow(QMainWindow):
             self.timeline.doItemsLayout()
 
         animation.valueChanged.connect(resize_tiles)
-        animation.finished.connect(lambda: self.refresh_timeline(selected))
+        animation.finished.connect(self.update_timeline_layout)
         self.duration_animation = animation
         animation.start()
 
