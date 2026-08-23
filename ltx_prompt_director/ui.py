@@ -134,7 +134,7 @@ class MagicWorker(QRunnable):
                 if attempt >= attempts or not retryable_connection_error(error):
                     self.signals.failed.emit(str(error))
                     return
-                self.signals.progress.emit(attempt + 1, attempts, "Connection stumbled—rewinding for another take…")
+                self.signals.progress.emit(attempt + 1, attempts, "Provider response stumbled—rewinding for another take…")
                 time.sleep(min(2 ** attempt, 8))
 
 

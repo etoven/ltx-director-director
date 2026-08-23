@@ -12,6 +12,10 @@ from .models import Segment
 GEMINI_MODELS = ["gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite"]
 
 
+class AIResponseFormatError(ValueError):
+    """The provider returned text that does not satisfy the response contract."""
+
+
 def build_prompts(segments: list[Segment], provider: str, model: str, api_key: str, intent: str, sfx: bool, spoken_dialog: bool, hdr: bool, reduce_music: bool, timeout: int = 400) -> dict:
     images = [{"name": item.name, "role": item.role, "image": data_url(item.preview_path, max_edge=384)} for item in segments]
     rules = _rules(len(images), intent, sfx, spoken_dialog, hdr, reduce_music)
@@ -38,7 +42,8 @@ def _rules(count: int, intent: str, sfx: bool, spoken_dialog: bool, hdr: bool, r
             "If it is labeled START FRAME, begin exactly from it and guide coherent action forward from that starting state; do not invent action before it. "
             "If it is labeled END FRAME, guide plausible preceding action toward that target state, resolve exactly into it and stop there; do not continue beyond it. "
             "Use User intent as the primary source of desired action, with conservative supporting motion inferred from visible pose, expression, environment and physical cause-and-effect. "
-            "Describe time-based motion across the segment rather than merely inventorying the still image. Do not require or refer to a missing adjacent frame."
+            "Describe time-based motion across the segment rather than merely inventorying the still image. Do not require or refer to a missing adjacent frame. "
+            "The JSON must still use a segments array containing exactly one object; never return a singular segment object or a bare segment."
         )
     else:
         frame_planning_rule = "Infer transitions only from adjacent frames."
@@ -88,14 +93,81 @@ def _openai(images: list[dict], key: str, rules: str, timeout: int) -> dict:
 
 
 def _validate(raw: str, expected: int) -> dict:
-    result = json.loads(raw)
+    result = _parse_json(raw)
+    if expected == 1:
+        result = _normalize_single_frame_result(result)
+    if not isinstance(result, dict):
+        raise AIResponseFormatError("The AI response was not a JSON object. Magic Build will retry.")
     if not isinstance(result.get("segments"), list) or len(result["segments"]) != expected:
-        raise ValueError("The AI returned the wrong segment count. Run Magic Build again.")
-    return result
+        raise AIResponseFormatError(f"The AI returned the wrong segment count; expected {expected}. Magic Build will retry.")
+    normalized_segments = []
+    for segment in result["segments"]:
+        if not isinstance(segment, dict):
+            raise AIResponseFormatError("The AI returned an invalid segment object. Magic Build will retry.")
+        prompt = segment.get("prompt") or segment.get("segmentPrompt") or segment.get("segment_prompt")
+        if not isinstance(prompt, str) or not prompt.strip():
+            raise AIResponseFormatError("The AI returned a segment without a prompt. Magic Build will retry.")
+        duration_value = segment.get("duration", 5)
+        match = re.search(r"\d+(?:\.\d+)?", str(duration_value))
+        if not match:
+            raise AIResponseFormatError("The AI returned an invalid segment duration. Magic Build will retry.")
+        duration = max(1.0, min(12.0, round(float(match.group()) * 2) / 2))
+        normalized_segments.append({"duration": duration, "prompt": prompt.strip()})
+    global_prompt = result.get("globalPrompt") or result.get("global_prompt") or result.get("global")
+    if not isinstance(global_prompt, str) or not global_prompt.strip():
+        raise AIResponseFormatError("The AI returned no global prompt. Magic Build will retry.")
+    return {"segments": normalized_segments, "globalPrompt": global_prompt.strip()}
+
+
+def _parse_json(raw: str) -> object:
+    """Parse JSON while tolerating presentation noise commonly emitted by LLMs."""
+    cleaned = str(raw or "").strip()
+    cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.I)
+    cleaned = re.sub(r"\s*```$", "", cleaned)
+    candidates = [cleaned]
+    object_start, object_end = cleaned.find("{"), cleaned.rfind("}")
+    if 0 <= object_start < object_end:
+        candidates.append(cleaned[object_start:object_end + 1])
+    array_start, array_end = cleaned.find("["), cleaned.rfind("]")
+    if 0 <= array_start < array_end:
+        candidates.append(cleaned[array_start:array_end + 1])
+    for candidate in candidates:
+        for value in (candidate, re.sub(r",\s*([}\]])", r"\1", candidate)):
+            try:
+                return json.loads(value)
+            except (json.JSONDecodeError, TypeError):
+                continue
+    raise AIResponseFormatError("The AI returned malformed JSON. Magic Build will retry.")
+
+
+def _normalize_single_frame_result(result: object) -> object:
+    """Normalize common one-frame response shapes without weakening count validation."""
+    if isinstance(result, list):
+        if len(result) != 1 or not isinstance(result[0], dict):
+            return result
+        entry = result[0]
+        if "segments" in entry:
+            return entry
+        return {"segments": [entry], "globalPrompt": entry.get("globalPrompt") or entry.get("global_prompt") or ""}
+    if not isinstance(result, dict):
+        return result
+    normalized = dict(result)
+    segments = normalized.get("segments")
+    if isinstance(segments, dict):
+        normalized["segments"] = [segments]
+    elif "segments" not in normalized:
+        singular = normalized.get("segment")
+        if isinstance(singular, dict):
+            normalized["segments"] = [singular]
+        elif any(key in normalized for key in ("prompt", "segmentPrompt", "segment_prompt")):
+            normalized["segments"] = [{key: normalized[key] for key in ("duration", "prompt", "segmentPrompt", "segment_prompt") if key in normalized}]
+    return normalized
 
 
 def retryable_connection_error(error: Exception) -> bool:
-    """Retry transient network, throttling, and upstream service failures only."""
+    """Retry transient provider failures and malformed model responses."""
+    if isinstance(error, AIResponseFormatError):
+        return True
     if isinstance(error, (requests.Timeout, requests.ConnectionError)):
         return True
     if isinstance(error, requests.HTTPError):
