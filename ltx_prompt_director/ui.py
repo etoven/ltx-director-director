@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
     QSizePolicy, QSlider, QSpinBox, QSplitter, QSplitterHandle, QStatusBar, QTextEdit, QToolBar, QVBoxLayout, QWidget,
 )
 
-from .ai import GEMINI_MODELS, build_prompts, retryable_connection_error
+from .ai import GEMINI_MODELS, build_prompts, refine_segment_prompt, refine_timing, retryable_connection_error
 from .media import APP_CACHE, data_url, prepare_media, write_data_url
 from .models import Segment
 
@@ -117,19 +117,21 @@ class WorkerSignals(QObject):
 
 
 class MagicWorker(QRunnable):
-    def __init__(self, args: tuple, retries: int, retry_cooldown: int):
+    def __init__(self, operation, args: tuple, retries: int, retry_cooldown: int, activity: str = "Analyzing frames and directing motion…"):
         super().__init__()
+        self.operation = operation
         self.args = args
         self.retries = retries
         self.retry_cooldown = max(0, int(retry_cooldown))
+        self.activity = activity
         self.signals = WorkerSignals()
 
     def run(self) -> None:
         attempts = self.retries + 1
         for attempt in range(1, attempts + 1):
             try:
-                self.signals.progress.emit(attempt, attempts, "Analyzing frames and directing motion…")
-                self.signals.finished.emit(build_prompts(*self.args))
+                self.signals.progress.emit(attempt, attempts, self.activity)
+                self.signals.finished.emit(self.operation(*self.args))
                 return
             except Exception as error:
                 if attempt >= attempts or not retryable_connection_error(error):
@@ -1383,6 +1385,18 @@ class MainWindow(QMainWindow):
         segment_label = QLabel("SEGMENT PROMPT")
         segment_label.setObjectName("sectionLabel")
         self.segment_header.addWidget(segment_label)
+        self.refine_timing_button = QPushButton("⏱ Refine Timing")
+        self.refine_timing_button.setObjectName("refineButton")
+        self.refine_timing_button.setToolTip("Analyze the existing sequence and retime only the selected segment; prompt wording is never changed")
+        self.refine_timing_button.clicked.connect(self.refine_selected_timing)
+        self.refine_timing_button.setEnabled(False)
+        self.refine_prompt_button = QPushButton("✎ Refine Prompt")
+        self.refine_prompt_button.setObjectName("refineButton")
+        self.refine_prompt_button.setToolTip("Refine only the selected segment prompt using adjacent frames for continuity; may also adjust its duration")
+        self.refine_prompt_button.clicked.connect(self.refine_selected_prompt)
+        self.refine_prompt_button.setEnabled(False)
+        self.segment_header.addWidget(self.refine_timing_button)
+        self.segment_header.addWidget(self.refine_prompt_button)
         self.frame_number = QLabel("Frame —")
         self.frame_number.setObjectName("muted")
         self.start_button = QPushButton("Start frame")
@@ -1693,7 +1707,7 @@ class MainWindow(QMainWindow):
         #segmentPreview{background:#17191a;border-top:1px solid #34383a}
         #addTile{border:1px dashed #596065;background:#111415;color:#828b90;font-size:10px} #sequenceBar{background:#181e21;border:1px solid #303a3f;border-left:3px solid #4e91b4;border-radius:5px;padding:10px 12px;color:#cbd7dd;font-weight:bold}
         #directorPanel{background:#1d2326;border:1px solid #354047;border-radius:6px} #panelTitle{background:transparent;color:#b8d9e9;border:0;font-size:10px;font-weight:bold;letter-spacing:1px} #groupLabel{background:transparent;color:#71838c;border:0;font-size:8px;font-weight:bold;letter-spacing:1px;padding-right:4px}
-        #sectionLabel{color:#8ebbd1;font-size:8px;font-weight:bold;letter-spacing:1px} #muted{color:#879095;font-size:9px} #promptPanel{background:#202527;border:1px solid #374044;border-radius:6px} #segmentMetaBar{background:#1a2023;border:1px solid #303a3f;border-radius:5px}
+        #sectionLabel{color:#8ebbd1;font-size:8px;font-weight:bold;letter-spacing:1px} #muted{color:#879095;font-size:9px} #promptPanel{background:#202527;border:1px solid #374044;border-radius:6px} #segmentMetaBar{background:#1a2023;border:1px solid #303a3f;border-radius:5px} #refineButton{background:#252d31;border:1px solid #45545b;color:#c9dce5;padding-left:9px;padding-right:9px} #refineButton:hover{background:#31414a;border-color:#6590a7;color:#f2fbff} #refineButton:pressed{background:#1d2b32;border-color:#7ca9bf} #refineButton:disabled{background:#202527;border-color:#31393d;color:#606a6f}
         QTextEdit{background:#252728;border:0;color:#e1e4e5;font:11px 'Courier New';padding:4px} #promptEditor{background:#202527;border:0;color:#e1e4e5;padding:7px} #magicButton{background:#3b78a5;border:1px solid #5b9bc6;border-radius:5px;color:#f4fbff;font-weight:bold;padding-left:12px;padding-right:12px} #magicButton:hover{background:#4b8dbd;border-color:#8bc6ea} #magicButton:pressed{background:#285b7c}
         #audioToggle,#qualityToggle,#frameToggle{background:transparent;border:1px solid #455057;color:#b8c0c4} #audioToggle:hover,#qualityToggle:hover,#frameToggle:hover{background:#293236;border-color:#65747c;color:#eef3f5} #audioToggle:checked,#qualityToggle:checked,#frameToggle:checked{background:#244d37;border-color:#4c9b6a;color:#c9f4d6} #copyButton{min-height:0;padding:1px 4px;margin:0;border:0;background:transparent;color:#aeb5b8} #copyButton:hover{background:#303a3f;color:#e5f4fc;border:0} #copyButton:pressed{background:#1b2429;color:#8fd3f7;border:0} QStatusBar{background:#171c1e;color:#7f898d;border-top:1px solid #30383c}
         QDockWidget{background:#191d1f;color:#d9dcde;font-weight:bold} QDockWidget::title{background:#1b2022;border-bottom:1px solid #0e1011;padding:8px;text-align:left}
@@ -1741,7 +1755,7 @@ class MainWindow(QMainWindow):
         self.timeline_height_handle.set_scale(scale)
         self.prompt_splitter.set_scale(scale)
         self.project_list.setSpacing(metric(4))
-        for button in (self.provider_button, self.sfx, self.spoken_dialog, self.hdr, self.reduce_music, self.magic_button, self.start_button, self.end_button):
+        for button in (self.provider_button, self.sfx, self.spoken_dialog, self.hdr, self.reduce_music, self.magic_button, self.refine_timing_button, self.refine_prompt_button, self.start_button, self.end_button):
             button.setMinimumWidth(button.fontMetrics().horizontalAdvance(button.text()) + metric(18))
         self.output_width.setMinimumWidth(metric(92))
         self.output_height.setMinimumWidth(metric(92))
@@ -2467,6 +2481,8 @@ class MainWindow(QMainWindow):
         self.segment_prompt.setPlainText(segment.prompt if segment else "")
         self.start_button.setEnabled(bool(segment))
         self.end_button.setEnabled(bool(segment))
+        self.refine_timing_button.setEnabled(bool(segment))
+        self.refine_prompt_button.setEnabled(bool(segment and segment.prompt.strip()))
         if segment:
             self.start_button.setChecked(segment.role == "start")
             self.end_button.setChecked(segment.role == "end")
@@ -2507,6 +2523,7 @@ class MainWindow(QMainWindow):
     def save_prompt(self) -> None:
         if not self._loading and self.current_segment():
             self.current_segment().prompt = self.segment_prompt.toPlainText()
+            self.refine_prompt_button.setEnabled(bool(self.current_segment().prompt.strip()))
             self.mark_dirty()
             self.update_counts()
 
@@ -2706,32 +2723,140 @@ class MainWindow(QMainWindow):
             )
         return "\n\n".join(lines)
 
-    def magic_build(self) -> None:
-        if not self.segments:
-            self.add_media()
-            return
+    def build_refinement_request(self) -> str:
+        lines = [self.build_director_request()]
+        lines.append(
+            "SFX option is ON: preserve and improve the selected prompt's required `SFX:` clause."
+            if self.sfx.isChecked() else
+            "SFX option is OFF: do not invent a new SFX clause, but do not delete deliberate existing prompt content."
+        )
+        lines.append(
+            "Spoken Dialog option is ON: preserve or improve appropriate `Spoken Dialog:` wording, explicit language and accent, performance, and accurate lip-sync direction."
+            if self.spoken_dialog.isChecked() else
+            "Spoken Dialog option is OFF: do not invent new spoken dialog, but do not delete deliberate existing prompt content."
+        )
+        return "\n\n".join(line for line in lines if line)
+
+    def ai_credentials(self) -> tuple[str, str, str] | None:
         provider = self.settings.value("provider", "gemini")
         key = self.session_keys.get(provider) or self.settings.value(f"{provider}_key", "")
         if not key:
             self.open_settings()
             key = self.session_keys.get(provider) or self.settings.value(f"{provider}_key", "")
         if not key:
-            return
-        self.magic_button.setEnabled(False)
-        self.statusBar().showMessage("Magic Build is analyzing optimized preview frames…")
-        timeout = self.settings.value("api_timeout", 400, int)
+            return None
+        return provider, self.settings.value("gemini_model", GEMINI_MODELS[0]), key
+
+    def set_ai_controls_enabled(self, enabled: bool) -> None:
+        self.magic_button.setEnabled(enabled)
+        segment = self.current_segment()
+        self.refine_timing_button.setEnabled(enabled and bool(segment))
+        self.refine_prompt_button.setEnabled(enabled and bool(segment and segment.prompt.strip()))
+
+    def start_ai_worker(self, operation, args: tuple, activity: str, finished) -> None:
         retries = self.settings.value("api_retries", 2, int)
         retry_cooldown = self.settings.value("api_retry_cooldown", 10, int)
-        self.magic_overlay.update_attempt(1, retries + 1, "Analyzing frames and directing motion…")
+        self.set_ai_controls_enabled(False)
+        self.ai_activity_title = "Magic Build" if operation is build_prompts else ("Refine Timing" if operation is refine_timing else "Refine Prompt")
+        self.magic_overlay.update_attempt(1, retries + 1, activity)
         self.magic_overlay.show_overlay()
-        worker = MagicWorker((
-            self.segments.copy(), provider, self.settings.value("gemini_model", GEMINI_MODELS[0]), key,
-            self.build_director_request(), self.sfx.isChecked(), self.spoken_dialog.isChecked(), self.hdr.isChecked(), self.reduce_music.isChecked(), timeout,
-        ), retries, retry_cooldown)
+        worker = MagicWorker(operation, args, retries, retry_cooldown, activity)
         worker.signals.progress.connect(self.magic_progress)
-        worker.signals.finished.connect(self.magic_finished)
+        worker.signals.finished.connect(finished)
         worker.signals.failed.connect(self.magic_failed)
         self.thread_pool.start(worker)
+
+    def refine_selected_timing(self) -> None:
+        segment = self.current_segment()
+        if not segment:
+            return
+        credentials = self.ai_credentials()
+        if not credentials:
+            return
+        provider, model, key = credentials
+        row = self.timeline.currentRow()
+        self.refinement_segment_id = segment.id
+        timeout = self.settings.value("api_timeout", 400, int)
+        self.statusBar().showMessage(f"Refining timing for segment {row + 1}…")
+        self.start_ai_worker(
+            refine_timing,
+            (self.segments.copy(), row, provider, model, key, self.build_refinement_request(), self.requested_length.value(), timeout),
+            "Analyzing sequence context and refining selected timing…",
+            self.refine_timing_finished,
+        )
+
+    def refine_selected_prompt(self) -> None:
+        segment = self.current_segment()
+        if not segment:
+            return
+        if not segment.prompt.strip():
+            QMessageBox.information(self, "Refine Prompt", "Write or generate a segment prompt before refining it.")
+            return
+        credentials = self.ai_credentials()
+        if not credentials:
+            return
+        provider, model, key = credentials
+        row = self.timeline.currentRow()
+        self.refinement_segment_id = segment.id
+        timeout = self.settings.value("api_timeout", 400, int)
+        self.statusBar().showMessage(f"Refining prompt for segment {row + 1}…")
+        self.start_ai_worker(
+            refine_segment_prompt,
+            (self.segments.copy(), row, provider, model, key, self.build_refinement_request(), self.requested_length.value(), timeout),
+            "Refining the selected prompt with adjacent-frame context…",
+            self.refine_prompt_finished,
+        )
+
+    def refinement_target(self) -> tuple[int, Segment] | None:
+        segment_id = getattr(self, "refinement_segment_id", "")
+        for index, segment in enumerate(self.segments):
+            if segment.id == segment_id:
+                return index, segment
+        return None
+
+    def refine_timing_finished(self, result: dict) -> None:
+        target = self.refinement_target()
+        if target:
+            index, segment = target
+            durations = [item.duration for item in self.segments]
+            durations[index] = float(result["duration"])
+            self.mark_dirty()
+            self.animate_timeline_durations(durations)
+            self.save_library_project(automatic=True)
+            self.statusBar().showMessage(f"Segment {index + 1} timing refined to {durations[index]:.1f}s; prompt text unchanged")
+        self.set_ai_controls_enabled(True)
+        self.magic_overlay.hide_overlay()
+
+    def refine_prompt_finished(self, result: dict) -> None:
+        target = self.refinement_target()
+        if target:
+            index, segment = target
+            segment.prompt = str(result["prompt"]).strip()
+            durations = [item.duration for item in self.segments]
+            durations[index] = float(result["duration"])
+            if self.timeline.currentRow() == index:
+                self.refresh_segment_prompt_box(index)
+            self.mark_dirty()
+            self.animate_timeline_durations(durations)
+            self.save_library_project(automatic=True)
+            self.statusBar().showMessage(f"Segment {index + 1} prompt refined")
+        self.set_ai_controls_enabled(True)
+        self.magic_overlay.hide_overlay()
+
+    def magic_build(self) -> None:
+        if not self.segments:
+            self.add_media()
+            return
+        credentials = self.ai_credentials()
+        if not credentials:
+            return
+        provider, model, key = credentials
+        self.statusBar().showMessage("Magic Build is analyzing optimized preview frames…")
+        timeout = self.settings.value("api_timeout", 400, int)
+        self.start_ai_worker(build_prompts, (
+            self.segments.copy(), provider, model, key,
+            self.build_director_request(), self.sfx.isChecked(), self.spoken_dialog.isChecked(), self.hdr.isChecked(), self.reduce_music.isChecked(), timeout,
+        ), "Analyzing frames and directing motion…", self.magic_finished)
 
     def magic_progress(self, attempt: int, total: int, detail: str) -> None:
         self.magic_overlay.update_attempt(attempt, total, detail)
@@ -2760,7 +2885,7 @@ class MainWindow(QMainWindow):
         self.global_prompt.setPlainText(global_prompt)
         self.refresh_segment_prompt_box(self.timeline.currentRow())
         self.mark_dirty()
-        self.magic_button.setEnabled(True)
+        self.set_ai_controls_enabled(True)
         self.magic_overlay.hide_overlay()
         self.animate_timeline_durations(target_durations)
         self.save_library_project(automatic=True)
@@ -2804,10 +2929,11 @@ class MainWindow(QMainWindow):
         animation.start()
 
     def magic_failed(self, message: str) -> None:
-        self.magic_button.setEnabled(True)
+        self.set_ai_controls_enabled(True)
         self.magic_overlay.hide_overlay()
-        QMessageBox.critical(self, "Magic Build failed", message)
-        self.statusBar().showMessage("Magic Build failed")
+        title = getattr(self, "ai_activity_title", "AI operation")
+        QMessageBox.critical(self, f"{title} failed", message)
+        self.statusBar().showMessage(f"{title} failed")
 
     def export_ltx(self) -> None:
         if not self.segments:

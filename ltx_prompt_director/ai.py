@@ -24,6 +24,142 @@ def build_prompts(segments: list[Segment], provider: str, model: str, api_key: s
     return _gemini(images, api_key, model, rules, timeout, sfx, spoken_dialog)
 
 
+def refine_timing(segments: list[Segment], selected_index: int, provider: str, model: str, api_key: str, intent: str, requested_total: float, timeout: int = 400) -> dict:
+    """Retiming pass that may change only the selected segment's duration."""
+    if not 0 <= selected_index < len(segments):
+        raise ValueError("Select a segment to refine its timing.")
+    maximum = 60.0 if len(segments) == 1 else 12.0
+    untouched_total = sum(segment.duration for index, segment in enumerate(segments) if index != selected_index)
+    available = min(maximum, MAX_SEQUENCE_SECONDS - untouched_total)
+    required = None
+    if requested_total > 0:
+        required = round((requested_total - untouched_total) * 2) / 2
+        if required < 1.0 or required > available:
+            raise ValueError(
+                f"The requested {requested_total:.1f}s sequence cannot be reached by changing only this segment. "
+                f"It would need to be {required:.1f}s, but its available range is 1.0–{available:.1f}s."
+            )
+    images = _refinement_images(segments, selected_index)
+    rules = _timing_rules(segments, selected_index, intent, available, required)
+    raw = _provider_raw(images, provider, model, api_key, rules, timeout)
+    result = _parse_json(raw)
+    if not isinstance(result, dict):
+        raise AIResponseFormatError("The AI returned an invalid timing response. The operation will retry.")
+    duration = _strict_duration(result.get("duration"), available)
+    if required is not None and duration != required:
+        raise AIResponseFormatError(f"The AI ignored the required {required:.1f}s selected-segment duration. The operation will retry.")
+    return {"duration": duration}
+
+
+def refine_segment_prompt(segments: list[Segment], selected_index: int, provider: str, model: str, api_key: str, intent: str, requested_total: float, timeout: int = 400) -> dict:
+    """Refine only the selected prompt, with an optional selected-duration change."""
+    if not 0 <= selected_index < len(segments):
+        raise ValueError("Select a segment to refine its prompt.")
+    selected = segments[selected_index]
+    if not selected.prompt.strip():
+        raise ValueError("The selected segment needs an existing prompt before it can be refined.")
+    maximum = 60.0 if len(segments) == 1 else 12.0
+    untouched_total = sum(segment.duration for index, segment in enumerate(segments) if index != selected_index)
+    available = min(maximum, MAX_SEQUENCE_SECONDS - untouched_total)
+    required = None
+    if requested_total > 0:
+        required = round((requested_total - untouched_total) * 2) / 2
+        if required < 1.0 or required > available:
+            raise ValueError(
+                f"The requested {requested_total:.1f}s sequence cannot be reached while changing only this segment. "
+                f"It would need to be {required:.1f}s, but its available range is 1.0–{available:.1f}s."
+            )
+    images = _refinement_images(segments, selected_index)
+    rules = _prompt_refinement_rules(segments, selected_index, intent, available, required)
+    raw = _provider_raw(images, provider, model, api_key, rules, timeout)
+    result = _parse_json(raw)
+    if not isinstance(result, dict):
+        raise AIResponseFormatError("The AI returned an invalid prompt-refinement response. The operation will retry.")
+    prompt = result.get("prompt") or result.get("segmentPrompt") or result.get("segment_prompt")
+    if not isinstance(prompt, str) or not prompt.strip():
+        raise AIResponseFormatError("The AI returned no refined prompt. The operation will retry.")
+    duration = _strict_duration(result.get("duration"), available)
+    if required is not None and duration != required:
+        raise AIResponseFormatError(f"The AI ignored the required {required:.1f}s selected-segment duration. The operation will retry.")
+    return {"prompt": prompt.strip(), "duration": duration}
+
+
+MAX_SEQUENCE_SECONDS = 60.0
+
+
+def _refinement_images(segments: list[Segment], selected_index: int) -> list[dict]:
+    start = max(0, selected_index - 1)
+    end = min(len(segments), selected_index + 2)
+    return [
+        {
+            "name": f"Segment {index + 1} {'SELECTED' if index == selected_index else ('PREVIOUS' if index < selected_index else 'NEXT')} — {item.name}",
+            "role": item.role,
+            "image": data_url(item.preview_path, max_edge=384),
+        }
+        for index, item in enumerate(segments[start:end], start)
+    ]
+
+
+def _segment_context(segments: list[Segment], selected_index: int) -> str:
+    records = []
+    for index, segment in enumerate(segments):
+        relation = "SELECTED" if index == selected_index else ("PREVIOUS" if index == selected_index - 1 else ("NEXT" if index == selected_index + 1 else "SEQUENCE CONTEXT"))
+        records.append(
+            f"Segment {index + 1} [{relation}; {segment.role.upper()} FRAME; current duration {segment.duration:.1f}s]\n"
+            f"Existing prompt (immutable unless SELECTED prompt refinement): {segment.prompt or '[empty]'}"
+        )
+    return "\n\n".join(records)
+
+
+def _timing_rules(segments: list[Segment], selected_index: int, intent: str, available: float, required: float | None) -> str:
+    duration_instruction = (
+        f"Return exactly {required:.1f} seconds because this is the only duration that satisfies the requested total sequence length."
+        if required is not None else
+        f"Choose 1.0–{available:.1f} seconds in 0.5-second increments."
+    )
+    return f"""You are performing a TIMING-ONLY refinement for LTX Video 2.3.
+Analyze the complete ordered segment plan below so the selected segment still fits the sequence. Use the immediately previous and next prompts and supplied adjacent frames as the primary motion and continuity context.
+Change ONLY the duration of selected segment {selected_index + 1}. Every prompt is immutable: do not rewrite, summarize or return any prompt text. Do not change any other duration.
+Estimate the time genuinely needed for the selected prompt's action, physical progression, camera motion, Spoken Dialog and lip sync. Respect its start/end-frame role, surrounding continuity, the 60-second sequence ceiling and the selected segment's available maximum.
+{duration_instruction}
+Director's intent and planning controls:
+{intent.strip() or 'No additional intent supplied.'}
+
+ORDERED EXISTING PLAN:
+{_segment_context(segments, selected_index)}
+
+Return strict JSON containing only: {{"duration": 5.0}}"""
+
+
+def _prompt_refinement_rules(segments: list[Segment], selected_index: int, intent: str, available: float, required: float | None) -> str:
+    duration_instruction = (
+        f"Return exactly {required:.1f} seconds because this is the only duration that satisfies the requested total sequence length."
+        if required is not None else
+        f"You may retime the selected segment from 1.0–{available:.1f} seconds in 0.5-second increments when the refined action or dialog needs it."
+    )
+    return f"""You are refining ONE existing segment prompt for LTX Video 2.3.
+Refine ONLY segment {selected_index + 1}. Preserve its visible facts and intended action while improving clarity, temporal progression, physical causality, camera direction, secondary motion, Spoken Dialog delivery and lip-sync direction where present.
+Use the immediately previous and next prompts and supplied adjacent frames for continuity, but do not rewrite or return any other prompt. Do not change the global prompt.
+{duration_instruction}
+Director's intent and planning controls:
+{intent.strip() or 'No additional intent supplied.'}
+
+ORDERED EXISTING PLAN:
+{_segment_context(segments, selected_index)}
+
+Return strict JSON containing only: {{"prompt":"refined selected prompt","duration":5.0}}"""
+
+
+def _strict_duration(value: object, maximum: float) -> float:
+    match = re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*", str(value or ""))
+    if not match:
+        raise AIResponseFormatError("The AI returned an invalid refined duration. The operation will retry.")
+    duration = float(match.group(1))
+    if duration < 1.0 or duration > maximum or abs(duration * 2 - round(duration * 2)) > 1e-6:
+        raise AIResponseFormatError(f"The AI returned a duration outside 1.0–{maximum:.1f}s in 0.5s increments. The operation will retry.")
+    return round(duration * 2) / 2
+
+
 def _rules(count: int, intent: str, sfx: bool, spoken_dialog: bool, hdr: bool, reduce_music: bool) -> str:
     if spoken_dialog and count == 1:
         spoken_rule = (
@@ -87,6 +223,17 @@ Return strict JSON: {{"segments":[{{"duration":5,"prompt":"..."}}],"globalPrompt
 
 
 def _gemini(images: list[dict], key: str, model: str, rules: str, timeout: int, sfx: bool, spoken_dialog: bool) -> dict:
+    raw = _gemini_raw(images, key, model, rules, timeout)
+    return _validate(raw, len(images), sfx, spoken_dialog)
+
+
+def _provider_raw(images: list[dict], provider: str, model: str, key: str, rules: str, timeout: int) -> str:
+    if provider == "openai":
+        return _openai_raw(images, key, rules, timeout)
+    return _gemini_raw(images, key, model, rules, timeout)
+
+
+def _gemini_raw(images: list[dict], key: str, model: str, rules: str, timeout: int) -> str:
     parts: list[dict] = [{"text": rules}]
     for index, item in enumerate(images, 1):
         mime, encoded = re.match(r"^data:([^;]+);base64,(.+)$", item["image"], re.S).groups()
@@ -99,8 +246,7 @@ def _gemini(images: list[dict], key: str, model: str, rules: str, timeout: int, 
     )
     response.raise_for_status()
     data = response.json()
-    raw = _gemini_response_text(data)
-    return _validate(raw, len(images), sfx, spoken_dialog)
+    return _gemini_response_text(data)
 
 
 def _gemini_response_text(data: object) -> str:
@@ -131,6 +277,11 @@ def _gemini_response_text(data: object) -> str:
 
 
 def _openai(images: list[dict], key: str, rules: str, timeout: int, sfx: bool, spoken_dialog: bool) -> dict:
+    raw = _openai_raw(images, key, rules, timeout)
+    return _validate(raw, len(images), sfx, spoken_dialog)
+
+
+def _openai_raw(images: list[dict], key: str, rules: str, timeout: int) -> str:
     content: list[dict] = [{"type": "input_text", "text": rules}]
     for index, item in enumerate(images, 1):
         content.extend([{"type": "input_text", "text": f"IMAGE {index} OF {len(images)} — {item['role'].upper()} FRAME — {item['name']}"}, {"type": "input_image", "image_url": item["image"], "detail": "high"}])
@@ -143,7 +294,9 @@ def _openai(images: list[dict], key: str, rules: str, timeout: int, sfx: bool, s
     response.raise_for_status()
     data = response.json()
     raw = data.get("output_text") or "".join(c.get("text", "") for item in data.get("output", []) for c in item.get("content", []) if c.get("type") == "output_text")
-    return _validate(raw, len(images), sfx, spoken_dialog)
+    if not str(raw).strip():
+        raise AIResponseFormatError("OpenAI returned no generated text. The operation will retry.")
+    return raw
 
 
 def _validate(raw: str, expected: int, require_sfx: bool = False, require_spoken_dialog: bool = False) -> dict:

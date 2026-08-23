@@ -44,6 +44,13 @@ Magic Build options:
 
 Enter optional Director's Intent, then select **Magic Build**. The empty field includes a narrative example and reminds you that it can request a total sequence length, such as `Total sequence length: 20 seconds.` A blocking animated overlay appears inside the application, prevents conflicting edits while the operation runs, and reports automatic retry attempts without creating another operating-system window. The default timeout is 400 seconds with two additional retries; both values are configurable in Application Settings. The result contains exactly one prompt for every timeline segment and one global prompt. Recommended durations ease smoothly into their new timeline widths instead of snapping instantly.
 
+After Magic Build, select a segment and use the focused controls in the Segment Prompt header:
+
+- **Refine Timing** analyzes the complete existing plan, with the adjacent prompts and frames as its primary continuity context, then changes only the selected segment's duration. It never rewrites any prompt. The other segment durations remain fixed, and a requested total length becomes a hard budget for the selected segment.
+- **Refine Prompt** improves only the selected segment's existing wording while using adjacent prompts and frames for continuity. It may also retime that selected segment when its action, Spoken Dialog, or lip sync needs more or less room. Every other segment prompt and duration remains untouched.
+
+Both refinements use the configured provider timeout, retry count, and retry cooldown. Duration changes animate in place without rebuilding the timeline.
+
 ## 4. Project library
 
 Select **Projects** in the toolbar to open the project-library panel. The panel provides a searchable gallery with a square thumbnail and short description for every saved project. Sort, Icons, the conditional **↑ UP** control, and the current library or collection title share one compact header row, leaving Search directly beneath it. The native dotted dock separator automatically appears on the panel's working inner edge—right when docked left and left when docked right—and remembers the resized width. The **Icons** menu selects Small, Medium, or Large cards and remembers that choice; cards wrap from left to right whenever the panel is wide enough for additional columns.
