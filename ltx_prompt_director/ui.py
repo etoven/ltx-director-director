@@ -548,16 +548,46 @@ class TimelineHeightHandle(QFrame):
         self.current_height = current_height
         self.start_height = current_height
         self.start_y: float | None = None
+        self.scale_factor = 1.0
         self.setObjectName("timelineHeightHandle")
-        self.setFixedHeight(9)
+        self.set_scale(1.0)
         self.setCursor(Qt.CursorShape.SizeVerCursor)
         self.setToolTip("Drag down to enlarge timeline previews")
+
+    def set_scale(self, scale: float) -> None:
+        self.scale_factor = max(.75, min(2.0, scale))
+        self.setFixedHeight(round(14 * self.scale_factor))
+        self.update()
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        active = self.start_y is not None
+        color = QColor("#9fd8fa") if active else QColor("#71838d") if self.underMouse() else QColor("#4f5c63")
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(color)
+        diameter = max(3.0, 3.2 * self.scale_factor)
+        spacing = 8 * self.scale_factor
+        center_x = self.width() / 2
+        center_y = self.height() / 2
+        for index in range(-3, 4):
+            painter.drawEllipse(QRectF(center_x + index * spacing - diameter / 2, center_y - diameter / 2, diameter, diameter))
+
+    def enterEvent(self, event) -> None:
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        self.update()
+        super().leaveEvent(event)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self.start_y = event.globalPosition().y()
             self.start_height = self.current_height
             self.grabMouse()
+            self.update()
             event.accept()
 
     def mouseMoveEvent(self, event):
@@ -571,6 +601,7 @@ class TimelineHeightHandle(QFrame):
         if self.start_y is not None:
             self.start_y = None
             self.releaseMouse()
+            self.update()
             self.finished.emit()
             event.accept()
 
@@ -1268,7 +1299,7 @@ class MainWindow(QMainWindow):
         #segmentCard{background:#252728;border:0} #mediaBadge{background:#e5e5e5;color:#262626;font-weight:bold;padding:2px} #roleBadge{background:#36393a;color:#eee;padding:2px}
         #tileDelete{padding:0;min-height:0;max-height:20px;background:#454849;color:#ddd;border:0} #tileDelete:hover{background:#a94444;color:#fff;border:1px solid #e07878} #tileTitle{background:#242627;padding:3px;font-size:9px} #tileDuration{color:#a2a7a9;font-size:8px}
         #resizeHandle{background:#606669;border-left:1px solid #9ca2a4} #resizeHandle:hover{background:#8aa6b7;border-left:2px solid #d8edf8}
-        #timelineHeightHandle{background:#3d4447;border-top:1px solid #737d82} #timelineHeightHandle:hover{background:#6d8795;border-top:2px solid #d8edf8}
+        #timelineHeightHandle{background:transparent;border:0} #timelineHeightHandle:hover{background:rgba(88,118,134,35);border:0}
         #segmentPreview{background:#17191a;border-top:1px solid #34383a}
         #addTile{border:1px dashed #596065;background:#111415;color:#828b90;font-size:10px} #sequenceBar{background:#1c1f20;border:1px solid #0e1011;border-radius:3px;padding:12px;font-weight:bold}
         #sectionLabel{color:#939ca1;font-size:8px;letter-spacing:1px} #muted{color:#879095;font-size:9px} #promptPanel{background:#252728;border:1px solid #101213;border-radius:3px}
@@ -1299,6 +1330,7 @@ class MainWindow(QMainWindow):
         self.director_controls.setSpacing(metric(8))
         self.segment_header.setSpacing(metric(8))
         self.ruler.setFixedHeight(metric(28))
+        self.timeline_height_handle.set_scale(scale)
         for button in (self.provider_button, self.sfx, self.spoken_dialog, self.hdr, self.reduce_music, self.magic_button, self.start_button, self.end_button):
             button.setMinimumWidth(button.fontMetrics().horizontalAdvance(button.text()) + metric(22))
         self.output_width.setMinimumWidth(metric(92))

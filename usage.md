@@ -17,7 +17,7 @@ Each WebM initially occupies one second. Image segments initially occupy five se
 - Right-click a card to replace its media, instantly export the complete source media, mark it as a start/end frame, or delete it. **Export image** or **Export video** copies only that segment's underlying media file directly to the folder configured in Application Settings—no prompts, metadata, or dialog. It initially uses the operating system's Downloads folder and creates collision-safe `<project name> - Segment 01.ext` filenames.
 - Replacing media preserves the segment prompt, timing, role, and position.
 
-Use the **Scale** slider to zoom the timeline horizontally, or select **Auto fit** to fit the complete sequence into the available width. Drag the bar along the bottom edge of the timeline downward to enlarge segment previews; previews preserve the complete image beneath their separate header row.
+Use the **Scale** slider to zoom the timeline horizontally, or select **Auto fit** to fit the complete sequence into the available width. Drag the dotted grip centered along the timeline's bottom edge downward to enlarge segment previews; previews preserve the complete image beneath their separate header row.
 
 During genuine timeline rebuilds, an animated loading indicator remains visible until every segment preview and control is ready. Timeline zoom, vertical preview resizing, and duration resizing update the existing cards in place without reloading them or displaying the loader.
 
