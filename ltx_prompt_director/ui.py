@@ -725,13 +725,15 @@ class SegmentCard(QFrame):
         self.segment = segment
         self.setCursor(Qt.CursorShape.OpenHandCursor)
         self.setObjectName("segmentCard")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.outer_layout = QHBoxLayout(self)
         self.outer_layout.setContentsMargins(0, 0, 0, 0)
         self.outer_layout.setSpacing(0)
-        content = QWidget()
-        content.setObjectName("segmentCardBody")
-        content.setCursor(Qt.CursorShape.OpenHandCursor)
-        layout = QVBoxLayout(content)
+        self.content = QWidget()
+        self.content.setObjectName("segmentCardBody")
+        self.content.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.content.setCursor(Qt.CursorShape.OpenHandCursor)
+        layout = QVBoxLayout(self.content)
         layout.setContentsMargins(2, 2, 2, 2)
         layout.setSpacing(1)
         badges = QHBoxLayout()
@@ -765,7 +767,7 @@ class SegmentCard(QFrame):
         self.duration_label.setAlignment(Qt.AlignmentFlag.AlignRight)
         self.duration_label.setObjectName("tileDuration")
         layout.addWidget(self.duration_label)
-        self.outer_layout.addWidget(content, 1)
+        self.outer_layout.addWidget(self.content, 1)
         self.resize_handle = ResizeHandle(segment.duration, pixels_per_second)
         self.resize_handle.preview.connect(self._preview_duration)
         self.resize_handle.finished.connect(self.resize_finished)
@@ -1194,6 +1196,7 @@ class MainWindow(QMainWindow):
         self.timeline.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.timeline.customContextMenuRequested.connect(self.timeline_menu)
         self.timeline.currentRowChanged.connect(self.load_editor)
+        self.timeline.currentRowChanged.connect(self.update_timeline_selection_style)
         self.timeline.model().rowsMoved.connect(lambda *_: self.sync_order())
         self.timeline.files_dropped.connect(self.add_media_paths)
         self.timeline.horizontalScrollBar().valueChanged.connect(self.ruler.set_offset)
@@ -1385,6 +1388,7 @@ class MainWindow(QMainWindow):
         self.project_library_title.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self.project_library_title.setMinimumWidth(0)
         self.project_library_title.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        layout.addWidget(self.project_library_title)
         self.project_sort = QComboBox()
         self.project_sort.addItem("Title A–Z", "title_asc")
         self.project_sort.addItem("Title Z–A", "title_desc")
@@ -1407,7 +1411,7 @@ class MainWindow(QMainWindow):
         self.project_icon_button.setMenu(icon_menu)
         header.addWidget(self.project_icon_button)
         header.addWidget(self.collection_up)
-        header.addWidget(self.project_library_title, 1)
+        header.addStretch()
         layout.addLayout(header)
         self.project_search = QLineEdit()
         self.project_search.setPlaceholderText("Search projects…")
@@ -1528,8 +1532,8 @@ class MainWindow(QMainWindow):
         #timelineSpin::up-button{width:__TIMELINE_SPIN_BUTTON__px;background:transparent;border:0;border-radius:2px;subcontrol-origin:border;subcontrol-position:top right} #timelineSpin::down-button{width:__TIMELINE_SPIN_BUTTON__px;background:transparent;border:0;border-radius:2px;subcontrol-origin:border;subcontrol-position:bottom right} #timelineSpin::up-button:hover,#timelineSpin::down-button:hover{background:#344b57} #timelineSpin::up-button:pressed,#timelineSpin::down-button:pressed{background:#1f668b} #timelineSpin::up-arrow{image:url("__SPIN_UP_IMAGE__");width:__TIMELINE_ARROW__px;height:__TIMELINE_ARROW__px} #timelineSpin::down-arrow{image:url("__SPIN_DOWN_IMAGE__");width:__TIMELINE_ARROW__px;height:__TIMELINE_ARROW__px}
         #resolutionSeparator{background:transparent;color:#60717a;border:0;padding:0 3px;font-weight:bold} #timelineButton{background:transparent;color:#acd8ef;border:1px solid #3f6679;border-radius:5px;padding:4px 10px;font-weight:bold} #timelineButton:hover{background:#243b46;color:#e0f5ff;border-color:#65a7c7} #timelineButton:pressed{background:#172b35;color:#85c9eb;border-color:#347898}
         QListWidget{background:#0d0f10;border:0;padding:0} QListWidget::item{border:1px solid #696b6c;background:#252728;margin:0} QListWidget::item:selected{border:2px solid #f1f1f1;background:#293034}
-        #timeline{padding:3px;background:#0d0f10} #timeline::item{background:#0d0f10;border:0} #timeline::item:selected{background:#0d0f10;border:1px solid #f1f1f1} #timeline[dropActive="true"]{border:3px solid #68b9ee;background:#13232c} #timeline[dropActive="false"]{border:1px solid #323638}
-        #segmentCard{background:transparent;border:0} #segmentCardBody{background:#252728;border:0} #mediaBadge{background:#e5e5e5;color:#262626;font-weight:bold;padding:2px} #roleBadge{background:#36393a;color:#eee;padding:2px}
+        #timeline{padding:3px;background:#0d0f10;outline:0} #timeline::item,#timeline::item:selected,#timeline::item:focus{background:#0d0f10;border:0;outline:0} #timeline[dropActive="true"]{border:3px solid #68b9ee;background:#13232c} #timeline[dropActive="false"]{border:1px solid #323638}
+        #segmentCard{background:transparent;border:1px solid transparent} #segmentCard[selected="true"]{background:#17262e;border:1px solid #73a9c4} #segmentCardBody{background:#252728;border:0} #mediaBadge{background:#e5e5e5;color:#262626;font-weight:bold;padding:2px} #roleBadge{background:#36393a;color:#eee;padding:2px}
         #tileDelete{padding:0;min-height:0;max-height:20px;background:#454849;color:#ddd;border:0} #tileDelete:hover{background:#a94444;color:#fff;border:1px solid #e07878} #tileTitle{background:#242627;padding:3px;font-size:9px} #tileDuration{color:#a2a7a9;font-size:8px}
         #resizeHandle{background:transparent;border:0} #resizeHandle:hover{background:rgba(88,118,134,35);border:0}
         #timelineHeightHandle{background:transparent;border:0} #timelineHeightHandle:hover{background:rgba(88,118,134,35);border:0}
@@ -2200,6 +2204,20 @@ class MainWindow(QMainWindow):
         finally:
             self._loading = previous_loading
 
+    def update_timeline_selection_style(self, selected_row: int) -> None:
+        """Render selection on the card, not the QListWidget item beneath it."""
+        for row in range(self.timeline.count()):
+            card = self.timeline.itemWidget(self.timeline.item(row))
+            if not isinstance(card, SegmentCard):
+                continue
+            selected = row == selected_row
+            if card.property("selected") == selected:
+                continue
+            card.setProperty("selected", selected)
+            card.style().unpolish(card)
+            card.style().polish(card)
+            card.update()
+
     def sync_order(self) -> None:
         if self._loading:
             return
@@ -2254,9 +2272,18 @@ class MainWindow(QMainWindow):
         for row in range(self.timeline.count()):
             item = self.timeline.item(row)
             if item.data(Qt.ItemDataRole.UserRole) == segment_id:
-                item.setSizeHint(QSize(max(48, int(segment.duration * self.pixels_per_second)), max(152, self.timeline_height - 32)))
+                self.timeline.setUpdatesEnabled(False)
+                try:
+                    item.setSizeHint(QSize(max(48, int(segment.duration * self.pixels_per_second)), max(152, self.timeline_height - 32)))
+                    self.timeline.doItemsLayout()
+                finally:
+                    self.timeline.setUpdatesEnabled(True)
+                card = self.timeline.itemWidget(item)
+                if isinstance(card, SegmentCard):
+                    card.update()
+                    card.content.update()
                 break
-        self.timeline.doItemsLayout()
+        self.timeline.viewport().update()
         self.update_summary()
 
     def finish_resize(self, segment_id: str) -> None:
