@@ -214,10 +214,25 @@ class ProjectListWidget(QListWidget):
             self._reordering = True
             self.drag_started.emit()
             self.viewport().setCursor(Qt.CursorShape.ClosedHandCursor)
-        target = self.indexAt(event.position().toPoint()).row()
-        if target < 0:
-            target = self.count() - 1
-        if target != self._drag_row and 0 <= target < self.count():
+        position = event.position().toPoint()
+        edge = 34
+        if position.y() < edge:
+            self.verticalScrollBar().setValue(self.verticalScrollBar().value() - 24)
+        elif position.y() > self.viewport().height() - edge:
+            self.verticalScrollBar().setValue(self.verticalScrollBar().value() + 24)
+
+        target = self._drag_row
+        if self._drag_row > 0:
+            previous = self.item(self._drag_row - 1)
+            previous_center = self.visualItemRect(previous).center().y()
+            if position.y() < previous_center:
+                target = self._drag_row - 1
+        if target == self._drag_row and self._drag_row < self.count() - 1:
+            following = self.item(self._drag_row + 1)
+            following_center = self.visualItemRect(following).center().y()
+            if position.y() > following_center:
+                target = self._drag_row + 1
+        if target != self._drag_row:
             item = self.takeItem(self._drag_row)
             self.insertItem(target, item)
             self.setCurrentItem(item)
@@ -1183,6 +1198,8 @@ class MainWindow(QMainWindow):
         self.refresh_project_library()
 
     def activate_custom_sort_for_drag(self) -> None:
+        if self.project_search.text():
+            self.project_search.clear()
         if self.project_sort.currentData() == "custom":
             return
         current_order = []

@@ -43,7 +43,7 @@ Select **Projects** in the toolbar to open the left project-library panel. The p
 - **Edit** changes a project's name, description, or collection.
 - **Delete** permanently removes the selected project from the local library after confirmation.
 - Search matches words in both project names and descriptions.
-- Choose **Title A–Z**, **Title Z–A**, or **Custom** sorting. Dragging a project tile automatically switches to Custom mode and reorders it through the stable tile-move system within the current collection or root view.
+- Choose **Title A–Z**, **Title Z–A**, or **Custom** sorting. Dragging a project or collection tile automatically switches to Custom mode. Reordering uses neighboring-tile midpoint thresholds and edge auto-scrolling to prevent tiles from bouncing between positions.
 
 Several library projects can remain open as live in-memory workspaces. Clicking another project preserves the current project's latest segments, prompts, output dimensions, options, and timeline view without writing them to disk. A yellow dot in the project's upper-left corner marks unsaved changes. **Save Current** writes only the active workspace and clears its yellow dot; other unsaved workspaces remain intact for the lifetime of the application.
 
