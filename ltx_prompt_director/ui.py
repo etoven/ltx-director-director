@@ -663,6 +663,61 @@ class ResizeHandle(QFrame):
             event.accept()
 
 
+class LeftResizeHandle(QFrame):
+    started = Signal(str)
+    preview = Signal(str, float, float)
+    finished = Signal(str)
+
+    def __init__(self, segment: Segment, pixels_per_second: int):
+        super().__init__()
+        self.segment = segment
+        self.pixels_per_second = pixels_per_second
+        self.start_x: float | None = None
+        self.start_origin = 0.0
+        self.duration_origin = 0.0
+        self.setObjectName("resizeHandle")
+        self.setFixedWidth(12)
+        self.setCursor(Qt.CursorShape.SizeHorCursor)
+        self.setToolTip("Drag to adjust the segment start while keeping its end fixed")
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        color = QColor("#b9e7ff") if self.start_x is not None else QColor("#84aabd") if self.underMouse() else QColor("#52636c")
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(color)
+        center_x, center_y = self.width() / 2, self.height() / 2
+        for index in range(-3, 4):
+            painter.drawEllipse(QRectF(center_x - 1.5, center_y + index * 7 - 1.5, 3, 3))
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.start_x = event.globalPosition().x()
+            self.start_origin = float(self.segment.start or 0.0)
+            self.duration_origin = self.segment.duration
+            self.grabMouse()
+            self.started.emit(self.segment.id)
+            self.update()
+            event.accept()
+
+    def mouseMoveEvent(self, event):
+        if self.start_x is not None:
+            delta = (event.globalPosition().x() - self.start_x) / max(1, self.pixels_per_second)
+            end = self.start_origin + self.duration_origin
+            start = max(0.0, min(end - .01, round(self.start_origin + delta, 2)))
+            self.preview.emit(self.segment.id, start, round(end - start, 2))
+            event.accept()
+
+    def mouseReleaseEvent(self, event):
+        if self.start_x is not None:
+            self.start_x = None
+            self.releaseMouse()
+            self.finished.emit(self.segment.id)
+            self.update()
+            event.accept()
+
+
 class TimelineHeightHandle(QFrame):
     height_changed = Signal(int)
     finished = Signal()
@@ -775,6 +830,9 @@ class DottedPromptSplitter(QSplitter):
 
 class SegmentCard(QFrame):
     resize_started = Signal(str)
+    left_resize_started = Signal(str)
+    left_resize_changed = Signal(str, float, float)
+    left_resize_finished = Signal(str)
     duration_changed = Signal(float)
     delete_requested = Signal()
     resize_finished = Signal()
@@ -837,6 +895,12 @@ class SegmentCard(QFrame):
         self.duration_label.setAlignment(Qt.AlignmentFlag.AlignRight)
         self.duration_label.setObjectName("tileDuration")
         layout.addWidget(self.duration_label)
+        self.left_resize_handle = LeftResizeHandle(segment, pixels_per_second)
+        self.left_resize_handle.started.connect(self.left_resize_started)
+        self.left_resize_handle.preview.connect(self.left_resize_changed)
+        self.left_resize_handle.finished.connect(self.left_resize_finished)
+        self.left_resize_handle.hide()
+        self.outer_layout.addWidget(self.left_resize_handle)
         self.outer_layout.addWidget(self.content, 1)
         self.resize_handle = ResizeHandle(segment.duration, pixels_per_second, maximum_duration)
         self.resize_handle.started.connect(lambda: self.resize_started.emit(self.segment.id))
@@ -873,7 +937,11 @@ class SegmentCard(QFrame):
             self.preview.setPixmap(scaled.copy(left, top, width, height))
         self.resize_handle.pixels_per_second = pixels_per_second
         self.resize_handle.duration = self.segment.duration
+        self.left_resize_handle.pixels_per_second = pixels_per_second
         self.duration_label.setText(f"{self.segment.duration:.2f}s")
+
+    def set_left_resize_visible(self, visible: bool) -> None:
+        self.left_resize_handle.setVisible(visible)
 
     def _preview_duration(self, value: float) -> None:
         self.duration_label.setText(f"{value:.2f}s")
@@ -934,6 +1002,7 @@ class SegmentSlot(QWidget):
     def update_gap(self, gap_start: float, gap_duration: float, gap_width: int) -> None:
         self.gap.setFixedWidth(max(0, gap_width))
         self.gap.setVisible(gap_duration >= .01 and gap_width > 0)
+        self.card.set_left_resize_visible(gap_duration >= .01 and gap_width > 0)
         self.button.setToolTip(f"Insert media into {gap_duration:.2f}s gap")
         try:
             self.button.clicked.disconnect()
@@ -2034,7 +2103,7 @@ class MainWindow(QMainWindow):
         #timelineHeightHandle{background:transparent;border:0} #timelineHeightHandle:hover{background:rgba(88,118,134,35);border:0}
         #promptSplitter::handle{background:transparent;border:0} #promptSplitter::handle:hover{background:rgba(88,118,134,35);border:0}
         #segmentPreview{background:#17191a;border-top:1px solid #34383a;color:#7494a3;font-weight:bold}
-        #addTileBox{border:1px dashed #596065;background:#111415} #addTile,#addTextTile{border:0;background:transparent;color:#828b90;font-size:10px} #addTile:hover,#addTextTile:hover{background:#1c2326;color:#b7d7e6} #addTextTile{border-top:1px solid #343d41;padding:7px 4px} #audioTrack[dropActive=true]{border:2px dashed #65a9cd;background:#17252c} #sequenceBar{background:#181e21;border:1px solid #303a3f;border-left:3px solid #4e91b4;border-radius:5px;padding:10px 12px;color:#cbd7dd;font-weight:bold}
+        #addTileBox{border:0;background:transparent} #addTile,#addTextTile{background:#111415;color:#828b90;font-size:10px} #addTile{border:1px dashed #596065} #addTile:hover,#addTextTile:hover{background:#1c2326;color:#b7d7e6} #addTextTile{border:0;border-top:1px solid #343d41;padding:7px 4px} #audioTrack[dropActive=true]{border:2px dashed #65a9cd;background:#17252c} #sequenceBar{background:#181e21;border:1px solid #303a3f;border-left:3px solid #4e91b4;border-radius:5px;padding:10px 12px;color:#cbd7dd;font-weight:bold}
         #directorPanel{background:#1d2326;border:1px solid #354047;border-radius:6px} #panelTitle{background:transparent;color:#b8d9e9;border:0;font-size:10px;font-weight:bold;letter-spacing:1px} #groupLabel{background:transparent;color:#71838c;border:0;font-size:8px;font-weight:bold;letter-spacing:1px;padding-right:4px}
         #sectionLabel{color:#8ebbd1;font-size:8px;font-weight:bold;letter-spacing:1px} #muted{color:#879095;font-size:9px} #promptPanel{background:#202527;border:1px solid #374044;border-radius:6px} #segmentMetaBar{background:#1a2023;border:1px solid #303a3f;border-radius:5px} #refineButton{background:#252d31;border:1px solid #45545b;color:#c9dce5;padding-left:9px;padding-right:9px} #refineButton:hover{background:#31414a;border-color:#6590a7;color:#f2fbff} #refineButton:pressed{background:#1d2b32;border-color:#7ca9bf} #refineButton:disabled{background:#202527;border-color:#31393d;color:#606a6f}
         QTextEdit{background:#252728;border:0;color:#e1e4e5;font:11px 'Courier New';padding:4px} #promptEditor{background:#202527;border:0;color:#e1e4e5;padding:7px} #magicButton{background:#3b78a5;border:1px solid #5b9bc6;border-radius:5px;color:#f4fbff;font-weight:bold;padding-left:12px;padding-right:12px} #magicButton:hover{background:#4b8dbd;border-color:#8bc6ea} #magicButton:pressed{background:#285b7c}
@@ -2933,6 +3002,9 @@ class MainWindow(QMainWindow):
                 card = SegmentCard(segment, preview_height, self.pixels_per_second, 9999.0)
                 card.duration_changed.connect(lambda value, sid=segment.id: self.change_duration(sid, value))
                 card.resize_started.connect(self.begin_segment_resize)
+                card.left_resize_started.connect(self.begin_segment_resize)
+                card.left_resize_changed.connect(self.change_segment_left)
+                card.left_resize_finished.connect(self.finish_resize)
                 card.delete_requested.connect(lambda sid=segment.id: self.delete_by_id(sid))
                 card.resize_finished.connect(lambda sid=segment.id: self.finish_resize(sid))
                 card.moved.connect(self.move_main_segment)
@@ -3297,6 +3369,24 @@ class MainWindow(QMainWindow):
             if base_start < cursor:
                 following.start = round(cursor, 2)
             cursor = float(following.start or 0.0) + following.duration
+        self.mark_dirty()
+        self.update_timeline_layout()
+        self.sync_selected_duration_control()
+
+    def change_segment_left(self, segment_id: str, requested_start: float, requested_duration: float) -> None:
+        snapshot = getattr(self, "_main_resize_snapshot", None)
+        segment = next((item for item in self.segments if item.id == segment_id), None)
+        if not segment or not snapshot or snapshot.get("segment_id") != segment_id:
+            return
+        for item in self.segments:
+            if item.id in snapshot["starts"]:
+                item.start = snapshot["starts"][item.id]
+        self.ensure_segment_starts()
+        index = self.segments.index(segment)
+        previous_end = 0.0 if index == 0 else float(self.segments[index - 1].start or 0.0) + self.segments[index - 1].duration
+        fixed_end = snapshot["starts"][segment_id] + snapshot["duration"]
+        segment.start = round(max(previous_end, min(requested_start, fixed_end - .01)), 2)
+        segment.duration = max(.01, round(fixed_end - segment.start, 2))
         self.mark_dirty()
         self.update_timeline_layout()
         self.sync_selected_duration_control()
