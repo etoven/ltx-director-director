@@ -17,10 +17,13 @@ class Segment:
     media_duration_frames: int | None = None
     trim_start: int | None = None
     id: str = ""
+    start: float | None = None
 
     def __post_init__(self) -> None:
         self.id = self.id or str(uuid4())
-        self.duration = max(1.0, round(float(self.duration) * 2) / 2)
+        self.duration = max(0.01, round(float(self.duration), 2))
+        if self.start is not None:
+            self.start = max(0.0, round(float(self.start), 2))
 
     @property
     def exists(self) -> bool:

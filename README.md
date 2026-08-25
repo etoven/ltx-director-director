@@ -54,12 +54,13 @@ In short: use **Project Export** for lossless editing and safekeeping; use **LTX
 - Adjustable timeline scale, one-click auto fit, and vertically resizable previews
 - Drag-and-drop media import with a highlighted timeline drop target
 - Animated in-timeline loading indicator while segment tiles are prepared
-- Drag-to-reorder horizontal timeline and smoothly animated AI timing recommendations
+- Freely positioned visual and text segments, with in-gap add buttons that fit new image or WebM media exactly into open space
+- Smoothly animated AI timing recommendations with immediately synchronized cards, previews, and duration controls
 - Selected-segment **Refine Timing** and **Refine Prompt** passes with adjacent-frame continuity context
 - AI-aware text-only segments mixed directly with image and WebM segments
 - Synchronized waveform soundtrack with standalone audio import, draggable independent clips, and video-audio coupling/decoupling
 - WAV soundtrack export plus LTXDirector-compatible `audioSegments` import/export
-- One-second minimum segment duration in 0.5-second increments
+- Positive segment durations with two-decimal precision and no fixed per-segment timing range
 - Right-click replace, one-click segment export, role assignment, and deletion
 - Direct KDE `kdialog`, GNOME `zenity`, macOS, and Windows native media-picker integration
 - Branded application icon and automatic per-user Linux desktop-menu installation
@@ -106,7 +107,7 @@ python3 -m pip install --upgrade "$(wget -qO- https://api.github.com/repos/etove
 Or download the `.whl` file from the latest GitHub release, then install it with:
 
 ```bash
-python3 -m pip install ./ltx_prompt_director-1.13.5-py3-none-any.whl
+python3 -m pip install ./ltx_prompt_director-1.14.0-py3-none-any.whl
 ```
 
 You can also install a locally built wheel from the repository:

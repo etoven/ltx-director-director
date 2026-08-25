@@ -584,7 +584,8 @@ class TimelineRuler(QWidget):
         painter.setFont(self.font())
         label_width = painter.fontMetrics().horizontalAdvance("60.00") + 8
         label_interval = max(1, (label_width + self.scale - 1) // self.scale)
-        for second in range(61):
+        last_second = max(60, int((self.width() + self.offset) / max(1, self.scale)) + 2)
+        for second in range(last_second + 1):
             x = second * self.scale - self.offset
             if x < -30 or x > self.width() + 30:
                 continue
@@ -599,7 +600,7 @@ class ResizeHandle(QFrame):
     preview = Signal(float)
     finished = Signal()
 
-    def __init__(self, duration: float, pixels_per_second: int, maximum_duration: float = 12.0):
+    def __init__(self, duration: float, pixels_per_second: int, maximum_duration: float = 9999.0):
         super().__init__()
         self.duration = duration
         self.start_duration = duration
@@ -610,7 +611,7 @@ class ResizeHandle(QFrame):
         # Keep a comfortable hit target while drawing only a slim dotted grip.
         self.setFixedWidth(12)
         self.setCursor(Qt.CursorShape.SizeHorCursor)
-        self.setToolTip("Drag to resize segment (1 second minimum)")
+        self.setToolTip("Drag to resize segment (0.01-second precision)")
 
     def paintEvent(self, event) -> None:
         super().paintEvent(event)
@@ -645,7 +646,7 @@ class ResizeHandle(QFrame):
 
     def mouseMoveEvent(self, event):
         if self.start_x is not None:
-            value = max(1, min(self.maximum_duration, round((self.start_duration + (event.globalPosition().x() - self.start_x) / self.pixels_per_second) * 2) / 2))
+            value = max(.01, min(self.maximum_duration, round(self.start_duration + (event.globalPosition().x() - self.start_x) / self.pixels_per_second, 2)))
             if value != self.duration:
                 self.duration = value
                 self.preview.emit(value)
@@ -774,10 +775,14 @@ class SegmentCard(QFrame):
     duration_changed = Signal(float)
     delete_requested = Signal()
     resize_finished = Signal()
+    moved = Signal(str, float)
+    selected = Signal(str)
 
-    def __init__(self, segment: Segment, preview_height: int, pixels_per_second: int, maximum_duration: float = 12.0):
+    def __init__(self, segment: Segment, preview_height: int, pixels_per_second: int, maximum_duration: float = 9999.0):
         super().__init__()
         self.segment = segment
+        self.drag_origin: float | None = None
+        self.start_origin = float(segment.start or 0.0)
         self.setCursor(Qt.CursorShape.OpenHandCursor)
         self.setObjectName("segmentCard")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
@@ -823,7 +828,7 @@ class SegmentCard(QFrame):
         title.setWordWrap(False)
         title.setObjectName("tileTitle")
         layout.addWidget(title)
-        self.duration_label = QLabel(f"{segment.duration:.1f}s")
+        self.duration_label = QLabel(f"{segment.duration:.2f}s")
         self.duration_label.setAlignment(Qt.AlignmentFlag.AlignRight)
         self.duration_label.setObjectName("tileDuration")
         layout.addWidget(self.duration_label)
@@ -862,20 +867,70 @@ class SegmentCard(QFrame):
             self.preview.setPixmap(scaled.copy(left, top, width, height))
         self.resize_handle.pixels_per_second = pixels_per_second
         self.resize_handle.duration = self.segment.duration
-        self.duration_label.setText(f"{self.segment.duration:.1f}s")
+        self.duration_label.setText(f"{self.segment.duration:.2f}s")
 
     def _preview_duration(self, value: float) -> None:
-        self.duration_label.setText(f"{value:.1f}s")
+        self.duration_label.setText(f"{value:.2f}s")
         self.duration_changed.emit(value)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
+            self.drag_origin = event.globalPosition().x()
+            self.start_origin = float(self.segment.start or 0.0)
+            self.selected.emit(self.segment.id)
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
-        event.ignore()
+            self.grabMouse()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self.drag_origin is not None:
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
-        self.setCursor(Qt.CursorShape.OpenHandCursor)
-        event.ignore()
+        if self.drag_origin is not None:
+            delta = (event.globalPosition().x() - self.drag_origin) / max(1, self.resize_handle.pixels_per_second)
+            self.drag_origin = None
+            self.releaseMouse()
+            self.setCursor(Qt.CursorShape.OpenHandCursor)
+            self.moved.emit(self.segment.id, max(0.0, round(self.start_origin + delta, 2)))
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+
+class SegmentSlot(QWidget):
+    def __init__(self, card: SegmentCard, gap_start: float, gap_duration: float, gap_width: int, insert_callback, parent=None):
+        super().__init__(parent)
+        self.card = card
+        self.insert_callback = insert_callback
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        self.gap = QFrame()
+        self.gap.setObjectName("segmentGap")
+        gap_layout = QHBoxLayout(self.gap)
+        gap_layout.setContentsMargins(0, 0, 0, 0)
+        self.button = QPushButton("+")
+        self.button.setObjectName("gapInsert")
+        self.button.setFixedSize(24, 24)
+        gap_layout.addWidget(self.button, 0, Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.gap)
+        layout.addWidget(card, 1)
+        self.update_gap(gap_start, gap_duration, gap_width)
+
+    def update_gap(self, gap_start: float, gap_duration: float, gap_width: int) -> None:
+        self.gap.setFixedWidth(max(0, gap_width))
+        self.gap.setVisible(gap_duration >= .01 and gap_width > 0)
+        self.button.setToolTip(f"Insert media into {gap_duration:.2f}s gap")
+        try:
+            self.button.clicked.disconnect()
+        except (RuntimeError, TypeError):
+            pass
+        self.button.clicked.connect(lambda: self.insert_callback(gap_start, gap_duration))
 
 
 class AudioClipCard(QFrame):
@@ -1467,14 +1522,12 @@ class MainWindow(QMainWindow):
         # SOUND owns the one visible timeline scrollbar; MAIN follows the same
         # range/value programmatically and still accepts wheel/trackpad input.
         self.timeline.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.timeline.setDragDropMode(QListWidget.DragDropMode.InternalMove)
-        self.timeline.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self.timeline.setDragDropMode(QListWidget.DragDropMode.NoDragDrop)
         self.timeline.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.timeline.customContextMenuRequested.connect(self.timeline_menu)
         self.timeline.currentRowChanged.connect(self.load_editor)
         self.timeline.currentRowChanged.connect(self.update_timeline_selection_style)
         self.timeline.itemClicked.connect(self.reload_clicked_segment)
-        self.timeline.model().rowsMoved.connect(lambda *_: self.sync_order())
         self.timeline.files_dropped.connect(self.add_media_paths)
         self.timeline.horizontalScrollBar().valueChanged.connect(self.ruler.set_offset)
         self.timeline.horizontalScrollBar().valueChanged.connect(self.sync_audio_scroll)
@@ -1493,7 +1546,7 @@ class MainWindow(QMainWindow):
         self.add_tile_layout.setSpacing(0)
         self.add_tile_layout.addWidget(self.add_tile, 1)
         self.add_tile_layout.addWidget(self.add_text_tile)
-        self.add_tile_wrap.setFixedSize(112, max(152, self.timeline_height - 32))
+        self.add_tile_wrap.setFixedSize(112, 152)
         track_row.addWidget(self.add_tile_wrap, 0, Qt.AlignmentFlag.AlignVCenter)
         timeline_layout.addLayout(track_row)
         audio_row = QHBoxLayout()
@@ -1678,11 +1731,11 @@ class MainWindow(QMainWindow):
         duration_control_layout.setContentsMargins(0, 0, 0, 0)
         self.duration_spin = QDoubleSpinBox()
         self.duration_spin.setObjectName("timelineSpin")
-        self.duration_spin.setRange(1, 12)
-        self.duration_spin.setSingleStep(.5)
-        self.duration_spin.setDecimals(1)
+        self.duration_spin.setRange(.01, 9999.0)
+        self.duration_spin.setSingleStep(.01)
+        self.duration_spin.setDecimals(2)
         self.duration_spin.setSuffix(" s")
-        self.duration_spin.setToolTip("Segment duration in seconds (1–12)")
+        self.duration_spin.setToolTip("Segment duration in seconds (0.01-second precision)")
         self.duration_spin.valueChanged.connect(self.editor_duration_changed)
         duration_control_layout.addWidget(self.duration_spin)
         self.start_button.clicked.connect(lambda: self.set_role("start"))
@@ -1966,7 +2019,7 @@ class MainWindow(QMainWindow):
         #resolutionSeparator{background:transparent;color:#60717a;border:0;padding:0 3px;font-weight:bold} #timelineButton{background:transparent;color:#acd8ef;border:1px solid #3f6679;border-radius:5px;padding:4px 10px;font-weight:bold} #timelineButton:hover{background:#243b46;color:#e0f5ff;border-color:#65a7c7} #timelineButton:pressed{background:#172b35;color:#85c9eb;border-color:#347898}
         QListWidget{background:#0d0f10;border:0;padding:0} QListWidget::item{border:1px solid #696b6c;background:#252728;margin:0} QListWidget::item:selected{border:2px solid #f1f1f1;background:#293034}
         #timeline{padding:3px;background:#0d0f10;outline:0} #timeline::item,#timeline::item:selected,#timeline::item:focus{background:#0d0f10;border:0;outline:0} #timeline[dropActive="true"]{border:3px solid #68b9ee;background:#13232c} #timeline[dropActive="false"]{border:1px solid #323638}
-        #segmentCard{background:transparent;border:1px solid transparent} #segmentCard[selected="true"]{background:#17262e;border:1px solid #73a9c4} #segmentCardBody{background:#252728;border:0} #mediaBadge{background:#e5e5e5;color:#262626;font-weight:bold;padding:2px} #roleBadge{background:#36393a;color:#eee;padding:2px}
+        #segmentCard{background:transparent;border:1px solid transparent} #segmentCard[selected="true"]{background:#17262e;border:1px solid #73a9c4} #segmentCardBody{background:#252728;border:0} #segmentGap{background:#0d0f10;border:0} #gapInsert{min-width:24px;max-width:24px;min-height:24px;max-height:24px;padding:0;border:1px solid #3e5966;border-radius:12px;background:#17242a;color:#9bc9df;font-weight:bold} #gapInsert:hover{background:#285063;border-color:#70b7d8;color:#fff} #mediaBadge{background:#e5e5e5;color:#262626;font-weight:bold;padding:2px} #roleBadge{background:#36393a;color:#eee;padding:2px}
         #tileDelete{padding:0;min-height:0;max-height:20px;background:#454849;color:#ddd;border:0} #tileDelete:hover{background:#a94444;color:#fff;border:1px solid #e07878} #tileTitle{background:#242627;padding:3px;font-size:9px} #tileDuration{color:#a2a7a9;font-size:8px}
         #resizeHandle{background:transparent;border:0} #resizeHandle:hover{background:rgba(88,118,134,35);border:0}
         #timelineHeightHandle{background:transparent;border:0} #timelineHeightHandle:hover{background:rgba(88,118,134,35);border:0}
@@ -2027,7 +2080,7 @@ class MainWindow(QMainWindow):
         self.output_width.setMinimumWidth(metric(92))
         self.output_height.setMinimumWidth(metric(92))
         self.duration_spin.setFixedWidth(metric(82))
-        self.add_tile_wrap.setFixedWidth(metric(112))
+        self.add_tile_wrap.setFixedSize(metric(112), metric(152))
         self.add_tile_layout.setContentsMargins(0, 0, 0, 0)
         for button in (self.copy_segment, self.copy_global):
             button.setFixedHeight(button.fontMetrics().height() + metric(4))
@@ -2594,7 +2647,6 @@ class MainWindow(QMainWindow):
         self.timeline_height = value
         self.timeline_height_handle.current_height = value
         self.timeline.setFixedHeight(value)
-        self.add_tile_wrap.setFixedHeight(max(152, value - 32))
         self.update_timeline_layout()
         self.mark_dirty()
 
@@ -2623,20 +2675,34 @@ class MainWindow(QMainWindow):
     def total_duration(self) -> float:
         return sum(item.duration for item in self.segments)
 
+    def ensure_segment_starts(self) -> None:
+        cursor = 0.0
+        for segment in self.segments:
+            if segment.start is None:
+                segment.start = round(cursor, 2)
+            cursor = max(cursor, segment.start + segment.duration)
+        self.segments.sort(key=lambda item: (float(item.start or 0.0), item.id))
+
+    def main_end_time(self) -> float:
+        return max(((item.start or 0.0) + item.duration for item in self.segments), default=0.0)
+
     def audio_end_time(self) -> float:
         return max((item.start + item.duration for item in self.audio_segments), default=0.0)
 
     def timeline_end_time(self) -> float:
         """Visible/export-style extent shared by MAIN, SOUND, ruler, and summary."""
-        return max(self.total_duration(), self.audio_end_time())
+        return max(self.main_end_time(), self.audio_end_time())
 
     def timeline_content_width(self) -> int:
         """Return the widest real track extent, including minimum-width MAIN cards."""
         time_width = round(self.timeline_end_time() * self.pixels_per_second) + 6
-        card_width = sum(
-            max(48, int(segment.duration * self.pixels_per_second))
-            for segment in self.segments
-        ) + self.autofit_tail_extension
+        cursor = 0.0
+        card_width = 0
+        for segment in sorted(self.segments, key=lambda item: float(item.start or 0.0)):
+            gap = max(0.0, float(segment.start or 0.0) - cursor)
+            card_width += round(gap * self.pixels_per_second) + max(48, int(segment.duration * self.pixels_per_second))
+            cursor = float(segment.start or 0.0) + segment.duration
+        card_width += self.autofit_tail_extension
         return max(0, time_width, card_width)
 
     def first_visual_segment(self) -> Segment | None:
@@ -2654,16 +2720,75 @@ class MainWindow(QMainWindow):
             return
         self.add_media_paths(paths)
 
+    def add_media_to_gap(self, gap_start: float, gap_duration: float) -> None:
+        if gap_duration < .01 or len(self.segments) >= MAX_SEGMENTS:
+            return
+        paths = choose_media_files(self, False, self.settings.value("last_media_dir", str(Path.home())))
+        if not paths:
+            return
+        path = paths[0]
+        if Path(path).suffix.lower() in {".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aac"}:
+            QMessageBox.information(self, "Visual gap", "Use an image or WebM clip for a MAIN-track gap. Drag audio onto SOUND.")
+            return
+        try:
+            kind, preview, frames, trim = prepare_media(path)
+            segment = Segment(Path(path).name, path, preview, kind, "end" if len(self.segments) % 2 else "start", duration=round(gap_duration, 2), media_duration_frames=frames, trim_start=trim, start=round(gap_start, 2))
+            self.segments.append(segment)
+            if kind == "video":
+                self.add_video_audio(segment, segment.start or 0.0)
+            self.mark_dirty()
+            self.refresh_timeline()
+            self.select_segment_by_id(segment.id)
+        except Exception as error:
+            QMessageBox.warning(self, "Media error", f"{Path(path).name}: {error}")
+
     def add_text_segment(self) -> None:
-        if len(self.segments) >= MAX_SEGMENTS or self.total_duration() > MAX_SECONDS - 1:
+        if len(self.segments) >= MAX_SEGMENTS or self.main_end_time() > MAX_SECONDS - .01:
             return
         number = sum(segment.kind == "text" for segment in self.segments) + 1
-        duration = min(5.0, MAX_SECONDS - self.total_duration())
-        self.segments.append(Segment(f"Text {number}", "", "", "text", "text", "", duration))
+        start = self.main_end_time()
+        duration = min(5.0, MAX_SECONDS - start)
+        self.segments.append(Segment(f"Text {number}", "", "", "text", "text", "", duration, start=start))
         self.mark_dirty()
         self.refresh_timeline(len(self.segments) - 1)
         self.segment_prompt.setFocus()
         self.statusBar().showMessage("Text-only segment added; enter its prompt or use Magic Build")
+
+    def select_segment_by_id(self, segment_id: str) -> None:
+        for row in range(self.timeline.count()):
+            if self.timeline.item(row).data(Qt.ItemDataRole.UserRole) == segment_id:
+                self.timeline.setCurrentRow(row)
+                return
+
+    def move_main_segment(self, segment_id: str, desired_start: float) -> None:
+        segment = next((item for item in self.segments if item.id == segment_id), None)
+        if not segment:
+            return
+        self.ensure_segment_starts()
+        clips = self.segments.copy()
+        current_index = clips.index(segment)
+        desired = max(0.0, min(round(desired_start, 2), MAX_SECONDS - segment.duration))
+        others = [item for item in clips if item.id != segment.id]
+        target_index = sum(desired >= float(item.start or 0.0) for item in others)
+        if target_index != current_index:
+            gaps = [max(0.0, float(clips[0].start or 0.0))]
+            gaps.extend(max(0.0, float(clips[i].start or 0.0) - (float(clips[i - 1].start or 0.0) + clips[i - 1].duration)) for i in range(1, len(clips)))
+            reordered = others.copy()
+            reordered.insert(target_index, segment)
+            cursor = gaps[0]
+            for index, item in enumerate(reordered):
+                item.start = round(cursor, 2)
+                cursor = item.start + item.duration
+                if index + 1 < len(reordered):
+                    cursor += gaps[index + 1]
+            self.segments = reordered
+        else:
+            previous_end = 0.0 if current_index == 0 else float(clips[current_index - 1].start or 0.0) + clips[current_index - 1].duration
+            next_start = MAX_SECONDS if current_index == len(clips) - 1 else float(clips[current_index + 1].start or 0.0)
+            segment.start = round(max(previous_end, min(desired, next_start - segment.duration)), 2)
+        self.mark_dirty()
+        self.refresh_timeline()
+        self.select_segment_by_id(segment_id)
 
     def add_audio_paths(self, paths: list[str]) -> None:
         paths = [path for path in paths if Path(path).is_file()]
@@ -2713,7 +2838,7 @@ class MainWindow(QMainWindow):
         if not paths:
             return
         self.settings.setValue("last_media_dir", str(Path(paths[0]).parent))
-        room = MAX_SECONDS - self.total_duration()
+        room = MAX_SECONDS - self.main_end_time()
         added = 0
         for path in paths[: max(0, MAX_SEGMENTS - len(self.segments))]:
             if room < 1:
@@ -2721,8 +2846,8 @@ class MainWindow(QMainWindow):
             try:
                 kind, preview, frames, trim = prepare_media(path)
                 duration = 1.0 if kind == "video" else min(5.0, room)
-                timeline_start = self.total_duration()
-                segment = Segment(Path(path).name, path, preview, kind, "end" if len(self.segments) % 2 else "start", duration=duration, media_duration_frames=frames, trim_start=trim)
+                timeline_start = self.main_end_time()
+                segment = Segment(Path(path).name, path, preview, kind, "end" if len(self.segments) % 2 else "start", duration=duration, media_duration_frames=frames, trim_start=trim, start=timeline_start)
                 self.segments.append(segment)
                 if kind == "video":
                     self.add_video_audio(segment, timeline_start)
@@ -2736,6 +2861,7 @@ class MainWindow(QMainWindow):
 
     def refresh_timeline(self, selected: int = 0) -> None:
         self.autofit_tail_extension = 0
+        self.ensure_segment_starts()
         indicator = getattr(self, "timeline_loading", None) if self.segments else None
         if indicator:
             indicator.show_loading()
@@ -2745,17 +2871,24 @@ class MainWindow(QMainWindow):
             self.timeline.clear()
             card_height = max(152, self.timeline_height - 32)
             preview_height = max(80, card_height - 55)
+            cursor = 0.0
             for index, segment in enumerate(self.segments):
+                gap_start = cursor
+                gap_duration = max(0.0, float(segment.start or 0.0) - cursor)
+                gap_width = round(gap_duration * self.pixels_per_second)
                 item = QListWidgetItem()
                 item.setData(Qt.ItemDataRole.UserRole, segment.id)
-                item.setSizeHint(QSize(max(48, int(segment.duration * self.pixels_per_second)), card_height))
+                item.setSizeHint(QSize(gap_width + max(48, int(segment.duration * self.pixels_per_second)), card_height))
                 self.timeline.addItem(item)
-                card = SegmentCard(segment, preview_height, self.pixels_per_second, MAX_SECONDS if len(self.segments) == 1 else 12.0)
+                card = SegmentCard(segment, preview_height, self.pixels_per_second, 9999.0)
                 card.duration_changed.connect(lambda value, sid=segment.id: self.change_duration(sid, value))
                 card.delete_requested.connect(lambda sid=segment.id: self.delete_by_id(sid))
                 card.resize_finished.connect(lambda sid=segment.id: self.finish_resize(sid))
+                card.moved.connect(self.move_main_segment)
+                card.selected.connect(self.select_segment_by_id)
                 card.set_timeline_edges(index == 0, index == len(self.segments) - 1)
-                self.timeline.setItemWidget(item, card)
+                self.timeline.setItemWidget(item, SegmentSlot(card, gap_start, gap_duration, gap_width, self.add_media_to_gap))
+                cursor = float(segment.start or 0.0) + segment.duration
                 if indicator:
                     indicator.raise_()
                     QApplication.processEvents(QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents)
@@ -2779,20 +2912,28 @@ class MainWindow(QMainWindow):
         try:
             card_height = max(152, self.timeline_height - 32)
             preview_height = max(80, card_height - 55)
+            self.ensure_segment_starts()
             by_id = {segment.id: segment for segment in self.segments}
+            cursor = 0.0
             for row in range(self.timeline.count()):
                 item = self.timeline.item(row)
                 segment = by_id.get(item.data(Qt.ItemDataRole.UserRole))
                 if not segment:
                     continue
-                width = max(48, int(segment.duration * self.pixels_per_second))
+                gap = max(0.0, float(segment.start or 0.0) - cursor)
+                gap_width = round(gap * self.pixels_per_second)
+                width = gap_width + max(48, int(segment.duration * self.pixels_per_second))
                 if row == self.timeline.count() - 1:
                     width += self.autofit_tail_extension
                 item.setSizeHint(QSize(width, card_height))
-                card = self.timeline.itemWidget(item)
+                slot = self.timeline.itemWidget(item)
+                card = slot.card if isinstance(slot, SegmentSlot) else slot
                 if isinstance(card, SegmentCard):
                     card.set_timeline_edges(row == 0, row == self.timeline.count() - 1)
                     card.update_layout(preview_height, self.pixels_per_second)
+                if isinstance(slot, SegmentSlot):
+                    slot.update_gap(cursor, gap, gap_width)
+                cursor = float(segment.start or 0.0) + segment.duration
             self.timeline.doItemsLayout()
             self.update_summary()
             self.update_audio_timeline()
@@ -2843,12 +2984,8 @@ class MainWindow(QMainWindow):
             self._syncing_audio_scroll = False
 
     def segment_start_time(self, segment_id: str) -> float | None:
-        cursor = 0.0
-        for segment in self.segments:
-            if segment.id == segment_id:
-                return cursor
-            cursor += segment.duration
-        return None
+        segment = next((item for item in self.segments if item.id == segment_id), None)
+        return float(segment.start or 0.0) if segment else None
 
     def sync_coupled_audio(self) -> None:
         for audio in self.audio_segments:
@@ -2970,7 +3107,8 @@ class MainWindow(QMainWindow):
     def update_timeline_selection_style(self, selected_row: int) -> None:
         """Render selection on the card, not the QListWidget item beneath it."""
         for row in range(self.timeline.count()):
-            card = self.timeline.itemWidget(self.timeline.item(row))
+            slot = self.timeline.itemWidget(self.timeline.item(row))
+            card = slot.card if isinstance(slot, SegmentSlot) else slot
             if not isinstance(card, SegmentCard):
                 continue
             selected = row == selected_row
@@ -2990,14 +3128,15 @@ class MainWindow(QMainWindow):
         self.mark_dirty()
 
     def current_segment(self) -> Segment | None:
-        row = self.timeline.currentRow()
-        return self.segments[row] if 0 <= row < len(self.segments) else None
+        item = self.timeline.currentItem()
+        segment_id = item.data(Qt.ItemDataRole.UserRole) if item else None
+        return next((segment for segment in self.segments if segment.id == segment_id), None)
 
     def load_editor(self, row: int) -> None:
         self._loading = True
         segment = self.current_segment()
-        self.duration_spin.setMaximum(MAX_SECONDS if len(self.segments) == 1 else 12.0)
-        self.duration_spin.setToolTip(f"Segment duration in seconds (1–{int(self.duration_spin.maximum())})")
+        self.duration_spin.setMaximum(9999.0)
+        self.duration_spin.setToolTip("Segment duration in seconds (0.01-second precision)")
         self.segment_prompt.setPlainText(segment.prompt if segment else "")
         visual = bool(segment and segment.kind != "text")
         self.start_button.setEnabled(visual)
@@ -3008,7 +3147,7 @@ class MainWindow(QMainWindow):
             self.start_button.setChecked(segment.role == "start" if visual else False)
             self.end_button.setChecked(segment.role == "end" if visual else False)
             self.duration_spin.setValue(segment.duration)
-            self.frame_number.setText(f"{'Text' if segment.kind == 'text' else 'Frame'} {row + 1}")
+            self.frame_number.setText(f"{'Text' if segment.kind == 'text' else 'Frame'} {self.segments.index(segment) + 1}")
         else:
             self.frame_number.setText("Frame —")
         self._loading = False
@@ -3036,8 +3175,8 @@ class MainWindow(QMainWindow):
         if not segment:
             return
         self.duration_spin.blockSignals(True)
-        self.duration_spin.setMaximum(MAX_SECONDS if len(self.segments) == 1 else 12.0)
-        self.duration_spin.setToolTip(f"Segment duration in seconds (1–{int(self.duration_spin.maximum())})")
+        self.duration_spin.setMaximum(9999.0)
+        self.duration_spin.setToolTip("Segment duration in seconds (0.01-second precision)")
         self.duration_spin.setValue(segment.duration)
         self.duration_spin.blockSignals(False)
 
@@ -3047,11 +3186,21 @@ class MainWindow(QMainWindow):
             self.refine_prompt_button.setEnabled(bool(self.current_segment().prompt.strip()))
             if self.current_segment().kind == "text":
                 item = self.timeline.currentItem()
-                card = self.timeline.itemWidget(item) if item else None
+                slot = self.timeline.itemWidget(item) if item else None
+                card = slot.card if isinstance(slot, SegmentSlot) else slot
                 if isinstance(card, SegmentCard):
                     card.set_text_preview(self.current_segment().prompt)
             self.mark_dirty()
             self.update_counts()
+
+    def refresh_text_segment_previews(self) -> None:
+        for row in range(self.timeline.count()):
+            item = self.timeline.item(row)
+            segment = next((value for value in self.segments if value.id == item.data(Qt.ItemDataRole.UserRole)), None)
+            slot = self.timeline.itemWidget(item)
+            card = slot.card if isinstance(slot, SegmentSlot) else slot
+            if segment and segment.kind == "text" and isinstance(card, SegmentCard):
+                card.set_text_preview(segment.prompt)
 
     def editor_duration_changed(self, value: float) -> None:
         if not self._loading and self.current_segment():
@@ -3065,7 +3214,8 @@ class MainWindow(QMainWindow):
         segment.role = role
         row = self.timeline.currentRow()
         item = self.timeline.item(row)
-        card = self.timeline.itemWidget(item) if item else None
+        slot = self.timeline.itemWidget(item) if item else None
+        card = slot.card if isinstance(slot, SegmentSlot) else slot
         if isinstance(card, SegmentCard):
             card.set_role(role)
         self.start_button.blockSignals(True)
@@ -3079,31 +3229,41 @@ class MainWindow(QMainWindow):
     def change_duration(self, segment_id: str, value: float) -> None:
         self.autofit_tail_extension = 0
         segment = next(item for item in self.segments if item.id == segment_id)
-        allowed = min(value, MAX_SECONDS - (self.total_duration() - segment.duration))
-        segment.duration = max(1, round(allowed * 2) / 2)
+        segment.duration = max(.01, round(value, 2))
+        self.ensure_segment_starts()
+        index = self.segments.index(segment)
+        cursor = float(segment.start or 0.0) + segment.duration
+        for following in self.segments[index + 1:]:
+            if float(following.start or 0.0) < cursor:
+                following.start = round(cursor, 2)
+            cursor = float(following.start or 0.0) + following.duration
         self.mark_dirty()
         for row in range(self.timeline.count()):
             item = self.timeline.item(row)
             if item.data(Qt.ItemDataRole.UserRole) == segment_id:
                 self.timeline.setUpdatesEnabled(False)
                 try:
-                    item.setSizeHint(QSize(max(48, int(segment.duration * self.pixels_per_second)), max(152, self.timeline_height - 32)))
+                    previous_end = 0.0 if index == 0 else float(self.segments[index - 1].start or 0.0) + self.segments[index - 1].duration
+                    gap_width = round(max(0.0, float(segment.start or 0.0) - previous_end) * self.pixels_per_second)
+                    item.setSizeHint(QSize(gap_width + max(48, int(segment.duration * self.pixels_per_second)), max(152, self.timeline_height - 32)))
                     self.timeline.doItemsLayout()
                 finally:
                     self.timeline.setUpdatesEnabled(True)
-                card = self.timeline.itemWidget(item)
+                slot = self.timeline.itemWidget(item)
+                card = slot.card if isinstance(slot, SegmentSlot) else slot
                 if isinstance(card, SegmentCard):
                     card.update()
                     card.content.update()
                 break
         self.timeline.viewport().update()
+        self.sync_selected_duration_control()
         self.update_audio_timeline()
 
     def finish_resize(self, segment_id: str) -> None:
         self.update_timeline_layout()
 
     def update_summary(self) -> None:
-        main_total = self.total_duration()
+        main_total = self.main_end_time()
         total = self.timeline_end_time()
         self.sequence_bar.setText(f"Sequence     Start: 0.00s  |  End: {total:.2f}s  |  Length: {total:.2f}s  |  Remaining: {MAX_SECONDS - total:.2f}s")
         self.add_tile.setText(f"＋\nAdd media\n{MAX_SECONDS - main_total:.1f}s available")
@@ -3435,6 +3595,7 @@ class MainWindow(QMainWindow):
             durations[index] = float(result["duration"])
             if self.timeline.currentRow() == index:
                 self.refresh_segment_prompt_box(index)
+            self.refresh_text_segment_previews()
             self.mark_dirty()
             self.animate_timeline_durations(durations)
             self.save_library_project(automatic=True)
@@ -3462,16 +3623,10 @@ class MainWindow(QMainWindow):
 
     def magic_finished(self, result: dict) -> None:
         target_durations = []
-        remaining = MAX_SECONDS
         generated_segments = result["segments"]
-        for index, (segment, generated) in enumerate(zip(self.segments, generated_segments)):
+        for segment, generated in zip(self.segments, generated_segments):
             segment.prompt = str(generated.get("prompt", segment.prompt))
-            maximum_duration = MAX_SECONDS if len(generated_segments) == 1 else 12.0
-            recommended = max(1, min(maximum_duration, round(float(generated.get("duration", segment.duration)) * 2) / 2))
-            reserve = max(0, len(generated_segments) - index - 1)
-            target = max(1, min(recommended, remaining - reserve))
-            target_durations.append(target)
-            remaining -= target
+            target_durations.append(max(.01, round(float(generated.get("duration", segment.duration)), 2)))
         global_prompt = str(result.get("globalPrompt", "")).strip()
         quality = "(4K, HDR, Realistic)"
         if self.hdr.isChecked() and not global_prompt.startswith(quality):
@@ -3483,6 +3638,7 @@ class MainWindow(QMainWindow):
             global_prompt = "\n".join(lines)
         self.global_prompt.setPlainText(global_prompt)
         self.refresh_segment_prompt_box(self.timeline.currentRow())
+        self.refresh_text_segment_previews()
         self.mark_dirty()
         self.set_ai_controls_enabled(True)
         self.magic_overlay.hide_overlay()
@@ -3498,9 +3654,17 @@ class MainWindow(QMainWindow):
             self.refresh_timeline(self.timeline.currentRow())
             return
         start_widths = [self.timeline.item(row).sizeHint().width() for row in range(self.timeline.count())]
-        target_widths = [max(48, int(duration * self.pixels_per_second)) for duration in target_durations]
         for segment, target in zip(self.segments, target_durations):
             segment.duration = target
+        self.ensure_segment_starts()
+        cursor = 0.0
+        target_widths = []
+        for segment in self.segments:
+            if float(segment.start or 0.0) < cursor:
+                segment.start = round(cursor, 2)
+            gap = max(0.0, float(segment.start or 0.0) - cursor)
+            target_widths.append(round(gap * self.pixels_per_second) + max(48, int(segment.duration * self.pixels_per_second)))
+            cursor = float(segment.start or 0.0) + segment.duration
         self.sync_coupled_audio()
         self.update_timeline_scroll_ranges()
         self.update_summary()
@@ -3515,15 +3679,19 @@ class MainWindow(QMainWindow):
             for row, (start, target) in enumerate(zip(start_widths, target_widths)):
                 item = self.timeline.item(row)
                 item.setSizeHint(QSize(round(start + (target - start) * progress), max(152, self.timeline_height - 32)))
-                card = self.timeline.itemWidget(item)
+                slot = self.timeline.itemWidget(item)
+                card = slot.card if isinstance(slot, SegmentSlot) else slot
                 if card and hasattr(card, "duration_label"):
-                    card.duration_label.setText(f"{target_durations[row]:.1f}s")
+                    card.duration_label.setText(f"{target_durations[row]:.2f}s")
             self.timeline.doItemsLayout()
             self.timeline.viewport().update()
 
         animation.valueChanged.connect(resize_tiles)
         def finish_resize_animation() -> None:
-            self.update_timeline_layout()
+            selected_id = self.current_segment().id if self.current_segment() else ""
+            self.refresh_timeline()
+            if selected_id:
+                self.select_segment_by_id(selected_id)
             self.sync_selected_duration_control()
 
         animation.finished.connect(finish_resize_animation)
@@ -3547,11 +3715,11 @@ class MainWindow(QMainWindow):
         if not path.lower().endswith(".json"):
             path += ".json"
         self.settings.setValue("last_document_dir", str(Path(path).parent))
-        cursor = 0
         timeline = []
         for segment in self.segments:
-            length = max(FPS, round(segment.duration * FPS))
-            record = {"id": segment.id, "type": segment.kind, "start": cursor, "length": length, "prompt": segment.prompt}
+            start_frame = round(float(segment.start or 0.0) * FPS)
+            length = max(1, round(segment.duration * FPS))
+            record = {"id": segment.id, "type": segment.kind, "start": start_frame, "length": length, "prompt": segment.prompt}
             if segment.kind != "text":
                 record.update({"imageFile": segment.media_path, "fileName": segment.name, "fileSize": Path(segment.media_path).stat().st_size if Path(segment.media_path).exists() else 0, "imageB64": data_url(segment.preview_path), "isEndFrame": segment.role == "end"})
                 if segment.kind == "video":
@@ -3559,7 +3727,6 @@ class MainWindow(QMainWindow):
                     if Path(segment.media_path).exists():
                         record["videoB64"] = data_url(segment.media_path)
             timeline.append(record)
-            cursor += length
         audio_timeline = []
         for audio in self.audio_segments:
             record = {
@@ -3571,10 +3738,11 @@ class MainWindow(QMainWindow):
             if Path(audio.media_path).is_file():
                 record["audioB64"] = data_url(audio.media_path)
             audio_timeline.append(record)
-        export_frames = max(cursor, max((item["start"] + item["length"] for item in audio_timeline), default=0))
+        main_frames = max((item["start"] + item["length"] for item in timeline), default=0)
+        export_frames = max(main_frames, max((item["start"] + item["length"] for item in audio_timeline), default=0))
         global_prompt = self.global_prompt.toPlainText()
         self.normalize_output_dimensions()
-        payload = {"version": 1, "settings": {"start_second": 0, "end_second": export_frames / FPS, "duration_seconds": export_frames / FPS, "start_frame": 0, "end_frame": export_frames - 1, "duration_frames": export_frames, "epsilon": .99, "use_custom_audio": bool(audio_timeline), "use_custom_motion": False, "inpaint_audio": False, "frame_rate": FPS, "display_mode": "seconds", "custom_width": self.output_width.value(), "custom_height": self.output_height.value(), "resize_method": "maintain aspect ratio", "divisible_by": 32, "img_compression": 0, "override_audio": False}, "global_prompt": global_prompt, "retake_global_prompt": "", "timeline": {"mainTrackEnabled": True, "audioTrackEnabled": bool(audio_timeline), "motionTrackEnabled": False, "showFilenames": True, "overrideAudio": False, "inpaint_audio": False, "propHeight": 163, "globalPropHeight": 124, "global_prompt": global_prompt, "retake_global_prompt": "", "retakeMode": False, "retakeStart": 0, "retakeLength": 0, "retakePrompt": "", "retakeStrength": 1, "retakeVideo": None, "normalStartFrame": 0, "normalDurationFrames": cursor, "segments": timeline, "motionSegments": [], "audioSegments": audio_timeline}}
+        payload = {"version": 1, "settings": {"start_second": 0, "end_second": export_frames / FPS, "duration_seconds": export_frames / FPS, "start_frame": 0, "end_frame": export_frames - 1, "duration_frames": export_frames, "epsilon": .99, "use_custom_audio": bool(audio_timeline), "use_custom_motion": False, "inpaint_audio": False, "frame_rate": FPS, "display_mode": "seconds", "custom_width": self.output_width.value(), "custom_height": self.output_height.value(), "resize_method": "maintain aspect ratio", "divisible_by": 32, "img_compression": 0, "override_audio": False}, "global_prompt": global_prompt, "retake_global_prompt": "", "timeline": {"mainTrackEnabled": True, "audioTrackEnabled": bool(audio_timeline), "motionTrackEnabled": False, "showFilenames": True, "overrideAudio": False, "inpaint_audio": False, "propHeight": 163, "globalPropHeight": 124, "global_prompt": global_prompt, "retake_global_prompt": "", "retakeMode": False, "retakeStart": 0, "retakeLength": 0, "retakePrompt": "", "retakeStrength": 1, "retakeVideo": None, "normalStartFrame": 0, "normalDurationFrames": main_frames, "segments": timeline, "motionSegments": [], "audioSegments": audio_timeline}}
         Path(path).write_text(json.dumps(payload, indent=2), encoding="utf-8")
         self.statusBar().showMessage(f"LTX Director export saved: {path}")
 
@@ -3592,7 +3760,7 @@ class MainWindow(QMainWindow):
                 if raw.get("type") not in ("image", "video", "text"):
                     continue
                 if raw.get("type") == "text":
-                    loaded.append(Segment(raw.get("fileName", f"Text {index + 1}"), "", "", "text", "text", raw.get("prompt", ""), max(1, float(raw.get("length", FPS)) / fps), id=raw.get("id", "")))
+                    loaded.append(Segment(raw.get("fileName", f"Text {index + 1}"), "", "", "text", "text", raw.get("prompt", ""), max(.01, float(raw.get("length", 1)) / fps), id=raw.get("id", ""), start=float(raw.get("start", 0)) / fps))
                     continue
                 cache = APP_CACHE / f"import-{index}-{Path(path).stem}.jpg"
                 preview = raw.get("imageB64")
@@ -3605,7 +3773,7 @@ class MainWindow(QMainWindow):
                     video_path = APP_CACHE / f"import-{index}-{Path(raw.get('fileName', 'clip.webm')).name}"
                     write_data_url(raw["videoB64"], video_path)
                     media_path = str(video_path)
-                segment = Segment(raw.get("fileName", f"Segment {index + 1}"), str(media_path), str(cache), raw.get("type", "image"), "end" if raw.get("isEndFrame") else "start", raw.get("prompt", ""), max(1, float(raw.get("length", FPS)) / fps), raw.get("videoDurationFrames"), raw.get("trimStart"), raw.get("id", ""))
+                segment = Segment(raw.get("fileName", f"Segment {index + 1}"), str(media_path), str(cache), raw.get("type", "image"), "end" if raw.get("isEndFrame") else "start", raw.get("prompt", ""), max(.01, float(raw.get("length", 1)) / fps), raw.get("videoDurationFrames"), raw.get("trimStart"), raw.get("id", ""), start=float(raw.get("start", 0)) / fps)
                 loaded.append(segment)
                 if segment.kind == "video":
                     video_starts[segment.id] = float(raw.get("start", 0)) / fps
