@@ -2,7 +2,7 @@
 
 ## 1. Add and arrange media
 
-Use the timeline's **Add Media** button to choose PNG, JPEG, WebP, GIF, WebM, WAV, MP3, FLAC, OGG, M4A, or AAC files. Images and WebM clips are added to the main track; standalone audio is decoded locally to portable WAV and displayed as a waveform on the SOUND track beneath it. Supported files may also be dragged directly onto the timeline.
+Use the timeline's **Add Media** button to choose PNG, JPEG, WebP, GIF, WebM, WAV, MP3, FLAC, OGG, M4A, or AAC files. Images and WebM clips are added to the main track; standalone audio is decoded locally to portable WAV and displayed as a waveform on the SOUND track beneath it. Images and WebM clips may also be dragged onto the MAIN track; drag standalone audio files onto the SOUND track.
 
 The **Add Text** button in the same timeline box creates a prompt-only main-track segment without a reference frame. Text segments can be reordered and resized like visual segments, participate in Magic Build as part of the complete sequence, and support both Refine Timing and Refine Prompt. The model receives surrounding image frames as context without being told that the text segment itself contains an image.
 
