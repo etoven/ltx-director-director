@@ -17,13 +17,13 @@ from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
     QDockWidget, QFileDialog, QFormLayout, QFrame, QHBoxLayout, QLabel, QLineEdit,
-    QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox, QPushButton,
-    QSizePolicy, QSlider, QSpinBox, QSplitter, QSplitterHandle, QStatusBar, QTextEdit, QToolBar, QVBoxLayout, QWidget,
+    QInputDialog, QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox, QPushButton,
+    QScrollArea, QSizePolicy, QSlider, QSpinBox, QSplitter, QSplitterHandle, QStatusBar, QTextEdit, QToolBar, QVBoxLayout, QWidget,
 )
 
 from .ai import GEMINI_MODELS, build_prompts, refine_segment_prompt, refine_timing, retryable_connection_error
-from .media import APP_CACHE, data_url, prepare_media, write_data_url
-from .models import Segment
+from .media import APP_CACHE, data_url, prepare_audio, prepare_media, write_audio_clip, write_data_url
+from .models import AudioSegment, Segment
 
 FPS = 24
 MAX_SECONDS = 60.0
@@ -76,6 +76,24 @@ def choose_media_files(parent: QWidget, multiple: bool, initial: str) -> list[st
         return files
     file, _ = QFileDialog.getOpenFileName(parent, "Replace media", initial, media_filter)
     return [file] if file else []
+
+
+def choose_audio_files(parent: QWidget, initial: str) -> list[str]:
+    audio_filter = "Supported Audio (*.wav *.mp3 *.flac *.ogg *.m4a *.aac *.webm)"
+    if sys.platform.startswith("linux") and shutil.which("kdialog"):
+        result = subprocess.run(
+            ["kdialog", "--title", "Choose soundtrack audio", "--multiple", "--separate-output", "--getopenfilename", initial or ":ltxDirectorAudio", audio_filter],
+            capture_output=True, text=True, check=False,
+        )
+        return [line.strip() for line in result.stdout.splitlines() if line.strip()] if result.returncode == 0 else []
+    if sys.platform.startswith("linux") and shutil.which("zenity"):
+        result = subprocess.run(
+            ["zenity", "--file-selection", "--multiple", "--separator=\n", "--title=Choose soundtrack audio", f"--filename={initial.rstrip('/')}/", "--file-filter=Supported audio | *.wav *.mp3 *.flac *.ogg *.m4a *.aac *.webm"],
+            capture_output=True, text=True, check=False,
+        )
+        return [line.strip() for line in result.stdout.splitlines() if line.strip()] if result.returncode == 0 else []
+    files, _ = QFileDialog.getOpenFileNames(parent, "Add soundtrack audio", initial, audio_filter)
+    return files
 
 
 def choose_document_open(parent: QWidget, title: str, initial: str, name_filter: str) -> str:
@@ -205,7 +223,7 @@ class TimelineListWidget(QListWidget):
     def _media_paths(event) -> list[str]:
         if not event.mimeData().hasUrls():
             return []
-        supported = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".webm"}
+        supported = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".webm", ".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aac"}
         return [url.toLocalFile() for url in event.mimeData().urls() if url.isLocalFile() and Path(url.toLocalFile()).suffix.lower() in supported]
 
     def dragEnterEvent(self, event) -> None:
@@ -745,9 +763,9 @@ class SegmentCard(QFrame):
         layout.setSpacing(1)
         badges = QHBoxLayout()
         badges.setContentsMargins(0, 0, 0, 0)
-        kind = QLabel("WEBM" if segment.kind == "video" else "IMAGE")
+        kind = QLabel("TEXT" if segment.kind == "text" else ("WEBM" if segment.kind == "video" else "IMAGE"))
         kind.setObjectName("mediaBadge")
-        self.role_badge = QLabel(segment.role.upper())
+        self.role_badge = QLabel("PROMPT" if segment.kind == "text" else segment.role.upper())
         self.role_badge.setObjectName("roleBadge")
         close = QPushButton("×")
         close.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
@@ -763,7 +781,10 @@ class SegmentCard(QFrame):
         self.preview = QLabel()
         self.preview.setObjectName("segmentPreview")
         self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.source_pixmap = QPixmap(segment.preview_path)
+        self.source_pixmap = QPixmap(segment.preview_path) if segment.preview_path else QPixmap()
+        if segment.kind == "text":
+            self.preview.setText("TEXT-ONLY SEGMENT\nNo reference frame")
+            self.preview.setWordWrap(True)
         layout.addWidget(self.preview, 1)
         title = QLabel(segment.prompt or segment.name)
         title.setToolTip(segment.name)
@@ -786,6 +807,8 @@ class SegmentCard(QFrame):
 
     def set_role(self, role: str) -> None:
         """Update the visible role without recreating the timeline card."""
+        if self.segment.kind == "text":
+            return
         self.segment.role = role
         self.role_badge.setText(role.upper())
 
@@ -817,6 +840,80 @@ class SegmentCard(QFrame):
     def mouseReleaseEvent(self, event):
         self.setCursor(Qt.CursorShape.OpenHandCursor)
         event.ignore()
+
+
+class AudioClipCard(QFrame):
+    moved = Signal(str, float)
+    menu_requested = Signal(str, object)
+
+    def __init__(self, segment: AudioSegment, pixels_per_second: int, parent=None):
+        super().__init__(parent)
+        self.segment = segment
+        self.pixels_per_second = pixels_per_second
+        self.drag_origin = None
+        self.start_origin = 0.0
+        self.setObjectName("audioClip")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setToolTip(self.tooltip_text())
+        self.setCursor(Qt.CursorShape.ArrowCursor if segment.coupled_to else Qt.CursorShape.SizeAllCursor)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(lambda point: self.menu_requested.emit(segment.id, self.mapToGlobal(point)))
+
+    def tooltip_text(self) -> str:
+        state = "Coupled to video — right-click to decouple" if self.segment.coupled_to else "Independent audio — drag to move"
+        return f"{self.segment.name}\n{state}\nStart {self.segment.start:.2f}s · Length {self.segment.duration:.2f}s"
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        mid = self.height() // 2 + 5
+        all_peaks = self.segment.waveform_peaks or [0.0]
+        source_frames = max(1, self.segment.audio_duration_frames)
+        first_peak = min(len(all_peaks) - 1, int(self.segment.trim_start / source_frames * len(all_peaks)))
+        last_frame = self.segment.trim_start + round(self.segment.duration * FPS)
+        last_peak = max(first_peak + 1, min(len(all_peaks), int(last_frame / source_frames * len(all_peaks)) + 1))
+        peaks = all_peaks[first_peak:last_peak] or [0.0]
+        painter.setPen(QPen(QColor("#65b7d8"), 1))
+        usable = max(1, self.width() - 8)
+        for x in range(4, self.width() - 4, 2):
+            index = min(len(peaks) - 1, int((x - 4) / usable * len(peaks)))
+            height = max(1, int(peaks[index] * max(3, self.height() * .34)))
+            painter.drawLine(x, mid - height, x, mid + height)
+        painter.setPen(QColor("#e5f4fb"))
+        painter.drawText(7, 16, self.segment.name)
+        painter.setPen(QColor("#8da4ae"))
+        marker = "LINKED" if self.segment.coupled_to else f"{self.segment.start:.2f}s"
+        painter.drawText(7, self.height() - 7, marker)
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton and not self.segment.coupled_to:
+            self.drag_origin = event.globalPosition().toPoint()
+            self.start_origin = self.segment.start
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        if self.drag_origin is not None:
+            delta = event.globalPosition().toPoint().x() - self.drag_origin.x()
+            start = max(0.0, min(MAX_SECONDS - self.segment.duration, self.start_origin + delta / max(1, self.pixels_per_second)))
+            start = round(start * FPS) / FPS
+            self.move(round(start * self.pixels_per_second), self.y())
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        if self.drag_origin is not None:
+            start = max(0.0, min(MAX_SECONDS - self.segment.duration, self.x() / max(1, self.pixels_per_second)))
+            self.drag_origin = None
+            self.setCursor(Qt.CursorShape.SizeAllCursor)
+            self.moved.emit(self.segment.id, round(start * FPS) / FPS)
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
 
 
 class SettingsDialog(QDialog):
@@ -1056,6 +1153,8 @@ class MainWindow(QMainWindow):
         self._settings_sync_timer.timeout.connect(self.settings.sync)
         self.session_keys = {"gemini": self.settings.value("gemini_key", ""), "openai": self.settings.value("openai_key", "")}
         self.segments: list[Segment] = []
+        self.audio_segments: list[AudioSegment] = []
+        self._syncing_audio_scroll = False
         self.current_project_id: str | None = None
         self.current_project_name = "Untitled"
         self.project_dirty = False
@@ -1095,7 +1194,7 @@ class MainWindow(QMainWindow):
         toolbar.addAction(projects_action)
         toolbar.addSeparator()
         action_groups = [
-            (("New Project", self.new_project), ("Add Media", self.add_media)),
+            (("New Project", self.new_project), ("Add Media", self.add_media), ("Add Text", self.add_text_segment), ("Add Sound", self.add_audio)),
             (("Open", self.import_ltx), ("Import", self.import_project)),
             (("Delete selected", self.delete_selected),),
         ]
@@ -1242,6 +1341,7 @@ class MainWindow(QMainWindow):
         self.timeline.model().rowsMoved.connect(lambda *_: self.sync_order())
         self.timeline.files_dropped.connect(self.add_media_paths)
         self.timeline.horizontalScrollBar().valueChanged.connect(self.ruler.set_offset)
+        self.timeline.horizontalScrollBar().valueChanged.connect(self.sync_audio_scroll)
         self.timeline_loading = TimelineLoadingOverlay(self.timeline.viewport())
         track_row.addWidget(self.timeline, 1)
         self.add_tile = QPushButton("＋\nAdd media\n60.0s available")
@@ -1254,6 +1354,30 @@ class MainWindow(QMainWindow):
         self.add_tile_layout.addWidget(self.add_tile)
         track_row.addWidget(add_tile_wrap)
         timeline_layout.addLayout(track_row)
+        audio_row = QHBoxLayout()
+        audio_row.setContentsMargins(0, 0, 0, 0)
+        audio_row.setSpacing(0)
+        audio_label = QLabel("SOUND ◉")
+        audio_label.setObjectName("audioTrackLabel")
+        audio_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        audio_label.setFixedWidth(145)
+        audio_row.addWidget(audio_label)
+        self.audio_scroll = QScrollArea()
+        self.audio_scroll.setObjectName("audioTrack")
+        self.audio_scroll.setWidgetResizable(False)
+        self.audio_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.audio_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.audio_scroll.setFixedHeight(88)
+        self.audio_canvas = QWidget()
+        self.audio_canvas.setObjectName("audioCanvas")
+        self.audio_canvas.setFixedHeight(76)
+        self.audio_scroll.setWidget(self.audio_canvas)
+        self.audio_scroll.horizontalScrollBar().valueChanged.connect(self.audio_scroll_changed)
+        audio_row.addWidget(self.audio_scroll, 1)
+        audio_end_spacer = QWidget()
+        audio_end_spacer.setFixedWidth(128)
+        audio_row.addWidget(audio_end_spacer)
+        timeline_layout.addLayout(audio_row)
         self.timeline_height_handle = TimelineHeightHandle(self.timeline_height)
         self.timeline_height_handle.height_changed.connect(self.set_timeline_height)
         self.timeline_height_handle.finished.connect(self.finish_timeline_height_resize)
@@ -1692,7 +1816,7 @@ class MainWindow(QMainWindow):
         QSpinBox::up-button:hover,QDoubleSpinBox::up-button:hover,QSpinBox::down-button:hover,QDoubleSpinBox::down-button:hover{background:#506471} QSpinBox::up-button:pressed,QDoubleSpinBox::up-button:pressed,QSpinBox::down-button:pressed,QDoubleSpinBox::down-button:pressed{background:#274e66} QSpinBox::up-arrow,QDoubleSpinBox::up-arrow,QSpinBox::down-arrow,QDoubleSpinBox::down-arrow{width:__ARROW_SIZE__px;height:__ARROW_SIZE__px}
         QComboBox{padding-right:__COMBO_PAD__px} QComboBox::drop-down{subcontrol-origin:padding;subcontrol-position:top right;width:__COMBO_BUTTON__px;background:#394145;border:0;border-left:1px solid #171a1c;border-top-right-radius:3px;border-bottom-right-radius:3px} QComboBox::drop-down:hover{background:#506471} QComboBox::drop-down:pressed{background:#274e66} QComboBox::down-arrow{width:__ARROW_SIZE__px;height:__ARROW_SIZE__px} QComboBox QAbstractItemView{background:#202527;color:#e1e5e7;border:1px solid #52616a;outline:0;padding:4px;selection-background-color:#3b6f9c;selection-color:#fff}
         QSlider::groove:horizontal{height:__SLIDER_GROOVE__px;background:#161b1d;border:1px solid #0d1011;border-radius:__SLIDER_RADIUS__px} QSlider::sub-page:horizontal{background:#367da6;border:1px solid #4b9ac6;border-radius:__SLIDER_RADIUS__px} QSlider::add-page:horizontal{background:#161b1d;border-radius:__SLIDER_RADIUS__px} QSlider::handle:horizontal{width:__SLIDER_HANDLE__px;margin:-__SLIDER_MARGIN__px 0;background:#607883;border:2px solid #8fb9cd;border-radius:__SLIDER_HANDLE_RADIUS__px} QSlider::handle:horizontal:hover{background:#78a8be;border-color:#c5ebff} QSlider::handle:horizontal:pressed{background:#4aa3d2;border-color:#e1f6ff}
-        #timelineShell{background:#0d0f10;border:1px solid #323638;border-radius:3px} #mainTrackLabel{background:#191c1d;border-right:1px solid #34383a;font-weight:bold}
+        #timelineShell{background:#0d0f10;border:1px solid #323638;border-radius:3px} #mainTrackLabel,#audioTrackLabel{background:#191c1d;border-right:1px solid #34383a;font-weight:bold} #audioTrack{background:#101516;border:0;border-top:1px solid #30383c} #audioTrack QWidget#qt_scrollarea_viewport{background:#101516} #audioCanvas{background:#101516} #audioClip{background:#1d343d;border:1px solid #4f849a;border-radius:4px} #audioClip:hover{background:#244653;border-color:#75b8d3}
         #timelineTitle{background:#19262d;color:#b9def2;border:1px solid #304955;border-radius:4px;padding:4px 8px;font-weight:bold;letter-spacing:1px} #timelineControlLabel{background:transparent;color:#7f9099;border:0;font-size:9px;font-weight:bold;letter-spacing:1px}
         #outputSizeControl{background:#1a2023;border:1px solid #354047;border-radius:5px} #timelineSpin{background:transparent;border:0;border-radius:0;padding-left:9px;padding-right:__TIMELINE_SPIN_PAD__px;color:#e6edf1;font-weight:bold;selection-background-color:#3b6f9c} #timelineSpin:hover{background:#20292d} #timelineSpin:focus{background:#202b30;color:#fff}
         #timelineSpin::up-button{width:__TIMELINE_SPIN_BUTTON__px;background:transparent;border:0;border-radius:2px;subcontrol-origin:border;subcontrol-position:top right} #timelineSpin::down-button{width:__TIMELINE_SPIN_BUTTON__px;background:transparent;border:0;border-radius:2px;subcontrol-origin:border;subcontrol-position:bottom right} #timelineSpin::up-button:hover,#timelineSpin::down-button:hover{background:#344b57} #timelineSpin::up-button:pressed,#timelineSpin::down-button:pressed{background:#1f668b} #timelineSpin::up-arrow{image:url("__SPIN_UP_IMAGE__");width:__TIMELINE_ARROW__px;height:__TIMELINE_ARROW__px} #timelineSpin::down-arrow{image:url("__SPIN_DOWN_IMAGE__");width:__TIMELINE_ARROW__px;height:__TIMELINE_ARROW__px}
@@ -1704,7 +1828,7 @@ class MainWindow(QMainWindow):
         #resizeHandle{background:transparent;border:0} #resizeHandle:hover{background:rgba(88,118,134,35);border:0}
         #timelineHeightHandle{background:transparent;border:0} #timelineHeightHandle:hover{background:rgba(88,118,134,35);border:0}
         #promptSplitter::handle{background:transparent;border:0} #promptSplitter::handle:hover{background:rgba(88,118,134,35);border:0}
-        #segmentPreview{background:#17191a;border-top:1px solid #34383a}
+        #segmentPreview{background:#17191a;border-top:1px solid #34383a;color:#7494a3;font-weight:bold}
         #addTile{border:1px dashed #596065;background:#111415;color:#828b90;font-size:10px} #sequenceBar{background:#181e21;border:1px solid #303a3f;border-left:3px solid #4e91b4;border-radius:5px;padding:10px 12px;color:#cbd7dd;font-weight:bold}
         #directorPanel{background:#1d2326;border:1px solid #354047;border-radius:6px} #panelTitle{background:transparent;color:#b8d9e9;border:0;font-size:10px;font-weight:bold;letter-spacing:1px} #groupLabel{background:transparent;color:#71838c;border:0;font-size:8px;font-weight:bold;letter-spacing:1px;padding-right:4px}
         #sectionLabel{color:#8ebbd1;font-size:8px;font-weight:bold;letter-spacing:1px} #muted{color:#879095;font-size:9px} #promptPanel{background:#202527;border:1px solid #374044;border-radius:6px} #segmentMetaBar{background:#1a2023;border:1px solid #303a3f;border-radius:5px} #refineButton{background:#252d31;border:1px solid #45545b;color:#c9dce5;padding-left:9px;padding-right:9px} #refineButton:hover{background:#31414a;border-color:#6590a7;color:#f2fbff} #refineButton:pressed{background:#1d2b32;border-color:#7ca9bf} #refineButton:disabled{background:#202527;border-color:#31393d;color:#606a6f}
@@ -1957,6 +2081,7 @@ class MainWindow(QMainWindow):
     def capture_workspace_state(self) -> dict:
         return {
             "segments": self.segments,
+            "audioSegments": self.audio_segments,
             "globalPrompt": self.global_prompt.toPlainText(),
             "directorIntent": self.intent.toPlainText(),
             "requestedLength": self.requested_length.value(),
@@ -1984,6 +2109,7 @@ class MainWindow(QMainWindow):
     def restore_workspace_state(self, state: dict) -> None:
         self._loading = True
         self.segments = state.get("segments", [])
+        self.audio_segments = state.get("audioSegments", [])
         self.global_prompt.setPlainText(str(state.get("globalPrompt", "")))
         self.intent.setPlainText(str(state.get("directorIntent", "")))
         self.requested_length.setValue(float(state.get("requestedLength", 0)))
@@ -2063,7 +2189,8 @@ class MainWindow(QMainWindow):
         meta["duration"] = self.total_duration()
         meta["segmentCount"] = len(self.segments)
         if not meta.get("thumbnailSource"):
-            meta["thumbnailData"] = data_url(self.segments[0].preview_path, max_edge=360, quality=84)
+            visual = self.first_visual_segment()
+            meta["thumbnailData"] = data_url(visual.preview_path, max_edge=360, quality=84) if visual else ""
         payload = self.project_payload()
         payload["library"] = {key: meta.get(key, "") for key in ("id", "name", "description", "collection", "savedAt")}
         Path(meta["projectPath"]).write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -2232,6 +2359,8 @@ class MainWindow(QMainWindow):
         super().resizeEvent(event)
         if hasattr(self, "magic_overlay") and self.magic_overlay.isVisible():
             self.magic_overlay.setGeometry(self.rect())
+        if hasattr(self, "audio_canvas"):
+            self.update_audio_timeline()
 
     def mark_dirty(self, *_args) -> None:
         if not self._loading:
@@ -2257,6 +2386,7 @@ class MainWindow(QMainWindow):
                 return
         self._loading = True
         self.segments = []
+        self.audio_segments = []
         self.current_project_id = None
         self.current_project_name = "Untitled"
         self.intent.clear()
@@ -2350,6 +2480,9 @@ class MainWindow(QMainWindow):
     def total_duration(self) -> float:
         return sum(item.duration for item in self.segments)
 
+    def first_visual_segment(self) -> Segment | None:
+        return next((segment for segment in self.segments if segment.kind != "text" and segment.preview_path), None)
+
     def normalize_output_dimensions(self) -> None:
         for field in (self.output_width, self.output_height):
             normalized = max(256, min(4096, round(field.value() / 32) * 32))
@@ -2362,8 +2495,68 @@ class MainWindow(QMainWindow):
             return
         self.add_media_paths(paths)
 
+    def add_text_segment(self) -> None:
+        if len(self.segments) >= MAX_SEGMENTS or self.total_duration() > MAX_SECONDS - 1:
+            return
+        number = sum(segment.kind == "text" for segment in self.segments) + 1
+        duration = min(5.0, MAX_SECONDS - self.total_duration())
+        self.segments.append(Segment(f"Text {number}", "", "", "text", "text", "", duration))
+        self.mark_dirty()
+        self.refresh_timeline(len(self.segments) - 1)
+        self.segment_prompt.setFocus()
+        self.statusBar().showMessage("Text-only segment added; enter its prompt or use Magic Build")
+
+    def add_audio(self) -> None:
+        paths = choose_audio_files(self, self.settings.value("last_audio_dir", str(Path.home())))
+        if not paths:
+            return
+        self.add_audio_paths(paths)
+
+    def add_audio_paths(self, paths: list[str]) -> None:
+        paths = [path for path in paths if Path(path).is_file()]
+        if not paths:
+            return
+        self.settings.setValue("last_audio_dir", str(Path(paths[0]).parent))
+        cursor = max((audio.start + audio.duration for audio in self.audio_segments), default=0.0)
+        added = 0
+        for path in paths:
+            try:
+                wav_path, frames, peaks = prepare_audio(path)
+                duration = min(frames / FPS, MAX_SECONDS)
+                start = min(cursor, max(0.0, MAX_SECONDS - duration))
+                self.audio_segments.append(AudioSegment(Path(path).name, wav_path, start, duration, 0, frames, peaks))
+                cursor = min(MAX_SECONDS, start + duration)
+                added += 1
+            except Exception as error:
+                QMessageBox.warning(self, "Audio error", f"{Path(path).name}: {error}")
+        if added:
+            self.mark_dirty()
+            self.update_audio_timeline()
+            self.statusBar().showMessage(f"Added {added} soundtrack clip{'s' if added != 1 else ''}")
+
+    def add_video_audio(self, segment: Segment, timeline_start: float) -> None:
+        if segment.kind != "video" or not Path(segment.media_path).is_file():
+            return
+        try:
+            wav_path, frames, peaks = prepare_audio(segment.media_path)
+        except Exception:
+            return
+        available = max(1, frames - int(segment.trim_start or 0))
+        duration = min(segment.duration, available / FPS)
+        self.audio_segments.append(AudioSegment(
+            f"{Path(segment.name).stem} — audio.wav", wav_path, timeline_start, duration,
+            int(segment.trim_start or 0), frames, peaks, segment.id,
+        ))
+
     def add_media_paths(self, paths: list[str]) -> None:
         paths = [path for path in paths if Path(path).is_file()]
+        if not paths:
+            return
+        audio_suffixes = {".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aac"}
+        audio_paths = [path for path in paths if Path(path).suffix.lower() in audio_suffixes]
+        paths = [path for path in paths if Path(path).suffix.lower() not in audio_suffixes]
+        if audio_paths:
+            self.add_audio_paths(audio_paths)
         if not paths:
             return
         self.settings.setValue("last_media_dir", str(Path(paths[0]).parent))
@@ -2375,7 +2568,11 @@ class MainWindow(QMainWindow):
             try:
                 kind, preview, frames, trim = prepare_media(path)
                 duration = 1.0 if kind == "video" else min(5.0, room)
-                self.segments.append(Segment(Path(path).name, path, preview, kind, "end" if len(self.segments) % 2 else "start", duration=duration, media_duration_frames=frames, trim_start=trim))
+                timeline_start = self.total_duration()
+                segment = Segment(Path(path).name, path, preview, kind, "end" if len(self.segments) % 2 else "start", duration=duration, media_duration_frames=frames, trim_start=trim)
+                self.segments.append(segment)
+                if kind == "video":
+                    self.add_video_audio(segment, timeline_start)
                 room -= duration
                 added += 1
             except Exception as error:
@@ -2413,6 +2610,7 @@ class MainWindow(QMainWindow):
             if self.segments:
                 self.timeline.setCurrentRow(max(0, min(selected, len(self.segments) - 1)))
             self.update_summary()
+            self.update_audio_timeline()
         finally:
             self._loading = False
             if indicator:
@@ -2444,8 +2642,79 @@ class MainWindow(QMainWindow):
                     card.update_layout(preview_height, self.pixels_per_second)
             self.timeline.doItemsLayout()
             self.update_summary()
+            self.update_audio_timeline()
         finally:
             self._loading = previous_loading
+
+    def sync_audio_scroll(self, value: int) -> None:
+        if hasattr(self, "audio_scroll") and not self._syncing_audio_scroll:
+            self._syncing_audio_scroll = True
+            self.audio_scroll.horizontalScrollBar().setValue(value)
+            self._syncing_audio_scroll = False
+
+    def audio_scroll_changed(self, value: int) -> None:
+        if self._syncing_audio_scroll:
+            return
+        self._syncing_audio_scroll = True
+        main_bar = self.timeline.horizontalScrollBar()
+        if value <= main_bar.maximum():
+            main_bar.setValue(value)
+        self.ruler.set_offset(value)
+        self._syncing_audio_scroll = False
+
+    def segment_start_time(self, segment_id: str) -> float | None:
+        cursor = 0.0
+        for segment in self.segments:
+            if segment.id == segment_id:
+                return cursor
+            cursor += segment.duration
+        return None
+
+    def sync_coupled_audio(self) -> None:
+        for audio in self.audio_segments:
+            if not audio.coupled_to:
+                continue
+            start = self.segment_start_time(audio.coupled_to)
+            video = next((segment for segment in self.segments if segment.id == audio.coupled_to), None)
+            if start is None or video is None:
+                audio.coupled_to = None
+                continue
+            audio.start = start
+            available = max(1, audio.audio_duration_frames - audio.trim_start) / FPS
+            audio.duration = min(video.duration, available)
+
+    def update_audio_timeline(self) -> None:
+        if not hasattr(self, "audio_canvas"):
+            return
+        self.sync_coupled_audio()
+        existing = {child.segment.id: child for child in self.audio_canvas.findChildren(AudioClipCard)}
+        width = max(self.audio_scroll.viewport().width(), round(MAX_SECONDS * self.pixels_per_second) + 6)
+        self.audio_canvas.setFixedSize(width, 76)
+        for audio in self.audio_segments:
+            card = existing.pop(audio.id, None)
+            if card is None:
+                card = AudioClipCard(audio, self.pixels_per_second, self.audio_canvas)
+                card.moved.connect(self.move_audio_segment)
+                card.menu_requested.connect(self.audio_menu)
+            card.segment = audio
+            card.pixels_per_second = self.pixels_per_second
+            card.setCursor(Qt.CursorShape.ArrowCursor if audio.coupled_to else Qt.CursorShape.SizeAllCursor)
+            card.setToolTip(card.tooltip_text())
+            card.setGeometry(round(audio.start * self.pixels_per_second), 5, max(28, round(audio.duration * self.pixels_per_second)), 66)
+            card.update()
+            card.show()
+        for card in existing.values():
+            card.deleteLater()
+        self.sync_audio_scroll(self.timeline.horizontalScrollBar().value())
+
+    def move_audio_segment(self, audio_id: str, start: float) -> None:
+        audio = next((item for item in self.audio_segments if item.id == audio_id), None)
+        if not audio or audio.coupled_to:
+            return
+        audio.start = max(0.0, min(start, MAX_SECONDS - audio.duration))
+        self.mark_dirty()
+        self.update_audio_timeline()
+        self.statusBar().showMessage(f"Audio moved to {audio.start:.2f}s")
 
     def update_timeline_selection_style(self, selected_row: int) -> None:
         """Render selection on the card, not the QListWidget item beneath it."""
@@ -2479,15 +2748,16 @@ class MainWindow(QMainWindow):
         self.duration_spin.setMaximum(MAX_SECONDS if len(self.segments) == 1 else 12.0)
         self.duration_spin.setToolTip(f"Segment duration in seconds (1–{int(self.duration_spin.maximum())})")
         self.segment_prompt.setPlainText(segment.prompt if segment else "")
-        self.start_button.setEnabled(bool(segment))
-        self.end_button.setEnabled(bool(segment))
+        visual = bool(segment and segment.kind != "text")
+        self.start_button.setEnabled(visual)
+        self.end_button.setEnabled(visual)
         self.refine_timing_button.setEnabled(bool(segment))
         self.refine_prompt_button.setEnabled(bool(segment and segment.prompt.strip()))
         if segment:
-            self.start_button.setChecked(segment.role == "start")
-            self.end_button.setChecked(segment.role == "end")
+            self.start_button.setChecked(segment.role == "start" if visual else False)
+            self.end_button.setChecked(segment.role == "end" if visual else False)
             self.duration_spin.setValue(segment.duration)
-            self.frame_number.setText(f"Frame {row + 1}")
+            self.frame_number.setText(f"{'Text' if segment.kind == 'text' else 'Frame'} {row + 1}")
         else:
             self.frame_number.setText("Frame —")
         self._loading = False
@@ -2534,7 +2804,7 @@ class MainWindow(QMainWindow):
 
     def set_role(self, role: str) -> None:
         segment = self.current_segment()
-        if not segment:
+        if not segment or segment.kind == "text":
             return
         segment.role = role
         row = self.timeline.currentRow()
@@ -2582,7 +2852,9 @@ class MainWindow(QMainWindow):
         self.add_tile.setText(f"＋\nAdd media\n{MAX_SECONDS - total:.1f}s available")
         self.add_tile.setEnabled(len(self.segments) < MAX_SEGMENTS and total <= MAX_SECONDS - 1)
         self.applied_label.setText(f"Applied across all {len(self.segments)} segments")
-        self.statusBar().showMessage(f"{len(self.segments)} media segments · {total:.1f}s")
+        visual_count = sum(segment.kind != "text" for segment in self.segments)
+        text_count = len(self.segments) - visual_count
+        self.statusBar().showMessage(f"{visual_count} visual · {text_count} text · {len(self.audio_segments)} audio · {total:.1f}s")
 
     def update_counts(self) -> None:
         self.segment_count.setText(f"{len(self.segment_prompt.toPlainText())} characters")
@@ -2600,17 +2872,81 @@ class MainWindow(QMainWindow):
         self.timeline.setCurrentItem(item)
         segment = self.current_segment()
         menu = QMenu(self)
-        menu.addAction("Replace media", self.replace_selected)
-        menu.addAction("Export video" if segment and segment.kind == "video" else "Export image", self.export_selected_segment)
-        menu.addAction("Set as start frame", lambda: self.set_role("start"))
-        menu.addAction("Set as end frame", lambda: self.set_role("end"))
+        if segment and segment.kind != "text":
+            menu.addAction("Replace media", self.replace_selected)
+            menu.addAction("Export video" if segment.kind == "video" else "Export image", self.export_selected_segment)
+            menu.addAction("Set as start frame", lambda: self.set_role("start"))
+            menu.addAction("Set as end frame", lambda: self.set_role("end"))
+        else:
+            menu.addAction("Edit text prompt", self.segment_prompt.setFocus)
         menu.addSeparator()
         menu.addAction("Delete segment", self.delete_selected)
         menu.exec(self.timeline.mapToGlobal(point))
 
+    def audio_menu(self, audio_id: str, global_point) -> None:
+        audio = next((item for item in self.audio_segments if item.id == audio_id), None)
+        if not audio:
+            return
+        menu = QMenu(self)
+        if audio.coupled_to:
+            menu.addAction("Decouple from video", lambda: self.decouple_audio(audio_id))
+        else:
+            menu.addAction("Set start time…", lambda: self.set_audio_start(audio_id))
+        menu.addAction("Export audio", lambda: self.export_audio_segment(audio_id))
+        menu.addSeparator()
+        menu.addAction("Delete audio", lambda: self.delete_audio_segment(audio_id))
+        menu.exec(global_point)
+
+    def decouple_audio(self, audio_id: str) -> None:
+        audio = next((item for item in self.audio_segments if item.id == audio_id), None)
+        if not audio:
+            return
+        audio.coupled_to = None
+        self.mark_dirty()
+        self.update_audio_timeline()
+        self.statusBar().showMessage("Audio decoupled; drag the waveform to move it independently")
+
+    def set_audio_start(self, audio_id: str) -> None:
+        audio = next((item for item in self.audio_segments if item.id == audio_id), None)
+        if not audio or audio.coupled_to:
+            return
+        value, accepted = QInputDialog.getDouble(
+            self, "Audio start time", "Start time in seconds:", audio.start,
+            0.0, max(0.0, MAX_SECONDS - audio.duration), 2,
+        )
+        if accepted:
+            self.move_audio_segment(audio_id, round(value * FPS) / FPS)
+
+    def delete_audio_segment(self, audio_id: str) -> None:
+        self.audio_segments = [item for item in self.audio_segments if item.id != audio_id]
+        self.mark_dirty()
+        self.update_audio_timeline()
+
+    def export_audio_segment(self, audio_id: str) -> None:
+        audio = next((item for item in self.audio_segments if item.id == audio_id), None)
+        if not audio or not Path(audio.media_path).is_file():
+            QMessageBox.warning(self, "Audio unavailable", "The source audio for this waveform is unavailable.")
+            return
+        downloads = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DownloadLocation) or str(Path.home())
+        directory = Path(str(self.settings.value("segment_export_dir", downloads)))
+        try:
+            directory.mkdir(parents=True, exist_ok=True)
+            base = f"{safe_export_name(self.current_project_name)} - {safe_export_name(Path(audio.name).stem)}"
+            destination = directory / f"{base}.wav"
+            counter = 2
+            while destination.exists() and Path(audio.media_path).resolve() != destination.resolve():
+                destination = directory / f"{base} ({counter}).wav"
+                counter += 1
+            if Path(audio.media_path).resolve() != destination.resolve():
+                write_audio_clip(audio.media_path, destination, audio.trim_start, audio.duration, FPS)
+            self.settings.setValue("segment_export_dir", str(destination.parent))
+            self.statusBar().showMessage(f"Audio exported: {destination}")
+        except OSError as error:
+            QMessageBox.critical(self, "Audio export failed", str(error))
+
     def export_selected_segment(self) -> None:
         segment = self.current_segment()
-        if not segment:
+        if not segment or segment.kind == "text":
             return
         downloads = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DownloadLocation) or str(Path.home())
         directory = Path(str(self.settings.value("segment_export_dir", self.settings.value("segment_save_dir", downloads))))
@@ -2637,7 +2973,7 @@ class MainWindow(QMainWindow):
 
     def replace_selected(self) -> None:
         segment = self.current_segment()
-        if not segment:
+        if not segment or segment.kind == "text":
             return
         paths = choose_media_files(self, False, self.settings.value("last_media_dir", str(Path.home())))
         if not paths:
@@ -2646,8 +2982,11 @@ class MainWindow(QMainWindow):
         self.settings.setValue("last_media_dir", str(Path(path).parent))
         try:
             kind, preview, frames, trim = prepare_media(path)
+            self.audio_segments = [audio for audio in self.audio_segments if audio.coupled_to != segment.id]
             segment.name, segment.media_path, segment.preview_path, segment.kind = Path(path).name, path, preview, kind
             segment.media_duration_frames, segment.trim_start = frames, trim
+            if kind == "video":
+                self.add_video_audio(segment, self.segment_start_time(segment.id) or 0.0)
             self.mark_dirty()
             self.refresh_timeline(self.timeline.currentRow())
             self.statusBar().showMessage("Media replaced; timing, role and prompt preserved")
@@ -2657,14 +2996,16 @@ class MainWindow(QMainWindow):
     def delete_selected(self) -> None:
         row = self.timeline.currentRow()
         if 0 <= row < len(self.segments):
-            self.segments.pop(row)
+            removed = self.segments.pop(row)
+            self.audio_segments = [audio for audio in self.audio_segments if audio.coupled_to != removed.id]
             self.mark_dirty()
             self.refresh_timeline(max(0, row - 1))
 
     def delete_by_id(self, segment_id: str) -> None:
         row = next((index for index, segment in enumerate(self.segments) if segment.id == segment_id), -1)
         if row >= 0:
-            self.segments.pop(row)
+            removed = self.segments.pop(row)
+            self.audio_segments = [audio for audio in self.audio_segments if audio.coupled_to != removed.id]
             self.mark_dirty()
             self.refresh_timeline(max(0, row - 1))
 
@@ -2949,16 +3290,30 @@ class MainWindow(QMainWindow):
         timeline = []
         for segment in self.segments:
             length = max(FPS, round(segment.duration * FPS))
-            record = {"id": segment.id, "type": segment.kind, "start": cursor, "length": length, "prompt": segment.prompt, "imageFile": segment.media_path, "fileName": segment.name, "fileSize": Path(segment.media_path).stat().st_size if Path(segment.media_path).exists() else 0, "imageB64": data_url(segment.preview_path), "isEndFrame": segment.role == "end"}
-            if segment.kind == "video":
-                record.update({"trimStart": segment.trim_start or 0, "videoDurationFrames": segment.media_duration_frames or length})
-                if Path(segment.media_path).exists():
-                    record["videoB64"] = data_url(segment.media_path)
+            record = {"id": segment.id, "type": segment.kind, "start": cursor, "length": length, "prompt": segment.prompt}
+            if segment.kind != "text":
+                record.update({"imageFile": segment.media_path, "fileName": segment.name, "fileSize": Path(segment.media_path).stat().st_size if Path(segment.media_path).exists() else 0, "imageB64": data_url(segment.preview_path), "isEndFrame": segment.role == "end"})
+                if segment.kind == "video":
+                    record.update({"trimStart": segment.trim_start or 0, "videoDurationFrames": segment.media_duration_frames or length})
+                    if Path(segment.media_path).exists():
+                        record["videoB64"] = data_url(segment.media_path)
             timeline.append(record)
             cursor += length
+        audio_timeline = []
+        for audio in self.audio_segments:
+            record = {
+                "id": audio.id, "type": "audio", "start": round(audio.start * FPS),
+                "length": max(1, round(audio.duration * FPS)), "trimStart": audio.trim_start,
+                "audioDurationFrames": audio.audio_duration_frames, "audioFile": audio.media_path,
+                "fileName": audio.name, "waveformPeaks": audio.waveform_peaks or [], "coupledTo": audio.coupled_to,
+            }
+            if Path(audio.media_path).is_file():
+                record["audioB64"] = data_url(audio.media_path)
+            audio_timeline.append(record)
+        export_frames = max(cursor, max((item["start"] + item["length"] for item in audio_timeline), default=0))
         global_prompt = self.global_prompt.toPlainText()
         self.normalize_output_dimensions()
-        payload = {"version": 1, "settings": {"start_second": 0, "end_second": cursor / FPS, "duration_seconds": cursor / FPS, "start_frame": 0, "end_frame": cursor, "duration_frames": cursor, "epsilon": .99, "use_custom_audio": False, "use_custom_motion": False, "inpaint_audio": False, "frame_rate": FPS, "display_mode": "seconds", "custom_width": self.output_width.value(), "custom_height": self.output_height.value(), "resize_method": "maintain aspect ratio", "divisible_by": 32, "img_compression": 0, "override_audio": False}, "global_prompt": global_prompt, "retake_global_prompt": "", "timeline": {"mainTrackEnabled": True, "audioTrackEnabled": False, "motionTrackEnabled": False, "showFilenames": True, "overrideAudio": False, "inpaint_audio": False, "propHeight": 163, "globalPropHeight": 124, "global_prompt": global_prompt, "retake_global_prompt": "", "retakeMode": False, "retakeStart": 0, "retakeLength": 0, "retakePrompt": "", "retakeStrength": 1, "retakeVideo": None, "normalStartFrame": 0, "normalDurationFrames": cursor, "segments": timeline, "motionSegments": [], "audioSegments": []}}
+        payload = {"version": 1, "settings": {"start_second": 0, "end_second": export_frames / FPS, "duration_seconds": export_frames / FPS, "start_frame": 0, "end_frame": export_frames - 1, "duration_frames": export_frames, "epsilon": .99, "use_custom_audio": bool(audio_timeline), "use_custom_motion": False, "inpaint_audio": False, "frame_rate": FPS, "display_mode": "seconds", "custom_width": self.output_width.value(), "custom_height": self.output_height.value(), "resize_method": "maintain aspect ratio", "divisible_by": 32, "img_compression": 0, "override_audio": False}, "global_prompt": global_prompt, "retake_global_prompt": "", "timeline": {"mainTrackEnabled": True, "audioTrackEnabled": bool(audio_timeline), "motionTrackEnabled": False, "showFilenames": True, "overrideAudio": False, "inpaint_audio": False, "propHeight": 163, "globalPropHeight": 124, "global_prompt": global_prompt, "retake_global_prompt": "", "retakeMode": False, "retakeStart": 0, "retakeLength": 0, "retakePrompt": "", "retakeStrength": 1, "retakeVideo": None, "normalStartFrame": 0, "normalDurationFrames": cursor, "segments": timeline, "motionSegments": [], "audioSegments": audio_timeline}}
         Path(path).write_text(json.dumps(payload, indent=2), encoding="utf-8")
         self.statusBar().showMessage(f"LTX Director export saved: {path}")
 
@@ -2971,8 +3326,12 @@ class MainWindow(QMainWindow):
             payload = json.loads(Path(path).read_text(encoding="utf-8"))
             fps = float(payload.get("settings", {}).get("frame_rate", FPS))
             loaded = []
+            video_starts: dict[str, float] = {}
             for index, raw in enumerate(payload["timeline"]["segments"][:MAX_SEGMENTS]):
-                if raw.get("type") not in ("image", "video"):
+                if raw.get("type") not in ("image", "video", "text"):
+                    continue
+                if raw.get("type") == "text":
+                    loaded.append(Segment(raw.get("fileName", f"Text {index + 1}"), "", "", "text", "text", raw.get("prompt", ""), max(1, float(raw.get("length", FPS)) / fps), id=raw.get("id", "")))
                     continue
                 cache = APP_CACHE / f"import-{index}-{Path(path).stem}.jpg"
                 preview = raw.get("imageB64")
@@ -2985,10 +3344,34 @@ class MainWindow(QMainWindow):
                     video_path = APP_CACHE / f"import-{index}-{Path(raw.get('fileName', 'clip.webm')).name}"
                     write_data_url(raw["videoB64"], video_path)
                     media_path = str(video_path)
-                loaded.append(Segment(raw.get("fileName", f"Segment {index + 1}"), str(media_path), str(cache), raw.get("type", "image"), "end" if raw.get("isEndFrame") else "start", raw.get("prompt", ""), max(1, float(raw.get("length", FPS)) / fps), raw.get("videoDurationFrames"), raw.get("trimStart"), raw.get("id", "")))
+                segment = Segment(raw.get("fileName", f"Segment {index + 1}"), str(media_path), str(cache), raw.get("type", "image"), "end" if raw.get("isEndFrame") else "start", raw.get("prompt", ""), max(1, float(raw.get("length", FPS)) / fps), raw.get("videoDurationFrames"), raw.get("trimStart"), raw.get("id", ""))
+                loaded.append(segment)
+                if segment.kind == "video":
+                    video_starts[segment.id] = float(raw.get("start", 0)) / fps
             if not loaded:
-                raise ValueError("No supported embedded image or WebM segments were found.")
+                raise ValueError("No supported image, WebM, or text segments were found.")
             self.segments = loaded
+            self.audio_segments = []
+            for index, raw in enumerate(payload.get("timeline", {}).get("audioSegments", [])):
+                audio_path = str(raw.get("audioFile") or raw.get("fileName") or "")
+                embedded = str(raw.get("audioB64", ""))
+                if embedded.startswith("data:audio/"):
+                    cached_audio = APP_CACHE / f"import-audio-{index}-{Path(raw.get('fileName', 'sound.wav')).stem}.wav"
+                    write_data_url(embedded, cached_audio)
+                    audio_path = str(cached_audio)
+                elif audio_path and not Path(audio_path).is_absolute():
+                    candidate = Path(path).parent / audio_path
+                    if candidate.is_file():
+                        audio_path = str(candidate)
+                self.audio_segments.append(AudioSegment(
+                    raw.get("fileName", f"Audio {index + 1}.wav"), audio_path,
+                    float(raw.get("start", 0)) / fps, max(1, int(raw.get("length", 1))) / fps,
+                    int(raw.get("trimStart", 0)), int(raw.get("audioDurationFrames", raw.get("length", 1))),
+                    raw.get("waveformPeaks", []), raw.get("coupledTo"), raw.get("id", ""),
+                ))
+            for segment in self.segments:
+                if segment.kind == "video" and Path(segment.media_path).is_file() and not any(audio.coupled_to == segment.id for audio in self.audio_segments):
+                    self.add_video_audio(segment, video_starts.get(segment.id, self.segment_start_time(segment.id) or 0.0))
             settings = payload.get("settings", {})
             self.output_width.setValue(int(settings.get("custom_width", 1280)))
             self.output_height.setValue(int(settings.get("custom_height", 704)))
@@ -3010,10 +3393,15 @@ class MainWindow(QMainWindow):
         frames = []
         for segment in self.segments:
             value = segment.to_dict()
-            value["previewData"] = data_url(segment.preview_path)
-            value["sourceData"] = data_url(segment.media_path) if Path(segment.media_path).exists() else None
+            value["previewData"] = data_url(segment.preview_path) if segment.preview_path and Path(segment.preview_path).exists() else None
+            value["sourceData"] = data_url(segment.media_path) if segment.media_path and Path(segment.media_path).exists() else None
             frames.append(value)
-        return {"app": "ltx-director-director", "projectVersion": 5, "globalPrompt": self.global_prompt.toPlainText(), "directorIntent": self.intent.toPlainText(), "directionOptions": {"requestedLength": self.requested_length.value(), "speakerLanguage": self.speaker_language.currentText(), "speakerAccent": self.speaker_accent.currentText()}, "magicBuild": {"sfx": self.sfx.isChecked(), "spokenDialog": self.spoken_dialog.isChecked(), "hdr": self.hdr.isChecked(), "reduceMusic": self.reduce_music.isChecked()}, "output": {"width": self.output_width.value(), "height": self.output_height.value()}, "timelineView": {"scale": self.pixels_per_second, "height": self.timeline_height}, "frames": frames}
+        audio_tracks = []
+        for audio in self.audio_segments:
+            value = audio.to_dict()
+            value["sourceData"] = data_url(audio.media_path) if Path(audio.media_path).is_file() else None
+            audio_tracks.append(value)
+        return {"app": "ltx-director-director", "projectVersion": 6, "globalPrompt": self.global_prompt.toPlainText(), "directorIntent": self.intent.toPlainText(), "directionOptions": {"requestedLength": self.requested_length.value(), "speakerLanguage": self.speaker_language.currentText(), "speakerAccent": self.speaker_accent.currentText()}, "magicBuild": {"sfx": self.sfx.isChecked(), "spokenDialog": self.spoken_dialog.isChecked(), "hdr": self.hdr.isChecked(), "reduceMusic": self.reduce_music.isChecked()}, "output": {"width": self.output_width.value(), "height": self.output_height.value()}, "timelineView": {"scale": self.pixels_per_second, "height": self.timeline_height}, "frames": frames, "audioTracks": audio_tracks}
 
     def load_project_payload(self, payload: dict) -> None:
         if payload.get("app") not in {"ltx-director-director", "ltx-prompt-director-python"}:
@@ -3023,20 +3411,33 @@ class MainWindow(QMainWindow):
         cache_key = uuid4().hex[:10]
         for index, original in enumerate(payload.get("frames", [])[:MAX_SEGMENTS]):
             raw = dict(original)
+            is_text = raw.get("kind") == "text"
             preview_path = APP_CACHE / f"project-{cache_key}-{index}.jpg"
-            write_data_url(raw["previewData"], preview_path)
-            media_path = preview_path
+            if raw.get("previewData"):
+                write_data_url(raw["previewData"], preview_path)
+            media_path = "" if is_text else preview_path
             if raw.get("sourceData"):
                 suffix = ".webm" if raw.get("kind") == "video" else Path(raw.get("name", "image.png")).suffix or ".png"
                 media_path = APP_CACHE / f"project-source-{cache_key}-{index}{suffix}"
                 write_data_url(raw["sourceData"], media_path)
-            raw.update({"preview_path": str(preview_path), "media_path": str(media_path)})
+            raw.update({"preview_path": "" if is_text else str(preview_path), "media_path": str(media_path)})
             for key in ("previewData", "sourceData"):
                 raw.pop(key, None)
             loaded.append(Segment.from_dict(raw))
         if not loaded:
-            raise ValueError("Project contains no supported media.")
+            raise ValueError("Project contains no supported main-track segments.")
         self.segments = loaded
+        self.audio_segments = []
+        for index, original in enumerate(payload.get("audioTracks", [])):
+            raw = dict(original)
+            media_path = str(raw.get("media_path", ""))
+            if raw.get("sourceData"):
+                destination = APP_CACHE / f"project-audio-{cache_key}-{index}.wav"
+                write_data_url(raw["sourceData"], destination)
+                media_path = str(destination)
+            raw["media_path"] = media_path
+            raw.pop("sourceData", None)
+            self.audio_segments.append(AudioSegment.from_dict(raw))
         self.global_prompt.setPlainText(payload.get("globalPrompt", ""))
         self.intent.setPlainText(payload.get("directorIntent", ""))
         direction_options = payload.get("directionOptions", {})

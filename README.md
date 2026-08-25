@@ -12,7 +12,7 @@
 
 LTX Director - Director turns a folder of reference frames into a structured LTX Video 2.3 sequence:
 
-1. Start a project, add images or WebM clips, and arrange them directly on the visual timeline.
+1. Start a project, add images, WebM clips, or text-only segments, and arrange them directly on the visual timeline.
 2. Mark each segment as a start frame or end frame, then drag its edge to set the duration.
 3. Describe the overall scene in the multiline **Director's Intent**, optionally set an exact total sequence length, and enable SFX or Spoken Dialog with speaker context when needed.
 4. Run **Magic Build** to refine timing and generate a focused prompt for every segment.
@@ -56,6 +56,9 @@ In short: use **Project Export** for lossless editing and safekeeping; use **LTX
 - Animated in-timeline loading indicator while segment tiles are prepared
 - Drag-to-reorder horizontal timeline and smoothly animated AI timing recommendations
 - Selected-segment **Refine Timing** and **Refine Prompt** passes with adjacent-frame continuity context
+- AI-aware text-only segments mixed directly with image and WebM segments
+- Synchronized waveform soundtrack with standalone audio import, draggable independent clips, and video-audio coupling/decoupling
+- WAV soundtrack export plus LTXDirector-compatible `audioSegments` import/export
 - One-second minimum segment duration in 0.5-second increments
 - Right-click replace, one-click segment export, role assignment, and deletion
 - Direct KDE `kdialog`, GNOME `zenity`, macOS, and Windows native media-picker integration
@@ -103,7 +106,7 @@ python3 -m pip install --upgrade "$(wget -qO- https://api.github.com/repos/etove
 Or download the `.whl` file from the latest GitHub release, then install it with:
 
 ```bash
-python3 -m pip install ./ltx_prompt_director-1.12.0-py3-none-any.whl
+python3 -m pip install ./ltx_prompt_director-1.13.0-py3-none-any.whl
 ```
 
 You can also install a locally built wheel from the repository:
@@ -140,7 +143,7 @@ See [install.md](install.md) for platform setup and [usage.md](usage.md) for the
 
 ## Privacy
 
-Media processing happens locally. Magic Build sends compressed 384-pixel reference frames and prompt instructions directly to the selected AI provider. Full WebM files are never sent to the AI. API keys are never included in project or LTX exports.
+Media and waveform processing happens locally. Magic Build sends compressed 384-pixel reference frames, text-segment context, and prompt instructions directly to the selected AI provider. Soundtrack files and full WebM files are never sent to the AI. API keys are never included in project or LTX exports.
 
 ## License
 

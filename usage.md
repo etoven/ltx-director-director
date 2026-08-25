@@ -2,9 +2,15 @@
 
 ## 1. Add and arrange media
 
-Select **Add Media** and choose up to 16 PNG, JPEG, WebP, GIF, or WebM files, or drag supported files directly onto the timeline. The timeline gains a bright border while it is an active drop target. On KDE Plasma the application invokes `kdialog` directly, ensuring the standard KDE picker and its preview support are used. GNOME uses `zenity`; Windows and macOS use their system dialogs. The last folder is remembered. Drag timeline cards horizontally to reorder them.
+Select **Add Media** and choose up to 16 PNG, JPEG, WebP, GIF, or WebM files, or drag supported files directly onto the timeline. Select **Add Text** to create a prompt-only main-track segment without a reference frame. Text segments can be reordered and resized like visual segments, participate in Magic Build as part of the complete sequence, and support both Refine Timing and Refine Prompt. The model receives surrounding image frames as context without being told that the text segment itself contains an image.
+
+Select **Add Sound** to import WAV, MP3, FLAC, OGG, M4A, AAC, or audio-bearing WebM files. Audio is decoded locally to portable WAV and displayed as a waveform on the SOUND track beneath the main timeline. Audio files may also be dragged onto the timeline drop target.
+
+The timeline gains a bright border while it is an active drop target. On KDE Plasma the application invokes `kdialog` directly, ensuring the standard KDE picker and its preview support are used. GNOME uses `zenity`; Windows and macOS use their system dialogs. The last folder is remembered. Drag main-track cards horizontally to reorder them.
 
 For WebM input, the application captures the first frame of the clip's final second. This becomes the visible timeline thumbnail and the only frame sent to AI. The complete WebM remains attached to the segment for project and LTX Director exports.
+
+When an imported WebM contains audio, the app automatically creates a waveform clip coupled to that video. Coupled audio follows the video's timeline position and duration. Right-click the waveform and choose **Decouple from video** to make it independent; it can then be dragged horizontally or assigned an exact start time. Right-click any waveform to export its decoded WAV directly or delete it. Standalone audio is independent from the beginning and is never sent to the AI provider.
 
 Each WebM initially occupies one second. Image segments initially occupy five seconds when timeline space permits. The total sequence limit is 60 seconds.
 
@@ -74,9 +80,9 @@ Library projects are stored in the operating system's per-user application-data 
 
 ## 5. LTX Director files
 
-Set the desired output width and height in the timeline header. Values are normalized to 32-pixel increments. **LTX Director Export** writes them to `settings.custom_width` and `settings.custom_height` along with timing in 24 FPS frames, prompts, roles, thumbnails, global prompt, and video metadata. Complete WebM content is embedded in `videoB64` so the portable file retains the source video.
+Set the desired output width and height in the timeline header. Values are normalized to 32-pixel increments. **LTX Director Export** writes them to `settings.custom_width` and `settings.custom_height` along with timing in 24 FPS frames, prompts, roles, thumbnails, global prompt, text-only segment records, video metadata, and `timeline.audioSegments`. Complete WebM content is embedded in `videoB64`; soundtrack WAV content is embedded in the app extension `audioB64` while retaining LTXDirector's standard audio filename, trim, duration, and waveform fields.
 
-**Open** restores supported image and WebM segments from an LTXDirector JSON file. Audio, motion, LoRA, and retake tracks are intentionally ignored.
+**Open** restores supported image, WebM, text-only, and audio segments from an LTXDirector JSON file. Motion, LoRA, and retake tracks remain intentionally ignored.
 
 All LTX Director and native project import/export actions use the same operating-system picker integration as Add Media: KDialog on KDE Plasma, Zenity on GNOME, and native dialogs on Windows and macOS.
 
@@ -93,6 +99,8 @@ All LTX Director and native project import/export actions use the same operating
 - HDR and Reduce Music settings
 - Output width and height
 - Timeline scale and preview-panel height
+- Text-only segments and their prompts
+- Soundtrack clips, waveform data, timing, coupling state, and embedded WAV media
 
 **Import** restores that workspace. API keys are deliberately excluded. Older `*.ltxproject.json` project files are accepted for backward compatibility.
 
