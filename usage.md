@@ -12,7 +12,7 @@ For WebM input, the application captures the first frame of the clip's final sec
 
 When an imported WebM contains audio, the app automatically creates a waveform clip coupled to that video. Coupled audio follows the video's timeline position and duration. Right-click the waveform and choose **Decouple from video** to make it independent; it can then be dragged horizontally or assigned an exact start time. Right-click any waveform to export its decoded WAV directly or delete it. Standalone audio is independent from the beginning and is never sent to the AI provider.
 
-The ruler, MAIN track, SOUND track, sequence End/Length, and horizontal scrollbar all use the later of the MAIN-track end or the final audio-clip end. The scrollbar is hidden whenever that complete combined extent fits in the visible timeline and is recalculated after manual resizing, audio movement, Auto Fit, Refine Timing, and Magic Build timing changes.
+The ruler, MAIN track, SOUND track, sequence End/Length, and horizontal scrollbar all use the later of the MAIN-track end or the final audio-clip end. SOUND provides the single visible scrollbar while MAIN follows the same offset; wheel and trackpad scrolling over MAIN remain supported. The SOUND scrollbar is hidden whenever the complete combined extent fits in the visible timeline and is recalculated after manual resizing, audio movement, Auto Fit, Refine Timing, and Magic Build timing changes.
 
 Each WebM initially occupies one second. Image segments initially occupy five seconds when timeline space permits. The total sequence limit is 60 seconds.
 
