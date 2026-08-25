@@ -1464,7 +1464,9 @@ class MainWindow(QMainWindow):
         self.timeline.setResizeMode(QListWidget.ResizeMode.Adjust)
         self.timeline.setSpacing(0)
         self.timeline.setFixedHeight(self.timeline_height)
-        self.timeline.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        # SOUND owns the one visible timeline scrollbar; MAIN follows the same
+        # range/value programmatically and still accepts wheel/trackpad input.
+        self.timeline.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.timeline.setDragDropMode(QListWidget.DragDropMode.InternalMove)
         self.timeline.setDefaultDropAction(Qt.DropAction.MoveAction)
         self.timeline.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
