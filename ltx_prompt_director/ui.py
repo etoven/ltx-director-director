@@ -844,7 +844,9 @@ class SegmentCard(QFrame):
 
 class AudioClipCard(QFrame):
     moved = Signal(str, float)
+    trimmed = Signal(str, float, float, int)
     menu_requested = Signal(str, object)
+    HANDLE_WIDTH = 9
 
     def __init__(self, segment: AudioSegment, pixels_per_second: int, parent=None):
         super().__init__(parent)
@@ -852,16 +854,46 @@ class AudioClipCard(QFrame):
         self.pixels_per_second = pixels_per_second
         self.drag_origin = None
         self.start_origin = 0.0
+        self.duration_origin = 0.0
+        self.trim_origin = 0
+        self.resize_edge: str | None = None
         self.setObjectName("audioClip")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setMouseTracking(True)
         self.setToolTip(self.tooltip_text())
-        self.setCursor(Qt.CursorShape.ArrowCursor if segment.coupled_to else Qt.CursorShape.SizeAllCursor)
+        self.update_cursor()
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(lambda point: self.menu_requested.emit(segment.id, self.mapToGlobal(point)))
 
     def tooltip_text(self) -> str:
-        state = "Coupled to video — right-click to decouple" if self.segment.coupled_to else "Independent audio — drag to move"
-        return f"{self.segment.name}\n{state}\nStart {self.segment.start:.2f}s · Length {self.segment.duration:.2f}s"
+        if self.segment.coupled_to:
+            state = "Coupled to video — right-click to decouple before trimming or moving"
+        else:
+            state = "Drag the waveform to move; drag either edge to trim"
+        end = self.segment.start + self.segment.duration
+        return (
+            f"{self.segment.name}\n{state}\n"
+            f"Start {self.segment.start:.2f}s · End {end:.2f}s · Length {self.segment.duration:.2f}s"
+        )
+
+    def edge_at(self, x: float) -> str | None:
+        if self.segment.coupled_to:
+            return None
+        if x <= self.HANDLE_WIDTH:
+            return "left"
+        if x >= self.width() - self.HANDLE_WIDTH:
+            return "right"
+        return None
+
+    def update_cursor(self, x: float | None = None) -> None:
+        if self.segment.coupled_to:
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+        elif self.resize_edge or (x is not None and self.edge_at(x)):
+            self.setCursor(Qt.CursorShape.SizeHorCursor)
+        elif self.drag_origin is not None:
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+        else:
+            self.setCursor(Qt.CursorShape.SizeAllCursor)
 
     def paintEvent(self, event) -> None:
         super().paintEvent(event)
@@ -881,36 +913,84 @@ class AudioClipCard(QFrame):
             height = max(1, int(peaks[index] * max(3, self.height() * .34)))
             painter.drawLine(x, mid - height, x, mid + height)
         painter.setPen(QColor("#e5f4fb"))
-        painter.drawText(7, 16, self.segment.name)
+        painter.drawText(12, 16, self.segment.name)
         painter.setPen(QColor("#8da4ae"))
-        marker = "LINKED" if self.segment.coupled_to else f"{self.segment.start:.2f}s"
-        painter.drawText(7, self.height() - 7, marker)
+        marker = "LINKED" if self.segment.coupled_to else f"{self.segment.start:.2f}s–{self.segment.start + self.segment.duration:.2f}s"
+        painter.drawText(12, self.height() - 7, marker)
+        if not self.segment.coupled_to:
+            painter.fillRect(0, 0, self.HANDLE_WIDTH, self.height(), QColor("#2185a8"))
+            painter.fillRect(self.width() - self.HANDLE_WIDTH, 0, self.HANDLE_WIDTH, self.height(), QColor("#2185a8"))
+            painter.setPen(QPen(QColor("#d9f5ff"), 1))
+            for edge_x in (3, self.width() - 6):
+                painter.drawLine(edge_x, 20, edge_x, self.height() - 20)
+                painter.drawLine(edge_x + 3, 20, edge_x + 3, self.height() - 20)
 
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton and not self.segment.coupled_to:
+            self.resize_edge = self.edge_at(event.position().x())
             self.drag_origin = event.globalPosition().toPoint()
             self.start_origin = self.segment.start
-            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            self.duration_origin = self.segment.duration
+            self.trim_origin = self.segment.trim_start
+            self.update_cursor(event.position().x())
             event.accept()
             return
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event) -> None:
         if self.drag_origin is not None:
-            delta = event.globalPosition().toPoint().x() - self.drag_origin.x()
-            start = max(0.0, min(MAX_SECONDS - self.segment.duration, self.start_origin + delta / max(1, self.pixels_per_second)))
-            start = round(start * FPS) / FPS
-            self.move(round(start * self.pixels_per_second), self.y())
+            delta_pixels = event.globalPosition().toPoint().x() - self.drag_origin.x()
+            delta_frames = round(delta_pixels / max(1, self.pixels_per_second) * FPS)
+            delta_seconds = delta_frames / FPS
+            minimum = 1 / FPS
+            if self.resize_edge == "left":
+                maximum_delta = min(
+                    self.duration_origin - minimum,
+                    max(0, self.segment.audio_duration_frames - self.trim_origin - 1) / FPS,
+                )
+                minimum_delta = max(-self.start_origin, -self.trim_origin / FPS)
+                delta_seconds = max(minimum_delta, min(maximum_delta, delta_seconds))
+                delta_frames = round(delta_seconds * FPS)
+                start = self.start_origin + delta_frames / FPS
+                duration = self.duration_origin - delta_frames / FPS
+                self.move(round(start * self.pixels_per_second), self.y())
+                self.resize(max(1, round(duration * self.pixels_per_second)), self.height())
+            elif self.resize_edge == "right":
+                available = max(1, self.segment.audio_duration_frames - self.trim_origin) / FPS
+                duration = max(minimum, min(available, MAX_SECONDS - self.start_origin, self.duration_origin + delta_seconds))
+                self.resize(max(1, round(duration * self.pixels_per_second)), self.height())
+            else:
+                start = max(0.0, min(MAX_SECONDS - self.duration_origin, self.start_origin + delta_seconds))
+                self.move(round(start * self.pixels_per_second), self.y())
             event.accept()
             return
+        self.update_cursor(event.position().x())
         super().mouseMoveEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        if self.drag_origin is None:
+            self.update_cursor()
+        super().leaveEvent(event)
 
     def mouseReleaseEvent(self, event) -> None:
         if self.drag_origin is not None:
-            start = max(0.0, min(MAX_SECONDS - self.segment.duration, self.x() / max(1, self.pixels_per_second)))
+            if self.resize_edge == "left":
+                start = max(0.0, round(self.x() / max(1, self.pixels_per_second) * FPS) / FPS)
+                end = self.start_origin + self.duration_origin
+                duration = max(1 / FPS, round((end - start) * FPS) / FPS)
+                trim_start = max(0, self.trim_origin + round((start - self.start_origin) * FPS))
+                self.trimmed.emit(self.segment.id, start, duration, trim_start)
+            elif self.resize_edge == "right":
+                duration = max(1 / FPS, round(self.width() / max(1, self.pixels_per_second) * FPS) / FPS)
+                available = max(1, self.segment.audio_duration_frames - self.trim_origin) / FPS
+                duration = min(duration, available, MAX_SECONDS - self.start_origin)
+                self.trimmed.emit(self.segment.id, self.start_origin, duration, self.trim_origin)
+            else:
+                start = max(0.0, min(MAX_SECONDS - self.segment.duration, self.x() / max(1, self.pixels_per_second)))
+                self.moved.emit(self.segment.id, round(start * FPS) / FPS)
             self.drag_origin = None
-            self.setCursor(Qt.CursorShape.SizeAllCursor)
-            self.moved.emit(self.segment.id, round(start * FPS) / FPS)
+            self.resize_edge = None
+            self.update_cursor(event.position().x())
             event.accept()
             return
         super().mouseReleaseEvent(event)
@@ -2695,6 +2775,7 @@ class MainWindow(QMainWindow):
             if card is None:
                 card = AudioClipCard(audio, self.pixels_per_second, self.audio_canvas)
                 card.moved.connect(self.move_audio_segment)
+                card.trimmed.connect(self.trim_audio_segment)
                 card.menu_requested.connect(self.audio_menu)
             card.segment = audio
             card.pixels_per_second = self.pixels_per_second
@@ -2715,6 +2796,20 @@ class MainWindow(QMainWindow):
         self.mark_dirty()
         self.update_audio_timeline()
         self.statusBar().showMessage(f"Audio moved to {audio.start:.2f}s")
+
+    def trim_audio_segment(self, audio_id: str, start: float, duration: float, trim_start: int) -> None:
+        audio = next((item for item in self.audio_segments if item.id == audio_id), None)
+        if not audio or audio.coupled_to:
+            return
+        audio.start = max(0.0, min(round(start * FPS) / FPS, MAX_SECONDS - 1 / FPS))
+        audio.trim_start = max(0, min(int(trim_start), audio.audio_duration_frames - 1))
+        available = max(1, audio.audio_duration_frames - audio.trim_start) / FPS
+        audio.duration = max(1 / FPS, min(round(duration * FPS) / FPS, available, MAX_SECONDS - audio.start))
+        self.mark_dirty()
+        self.update_audio_timeline()
+        self.statusBar().showMessage(
+            f"Audio trimmed: {audio.start:.2f}s–{audio.start + audio.duration:.2f}s"
+        )
 
     def update_timeline_selection_style(self, selected_row: int) -> None:
         """Render selection on the card, not the QListWidget item beneath it."""
