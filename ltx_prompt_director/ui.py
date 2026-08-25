@@ -597,6 +597,7 @@ class TimelineRuler(QWidget):
 
 
 class ResizeHandle(QFrame):
+    started = Signal()
     preview = Signal(float)
     finished = Signal()
 
@@ -641,6 +642,7 @@ class ResizeHandle(QFrame):
             self.start_x = event.globalPosition().x()
             self.start_duration = self.duration
             self.grabMouse()
+            self.started.emit()
             self.update()
             event.accept()
 
@@ -772,10 +774,13 @@ class DottedPromptSplitter(QSplitter):
 
 
 class SegmentCard(QFrame):
+    resize_started = Signal(str)
     duration_changed = Signal(float)
     delete_requested = Signal()
     resize_finished = Signal()
     moved = Signal(str, float)
+    moving = Signal(str, float)
+    drag_started = Signal(str)
     selected = Signal(str)
 
     def __init__(self, segment: Segment, preview_height: int, pixels_per_second: int, maximum_duration: float = 9999.0):
@@ -834,6 +839,7 @@ class SegmentCard(QFrame):
         layout.addWidget(self.duration_label)
         self.outer_layout.addWidget(self.content, 1)
         self.resize_handle = ResizeHandle(segment.duration, pixels_per_second, maximum_duration)
+        self.resize_handle.started.connect(lambda: self.resize_started.emit(self.segment.id))
         self.resize_handle.preview.connect(self._preview_duration)
         self.resize_handle.finished.connect(self.resize_finished)
         self.outer_layout.addWidget(self.resize_handle)
@@ -878,6 +884,7 @@ class SegmentCard(QFrame):
             self.drag_origin = event.globalPosition().x()
             self.start_origin = float(self.segment.start or 0.0)
             self.selected.emit(self.segment.id)
+            self.drag_started.emit(self.segment.id)
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
             self.grabMouse()
             event.accept()
@@ -886,6 +893,8 @@ class SegmentCard(QFrame):
 
     def mouseMoveEvent(self, event):
         if self.drag_origin is not None:
+            delta = (event.globalPosition().x() - self.drag_origin) / max(1, self.resize_handle.pixels_per_second)
+            self.moving.emit(self.segment.id, max(0.0, round(self.start_origin + delta, 2)))
             event.accept()
             return
         super().mouseMoveEvent(event)
@@ -2610,6 +2619,17 @@ class MainWindow(QMainWindow):
         self.update_timeline_layout()
         self.mark_dirty()
 
+    def begin_segment_resize(self, segment_id: str) -> None:
+        self.ensure_segment_starts()
+        segment = next((item for item in self.segments if item.id == segment_id), None)
+        if not segment:
+            return
+        self._main_resize_snapshot = {
+            "segment_id": segment_id,
+            "duration": segment.duration,
+            "starts": {item.id: float(item.start or 0.0) for item in self.segments},
+        }
+
     def autofit_timeline(self) -> None:
         total = self.timeline_end_time()
         if total <= 0:
@@ -2760,10 +2780,40 @@ class MainWindow(QMainWindow):
                 self.timeline.setCurrentRow(row)
                 return
 
+    def begin_main_segment_move(self, segment_id: str) -> None:
+        self.ensure_segment_starts()
+        self._main_move_snapshot = {
+            "segment_id": segment_id,
+            "starts": {item.id: float(item.start or 0.0) for item in self.segments},
+        }
+
+    def preview_main_segment_move(self, segment_id: str, desired_start: float) -> None:
+        snapshot = getattr(self, "_main_move_snapshot", None)
+        if not snapshot or snapshot.get("segment_id") != segment_id:
+            return
+        starts = snapshot["starts"]
+        for item in self.segments:
+            if item.id in starts:
+                item.start = starts[item.id]
+        segment = next((item for item in self.segments if item.id == segment_id), None)
+        if not segment:
+            return
+        index = self.segments.index(segment)
+        previous_end = 0.0 if index == 0 else float(self.segments[index - 1].start or 0.0) + self.segments[index - 1].duration
+        next_start = MAX_SECONDS if index == len(self.segments) - 1 else float(self.segments[index + 1].start or 0.0)
+        segment.start = round(max(previous_end, min(desired_start, next_start - segment.duration)), 2)
+        self.update_timeline_layout()
+
     def move_main_segment(self, segment_id: str, desired_start: float) -> None:
         segment = next((item for item in self.segments if item.id == segment_id), None)
         if not segment:
             return
+        snapshot = getattr(self, "_main_move_snapshot", None)
+        if snapshot and snapshot.get("segment_id") == segment_id:
+            for item in self.segments:
+                if item.id in snapshot["starts"]:
+                    item.start = snapshot["starts"][item.id]
+        self._main_move_snapshot = None
         self.ensure_segment_starts()
         clips = self.segments.copy()
         current_index = clips.index(segment)
@@ -2882,9 +2932,12 @@ class MainWindow(QMainWindow):
                 self.timeline.addItem(item)
                 card = SegmentCard(segment, preview_height, self.pixels_per_second, 9999.0)
                 card.duration_changed.connect(lambda value, sid=segment.id: self.change_duration(sid, value))
+                card.resize_started.connect(self.begin_segment_resize)
                 card.delete_requested.connect(lambda sid=segment.id: self.delete_by_id(sid))
                 card.resize_finished.connect(lambda sid=segment.id: self.finish_resize(sid))
                 card.moved.connect(self.move_main_segment)
+                card.moving.connect(self.preview_main_segment_move)
+                card.drag_started.connect(self.begin_main_segment_move)
                 card.selected.connect(self.select_segment_by_id)
                 card.set_timeline_edges(index == 0, index == len(self.segments) - 1)
                 self.timeline.setItemWidget(item, SegmentSlot(card, gap_start, gap_duration, gap_width, self.add_media_to_gap))
@@ -3229,37 +3282,27 @@ class MainWindow(QMainWindow):
     def change_duration(self, segment_id: str, value: float) -> None:
         self.autofit_tail_extension = 0
         segment = next(item for item in self.segments if item.id == segment_id)
+        snapshot = getattr(self, "_main_resize_snapshot", None)
+        if snapshot and snapshot.get("segment_id") == segment_id:
+            for item in self.segments:
+                if item.id in snapshot["starts"]:
+                    item.start = snapshot["starts"][item.id]
         segment.duration = max(.01, round(value, 2))
         self.ensure_segment_starts()
         index = self.segments.index(segment)
         cursor = float(segment.start or 0.0) + segment.duration
         for following in self.segments[index + 1:]:
-            if float(following.start or 0.0) < cursor:
+            base_start = snapshot["starts"].get(following.id, float(following.start or 0.0)) if snapshot else float(following.start or 0.0)
+            following.start = base_start
+            if base_start < cursor:
                 following.start = round(cursor, 2)
             cursor = float(following.start or 0.0) + following.duration
         self.mark_dirty()
-        for row in range(self.timeline.count()):
-            item = self.timeline.item(row)
-            if item.data(Qt.ItemDataRole.UserRole) == segment_id:
-                self.timeline.setUpdatesEnabled(False)
-                try:
-                    previous_end = 0.0 if index == 0 else float(self.segments[index - 1].start or 0.0) + self.segments[index - 1].duration
-                    gap_width = round(max(0.0, float(segment.start or 0.0) - previous_end) * self.pixels_per_second)
-                    item.setSizeHint(QSize(gap_width + max(48, int(segment.duration * self.pixels_per_second)), max(152, self.timeline_height - 32)))
-                    self.timeline.doItemsLayout()
-                finally:
-                    self.timeline.setUpdatesEnabled(True)
-                slot = self.timeline.itemWidget(item)
-                card = slot.card if isinstance(slot, SegmentSlot) else slot
-                if isinstance(card, SegmentCard):
-                    card.update()
-                    card.content.update()
-                break
-        self.timeline.viewport().update()
+        self.update_timeline_layout()
         self.sync_selected_duration_control()
-        self.update_audio_timeline()
 
     def finish_resize(self, segment_id: str) -> None:
+        self._main_resize_snapshot = None
         self.update_timeline_layout()
 
     def update_summary(self) -> None:
