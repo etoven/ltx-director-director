@@ -2,9 +2,9 @@
 
 ## 1. Add and arrange media
 
-Select **Add Media** and choose up to 16 PNG, JPEG, WebP, GIF, or WebM files, or drag supported files directly onto the timeline. Select **Add Text** to create a prompt-only main-track segment without a reference frame. Text segments can be reordered and resized like visual segments, participate in Magic Build as part of the complete sequence, and support both Refine Timing and Refine Prompt. The model receives surrounding image frames as context without being told that the text segment itself contains an image.
+Use the timeline's **Add Media** button to choose PNG, JPEG, WebP, GIF, WebM, WAV, MP3, FLAC, OGG, M4A, or AAC files. Images and WebM clips are added to the main track; standalone audio is decoded locally to portable WAV and displayed as a waveform on the SOUND track beneath it. Supported files may also be dragged directly onto the timeline.
 
-Select **Add Sound** to import WAV, MP3, FLAC, OGG, M4A, AAC, or audio-bearing WebM files. Audio is decoded locally to portable WAV and displayed as a waveform on the SOUND track beneath the main timeline. Audio files may also be dragged onto the timeline drop target.
+The **Add Text** button in the same timeline box creates a prompt-only main-track segment without a reference frame. Text segments can be reordered and resized like visual segments, participate in Magic Build as part of the complete sequence, and support both Refine Timing and Refine Prompt. The model receives surrounding image frames as context without being told that the text segment itself contains an image.
 
 The timeline gains a bright border while it is an active drop target. On KDE Plasma the application invokes `kdialog` directly, ensuring the standard KDE picker and its preview support are used. GNOME uses `zenity`; Windows and macOS use their system dialogs. The last folder is remembered. Drag main-track cards horizontally to reorder them.
 

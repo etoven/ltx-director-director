@@ -53,9 +53,9 @@ def pixmap_from_data_url(value: str) -> QPixmap:
 
 def choose_media_files(parent: QWidget, multiple: bool, initial: str) -> list[str]:
     """Prefer the desktop's actual file picker, then fall back to QFileDialog."""
-    media_filter = "Supported Media (*.png *.jpg *.jpeg *.webp *.gif *.webm)"
+    media_filter = "Supported Media (*.png *.jpg *.jpeg *.webp *.gif *.webm *.wav *.mp3 *.flac *.ogg *.m4a *.aac)"
     if sys.platform.startswith("linux") and shutil.which("kdialog"):
-        command = ["kdialog", "--title", "Choose images or WebM files"]
+        command = ["kdialog", "--title", "Choose images, video, or audio"]
         if multiple:
             command.extend(["--multiple", "--separate-output"])
         command.extend(["--getopenfilename", initial or ":ltxPromptDirectorMedia", media_filter])
@@ -64,7 +64,7 @@ def choose_media_files(parent: QWidget, multiple: bool, initial: str) -> list[st
             return [line.strip() for line in result.stdout.splitlines() if line.strip()]
         return []
     if sys.platform.startswith("linux") and shutil.which("zenity"):
-        command = ["zenity", "--file-selection", "--title=Choose images or WebM files", f"--filename={initial.rstrip('/')}/", "--file-filter=Supported media | *.png *.jpg *.jpeg *.webp *.gif *.webm"]
+        command = ["zenity", "--file-selection", "--title=Choose images, video, or audio", f"--filename={initial.rstrip('/')}/", "--file-filter=Supported media | *.png *.jpg *.jpeg *.webp *.gif *.webm *.wav *.mp3 *.flac *.ogg *.m4a *.aac"]
         if multiple:
             command.extend(["--multiple", "--separator=\n"])
         result = subprocess.run(command, capture_output=True, text=True, check=False)
@@ -72,28 +72,10 @@ def choose_media_files(parent: QWidget, multiple: bool, initial: str) -> list[st
             return [line.strip() for line in result.stdout.splitlines() if line.strip()]
         return []
     if multiple:
-        files, _ = QFileDialog.getOpenFileNames(parent, "Add images or WebM", initial, media_filter)
+        files, _ = QFileDialog.getOpenFileNames(parent, "Add images, video, or audio", initial, media_filter)
         return files
-    file, _ = QFileDialog.getOpenFileName(parent, "Replace media", initial, media_filter)
+    file, _ = QFileDialog.getOpenFileName(parent, "Choose media", initial, media_filter)
     return [file] if file else []
-
-
-def choose_audio_files(parent: QWidget, initial: str) -> list[str]:
-    audio_filter = "Supported Audio (*.wav *.mp3 *.flac *.ogg *.m4a *.aac *.webm)"
-    if sys.platform.startswith("linux") and shutil.which("kdialog"):
-        result = subprocess.run(
-            ["kdialog", "--title", "Choose soundtrack audio", "--multiple", "--separate-output", "--getopenfilename", initial or ":ltxDirectorAudio", audio_filter],
-            capture_output=True, text=True, check=False,
-        )
-        return [line.strip() for line in result.stdout.splitlines() if line.strip()] if result.returncode == 0 else []
-    if sys.platform.startswith("linux") and shutil.which("zenity"):
-        result = subprocess.run(
-            ["zenity", "--file-selection", "--multiple", "--separator=\n", "--title=Choose soundtrack audio", f"--filename={initial.rstrip('/')}/", "--file-filter=Supported audio | *.wav *.mp3 *.flac *.ogg *.m4a *.aac *.webm"],
-            capture_output=True, text=True, check=False,
-        )
-        return [line.strip() for line in result.stdout.splitlines() if line.strip()] if result.returncode == 0 else []
-    files, _ = QFileDialog.getOpenFileNames(parent, "Add soundtrack audio", initial, audio_filter)
-    return files
 
 
 def choose_document_open(parent: QWidget, title: str, initial: str, name_filter: str) -> str:
@@ -783,10 +765,12 @@ class SegmentCard(QFrame):
         self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.source_pixmap = QPixmap(segment.preview_path) if segment.preview_path else QPixmap()
         if segment.kind == "text":
-            self.preview.setText("TEXT-ONLY SEGMENT\nNo reference frame")
+            self.preview.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+            self.preview.setMargin(8)
             self.preview.setWordWrap(True)
+            self.set_text_preview(segment.prompt)
         layout.addWidget(self.preview, 1)
-        title = QLabel(segment.prompt or segment.name)
+        title = QLabel(segment.name if segment.kind == "text" else (segment.prompt or segment.name))
         title.setToolTip(segment.name)
         title.setWordWrap(False)
         title.setObjectName("tileTitle")
@@ -811,6 +795,10 @@ class SegmentCard(QFrame):
             return
         self.segment.role = role
         self.role_badge.setText(role.upper())
+
+    def set_text_preview(self, text: str) -> None:
+        if self.segment.kind == "text":
+            self.preview.setText(text or "Enter text prompt…")
 
     def update_layout(self, preview_height: int, pixels_per_second: int) -> None:
         height = max(80, preview_height)
@@ -844,7 +832,9 @@ class SegmentCard(QFrame):
 
 class AudioClipCard(QFrame):
     moved = Signal(str, float)
+    trimmed = Signal(str, float, float, int)
     menu_requested = Signal(str, object)
+    HANDLE_WIDTH = 9
 
     def __init__(self, segment: AudioSegment, pixels_per_second: int, parent=None):
         super().__init__(parent)
@@ -852,16 +842,46 @@ class AudioClipCard(QFrame):
         self.pixels_per_second = pixels_per_second
         self.drag_origin = None
         self.start_origin = 0.0
+        self.duration_origin = 0.0
+        self.trim_origin = 0
+        self.resize_edge: str | None = None
         self.setObjectName("audioClip")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setMouseTracking(True)
         self.setToolTip(self.tooltip_text())
-        self.setCursor(Qt.CursorShape.ArrowCursor if segment.coupled_to else Qt.CursorShape.SizeAllCursor)
+        self.update_cursor()
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(lambda point: self.menu_requested.emit(segment.id, self.mapToGlobal(point)))
 
     def tooltip_text(self) -> str:
-        state = "Coupled to video — right-click to decouple" if self.segment.coupled_to else "Independent audio — drag to move"
-        return f"{self.segment.name}\n{state}\nStart {self.segment.start:.2f}s · Length {self.segment.duration:.2f}s"
+        if self.segment.coupled_to:
+            state = "Coupled to video — right-click to decouple before trimming or moving"
+        else:
+            state = "Drag the waveform to move; drag either edge to trim"
+        end = self.segment.start + self.segment.duration
+        return (
+            f"{self.segment.name}\n{state}\n"
+            f"Start {self.segment.start:.2f}s · End {end:.2f}s · Length {self.segment.duration:.2f}s"
+        )
+
+    def edge_at(self, x: float) -> str | None:
+        if self.segment.coupled_to:
+            return None
+        if x <= self.HANDLE_WIDTH:
+            return "left"
+        if x >= self.width() - self.HANDLE_WIDTH:
+            return "right"
+        return None
+
+    def update_cursor(self, x: float | None = None) -> None:
+        if self.segment.coupled_to:
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+        elif self.resize_edge or (x is not None and self.edge_at(x)):
+            self.setCursor(Qt.CursorShape.SizeHorCursor)
+        elif self.drag_origin is not None:
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+        else:
+            self.setCursor(Qt.CursorShape.SizeAllCursor)
 
     def paintEvent(self, event) -> None:
         super().paintEvent(event)
@@ -881,36 +901,84 @@ class AudioClipCard(QFrame):
             height = max(1, int(peaks[index] * max(3, self.height() * .34)))
             painter.drawLine(x, mid - height, x, mid + height)
         painter.setPen(QColor("#e5f4fb"))
-        painter.drawText(7, 16, self.segment.name)
+        painter.drawText(12, 16, self.segment.name)
         painter.setPen(QColor("#8da4ae"))
-        marker = "LINKED" if self.segment.coupled_to else f"{self.segment.start:.2f}s"
-        painter.drawText(7, self.height() - 7, marker)
+        marker = "LINKED" if self.segment.coupled_to else f"{self.segment.start:.2f}s–{self.segment.start + self.segment.duration:.2f}s"
+        painter.drawText(12, self.height() - 7, marker)
+        if not self.segment.coupled_to:
+            painter.fillRect(0, 0, self.HANDLE_WIDTH, self.height(), QColor("#2185a8"))
+            painter.fillRect(self.width() - self.HANDLE_WIDTH, 0, self.HANDLE_WIDTH, self.height(), QColor("#2185a8"))
+            painter.setPen(QPen(QColor("#d9f5ff"), 1))
+            for edge_x in (3, self.width() - 6):
+                painter.drawLine(edge_x, 20, edge_x, self.height() - 20)
+                painter.drawLine(edge_x + 3, 20, edge_x + 3, self.height() - 20)
 
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton and not self.segment.coupled_to:
+            self.resize_edge = self.edge_at(event.position().x())
             self.drag_origin = event.globalPosition().toPoint()
             self.start_origin = self.segment.start
-            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            self.duration_origin = self.segment.duration
+            self.trim_origin = self.segment.trim_start
+            self.update_cursor(event.position().x())
             event.accept()
             return
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event) -> None:
         if self.drag_origin is not None:
-            delta = event.globalPosition().toPoint().x() - self.drag_origin.x()
-            start = max(0.0, min(MAX_SECONDS - self.segment.duration, self.start_origin + delta / max(1, self.pixels_per_second)))
-            start = round(start * FPS) / FPS
-            self.move(round(start * self.pixels_per_second), self.y())
+            delta_pixels = event.globalPosition().toPoint().x() - self.drag_origin.x()
+            delta_frames = round(delta_pixels / max(1, self.pixels_per_second) * FPS)
+            delta_seconds = delta_frames / FPS
+            minimum = 1 / FPS
+            if self.resize_edge == "left":
+                maximum_delta = min(
+                    self.duration_origin - minimum,
+                    max(0, self.segment.audio_duration_frames - self.trim_origin - 1) / FPS,
+                )
+                minimum_delta = max(-self.start_origin, -self.trim_origin / FPS)
+                delta_seconds = max(minimum_delta, min(maximum_delta, delta_seconds))
+                delta_frames = round(delta_seconds * FPS)
+                start = self.start_origin + delta_frames / FPS
+                duration = self.duration_origin - delta_frames / FPS
+                self.move(round(start * self.pixels_per_second), self.y())
+                self.resize(max(1, round(duration * self.pixels_per_second)), self.height())
+            elif self.resize_edge == "right":
+                available = max(1, self.segment.audio_duration_frames - self.trim_origin) / FPS
+                duration = max(minimum, min(available, MAX_SECONDS - self.start_origin, self.duration_origin + delta_seconds))
+                self.resize(max(1, round(duration * self.pixels_per_second)), self.height())
+            else:
+                start = max(0.0, min(MAX_SECONDS - self.duration_origin, self.start_origin + delta_seconds))
+                self.move(round(start * self.pixels_per_second), self.y())
             event.accept()
             return
+        self.update_cursor(event.position().x())
         super().mouseMoveEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        if self.drag_origin is None:
+            self.update_cursor()
+        super().leaveEvent(event)
 
     def mouseReleaseEvent(self, event) -> None:
         if self.drag_origin is not None:
-            start = max(0.0, min(MAX_SECONDS - self.segment.duration, self.x() / max(1, self.pixels_per_second)))
+            if self.resize_edge == "left":
+                start = max(0.0, round(self.x() / max(1, self.pixels_per_second) * FPS) / FPS)
+                end = self.start_origin + self.duration_origin
+                duration = max(1 / FPS, round((end - start) * FPS) / FPS)
+                trim_start = max(0, self.trim_origin + round((start - self.start_origin) * FPS))
+                self.trimmed.emit(self.segment.id, start, duration, trim_start)
+            elif self.resize_edge == "right":
+                duration = max(1 / FPS, round(self.width() / max(1, self.pixels_per_second) * FPS) / FPS)
+                available = max(1, self.segment.audio_duration_frames - self.trim_origin) / FPS
+                duration = min(duration, available, MAX_SECONDS - self.start_origin)
+                self.trimmed.emit(self.segment.id, self.start_origin, duration, self.trim_origin)
+            else:
+                start = max(0.0, min(MAX_SECONDS - self.segment.duration, self.x() / max(1, self.pixels_per_second)))
+                self.moved.emit(self.segment.id, round(start * FPS) / FPS)
             self.drag_origin = None
-            self.setCursor(Qt.CursorShape.SizeAllCursor)
-            self.moved.emit(self.segment.id, round(start * FPS) / FPS)
+            self.resize_edge = None
+            self.update_cursor(event.position().x())
             event.accept()
             return
         super().mouseReleaseEvent(event)
@@ -1194,7 +1262,7 @@ class MainWindow(QMainWindow):
         toolbar.addAction(projects_action)
         toolbar.addSeparator()
         action_groups = [
-            (("New Project", self.new_project), ("Add Media", self.add_media), ("Add Text", self.add_text_segment), ("Add Sound", self.add_audio)),
+            (("New Project", self.new_project),),
             (("Open", self.import_ltx), ("Import", self.import_project)),
             (("Delete selected", self.delete_selected),),
         ]
@@ -1346,12 +1414,16 @@ class MainWindow(QMainWindow):
         track_row.addWidget(self.timeline, 1)
         self.add_tile = QPushButton("＋\nAdd media\n60.0s available")
         self.add_tile.setObjectName("addTile")
-        self.add_tile.setFixedSize(112, max(152, self.timeline_height - 32))
         self.add_tile.clicked.connect(self.add_media)
+        self.add_text_tile = QPushButton("＋ Add text")
+        self.add_text_tile.setObjectName("addTextTile")
+        self.add_text_tile.clicked.connect(self.add_text_segment)
         add_tile_wrap = QWidget()
         self.add_tile_layout = QVBoxLayout(add_tile_wrap)
         self.add_tile_layout.setContentsMargins(8, 0, 8, 0)
-        self.add_tile_layout.addWidget(self.add_tile)
+        self.add_tile_layout.setSpacing(6)
+        self.add_tile_layout.addWidget(self.add_tile, 1)
+        self.add_tile_layout.addWidget(self.add_text_tile)
         track_row.addWidget(add_tile_wrap)
         timeline_layout.addLayout(track_row)
         audio_row = QHBoxLayout()
@@ -1829,7 +1901,7 @@ class MainWindow(QMainWindow):
         #timelineHeightHandle{background:transparent;border:0} #timelineHeightHandle:hover{background:rgba(88,118,134,35);border:0}
         #promptSplitter::handle{background:transparent;border:0} #promptSplitter::handle:hover{background:rgba(88,118,134,35);border:0}
         #segmentPreview{background:#17191a;border-top:1px solid #34383a;color:#7494a3;font-weight:bold}
-        #addTile{border:1px dashed #596065;background:#111415;color:#828b90;font-size:10px} #sequenceBar{background:#181e21;border:1px solid #303a3f;border-left:3px solid #4e91b4;border-radius:5px;padding:10px 12px;color:#cbd7dd;font-weight:bold}
+        #addTile,#addTextTile{border:1px dashed #596065;background:#111415;color:#828b90;font-size:10px} #addTextTile{padding:7px 4px} #sequenceBar{background:#181e21;border:1px solid #303a3f;border-left:3px solid #4e91b4;border-radius:5px;padding:10px 12px;color:#cbd7dd;font-weight:bold}
         #directorPanel{background:#1d2326;border:1px solid #354047;border-radius:6px} #panelTitle{background:transparent;color:#b8d9e9;border:0;font-size:10px;font-weight:bold;letter-spacing:1px} #groupLabel{background:transparent;color:#71838c;border:0;font-size:8px;font-weight:bold;letter-spacing:1px;padding-right:4px}
         #sectionLabel{color:#8ebbd1;font-size:8px;font-weight:bold;letter-spacing:1px} #muted{color:#879095;font-size:9px} #promptPanel{background:#202527;border:1px solid #374044;border-radius:6px} #segmentMetaBar{background:#1a2023;border:1px solid #303a3f;border-radius:5px} #refineButton{background:#252d31;border:1px solid #45545b;color:#c9dce5;padding-left:9px;padding-right:9px} #refineButton:hover{background:#31414a;border-color:#6590a7;color:#f2fbff} #refineButton:pressed{background:#1d2b32;border-color:#7ca9bf} #refineButton:disabled{background:#202527;border-color:#31393d;color:#606a6f}
         QTextEdit{background:#252728;border:0;color:#e1e4e5;font:11px 'Courier New';padding:4px} #promptEditor{background:#202527;border:0;color:#e1e4e5;padding:7px} #magicButton{background:#3b78a5;border:1px solid #5b9bc6;border-radius:5px;color:#f4fbff;font-weight:bold;padding-left:12px;padding-right:12px} #magicButton:hover{background:#4b8dbd;border-color:#8bc6ea} #magicButton:pressed{background:#285b7c}
@@ -1885,6 +1957,7 @@ class MainWindow(QMainWindow):
         self.output_height.setMinimumWidth(metric(92))
         self.duration_spin.setFixedWidth(metric(82))
         self.add_tile.setFixedWidth(metric(112))
+        self.add_text_tile.setFixedWidth(metric(112))
         self.add_tile_layout.setContentsMargins(metric(8), 0, metric(8), 0)
         for button in (self.copy_segment, self.copy_global):
             button.setFixedHeight(button.fontMetrics().height() + metric(4))
@@ -2451,7 +2524,6 @@ class MainWindow(QMainWindow):
         self.timeline_height = value
         self.timeline_height_handle.current_height = value
         self.timeline.setFixedHeight(value)
-        self.add_tile.setFixedHeight(max(152, value - 32))
         self.update_timeline_layout()
         self.mark_dirty()
 
@@ -2505,12 +2577,6 @@ class MainWindow(QMainWindow):
         self.refresh_timeline(len(self.segments) - 1)
         self.segment_prompt.setFocus()
         self.statusBar().showMessage("Text-only segment added; enter its prompt or use Magic Build")
-
-    def add_audio(self) -> None:
-        paths = choose_audio_files(self, self.settings.value("last_audio_dir", str(Path.home())))
-        if not paths:
-            return
-        self.add_audio_paths(paths)
 
     def add_audio_paths(self, paths: list[str]) -> None:
         paths = [path for path in paths if Path(path).is_file()]
@@ -2695,6 +2761,7 @@ class MainWindow(QMainWindow):
             if card is None:
                 card = AudioClipCard(audio, self.pixels_per_second, self.audio_canvas)
                 card.moved.connect(self.move_audio_segment)
+                card.trimmed.connect(self.trim_audio_segment)
                 card.menu_requested.connect(self.audio_menu)
             card.segment = audio
             card.pixels_per_second = self.pixels_per_second
@@ -2715,6 +2782,20 @@ class MainWindow(QMainWindow):
         self.mark_dirty()
         self.update_audio_timeline()
         self.statusBar().showMessage(f"Audio moved to {audio.start:.2f}s")
+
+    def trim_audio_segment(self, audio_id: str, start: float, duration: float, trim_start: int) -> None:
+        audio = next((item for item in self.audio_segments if item.id == audio_id), None)
+        if not audio or audio.coupled_to:
+            return
+        audio.start = max(0.0, min(round(start * FPS) / FPS, MAX_SECONDS - 1 / FPS))
+        audio.trim_start = max(0, min(int(trim_start), audio.audio_duration_frames - 1))
+        available = max(1, audio.audio_duration_frames - audio.trim_start) / FPS
+        audio.duration = max(1 / FPS, min(round(duration * FPS) / FPS, available, MAX_SECONDS - audio.start))
+        self.mark_dirty()
+        self.update_audio_timeline()
+        self.statusBar().showMessage(
+            f"Audio trimmed: {audio.start:.2f}s–{audio.start + audio.duration:.2f}s"
+        )
 
     def update_timeline_selection_style(self, selected_row: int) -> None:
         """Render selection on the card, not the QListWidget item beneath it."""
@@ -2794,6 +2875,11 @@ class MainWindow(QMainWindow):
         if not self._loading and self.current_segment():
             self.current_segment().prompt = self.segment_prompt.toPlainText()
             self.refine_prompt_button.setEnabled(bool(self.current_segment().prompt.strip()))
+            if self.current_segment().kind == "text":
+                item = self.timeline.currentItem()
+                card = self.timeline.itemWidget(item) if item else None
+                if isinstance(card, SegmentCard):
+                    card.set_text_preview(self.current_segment().prompt)
             self.mark_dirty()
             self.update_counts()
 
@@ -2850,7 +2936,8 @@ class MainWindow(QMainWindow):
         total = self.total_duration()
         self.sequence_bar.setText(f"Sequence     Start: 0.00s  |  End: {total:.2f}s  |  Length: {total:.2f}s  |  Remaining: {MAX_SECONDS - total:.2f}s")
         self.add_tile.setText(f"＋\nAdd media\n{MAX_SECONDS - total:.1f}s available")
-        self.add_tile.setEnabled(len(self.segments) < MAX_SEGMENTS and total <= MAX_SECONDS - 1)
+        self.add_tile.setEnabled(True)
+        self.add_text_tile.setEnabled(len(self.segments) < MAX_SEGMENTS and total <= MAX_SECONDS - 1)
         self.applied_label.setText(f"Applied across all {len(self.segments)} segments")
         visual_count = sum(segment.kind != "text" for segment in self.segments)
         text_count = len(self.segments) - visual_count
