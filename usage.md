@@ -21,7 +21,8 @@ Each WebM initially occupies one second. Image segments initially occupy five se
 ## 2. Edit a segment
 
 - Select a timeline card to edit its prompt.
-- Change duration with the card control in 0.5-second increments.
+- Change duration with the card handle or duration box using two-decimal precision.
+- Drag image, WebM, and text segments horizontally to create timeline gaps. Use the `+` button in a gap to insert an image or WebM segment fitted to that space.
 - Drag the highlighted handle on the card's right edge to resize it directly. The cursor changes to a horizontal-resize indicator over the handle.
 - The rest of the tile uses an open-hand cursor and can be dragged to move the segment.
 - Right-click a card to replace its media, instantly export the complete source media, mark it as a start/end frame, or delete it. **Export image** or **Export video** copies only that segment's underlying media file directly to the folder configured in Application Settings—no prompts, metadata, or dialog. It initially uses the operating system's Downloads folder and creates collision-safe `<project name> - Segment 01.ext` filenames.
