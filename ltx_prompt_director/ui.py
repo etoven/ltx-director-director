@@ -205,7 +205,7 @@ class TimelineListWidget(QListWidget):
     def _media_paths(event) -> list[str]:
         if not event.mimeData().hasUrls():
             return []
-        supported = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".webm", ".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aac"}
+        supported = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".webm"}
         return [url.toLocalFile() for url in event.mimeData().urls() if url.isLocalFile() and Path(url.toLocalFile()).suffix.lower() in supported]
 
     def dragEnterEvent(self, event) -> None:
@@ -238,6 +238,54 @@ class TimelineListWidget(QListWidget):
 
     def _clear_drop_state(self) -> None:
         self.setProperty("dropActive", False)
+        self.style().unpolish(self)
+        self.style().polish(self)
+
+
+class AudioTrackScroll(QScrollArea):
+    files_dropped = Signal(list)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAcceptDrops(True)
+        self.viewport().setAcceptDrops(True)
+        self.setProperty("dropActive", False)
+
+    @staticmethod
+    def _audio_paths(event) -> list[str]:
+        if not event.mimeData().hasUrls():
+            return []
+        supported = {".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aac"}
+        return [url.toLocalFile() for url in event.mimeData().urls() if url.isLocalFile() and Path(url.toLocalFile()).suffix.lower() in supported]
+
+    def dragEnterEvent(self, event) -> None:
+        if self._audio_paths(event):
+            self._set_drop_state(True)
+            event.acceptProposedAction()
+            return
+        super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event) -> None:
+        if self._audio_paths(event):
+            event.acceptProposedAction()
+            return
+        super().dragMoveEvent(event)
+
+    def dragLeaveEvent(self, event) -> None:
+        self._set_drop_state(False)
+        super().dragLeaveEvent(event)
+
+    def dropEvent(self, event) -> None:
+        paths = self._audio_paths(event)
+        self._set_drop_state(False)
+        if paths:
+            self.files_dropped.emit(paths)
+            event.acceptProposedAction()
+            return
+        super().dropEvent(event)
+
+    def _set_drop_state(self, active: bool) -> None:
+        self.setProperty("dropActive", active)
         self.style().unpolish(self)
         self.style().polish(self)
 
@@ -845,6 +893,9 @@ class AudioClipCard(QFrame):
         self.duration_origin = 0.0
         self.trim_origin = 0
         self.resize_edge: str | None = None
+        self.preview_start: float | None = None
+        self.preview_duration: float | None = None
+        self.preview_trim: int | None = None
         self.setObjectName("audioClip")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setMouseTracking(True)
@@ -890,8 +941,11 @@ class AudioClipCard(QFrame):
         mid = self.height() // 2 + 5
         all_peaks = self.segment.waveform_peaks or [0.0]
         source_frames = max(1, self.segment.audio_duration_frames)
-        first_peak = min(len(all_peaks) - 1, int(self.segment.trim_start / source_frames * len(all_peaks)))
-        last_frame = self.segment.trim_start + round(self.segment.duration * FPS)
+        trim_start = self.segment.trim_start if self.preview_trim is None else self.preview_trim
+        duration = self.segment.duration if self.preview_duration is None else self.preview_duration
+        start = self.segment.start if self.preview_start is None else self.preview_start
+        first_peak = min(len(all_peaks) - 1, int(trim_start / source_frames * len(all_peaks)))
+        last_frame = trim_start + round(duration * FPS)
         last_peak = max(first_peak + 1, min(len(all_peaks), int(last_frame / source_frames * len(all_peaks)) + 1))
         peaks = all_peaks[first_peak:last_peak] or [0.0]
         painter.setPen(QPen(QColor("#65b7d8"), 1))
@@ -903,7 +957,7 @@ class AudioClipCard(QFrame):
         painter.setPen(QColor("#e5f4fb"))
         painter.drawText(12, 16, self.segment.name)
         painter.setPen(QColor("#8da4ae"))
-        marker = "LINKED" if self.segment.coupled_to else f"{self.segment.start:.2f}s–{self.segment.start + self.segment.duration:.2f}s"
+        marker = "LINKED" if self.segment.coupled_to else f"{start:.2f}s–{start + duration:.2f}s"
         painter.drawText(12, self.height() - 7, marker)
         if not self.segment.coupled_to:
             painter.fillRect(0, 0, self.HANDLE_WIDTH, self.height(), QColor("#2185a8"))
@@ -920,6 +974,9 @@ class AudioClipCard(QFrame):
             self.start_origin = self.segment.start
             self.duration_origin = self.segment.duration
             self.trim_origin = self.segment.trim_start
+            self.preview_start = self.start_origin
+            self.preview_duration = self.duration_origin
+            self.preview_trim = self.trim_origin
             self.update_cursor(event.position().x())
             event.accept()
             return
@@ -941,12 +998,18 @@ class AudioClipCard(QFrame):
                 delta_frames = round(delta_seconds * FPS)
                 start = self.start_origin + delta_frames / FPS
                 duration = self.duration_origin - delta_frames / FPS
+                self.preview_start = start
+                self.preview_duration = duration
+                self.preview_trim = self.trim_origin + delta_frames
                 self.move(round(start * self.pixels_per_second), self.y())
                 self.resize(max(1, round(duration * self.pixels_per_second)), self.height())
+                self.update()
             elif self.resize_edge == "right":
                 available = max(1, self.segment.audio_duration_frames - self.trim_origin) / FPS
                 duration = max(minimum, min(available, MAX_SECONDS - self.start_origin, self.duration_origin + delta_seconds))
+                self.preview_duration = duration
                 self.resize(max(1, round(duration * self.pixels_per_second)), self.height())
+                self.update()
             else:
                 start = max(0.0, min(MAX_SECONDS - self.duration_origin, self.start_origin + delta_seconds))
                 self.move(round(start * self.pixels_per_second), self.y())
@@ -963,13 +1026,12 @@ class AudioClipCard(QFrame):
     def mouseReleaseEvent(self, event) -> None:
         if self.drag_origin is not None:
             if self.resize_edge == "left":
-                start = max(0.0, round(self.x() / max(1, self.pixels_per_second) * FPS) / FPS)
-                end = self.start_origin + self.duration_origin
-                duration = max(1 / FPS, round((end - start) * FPS) / FPS)
-                trim_start = max(0, self.trim_origin + round((start - self.start_origin) * FPS))
+                start = self.preview_start if self.preview_start is not None else self.start_origin
+                duration = self.preview_duration if self.preview_duration is not None else self.duration_origin
+                trim_start = self.preview_trim if self.preview_trim is not None else self.trim_origin
                 self.trimmed.emit(self.segment.id, start, duration, trim_start)
             elif self.resize_edge == "right":
-                duration = max(1 / FPS, round(self.width() / max(1, self.pixels_per_second) * FPS) / FPS)
+                duration = self.preview_duration if self.preview_duration is not None else self.duration_origin
                 available = max(1, self.segment.audio_duration_frames - self.trim_origin) / FPS
                 duration = min(duration, available, MAX_SECONDS - self.start_origin)
                 self.trimmed.emit(self.segment.id, self.start_origin, duration, self.trim_origin)
@@ -978,6 +1040,9 @@ class AudioClipCard(QFrame):
                 self.moved.emit(self.segment.id, round(start * FPS) / FPS)
             self.drag_origin = None
             self.resize_edge = None
+            self.preview_start = None
+            self.preview_duration = None
+            self.preview_trim = None
             self.update_cursor(event.position().x())
             event.accept()
             return
@@ -1418,13 +1483,15 @@ class MainWindow(QMainWindow):
         self.add_text_tile = QPushButton("＋ Add text")
         self.add_text_tile.setObjectName("addTextTile")
         self.add_text_tile.clicked.connect(self.add_text_segment)
-        add_tile_wrap = QWidget()
-        self.add_tile_layout = QVBoxLayout(add_tile_wrap)
-        self.add_tile_layout.setContentsMargins(8, 0, 8, 0)
-        self.add_tile_layout.setSpacing(6)
+        self.add_tile_wrap = QFrame()
+        self.add_tile_wrap.setObjectName("addTileBox")
+        self.add_tile_layout = QVBoxLayout(self.add_tile_wrap)
+        self.add_tile_layout.setContentsMargins(0, 0, 0, 0)
+        self.add_tile_layout.setSpacing(0)
         self.add_tile_layout.addWidget(self.add_tile, 1)
         self.add_tile_layout.addWidget(self.add_text_tile)
-        track_row.addWidget(add_tile_wrap)
+        self.add_tile_wrap.setFixedSize(112, max(152, self.timeline_height - 32))
+        track_row.addWidget(self.add_tile_wrap, 0, Qt.AlignmentFlag.AlignVCenter)
         timeline_layout.addLayout(track_row)
         audio_row = QHBoxLayout()
         audio_row.setContentsMargins(0, 0, 0, 0)
@@ -1434,7 +1501,7 @@ class MainWindow(QMainWindow):
         audio_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         audio_label.setFixedWidth(145)
         audio_row.addWidget(audio_label)
-        self.audio_scroll = QScrollArea()
+        self.audio_scroll = AudioTrackScroll()
         self.audio_scroll.setObjectName("audioTrack")
         self.audio_scroll.setWidgetResizable(False)
         self.audio_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
@@ -1444,6 +1511,7 @@ class MainWindow(QMainWindow):
         self.audio_canvas.setObjectName("audioCanvas")
         self.audio_canvas.setFixedHeight(76)
         self.audio_scroll.setWidget(self.audio_canvas)
+        self.audio_scroll.files_dropped.connect(self.add_audio_paths)
         self.audio_scroll.horizontalScrollBar().valueChanged.connect(self.audio_scroll_changed)
         audio_row.addWidget(self.audio_scroll, 1)
         audio_end_spacer = QWidget()
@@ -1901,7 +1969,7 @@ class MainWindow(QMainWindow):
         #timelineHeightHandle{background:transparent;border:0} #timelineHeightHandle:hover{background:rgba(88,118,134,35);border:0}
         #promptSplitter::handle{background:transparent;border:0} #promptSplitter::handle:hover{background:rgba(88,118,134,35);border:0}
         #segmentPreview{background:#17191a;border-top:1px solid #34383a;color:#7494a3;font-weight:bold}
-        #addTile,#addTextTile{border:1px dashed #596065;background:#111415;color:#828b90;font-size:10px} #addTextTile{padding:7px 4px} #sequenceBar{background:#181e21;border:1px solid #303a3f;border-left:3px solid #4e91b4;border-radius:5px;padding:10px 12px;color:#cbd7dd;font-weight:bold}
+        #addTileBox{border:1px dashed #596065;background:#111415} #addTile,#addTextTile{border:0;background:transparent;color:#828b90;font-size:10px} #addTile:hover,#addTextTile:hover{background:#1c2326;color:#b7d7e6} #addTextTile{border-top:1px solid #343d41;padding:7px 4px} #audioTrack[dropActive=true]{border:2px dashed #65a9cd;background:#17252c} #sequenceBar{background:#181e21;border:1px solid #303a3f;border-left:3px solid #4e91b4;border-radius:5px;padding:10px 12px;color:#cbd7dd;font-weight:bold}
         #directorPanel{background:#1d2326;border:1px solid #354047;border-radius:6px} #panelTitle{background:transparent;color:#b8d9e9;border:0;font-size:10px;font-weight:bold;letter-spacing:1px} #groupLabel{background:transparent;color:#71838c;border:0;font-size:8px;font-weight:bold;letter-spacing:1px;padding-right:4px}
         #sectionLabel{color:#8ebbd1;font-size:8px;font-weight:bold;letter-spacing:1px} #muted{color:#879095;font-size:9px} #promptPanel{background:#202527;border:1px solid #374044;border-radius:6px} #segmentMetaBar{background:#1a2023;border:1px solid #303a3f;border-radius:5px} #refineButton{background:#252d31;border:1px solid #45545b;color:#c9dce5;padding-left:9px;padding-right:9px} #refineButton:hover{background:#31414a;border-color:#6590a7;color:#f2fbff} #refineButton:pressed{background:#1d2b32;border-color:#7ca9bf} #refineButton:disabled{background:#202527;border-color:#31393d;color:#606a6f}
         QTextEdit{background:#252728;border:0;color:#e1e4e5;font:11px 'Courier New';padding:4px} #promptEditor{background:#202527;border:0;color:#e1e4e5;padding:7px} #magicButton{background:#3b78a5;border:1px solid #5b9bc6;border-radius:5px;color:#f4fbff;font-weight:bold;padding-left:12px;padding-right:12px} #magicButton:hover{background:#4b8dbd;border-color:#8bc6ea} #magicButton:pressed{background:#285b7c}
@@ -1956,9 +2024,8 @@ class MainWindow(QMainWindow):
         self.output_width.setMinimumWidth(metric(92))
         self.output_height.setMinimumWidth(metric(92))
         self.duration_spin.setFixedWidth(metric(82))
-        self.add_tile.setFixedWidth(metric(112))
-        self.add_text_tile.setFixedWidth(metric(112))
-        self.add_tile_layout.setContentsMargins(metric(8), 0, metric(8), 0)
+        self.add_tile_wrap.setFixedWidth(metric(112))
+        self.add_tile_layout.setContentsMargins(0, 0, 0, 0)
         for button in (self.copy_segment, self.copy_global):
             button.setFixedHeight(button.fontMetrics().height() + metric(4))
             button.setMinimumWidth(button.fontMetrics().horizontalAdvance(button.text()) + metric(10))
@@ -2524,6 +2591,7 @@ class MainWindow(QMainWindow):
         self.timeline_height = value
         self.timeline_height_handle.current_height = value
         self.timeline.setFixedHeight(value)
+        self.add_tile_wrap.setFixedHeight(max(152, value - 32))
         self.update_timeline_layout()
         self.mark_dirty()
 
@@ -2723,8 +2791,9 @@ class MainWindow(QMainWindow):
             return
         self._syncing_audio_scroll = True
         main_bar = self.timeline.horizontalScrollBar()
-        if value <= main_bar.maximum():
-            main_bar.setValue(value)
+        if main_bar.maximum() < self.audio_scroll.horizontalScrollBar().maximum():
+            main_bar.setMaximum(self.audio_scroll.horizontalScrollBar().maximum())
+        main_bar.setValue(value)
         self.ruler.set_offset(value)
         self._syncing_audio_scroll = False
 
