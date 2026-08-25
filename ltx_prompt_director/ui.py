@@ -2887,23 +2887,80 @@ class MainWindow(QMainWindow):
         self.update_timeline_scroll_ranges()
         self.update_summary()
 
+    def audio_move_region(self, audio: AudioSegment) -> tuple[float, float, list[AudioSegment]]:
+        """Return the independent lane bounded by coupled video-audio clips."""
+        left = 0.0
+        right = MAX_SECONDS
+        center = audio.start + audio.duration / 2
+        for fixed in sorted((item for item in self.audio_segments if item.coupled_to), key=lambda item: item.start):
+            fixed_end = fixed.start + fixed.duration
+            if fixed_end <= center:
+                left = max(left, fixed_end)
+            elif fixed.start >= center:
+                right = min(right, fixed.start)
+                break
+        clips = sorted(
+            (
+                item for item in self.audio_segments
+                if not item.coupled_to and item.start >= left - 1 / FPS
+                and item.start + item.duration <= right + 1 / FPS
+            ),
+            key=lambda item: (item.start, item.id),
+        )
+        return left, right, clips
+
+    def audio_neighbor_bounds(self, audio: AudioSegment) -> tuple[float, float]:
+        others = sorted((item for item in self.audio_segments if item.id != audio.id), key=lambda item: item.start)
+        left = max((item.start + item.duration for item in others if item.start + item.duration <= audio.start + 1 / FPS), default=0.0)
+        right = min((item.start for item in others if item.start >= audio.start + audio.duration - 1 / FPS), default=MAX_SECONDS)
+        return left, right
+
     def move_audio_segment(self, audio_id: str, start: float) -> None:
         audio = next((item for item in self.audio_segments if item.id == audio_id), None)
         if not audio or audio.coupled_to:
             return
-        audio.start = max(0.0, min(start, MAX_SECONDS - audio.duration))
+        desired = max(0.0, min(round(start * FPS) / FPS, MAX_SECONDS - audio.duration))
+        region_start, region_end, clips = self.audio_move_region(audio)
+        if audio not in clips:
+            clips.append(audio)
+            clips.sort(key=lambda item: (item.start, item.id))
+        current_index = clips.index(audio)
+        others = [item for item in clips if item.id != audio.id]
+        target_index = sum(desired >= item.start for item in others)
+        if target_index != current_index:
+            gaps = [max(0.0, clips[0].start - region_start)]
+            gaps.extend(max(0.0, clips[index].start - (clips[index - 1].start + clips[index - 1].duration)) for index in range(1, len(clips)))
+            reordered = others.copy()
+            reordered.insert(target_index, audio)
+            cursor = region_start + gaps[0]
+            for index, item in enumerate(reordered):
+                item.start = round(cursor * FPS) / FPS
+                cursor = item.start + item.duration
+                if index + 1 < len(reordered):
+                    cursor += gaps[index + 1]
+            action = "Audio clips reordered"
+        else:
+            previous_end = region_start if current_index == 0 else clips[current_index - 1].start + clips[current_index - 1].duration
+            next_start = region_end if current_index == len(clips) - 1 else clips[current_index + 1].start
+            audio.start = max(previous_end, min(desired, next_start - audio.duration))
+            audio.start = round(audio.start * FPS) / FPS
+            action = f"Audio moved to {audio.start:.2f}s"
         self.mark_dirty()
         self.update_audio_timeline()
-        self.statusBar().showMessage(f"Audio moved to {audio.start:.2f}s")
+        self.statusBar().showMessage(action)
 
     def trim_audio_segment(self, audio_id: str, start: float, duration: float, trim_start: int) -> None:
         audio = next((item for item in self.audio_segments if item.id == audio_id), None)
         if not audio or audio.coupled_to:
             return
-        audio.start = max(0.0, min(round(start * FPS) / FPS, MAX_SECONDS - 1 / FPS))
+        requested_start = max(0.0, min(round(start * FPS) / FPS, MAX_SECONDS - 1 / FPS))
+        requested_end = min(MAX_SECONDS, requested_start + max(1 / FPS, round(duration * FPS) / FPS))
+        left, right = self.audio_neighbor_bounds(audio)
+        audio.start = max(left, requested_start)
+        trim_start += round((audio.start - requested_start) * FPS)
         audio.trim_start = max(0, min(int(trim_start), audio.audio_duration_frames - 1))
         available = max(1, audio.audio_duration_frames - audio.trim_start) / FPS
-        audio.duration = max(1 / FPS, min(round(duration * FPS) / FPS, available, MAX_SECONDS - audio.start))
+        audio.duration = max(1 / FPS, min(requested_end - audio.start, right - audio.start, available))
         self.mark_dirty()
         self.update_audio_timeline()
         self.statusBar().showMessage(
