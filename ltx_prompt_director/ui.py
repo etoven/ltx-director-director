@@ -1623,8 +1623,15 @@ class MainWindow(QMainWindow):
         self.add_tile_layout = QVBoxLayout(self.add_tile_wrap)
         self.add_tile_layout.setContentsMargins(10, 10, 10, 10)
         self.add_tile_layout.setSpacing(0)
-        self.add_tile_layout.addWidget(self.add_tile, 1)
-        self.add_tile_layout.addWidget(self.add_text_tile)
+        self.add_tile_surface = QFrame()
+        self.add_tile_surface.setObjectName("addTileSurface")
+        self.add_tile_surface.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.add_tile_surface_layout = QVBoxLayout(self.add_tile_surface)
+        self.add_tile_surface_layout.setContentsMargins(0, 0, 0, 0)
+        self.add_tile_surface_layout.setSpacing(0)
+        self.add_tile_surface_layout.addWidget(self.add_tile, 1)
+        self.add_tile_surface_layout.addWidget(self.add_text_tile)
+        self.add_tile_layout.addWidget(self.add_tile_surface)
         self.add_tile_wrap.setFixedSize(112, 152)
         track_row.addWidget(self.add_tile_wrap, 0, Qt.AlignmentFlag.AlignVCenter)
         timeline_layout.addLayout(track_row)
@@ -2104,7 +2111,7 @@ class MainWindow(QMainWindow):
         #timelineHeightHandle{background:transparent;border:0} #timelineHeightHandle:hover{background:rgba(88,118,134,35);border:0}
         #promptSplitter::handle{background:transparent;border:0} #promptSplitter::handle:hover{background:rgba(88,118,134,35);border:0}
         #segmentPreview{background:#17191a;border-top:1px solid #34383a;color:#7494a3;font-weight:bold}
-        #addTileBox{border:0;background:#626466} #addTile,#addTextTile{border:0;background:#111415;color:#828b90;font-size:10px} #addTile:hover,#addTextTile:hover{background:#1c2326;color:#b7d7e6} #addTextTile{padding:7px 4px} #audioTrack[dropActive=true]{border:2px dashed #65a9cd;background:#17252c} #sequenceBar{background:#181e21;border:1px solid #303a3f;border-left:3px solid #4e91b4;border-radius:5px;padding:10px 12px;color:#cbd7dd;font-weight:bold}
+        #addTileBox{border:0;background:#626466} #addTileSurface{border:1px solid #596065;background:#111415} #addTile,#addTextTile{border:0;border-radius:0;background:transparent;color:#828b90;font-size:10px;margin:0} #addTile:hover,#addTextTile:hover{background:#1c2326;color:#b7d7e6} #addTextTile{padding:7px 4px} #audioTrack[dropActive=true]{border:2px dashed #65a9cd;background:#17252c} #sequenceBar{background:#181e21;border:1px solid #303a3f;border-left:3px solid #4e91b4;border-radius:5px;padding:10px 12px;color:#cbd7dd;font-weight:bold}
         #directorPanel{background:#1d2326;border:1px solid #354047;border-radius:6px} #panelTitle{background:transparent;color:#b8d9e9;border:0;font-size:10px;font-weight:bold;letter-spacing:1px} #groupLabel{background:transparent;color:#71838c;border:0;font-size:8px;font-weight:bold;letter-spacing:1px;padding-right:4px}
         #sectionLabel{color:#8ebbd1;font-size:8px;font-weight:bold;letter-spacing:1px} #muted{color:#879095;font-size:9px} #promptPanel{background:#202527;border:1px solid #374044;border-radius:6px} #segmentMetaBar{background:#1a2023;border:1px solid #303a3f;border-radius:5px} #refineButton{background:#252d31;border:1px solid #45545b;color:#c9dce5;padding-left:9px;padding-right:9px} #refineButton:hover{background:#31414a;border-color:#6590a7;color:#f2fbff} #refineButton:pressed{background:#1d2b32;border-color:#7ca9bf} #refineButton:disabled{background:#202527;border-color:#31393d;color:#606a6f}
         QTextEdit{background:#252728;border:0;color:#e1e4e5;font:11px 'Courier New';padding:4px} #promptEditor{background:#202527;border:0;color:#e1e4e5;padding:7px} #magicButton{background:#3b78a5;border:1px solid #5b9bc6;border-radius:5px;color:#f4fbff;font-weight:bold;padding-left:12px;padding-right:12px} #magicButton:hover{background:#4b8dbd;border-color:#8bc6ea} #magicButton:pressed{background:#285b7c}
@@ -2889,53 +2896,12 @@ class MainWindow(QMainWindow):
         clips = self.segments.copy()
         current_index = clips.index(segment)
         desired = max(0.0, min(round(desired_start, 2), MAX_SECONDS - segment.duration))
-        others = [item for item in clips if item.id != segment.id]
-        target_index = sum(desired >= float(item.start or 0.0) for item in others)
-        if target_index != current_index:
-            gaps = [max(0.0, float(clips[0].start or 0.0))]
-            gaps.extend(max(0.0, float(clips[i].start or 0.0) - (float(clips[i - 1].start or 0.0) + clips[i - 1].duration)) for i in range(1, len(clips)))
-            reordered = others.copy()
-            reordered.insert(target_index, segment)
-            cursor = gaps[0]
-            for index, item in enumerate(reordered):
-                item.start = round(cursor, 2)
-                cursor = item.start + item.duration
-                if index + 1 < len(reordered):
-                    cursor += gaps[index + 1]
-            self.segments = reordered
-        else:
-            previous_end = 0.0 if current_index == 0 else float(clips[current_index - 1].start or 0.0) + clips[current_index - 1].duration
-            next_start = MAX_SECONDS if current_index == len(clips) - 1 else float(clips[current_index + 1].start or 0.0)
-            segment.start = round(max(previous_end, min(desired, next_start - segment.duration)), 2)
+        previous_end = 0.0 if current_index == 0 else float(clips[current_index - 1].start or 0.0) + clips[current_index - 1].duration
+        next_start = MAX_SECONDS if current_index == len(clips) - 1 else float(clips[current_index + 1].start or 0.0)
+        segment.start = round(max(previous_end, min(desired, next_start - segment.duration)), 2)
         self.mark_dirty()
-        self.reorder_main_timeline_widgets()
         self.update_timeline_layout()
         self.select_segment_by_id(segment_id)
-
-    def reorder_main_timeline_widgets(self) -> None:
-        """Reorder existing MAIN widgets without rebuilding media previews."""
-        widgets = {}
-        for row in range(self.timeline.count()):
-            item = self.timeline.item(row)
-            widgets[item.data(Qt.ItemDataRole.UserRole)] = (item, self.timeline.itemWidget(item))
-        previous_loading = self._loading
-        self._loading = True
-        self.timeline.blockSignals(True)
-        try:
-            for item, _widget in widgets.values():
-                self.timeline.removeItemWidget(item)
-            while self.timeline.count():
-                self.timeline.takeItem(0)
-            for segment in self.segments:
-                pair = widgets.get(segment.id)
-                if not pair:
-                    continue
-                item, widget = pair
-                self.timeline.addItem(item)
-                self.timeline.setItemWidget(item, widget)
-        finally:
-            self.timeline.blockSignals(False)
-            self._loading = previous_loading
 
     def add_audio_paths(self, paths: list[str]) -> None:
         paths = [path for path in paths if Path(path).is_file()]
