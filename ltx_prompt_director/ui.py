@@ -1464,6 +1464,7 @@ class MainWindow(QMainWindow):
         self.timeline.setResizeMode(QListWidget.ResizeMode.Adjust)
         self.timeline.setSpacing(0)
         self.timeline.setFixedHeight(self.timeline_height)
+        self.timeline.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.timeline.setDragDropMode(QListWidget.DragDropMode.InternalMove)
         self.timeline.setDefaultDropAction(Qt.DropAction.MoveAction)
         self.timeline.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -2326,7 +2327,7 @@ class MainWindow(QMainWindow):
             self.current_project_name = meta["name"]
             self.update_window_title()
         meta["savedAt"] = datetime.now(timezone.utc).isoformat()
-        meta["duration"] = self.total_duration()
+        meta["duration"] = self.timeline_end_time()
         meta["segmentCount"] = len(self.segments)
         if not meta.get("thumbnailSource"):
             visual = self.first_visual_segment()
@@ -2555,7 +2556,7 @@ class MainWindow(QMainWindow):
         self.mark_dirty()
 
     def autofit_timeline(self) -> None:
-        total = self.total_duration()
+        total = self.timeline_end_time()
         if total <= 0:
             return
         available = max(200, self.timeline.viewport().width() - 6)
@@ -2566,7 +2567,7 @@ class MainWindow(QMainWindow):
         self.pixels_per_second = fitted
         self.ruler.set_scale(fitted)
         base_width = sum(max(48, int(segment.duration * fitted)) for segment in self.segments)
-        self.autofit_tail_extension = max(0, available - base_width)
+        self.autofit_tail_extension = max(0, available - base_width) if self.total_duration() >= self.audio_end_time() else 0
         self.update_timeline_layout()
         self.timeline.horizontalScrollBar().setValue(0)
         self.mark_dirty()
@@ -2619,6 +2620,22 @@ class MainWindow(QMainWindow):
 
     def total_duration(self) -> float:
         return sum(item.duration for item in self.segments)
+
+    def audio_end_time(self) -> float:
+        return max((item.start + item.duration for item in self.audio_segments), default=0.0)
+
+    def timeline_end_time(self) -> float:
+        """Visible/export-style extent shared by MAIN, SOUND, ruler, and summary."""
+        return max(self.total_duration(), self.audio_end_time())
+
+    def timeline_content_width(self) -> int:
+        """Return the widest real track extent, including minimum-width MAIN cards."""
+        time_width = round(self.timeline_end_time() * self.pixels_per_second) + 6
+        card_width = sum(
+            max(48, int(segment.duration * self.pixels_per_second))
+            for segment in self.segments
+        ) + self.autofit_tail_extension
+        return max(0, time_width, card_width)
 
     def first_visual_segment(self) -> Segment | None:
         return next((segment for segment in self.segments if segment.kind != "text" and segment.preview_path), None)
@@ -2791,11 +2808,37 @@ class MainWindow(QMainWindow):
             return
         self._syncing_audio_scroll = True
         main_bar = self.timeline.horizontalScrollBar()
-        if main_bar.maximum() < self.audio_scroll.horizontalScrollBar().maximum():
-            main_bar.setMaximum(self.audio_scroll.horizontalScrollBar().maximum())
         main_bar.setValue(value)
         self.ruler.set_offset(value)
         self._syncing_audio_scroll = False
+
+    def update_timeline_scroll_ranges(self) -> None:
+        """Keep both tracks on one dynamic range and hide bars when everything fits."""
+        if not hasattr(self, "audio_canvas"):
+            return
+        main_view = max(1, self.timeline.viewport().width())
+        audio_view = max(1, self.audio_scroll.viewport().width())
+        visible_width = min(main_view, audio_view)
+        content_width = max(visible_width, self.timeline_content_width())
+        scroll_maximum = max(0, content_width - visible_width)
+        current = min(scroll_maximum, max(
+            self.timeline.horizontalScrollBar().value(),
+            self.audio_scroll.horizontalScrollBar().value(),
+        ))
+        self.timeline._cancel_smooth_scroll()
+        self._syncing_audio_scroll = True
+        try:
+            self.audio_canvas.setFixedSize(audio_view + scroll_maximum, 76)
+            main_bar = self.timeline.horizontalScrollBar()
+            audio_bar = self.audio_scroll.horizontalScrollBar()
+            main_bar.setRange(0, scroll_maximum)
+            audio_bar.setRange(0, scroll_maximum)
+            main_bar.setValue(current)
+            audio_bar.setValue(current)
+            self.ruler.set_offset(current)
+            self.timeline._scroll_target = current
+        finally:
+            self._syncing_audio_scroll = False
 
     def segment_start_time(self, segment_id: str) -> float | None:
         cursor = 0.0
@@ -2823,8 +2866,6 @@ class MainWindow(QMainWindow):
             return
         self.sync_coupled_audio()
         existing = {child.segment.id: child for child in self.audio_canvas.findChildren(AudioClipCard)}
-        width = max(self.audio_scroll.viewport().width(), round(MAX_SECONDS * self.pixels_per_second) + 6)
-        self.audio_canvas.setFixedSize(width, 76)
         for audio in self.audio_segments:
             card = existing.pop(audio.id, None)
             if card is None:
@@ -2841,7 +2882,8 @@ class MainWindow(QMainWindow):
             card.show()
         for card in existing.values():
             card.deleteLater()
-        self.sync_audio_scroll(self.timeline.horizontalScrollBar().value())
+        self.update_timeline_scroll_ranges()
+        self.update_summary()
 
     def move_audio_segment(self, audio_id: str, start: float) -> None:
         audio = next((item for item in self.audio_segments if item.id == audio_id), None)
@@ -2996,17 +3038,18 @@ class MainWindow(QMainWindow):
                     card.content.update()
                 break
         self.timeline.viewport().update()
-        self.update_summary()
+        self.update_audio_timeline()
 
     def finish_resize(self, segment_id: str) -> None:
         self.update_timeline_layout()
 
     def update_summary(self) -> None:
-        total = self.total_duration()
+        main_total = self.total_duration()
+        total = self.timeline_end_time()
         self.sequence_bar.setText(f"Sequence     Start: 0.00s  |  End: {total:.2f}s  |  Length: {total:.2f}s  |  Remaining: {MAX_SECONDS - total:.2f}s")
-        self.add_tile.setText(f"＋\nAdd media\n{MAX_SECONDS - total:.1f}s available")
+        self.add_tile.setText(f"＋\nAdd media\n{MAX_SECONDS - main_total:.1f}s available")
         self.add_tile.setEnabled(True)
-        self.add_text_tile.setEnabled(len(self.segments) < MAX_SEGMENTS and total <= MAX_SECONDS - 1)
+        self.add_text_tile.setEnabled(len(self.segments) < MAX_SEGMENTS and main_total <= MAX_SECONDS - 1)
         self.applied_label.setText(f"Applied across all {len(self.segments)} segments")
         visual_count = sum(segment.kind != "text" for segment in self.segments)
         text_count = len(self.segments) - visual_count
@@ -3399,6 +3442,9 @@ class MainWindow(QMainWindow):
         target_widths = [max(48, int(duration * self.pixels_per_second)) for duration in target_durations]
         for segment, target in zip(self.segments, target_durations):
             segment.duration = target
+        self.sync_coupled_audio()
+        self.update_timeline_scroll_ranges()
+        self.update_summary()
         self.sync_selected_duration_control()
         animation = QVariantAnimation(self)
         animation.setDuration(950)
