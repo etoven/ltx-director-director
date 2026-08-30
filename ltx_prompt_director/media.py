@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import io
+import re
 import subprocess
 import tempfile
 import wave
@@ -14,6 +15,28 @@ from PIL import Image
 
 APP_CACHE = Path(tempfile.gettempdir()) / "ltx-director-director"
 APP_CACHE.mkdir(parents=True, exist_ok=True)
+
+
+def safe_media_filename(value: str, fallback_stem: str = "media") -> str:
+    """Return a filesystem-safe media name containing no whitespace."""
+    source = Path(value)
+    stem = re.sub(r"\s+", "_", source.stem.strip())
+    stem = re.sub(r'[^\w.-]+', "_", stem, flags=re.UNICODE)
+    stem = re.sub(r"_+", "_", stem).strip("._-") or fallback_stem
+    suffix = re.sub(r'[^A-Za-z0-9.]', "", source.suffix)
+    return f"{stem}{suffix}"
+
+
+def unique_media_filename(filename: str, used_names: set[str]) -> str:
+    """Keep colliding media names unique within one export."""
+    source = Path(filename)
+    candidate = filename
+    number = 2
+    while candidate.casefold() in used_names:
+        candidate = f"{source.stem}_{number}{source.suffix}"
+        number += 1
+    used_names.add(candidate.casefold())
+    return candidate
 
 
 def data_url(path: str, max_edge: int | None = None, quality: int = 82) -> str:
