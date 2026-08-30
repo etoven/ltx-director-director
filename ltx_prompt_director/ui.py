@@ -18,11 +18,11 @@ from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
     QDockWidget, QFileDialog, QFormLayout, QFrame, QHBoxLayout, QLabel, QLineEdit,
     QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox, QPushButton,
-    QSizePolicy, QSlider, QSpinBox, QSplitter, QSplitterHandle, QStatusBar, QTextEdit, QToolBar, QVBoxLayout, QWidget,
+    QSizePolicy, QSlider, QSpinBox, QSplitter, QSplitterHandle, QStatusBar, QStyle, QTextEdit, QToolBar, QVBoxLayout, QWidget,
 )
 
 from .ai import GEMINI_MODELS, build_prompts, refine_segment_prompt, refine_timing, retryable_connection_error
-from .media import APP_CACHE, data_url, extract_audio_for_export, prepare_media, write_data_url
+from .media import APP_CACHE, data_url, extract_audio_for_export, prepare_media, safe_media_filename, unique_media_filename, write_data_url
 from .models import Segment
 
 FPS = 24
@@ -879,6 +879,15 @@ class SettingsDialog(QDialog):
         save_directory_layout.setContentsMargins(0, 0, 0, 0)
         save_directory_layout.addWidget(self.segment_save_dir, 1)
         save_directory_layout.addWidget(self.segment_save_browse)
+        self.comfy_root_dir = QLineEdit(str(settings.value("comfy_root_dir", "")))
+        self.comfy_root_dir.setPlaceholderText("Choose the ComfyUI root directory")
+        self.comfy_root_browse = QPushButton("Browse…")
+        self.comfy_root_browse.clicked.connect(self.choose_comfy_root_directory)
+        comfy_directory_row = QWidget()
+        comfy_directory_layout = QHBoxLayout(comfy_directory_row)
+        comfy_directory_layout.setContentsMargins(0, 0, 0, 0)
+        comfy_directory_layout.addWidget(self.comfy_root_dir, 1)
+        comfy_directory_layout.addWidget(self.comfy_root_browse)
         form.addRow("Provider", self.provider)
         form.addRow("Gemini model", self.model)
         form.addRow("Gemini API key", self.gemini)
@@ -888,6 +897,7 @@ class SettingsDialog(QDialog):
         form.addRow("Retry cooldown", self.retry_cooldown)
         form.addRow("UI text scale (DPI)", text_scale_row)
         form.addRow("Default segment export folder", save_directory_row)
+        form.addRow("ComfyUI working directory", comfy_directory_row)
         form.addRow("", self.remember)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self.accept)
@@ -906,6 +916,7 @@ class SettingsDialog(QDialog):
         self.settings.setValue("api_retry_cooldown", self.retry_cooldown.value())
         self.settings.setValue("ui_text_scale", self.ui_text_scale.value())
         self.settings.setValue("segment_export_dir", self.segment_save_dir.text().strip())
+        self.settings.setValue("comfy_root_dir", self.comfy_root_dir.text().strip())
         self.settings.setValue("dialogs/settings_geometry", self.saveGeometry())
         if self.remember.isChecked():
             self.settings.setValue("gemini_key", self.gemini.text().strip())
@@ -920,6 +931,11 @@ class SettingsDialog(QDialog):
         selected = choose_directory(self, "Choose default segment export folder", self.segment_save_dir.text().strip() or str(Path.home()))
         if selected:
             self.segment_save_dir.setText(selected)
+
+    def choose_comfy_root_directory(self) -> None:
+        selected = choose_directory(self, "Choose ComfyUI root directory", self.comfy_root_dir.text().strip() or str(Path.home()))
+        if selected:
+            self.comfy_root_dir.setText(selected)
 
     def reject(self) -> None:
         self.settings.setValue("dialogs/settings_geometry", self.saveGeometry())
@@ -1092,16 +1108,20 @@ class MainWindow(QMainWindow):
         self.addToolBar(toolbar)
         projects_action = self.project_dock.toggleViewAction()
         projects_action.setText("Projects")
+        projects_action.setIcon(QIcon.fromTheme("folder", self.style().standardIcon(QStyle.StandardPixmap.SP_DirIcon)))
         toolbar.addAction(projects_action)
         toolbar.addSeparator()
         action_groups = [
-            (("New Project", self.new_project), ("Add Media", self.add_media)),
-            (("Open", self.import_ltx), ("Import", self.import_project)),
-            (("Delete selected", self.delete_selected),),
+            (("New Project", "document-new", QStyle.StandardPixmap.SP_FileIcon, self.new_project),
+             ("Open", "document-open", QStyle.StandardPixmap.SP_DialogOpenButton, self.open_project),
+             ("Save Project", "document-save", QStyle.StandardPixmap.SP_DialogSaveButton, self.export_project)),
+            (("Import", "document-import", QStyle.StandardPixmap.SP_ArrowDown, self.import_ltx),
+             ("Export", "document-export", QStyle.StandardPixmap.SP_ArrowUp, self.export_ltx)),
+            (("Delete selected", "edit-delete", QStyle.StandardPixmap.SP_TrashIcon, self.delete_selected),),
         ]
         for group_index, group in enumerate(action_groups):
-            for label, callback in group:
-                action = QAction(label, self)
+            for label, theme_icon, fallback_icon, callback in group:
+                action = QAction(QIcon.fromTheme(theme_icon, self.style().standardIcon(fallback_icon)), label, self)
                 action.triggered.connect(callback)
                 toolbar.addAction(action)
             if group_index < len(action_groups) - 1:
@@ -1114,11 +1134,6 @@ class MainWindow(QMainWindow):
         self.provider_button.clicked.connect(self.open_settings)
         self.update_provider_button()
         toolbar.addWidget(self.provider_button)
-        toolbar.addSeparator()
-        for label, callback in [("LTX Director Export", self.export_ltx), ("Project Export", self.export_project)]:
-            action = QAction(label, self)
-            action.triggered.connect(callback)
-            toolbar.addAction(action)
         toolbar.addSeparator()
         current_text_scale = self.settings.value("ui_text_scale", 100, int)
         self.ui_scale_label = QLabel("TEXT")
@@ -1139,7 +1154,7 @@ class MainWindow(QMainWindow):
         self.ui_scale_spin.valueChanged.connect(self.set_ui_text_scale)
         ui_scale_layout.addWidget(self.ui_scale_spin)
         toolbar.addWidget(self.ui_scale_control)
-        settings_action = QAction("⚙", self)
+        settings_action = QAction(QIcon.fromTheme("preferences-system", self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogDetailedView)), "Settings", self)
         settings_action.triggered.connect(self.open_settings)
         toolbar.addAction(settings_action)
 
@@ -2938,16 +2953,29 @@ class MainWindow(QMainWindow):
     def export_ltx(self) -> None:
         if not self.segments:
             return
+        comfy_root = self.resolve_comfy_root()
+        if comfy_root is None:
+            return
+        media_directory = comfy_root / "input" / "whatdreamscost"
+        try:
+            media_directory.mkdir(parents=True, exist_ok=True)
+        except OSError as error:
+            QMessageBox.critical(self, "Export failed", f"Could not create the ComfyUI input directory:\n{error}")
+            return
         directory = Path(self.settings.value("last_document_dir", str(Path.home())))
-        path = choose_document_save(self, "LTX Director Export", str(directory / f"{safe_export_name(self.current_project_name)}.json"), "LTX Director JSON (*.json)")
+        export_name = safe_media_filename(f"{self.current_project_name}.json", "Untitled")
+        path = choose_document_save(self, "Export", str(directory / export_name), "LTX Director JSON (*.json)")
         if not path:
             return
         if not path.lower().endswith(".json"):
             path += ".json"
+        selected_path = Path(path)
+        path = str(selected_path.with_name(safe_media_filename(selected_path.name, "Untitled")))
         self.settings.setValue("last_document_dir", str(Path(path).parent))
         cursor = 0
         timeline = []
         audio_timeline = []
+        used_media_names: set[str] = set()
         for segment in self.segments:
             start = cursor
             length = max(FPS, round(segment.duration * FPS))
@@ -2955,11 +2983,20 @@ class MainWindow(QMainWindow):
             if segment.kind == "video":
                 record.update({"trimStart": segment.trim_start or 0, "videoDurationFrames": segment.media_duration_frames or length})
                 if Path(segment.media_path).exists():
-                    record["videoB64"] = data_url(segment.media_path)
-                    audio_name = f"{safe_export_name(Path(segment.name).stem)}-{segment.id}_extracted_audio.wav"
-                    audio_path = APP_CACHE / "audio" / audio_name
+                    video_name = unique_media_filename(safe_media_filename(segment.name, "video"), used_media_names)
+                    video_path = media_directory / video_name
                     try:
-                        audio_duration_frames, peaks = extract_audio_for_export(segment.media_path, audio_path, FPS)
+                        if Path(segment.media_path).resolve() != video_path.resolve():
+                            shutil.copy2(segment.media_path, video_path)
+                    except OSError as error:
+                        QMessageBox.critical(self, "Export failed", f"Could not copy {segment.name} to the ComfyUI input directory:\n{error}")
+                        return
+                    record.update({"imageFile": str(video_path), "fileName": video_name, "fileSize": video_path.stat().st_size})
+                    record["videoB64"] = data_url(str(video_path))
+                    audio_name = unique_media_filename(f"{video_path.stem}_extracted_audio.wav", used_media_names)
+                    audio_path = media_directory / audio_name
+                    try:
+                        audio_duration_frames, peaks = extract_audio_for_export(str(video_path), audio_path, FPS)
                     except ValueError:
                         pass
                     else:
@@ -2967,7 +3004,7 @@ class MainWindow(QMainWindow):
                             "id": f"{segment.id}_a", "type": "audio", "start": start,
                             "length": length, "trimStart": segment.trim_start or 0,
                             "audioDurationFrames": audio_duration_frames,
-                            "audioFile": str(audio_path), "fileName": segment.name,
+                            "audioFile": str(audio_path), "fileName": video_name,
                             "waveformPeaks": peaks, "fileSize": audio_path.stat().st_size,
                         })
             timeline.append(record)
@@ -2978,8 +3015,21 @@ class MainWindow(QMainWindow):
         Path(path).write_text(json.dumps(payload, indent=2), encoding="utf-8")
         self.statusBar().showMessage(f"LTX Director export saved: {path}")
 
+    def resolve_comfy_root(self) -> Path | None:
+        configured = str(self.settings.value("comfy_root_dir", "") or "").strip()
+        configured_path = Path(configured).expanduser() if configured else None
+        if configured_path and configured_path.is_dir():
+            return configured_path.resolve()
+        selected = choose_directory(self, "Choose ComfyUI root directory", configured or str(Path.home()))
+        if not selected:
+            return None
+        root = Path(selected).expanduser().resolve()
+        self.settings.setValue("comfy_root_dir", str(root))
+        self.settings.sync()
+        return root
+
     def import_ltx(self) -> None:
-        path = choose_document_open(self, "Open LTX Director JSON", self.settings.value("last_document_dir", str(Path.home())), "LTX Director JSON (*.json)")
+        path = choose_document_open(self, "Import LTX Director JSON", self.settings.value("last_document_dir", str(Path.home())), "LTX Director JSON (*.json)")
         if not path:
             return
         self.settings.setValue("last_document_dir", str(Path(path).parent))
@@ -3081,7 +3131,7 @@ class MainWindow(QMainWindow):
         if not self.segments:
             return
         directory = Path(self.settings.value("last_document_dir", str(Path.home())))
-        path = choose_document_save(self, "Project Export", str(directory / f"{safe_export_name(self.current_project_name)}.LTXD"), "LTX Director - Director Project (*.LTXD *.ltxd)")
+        path = choose_document_save(self, "Save Project", str(directory / f"{safe_export_name(self.current_project_name)}.LTXD"), "LTX Director - Director Project (*.LTXD *.ltxd)")
         if not path:
             return
         if not path.lower().endswith(".ltxd"):
@@ -3092,8 +3142,8 @@ class MainWindow(QMainWindow):
         self.project_dirty = False
         self.statusBar().showMessage(f"Project saved: {path}")
 
-    def import_project(self) -> None:
-        path = choose_document_open(self, "Import Project", self.settings.value("last_document_dir", str(Path.home())), "LTX Director - Director Project (*.LTXD *.ltxd *.ltxproject.json *.json)")
+    def open_project(self) -> None:
+        path = choose_document_open(self, "Open Project", self.settings.value("last_document_dir", str(Path.home())), "LTX Director - Director Project (*.LTXD *.ltxd)")
         if not path:
             return
         self.settings.setValue("last_document_dir", str(Path(path).parent))
@@ -3104,7 +3154,7 @@ class MainWindow(QMainWindow):
             self.current_project_name = str(payload.get("library", {}).get("name") or Path(path).stem)
             self.update_window_title()
             self.project_dirty = False
-            self.statusBar().showMessage(f"Project imported: {path}")
+            self.statusBar().showMessage(f"Project opened: {path}")
         except Exception as error:
             self._loading = False
-            QMessageBox.critical(self, "Project import failed", str(error))
+            QMessageBox.critical(self, "Open project failed", str(error))
