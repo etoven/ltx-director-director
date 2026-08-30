@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import base64
 import io
+import subprocess
 import tempfile
+import wave
 from pathlib import Path
 
 import imageio.v2 as imageio
+import imageio_ffmpeg
 from PIL import Image
 
 
@@ -61,6 +64,44 @@ def prepare_media(path: str) -> tuple[str, str, int | None, int | None]:
     with Image.open(source) as image:
         image.verify()
     return "image", path, None, None
+
+
+def extract_audio_for_export(source_path: str, destination: str | Path, fps: int = 24) -> tuple[int, list[float]]:
+    """Extract a video's complete audio stream and return its frame duration and peaks."""
+    source = Path(source_path)
+    output = Path(destination)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    command = [
+        imageio_ffmpeg.get_ffmpeg_exe(), "-y", "-i", str(source), "-vn",
+        "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(output),
+    ]
+    result = subprocess.run(command, capture_output=True, check=False)
+    if result.returncode or not output.is_file() or output.stat().st_size <= 44:
+        output.unlink(missing_ok=True)
+        raise ValueError("No decodable audio track was found.")
+    with wave.open(str(output), "rb") as audio:
+        frame_count = audio.getnframes()
+        sample_rate = audio.getframerate()
+        sample_width = audio.getsampwidth()
+        channels = audio.getnchannels()
+        raw = audio.readframes(frame_count)
+    duration_frames = max(1, round(frame_count / max(1, sample_rate) * fps))
+    return duration_frames, waveform_peaks(raw, sample_width, channels)
+
+
+def waveform_peaks(raw: bytes, sample_width: int, channels: int, count: int = 200) -> list[float]:
+    """Return normalized peak amplitudes in evenly sized waveform buckets."""
+    if sample_width != 2 or not raw:
+        return [0.0] * count
+    samples = memoryview(raw).cast("h")
+    if channels > 1:
+        samples = samples[::channels]
+    bucket = max(1, len(samples) // count)
+    peaks = []
+    for index in range(count):
+        chunk = samples[index * bucket:min(len(samples), (index + 1) * bucket)]
+        peaks.append(max((abs(value) for value in chunk), default=0) / 32768.0)
+    return peaks
 
 
 def _image_mime(path: Path) -> str:
