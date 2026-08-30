@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
 )
 
 from .ai import GEMINI_MODELS, build_prompts, refine_segment_prompt, refine_timing, retryable_connection_error
-from .media import APP_CACHE, data_url, prepare_media, write_data_url
+from .media import APP_CACHE, data_url, extract_audio_for_export, prepare_media, write_data_url
 from .models import Segment
 
 FPS = 24
@@ -2947,18 +2947,34 @@ class MainWindow(QMainWindow):
         self.settings.setValue("last_document_dir", str(Path(path).parent))
         cursor = 0
         timeline = []
+        audio_timeline = []
         for segment in self.segments:
+            start = cursor
             length = max(FPS, round(segment.duration * FPS))
-            record = {"id": segment.id, "type": segment.kind, "start": cursor, "length": length, "prompt": segment.prompt, "imageFile": segment.media_path, "fileName": segment.name, "fileSize": Path(segment.media_path).stat().st_size if Path(segment.media_path).exists() else 0, "imageB64": data_url(segment.preview_path), "isEndFrame": segment.role == "end"}
+            record = {"id": segment.id, "type": segment.kind, "start": start, "length": length, "prompt": segment.prompt, "imageFile": segment.media_path, "fileName": segment.name, "fileSize": Path(segment.media_path).stat().st_size if Path(segment.media_path).exists() else 0, "imageB64": data_url(segment.preview_path), "isEndFrame": segment.role == "end"}
             if segment.kind == "video":
                 record.update({"trimStart": segment.trim_start or 0, "videoDurationFrames": segment.media_duration_frames or length})
                 if Path(segment.media_path).exists():
                     record["videoB64"] = data_url(segment.media_path)
+                    audio_name = f"{safe_export_name(Path(segment.name).stem)}-{segment.id}_extracted_audio.wav"
+                    audio_path = APP_CACHE / "audio" / audio_name
+                    try:
+                        audio_duration_frames, peaks = extract_audio_for_export(segment.media_path, audio_path, FPS)
+                    except ValueError:
+                        pass
+                    else:
+                        audio_timeline.append({
+                            "id": f"{segment.id}_a", "type": "audio", "start": start,
+                            "length": length, "trimStart": segment.trim_start or 0,
+                            "audioDurationFrames": audio_duration_frames,
+                            "audioFile": str(audio_path), "fileName": segment.name,
+                            "waveformPeaks": peaks, "fileSize": audio_path.stat().st_size,
+                        })
             timeline.append(record)
             cursor += length
         global_prompt = self.global_prompt.toPlainText()
         self.normalize_output_dimensions()
-        payload = {"version": 1, "settings": {"start_second": 0, "end_second": cursor / FPS, "duration_seconds": cursor / FPS, "start_frame": 0, "end_frame": cursor, "duration_frames": cursor, "epsilon": .99, "use_custom_audio": False, "use_custom_motion": False, "inpaint_audio": False, "frame_rate": FPS, "display_mode": "seconds", "custom_width": self.output_width.value(), "custom_height": self.output_height.value(), "resize_method": "maintain aspect ratio", "divisible_by": 32, "img_compression": 0, "override_audio": False}, "global_prompt": global_prompt, "retake_global_prompt": "", "timeline": {"mainTrackEnabled": True, "audioTrackEnabled": False, "motionTrackEnabled": False, "showFilenames": True, "overrideAudio": False, "inpaint_audio": False, "propHeight": 163, "globalPropHeight": 124, "global_prompt": global_prompt, "retake_global_prompt": "", "retakeMode": False, "retakeStart": 0, "retakeLength": 0, "retakePrompt": "", "retakeStrength": 1, "retakeVideo": None, "normalStartFrame": 0, "normalDurationFrames": cursor, "segments": timeline, "motionSegments": [], "audioSegments": []}}
+        payload = {"version": 1, "settings": {"start_second": 0, "end_second": cursor / FPS, "duration_seconds": cursor / FPS, "start_frame": 0, "end_frame": cursor, "duration_frames": cursor, "epsilon": .99, "use_custom_audio": bool(audio_timeline), "use_custom_motion": False, "inpaint_audio": False, "frame_rate": FPS, "display_mode": "seconds", "custom_width": self.output_width.value(), "custom_height": self.output_height.value(), "resize_method": "maintain aspect ratio", "divisible_by": 32, "img_compression": 0, "override_audio": False}, "global_prompt": global_prompt, "retake_global_prompt": "", "timeline": {"mainTrackEnabled": True, "audioTrackEnabled": bool(audio_timeline), "motionTrackEnabled": False, "showFilenames": True, "overrideAudio": False, "inpaint_audio": False, "propHeight": 163, "globalPropHeight": 124, "global_prompt": global_prompt, "retake_global_prompt": "", "retakeMode": False, "retakeStart": 0, "retakeLength": 0, "retakePrompt": "", "retakeStrength": 1, "retakeVideo": None, "normalStartFrame": 0, "normalDurationFrames": cursor, "segments": timeline, "motionSegments": [], "audioSegments": audio_timeline}}
         Path(path).write_text(json.dumps(payload, indent=2), encoding="utf-8")
         self.statusBar().showMessage(f"LTX Director export saved: {path}")
 
