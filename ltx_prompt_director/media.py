@@ -10,7 +10,6 @@ import wave
 from pathlib import Path
 from urllib.parse import quote
 
-import imageio.v2 as imageio
 import imageio_ffmpeg
 from PIL import Image
 
@@ -78,24 +77,25 @@ def write_data_url(value: str, destination: Path) -> None:
 
 
 def capture_webm_preview(path: str, fps_out: int = 24) -> tuple[str, int, int]:
-    reader = imageio.get_reader(path, "ffmpeg")
-    try:
-        meta = reader.get_meta_data()
-        fps = float(meta.get("fps") or fps_out)
-        duration = float(meta.get("duration") or 1.0)
-        source_frames = max(1, round(duration * fps))
-        source_index = max(0, min(source_frames - 1, round(max(0.0, duration - 1.0) * fps)))
-        try:
-            frame = reader.get_data(source_index)
-        except Exception:
-            frame = reader.get_data(max(0, source_frames - 1))
-        preview = APP_CACHE / f"{Path(path).stem}-{Path(path).stat().st_mtime_ns}.jpg"
-        Image.fromarray(frame).convert("RGB").save(preview, "JPEG", quality=90)
-        duration_frames = max(1, round(duration * fps_out))
-        trim_start = max(0, duration_frames - fps_out)
-        return str(preview), duration_frames, trim_start
-    finally:
-        reader.close()
+    source = Path(path)
+    ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+    probe = subprocess.run([ffmpeg, "-hide_banner", "-i", str(source)], capture_output=True, text=True, check=False)
+    match = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", probe.stderr)
+    duration = 1.0
+    if match:
+        duration = int(match.group(1)) * 3600 + int(match.group(2)) * 60 + float(match.group(3))
+    preview = APP_CACHE / f"{source.stem}-{source.stat().st_mtime_ns}.jpg"
+    seek = max(0.0, duration - 1.0)
+    command = [ffmpeg, "-y", "-ss", f"{seek:.3f}", "-i", str(source), "-frames:v", "1", "-q:v", "2", str(preview)]
+    result = subprocess.run(command, capture_output=True, check=False)
+    if result.returncode or not preview.is_file():
+        fallback = [ffmpeg, "-y", "-i", str(source), "-frames:v", "1", "-q:v", "2", str(preview)]
+        result = subprocess.run(fallback, capture_output=True, check=False)
+    if result.returncode or not preview.is_file():
+        raise ValueError("Could not decode a preview frame from the WebM file.")
+    duration_frames = max(1, round(duration * fps_out))
+    trim_start = max(0, duration_frames - fps_out)
+    return str(preview), duration_frames, trim_start
 
 
 def prepare_media(path: str) -> tuple[str, str, int | None, int | None]:
