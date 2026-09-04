@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 import wave
 from pathlib import Path
+from urllib.parse import quote
 
 import imageio.v2 as imageio
 import imageio_ffmpeg
@@ -48,6 +49,13 @@ def copy_media_for_export(source_path: str, display_name: str, destination: Path
     if source.resolve() != target.resolve():
         shutil.copy2(source, target)
     return target
+
+
+def comfy_input_references(filename: str, subfolder: str = "whatdreamscost") -> tuple[str, str]:
+    """Return LTX Director's Comfy-relative file and browser preview references."""
+    relative = f"{subfolder}/{filename}"
+    preview = f"/api/view?filename={quote(filename, safe='')}&type=input&subfolder={quote(subfolder, safe='')}"
+    return relative, preview
 
 
 def data_url(path: str, max_edge: int | None = None, quality: int = 82) -> str:
