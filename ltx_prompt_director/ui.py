@@ -3072,11 +3072,12 @@ class MainWindow(QMainWindow):
                         except ValueError:
                             pass
                         else:
+                            audio_file, _ = comfy_input_references(audio_name)
                             audio_timeline.append({
                                 "id": f"{segment.id}_a", "type": "audio", "start": start,
                                 "length": length, "trimStart": segment.trim_start or 0,
                                 "audioDurationFrames": audio_duration_frames,
-                                "audioFile": str(audio_path), "fileName": video_name,
+                                "audioFile": audio_file, "fileName": video_name,
                                 "waveformPeaks": peaks, "fileSize": audio_path.stat().st_size,
                             })
             timeline.append(record)
