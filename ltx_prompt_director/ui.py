@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
 )
 
 from .ai import GEMINI_MODELS, build_prompts, refine_segment_prompt, refine_timing, retryable_connection_error
-from .media import APP_CACHE, data_url, extract_audio_for_export, prepare_media, safe_media_filename, unique_media_filename, write_data_url
+from .media import APP_CACHE, copy_media_for_export, data_url, extract_audio_for_export, prepare_media, safe_media_filename, unique_media_filename, write_data_url
 from .models import Segment, order_segments_by_ids, text_segment_from_ltx
 
 FPS = 24
@@ -2860,6 +2860,9 @@ class MainWindow(QMainWindow):
         segment = self.current_segment()
         if not segment:
             return
+        # Commit the editor value synchronously before snapshotting the timeline
+        # for the background refinement worker.
+        segment.prompt = self.segment_prompt.toPlainText()
         if not segment.prompt.strip():
             QMessageBox.information(self, "Refine Prompt", "Write or generate a segment prompt before refining it.")
             return
@@ -3040,17 +3043,23 @@ class MainWindow(QMainWindow):
             record = {"id": segment.id, "type": segment.kind, "start": start, "length": length, "prompt": segment.prompt, "isEndFrame": False if segment.kind == "text" else segment.role == "end"}
             if segment.kind != "text":
                 record.update({"imageFile": segment.media_path, "fileName": segment.name, "fileSize": Path(segment.media_path).stat().st_size if Path(segment.media_path).exists() else 0, "imageB64": data_url(segment.preview_path)})
-                if segment.kind == "video":
+                if segment.kind == "image" and Path(segment.media_path).exists():
+                    try:
+                        image_path = copy_media_for_export(segment.media_path, segment.name, media_directory, used_media_names, "image")
+                    except OSError as error:
+                        QMessageBox.critical(self, "Export failed", f"Could not copy {segment.name} to the ComfyUI input directory:\n{error}")
+                        return
+                    record.update({"imageFile": str(image_path), "fileName": image_path.name, "fileSize": image_path.stat().st_size})
+                    record["imageB64"] = data_url(str(image_path))
+                elif segment.kind == "video":
                     record.update({"trimStart": segment.trim_start or 0, "videoDurationFrames": segment.media_duration_frames or length})
                     if Path(segment.media_path).exists():
-                        video_name = unique_media_filename(safe_media_filename(segment.name, "video"), used_media_names)
-                        video_path = media_directory / video_name
                         try:
-                            if Path(segment.media_path).resolve() != video_path.resolve():
-                                shutil.copy2(segment.media_path, video_path)
+                            video_path = copy_media_for_export(segment.media_path, segment.name, media_directory, used_media_names, "video")
                         except OSError as error:
                             QMessageBox.critical(self, "Export failed", f"Could not copy {segment.name} to the ComfyUI input directory:\n{error}")
                             return
+                        video_name = video_path.name
                         record.update({"imageFile": str(video_path), "fileName": video_name, "fileSize": video_path.stat().st_size})
                         record["videoB64"] = data_url(str(video_path))
                         audio_name = unique_media_filename(f"{video_path.stem}_extracted_audio.wav", used_media_names)

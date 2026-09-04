@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import io
 import re
+import shutil
 import subprocess
 import tempfile
 import wave
@@ -37,6 +38,16 @@ def unique_media_filename(filename: str, used_names: set[str]) -> str:
         number += 1
     used_names.add(candidate.casefold())
     return candidate
+
+
+def copy_media_for_export(source_path: str, display_name: str, destination: Path, used_names: set[str], fallback_stem: str) -> Path:
+    """Copy media into ComfyUI with a safe, collision-free filename."""
+    source = Path(source_path)
+    name = unique_media_filename(safe_media_filename(display_name or source.name, fallback_stem), used_names)
+    target = destination / name
+    if source.resolve() != target.resolve():
+        shutil.copy2(source, target)
+    return target
 
 
 def data_url(path: str, max_edge: int | None = None, quality: int = 82) -> str:
