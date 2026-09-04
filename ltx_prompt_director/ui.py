@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
 
 from .ai import GEMINI_MODELS, build_prompts, refine_segment_prompt, refine_timing, retryable_connection_error
 from .media import APP_CACHE, data_url, extract_audio_for_export, prepare_media, safe_media_filename, unique_media_filename, write_data_url
-from .models import Segment
+from .models import Segment, order_segments_by_ids, text_segment_from_ltx
 
 FPS = 24
 MAX_SECONDS = 60.0
@@ -745,9 +745,9 @@ class SegmentCard(QFrame):
         layout.setSpacing(1)
         badges = QHBoxLayout()
         badges.setContentsMargins(0, 0, 0, 0)
-        kind = QLabel("WEBM" if segment.kind == "video" else "IMAGE")
+        kind = QLabel("TEXT" if segment.kind == "text" else ("WEBM" if segment.kind == "video" else "IMAGE"))
         kind.setObjectName("mediaBadge")
-        self.role_badge = QLabel(segment.role.upper())
+        self.role_badge = QLabel("PROMPT" if segment.kind == "text" else segment.role.upper())
         self.role_badge.setObjectName("roleBadge")
         close = QPushButton("×")
         close.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
@@ -763,9 +763,14 @@ class SegmentCard(QFrame):
         self.preview = QLabel()
         self.preview.setObjectName("segmentPreview")
         self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.source_pixmap = QPixmap(segment.preview_path)
+        self.source_pixmap = QPixmap(segment.preview_path) if segment.preview_path else QPixmap()
+        if segment.kind == "text":
+            self.preview.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+            self.preview.setMargin(8)
+            self.preview.setWordWrap(True)
+            self.set_text_preview(segment.prompt)
         layout.addWidget(self.preview, 1)
-        title = QLabel(segment.prompt or segment.name)
+        title = QLabel(segment.name if segment.kind == "text" else (segment.prompt or segment.name))
         title.setToolTip(segment.name)
         title.setWordWrap(False)
         title.setObjectName("tileTitle")
@@ -786,8 +791,14 @@ class SegmentCard(QFrame):
 
     def set_role(self, role: str) -> None:
         """Update the visible role without recreating the timeline card."""
+        if self.segment.kind == "text":
+            return
         self.segment.role = role
         self.role_badge.setText(role.upper())
+
+    def set_text_preview(self, text: str) -> None:
+        if self.segment.kind == "text":
+            self.preview.setText(text or "Enter text prompt…")
 
     def update_layout(self, preview_height: int, pixels_per_second: int) -> None:
         height = max(80, preview_height)
@@ -1261,13 +1272,24 @@ class MainWindow(QMainWindow):
         track_row.addWidget(self.timeline, 1)
         self.add_tile = QPushButton("＋\nAdd media\n60.0s available")
         self.add_tile.setObjectName("addTile")
-        self.add_tile.setFixedSize(112, max(152, self.timeline_height - 32))
         self.add_tile.clicked.connect(self.add_media)
-        add_tile_wrap = QWidget()
-        self.add_tile_layout = QVBoxLayout(add_tile_wrap)
-        self.add_tile_layout.setContentsMargins(8, 0, 8, 0)
-        self.add_tile_layout.addWidget(self.add_tile)
-        track_row.addWidget(add_tile_wrap)
+        self.add_text_tile = QPushButton("＋\nAdd text")
+        self.add_text_tile.setObjectName("addTextTile")
+        self.add_text_tile.clicked.connect(self.add_text_segment)
+        self.add_tile_wrap = QFrame()
+        self.add_tile_wrap.setObjectName("addTileBox")
+        self.add_tile_wrap.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.add_tile_wrap.setFixedSize(128, max(152, self.timeline_height - 32))
+        self.add_tile_layout = QVBoxLayout(self.add_tile_wrap)
+        self.add_tile_layout.setContentsMargins(8, 8, 8, 8)
+        self.add_tile_layout.setSpacing(0)
+        self.add_tile.setFixedHeight(54)
+        self.add_text_tile.setFixedHeight(30)
+        self.add_tile_layout.addStretch(1)
+        self.add_tile_layout.addWidget(self.add_tile, 0, Qt.AlignmentFlag.AlignHCenter)
+        self.add_tile_layout.addWidget(self.add_text_tile, 0, Qt.AlignmentFlag.AlignHCenter)
+        self.add_tile_layout.addStretch(1)
+        track_row.addWidget(self.add_tile_wrap)
         timeline_layout.addLayout(track_row)
         self.timeline_height_handle = TimelineHeightHandle(self.timeline_height)
         self.timeline_height_handle.height_changed.connect(self.set_timeline_height)
@@ -1720,7 +1742,7 @@ class MainWindow(QMainWindow):
         #timelineHeightHandle{background:transparent;border:0} #timelineHeightHandle:hover{background:rgba(88,118,134,35);border:0}
         #promptSplitter::handle{background:transparent;border:0} #promptSplitter::handle:hover{background:rgba(88,118,134,35);border:0}
         #segmentPreview{background:#17191a;border-top:1px solid #34383a}
-        #addTile{border:1px dashed #596065;background:#111415;color:#828b90;font-size:10px} #sequenceBar{background:#181e21;border:1px solid #303a3f;border-left:3px solid #4e91b4;border-radius:5px;padding:10px 12px;color:#cbd7dd;font-weight:bold}
+        #addTileBox{border:1px dashed #596065;background:#111415} #addTile,#addTextTile{border:0;border-radius:0;background:transparent;color:#828b90;font-size:10px;text-align:center} #addTile:hover,#addTextTile:hover{background:#1c2326;color:#b7d7e6} #sequenceBar{background:#181e21;border:1px solid #303a3f;border-left:3px solid #4e91b4;border-radius:5px;padding:10px 12px;color:#cbd7dd;font-weight:bold}
         #directorPanel{background:#1d2326;border:1px solid #354047;border-radius:6px} #panelTitle{background:transparent;color:#b8d9e9;border:0;font-size:10px;font-weight:bold;letter-spacing:1px} #groupLabel{background:transparent;color:#71838c;border:0;font-size:8px;font-weight:bold;letter-spacing:1px;padding-right:4px}
         #sectionLabel{color:#8ebbd1;font-size:8px;font-weight:bold;letter-spacing:1px} #muted{color:#879095;font-size:9px} #promptPanel{background:#202527;border:1px solid #374044;border-radius:6px} #segmentMetaBar{background:#1a2023;border:1px solid #303a3f;border-radius:5px} #refineButton{background:#252d31;border:1px solid #45545b;color:#c9dce5;padding-left:9px;padding-right:9px} #refineButton:hover{background:#31414a;border-color:#6590a7;color:#f2fbff} #refineButton:pressed{background:#1d2b32;border-color:#7ca9bf} #refineButton:disabled{background:#202527;border-color:#31393d;color:#606a6f}
         QTextEdit{background:#252728;border:0;color:#e1e4e5;font:11px 'Courier New';padding:4px} #promptEditor{background:#202527;border:0;color:#e1e4e5;padding:7px} #magicButton{background:#3b78a5;border:1px solid #5b9bc6;border-radius:5px;color:#f4fbff;font-weight:bold;padding-left:12px;padding-right:12px} #magicButton:hover{background:#4b8dbd;border-color:#8bc6ea} #magicButton:pressed{background:#285b7c}
@@ -1775,7 +1797,7 @@ class MainWindow(QMainWindow):
         self.output_width.setMinimumWidth(metric(92))
         self.output_height.setMinimumWidth(metric(92))
         self.duration_spin.setFixedWidth(metric(82))
-        self.add_tile.setFixedWidth(metric(112))
+        self.add_tile_wrap.setFixedWidth(metric(128))
         self.add_tile_layout.setContentsMargins(metric(8), 0, metric(8), 0)
         for button in (self.copy_segment, self.copy_global):
             button.setFixedHeight(button.fontMetrics().height() + metric(4))
@@ -2028,7 +2050,7 @@ class MainWindow(QMainWindow):
 
     def save_library_project(self, automatic: bool = False) -> None:
         if not self.segments:
-            QMessageBox.information(self, "Nothing to save", "Add at least one image or WebM segment first.")
+            QMessageBox.information(self, "Nothing to save", "Add at least one image, WebM, or text segment first.")
             return
         root = project_library_path()
         meta = None
@@ -2078,7 +2100,8 @@ class MainWindow(QMainWindow):
         meta["duration"] = self.total_duration()
         meta["segmentCount"] = len(self.segments)
         if not meta.get("thumbnailSource"):
-            meta["thumbnailData"] = data_url(self.segments[0].preview_path, max_edge=360, quality=84)
+            visual = next((segment for segment in self.segments if segment.kind != "text" and segment.preview_path), None)
+            meta["thumbnailData"] = data_url(visual.preview_path, max_edge=360, quality=84) if visual else ""
         payload = self.project_payload()
         payload["library"] = {key: meta.get(key, "") for key in ("id", "name", "description", "collection", "savedAt")}
         Path(meta["projectPath"]).write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -2336,7 +2359,7 @@ class MainWindow(QMainWindow):
         self.timeline_height = value
         self.timeline_height_handle.current_height = value
         self.timeline.setFixedHeight(value)
-        self.add_tile.setFixedHeight(max(152, value - 32))
+        self.add_tile_wrap.setFixedHeight(max(152, value - 32))
         self.update_timeline_layout()
         self.mark_dirty()
 
@@ -2376,6 +2399,17 @@ class MainWindow(QMainWindow):
         if not paths:
             return
         self.add_media_paths(paths)
+
+    def add_text_segment(self) -> None:
+        room = MAX_SECONDS - self.total_duration()
+        if len(self.segments) >= MAX_SEGMENTS or room < 1:
+            return
+        number = sum(segment.kind == "text" for segment in self.segments) + 1
+        self.segments.append(Segment(f"Text {number}", "", "", "text", "text", "", min(5.0, room)))
+        self.mark_dirty()
+        self.refresh_timeline(len(self.segments) - 1)
+        self.segment_prompt.setFocus()
+        self.statusBar().showMessage("Text-only segment added; enter its prompt or use Magic Build")
 
     def add_media_paths(self, paths: list[str]) -> None:
         paths = [path for path in paths if Path(path).is_file()]
@@ -2479,8 +2513,8 @@ class MainWindow(QMainWindow):
     def sync_order(self) -> None:
         if self._loading:
             return
-        by_id = {segment.id: segment for segment in self.segments}
-        self.segments = [by_id[self.timeline.item(row).data(Qt.ItemDataRole.UserRole)] for row in range(self.timeline.count())]
+        ordered_ids = [self.timeline.item(row).data(Qt.ItemDataRole.UserRole) for row in range(self.timeline.count())]
+        self.segments = order_segments_by_ids(self.segments, ordered_ids)
         self.update_timeline_layout()
         self.mark_dirty()
 
@@ -2494,15 +2528,16 @@ class MainWindow(QMainWindow):
         self.duration_spin.setMaximum(MAX_SECONDS if len(self.segments) == 1 else 12.0)
         self.duration_spin.setToolTip(f"Segment duration in seconds (1–{int(self.duration_spin.maximum())})")
         self.segment_prompt.setPlainText(segment.prompt if segment else "")
-        self.start_button.setEnabled(bool(segment))
-        self.end_button.setEnabled(bool(segment))
+        visual = bool(segment and segment.kind != "text")
+        self.start_button.setEnabled(visual)
+        self.end_button.setEnabled(visual)
         self.refine_timing_button.setEnabled(bool(segment))
         self.refine_prompt_button.setEnabled(bool(segment and segment.prompt.strip()))
         if segment:
-            self.start_button.setChecked(segment.role == "start")
-            self.end_button.setChecked(segment.role == "end")
+            self.start_button.setChecked(segment.role == "start" if visual else False)
+            self.end_button.setChecked(segment.role == "end" if visual else False)
             self.duration_spin.setValue(segment.duration)
-            self.frame_number.setText(f"Frame {row + 1}")
+            self.frame_number.setText(f"{'Text' if segment.kind == 'text' else 'Frame'} {row + 1}")
         else:
             self.frame_number.setText("Frame —")
         self._loading = False
@@ -2539,8 +2574,22 @@ class MainWindow(QMainWindow):
         if not self._loading and self.current_segment():
             self.current_segment().prompt = self.segment_prompt.toPlainText()
             self.refine_prompt_button.setEnabled(bool(self.current_segment().prompt.strip()))
+            if self.current_segment().kind == "text":
+                item = self.timeline.currentItem()
+                card = self.timeline.itemWidget(item) if item else None
+                if isinstance(card, SegmentCard):
+                    card.set_text_preview(self.current_segment().prompt)
             self.mark_dirty()
             self.update_counts()
+
+    def refresh_text_segment_previews(self) -> None:
+        by_id = {segment.id: segment for segment in self.segments}
+        for row in range(self.timeline.count()):
+            item = self.timeline.item(row)
+            segment = by_id.get(item.data(Qt.ItemDataRole.UserRole))
+            card = self.timeline.itemWidget(item)
+            if segment and segment.kind == "text" and isinstance(card, SegmentCard):
+                card.set_text_preview(segment.prompt)
 
     def editor_duration_changed(self, value: float) -> None:
         if not self._loading and self.current_segment():
@@ -2549,7 +2598,7 @@ class MainWindow(QMainWindow):
 
     def set_role(self, role: str) -> None:
         segment = self.current_segment()
-        if not segment:
+        if not segment or segment.kind == "text":
             return
         segment.role = role
         row = self.timeline.currentRow()
@@ -2596,8 +2645,11 @@ class MainWindow(QMainWindow):
         self.sequence_bar.setText(f"Sequence     Start: 0.00s  |  End: {total:.2f}s  |  Length: {total:.2f}s  |  Remaining: {MAX_SECONDS - total:.2f}s")
         self.add_tile.setText(f"＋\nAdd media\n{MAX_SECONDS - total:.1f}s available")
         self.add_tile.setEnabled(len(self.segments) < MAX_SEGMENTS and total <= MAX_SECONDS - 1)
+        self.add_text_tile.setEnabled(len(self.segments) < MAX_SEGMENTS and total <= MAX_SECONDS - 1)
         self.applied_label.setText(f"Applied across all {len(self.segments)} segments")
-        self.statusBar().showMessage(f"{len(self.segments)} media segments · {total:.1f}s")
+        visual_count = sum(segment.kind != "text" for segment in self.segments)
+        text_count = len(self.segments) - visual_count
+        self.statusBar().showMessage(f"{visual_count} visual · {text_count} text · {total:.1f}s")
 
     def update_counts(self) -> None:
         self.segment_count.setText(f"{len(self.segment_prompt.toPlainText())} characters")
@@ -2615,10 +2667,13 @@ class MainWindow(QMainWindow):
         self.timeline.setCurrentItem(item)
         segment = self.current_segment()
         menu = QMenu(self)
-        menu.addAction("Replace media", self.replace_selected)
-        menu.addAction("Export video" if segment and segment.kind == "video" else "Export image", self.export_selected_segment)
-        menu.addAction("Set as start frame", lambda: self.set_role("start"))
-        menu.addAction("Set as end frame", lambda: self.set_role("end"))
+        if segment and segment.kind == "text":
+            menu.addAction("Edit text prompt", self.segment_prompt.setFocus)
+        else:
+            menu.addAction("Replace media", self.replace_selected)
+            menu.addAction("Export video" if segment and segment.kind == "video" else "Export image", self.export_selected_segment)
+            menu.addAction("Set as start frame", lambda: self.set_role("start"))
+            menu.addAction("Set as end frame", lambda: self.set_role("end"))
         menu.addSeparator()
         menu.addAction("Delete segment", self.delete_selected)
         menu.exec(self.timeline.mapToGlobal(point))
@@ -2711,9 +2766,10 @@ class MainWindow(QMainWindow):
         requested_length = self.requested_length.value()
         if requested_length > 0:
             if len(self.segments) == 1:
+                item_label = "single text-only segment" if self.segments[0].kind == "text" else "single-frame sequence"
                 lines.append(
                     f"Requested total sequence length: {requested_length:.1f} seconds. "
-                    "Because this is a single-frame sequence, return this exact duration for its one segment."
+                    f"Because this is a {item_label}, return this exact duration for its one segment."
                 )
             else:
                 lines.append(
@@ -2851,6 +2907,7 @@ class MainWindow(QMainWindow):
             durations[index] = float(result["duration"])
             if self.timeline.currentRow() == index:
                 self.refresh_segment_prompt_box(index)
+            self.refresh_text_segment_previews()
             self.mark_dirty()
             self.animate_timeline_durations(durations)
             self.save_library_project(automatic=True)
@@ -2866,12 +2923,12 @@ class MainWindow(QMainWindow):
         if not credentials:
             return
         provider, model, key = credentials
-        self.statusBar().showMessage("Magic Build is analyzing optimized preview frames…")
+        self.statusBar().showMessage("Magic Build is analyzing ordered timeline items…")
         timeout = self.settings.value("api_timeout", 400, int)
         self.start_ai_worker(build_prompts, (
             self.segments.copy(), provider, model, key,
             self.build_director_request(), self.sfx.isChecked(), self.spoken_dialog.isChecked(), self.hdr.isChecked(), self.reduce_music.isChecked(), timeout,
-        ), "Analyzing frames and directing motion…", self.magic_finished)
+        ), "Analyzing timeline context and directing motion…", self.magic_finished)
 
     def magic_progress(self, attempt: int, total: int, detail: str) -> None:
         self.magic_overlay.update_attempt(attempt, total, detail)
@@ -2899,6 +2956,7 @@ class MainWindow(QMainWindow):
             global_prompt = "\n".join(lines)
         self.global_prompt.setPlainText(global_prompt)
         self.refresh_segment_prompt_box(self.timeline.currentRow())
+        self.refresh_text_segment_previews()
         self.mark_dirty()
         self.set_ai_controls_enabled(True)
         self.magic_overlay.hide_overlay()
@@ -2979,34 +3037,36 @@ class MainWindow(QMainWindow):
         for segment in self.segments:
             start = cursor
             length = max(FPS, round(segment.duration * FPS))
-            record = {"id": segment.id, "type": segment.kind, "start": start, "length": length, "prompt": segment.prompt, "imageFile": segment.media_path, "fileName": segment.name, "fileSize": Path(segment.media_path).stat().st_size if Path(segment.media_path).exists() else 0, "imageB64": data_url(segment.preview_path), "isEndFrame": segment.role == "end"}
-            if segment.kind == "video":
-                record.update({"trimStart": segment.trim_start or 0, "videoDurationFrames": segment.media_duration_frames or length})
-                if Path(segment.media_path).exists():
-                    video_name = unique_media_filename(safe_media_filename(segment.name, "video"), used_media_names)
-                    video_path = media_directory / video_name
-                    try:
-                        if Path(segment.media_path).resolve() != video_path.resolve():
-                            shutil.copy2(segment.media_path, video_path)
-                    except OSError as error:
-                        QMessageBox.critical(self, "Export failed", f"Could not copy {segment.name} to the ComfyUI input directory:\n{error}")
-                        return
-                    record.update({"imageFile": str(video_path), "fileName": video_name, "fileSize": video_path.stat().st_size})
-                    record["videoB64"] = data_url(str(video_path))
-                    audio_name = unique_media_filename(f"{video_path.stem}_extracted_audio.wav", used_media_names)
-                    audio_path = media_directory / audio_name
-                    try:
-                        audio_duration_frames, peaks = extract_audio_for_export(str(video_path), audio_path, FPS)
-                    except ValueError:
-                        pass
-                    else:
-                        audio_timeline.append({
-                            "id": f"{segment.id}_a", "type": "audio", "start": start,
-                            "length": length, "trimStart": segment.trim_start or 0,
-                            "audioDurationFrames": audio_duration_frames,
-                            "audioFile": str(audio_path), "fileName": video_name,
-                            "waveformPeaks": peaks, "fileSize": audio_path.stat().st_size,
-                        })
+            record = {"id": segment.id, "type": segment.kind, "start": start, "length": length, "prompt": segment.prompt, "isEndFrame": False if segment.kind == "text" else segment.role == "end"}
+            if segment.kind != "text":
+                record.update({"imageFile": segment.media_path, "fileName": segment.name, "fileSize": Path(segment.media_path).stat().st_size if Path(segment.media_path).exists() else 0, "imageB64": data_url(segment.preview_path)})
+                if segment.kind == "video":
+                    record.update({"trimStart": segment.trim_start or 0, "videoDurationFrames": segment.media_duration_frames or length})
+                    if Path(segment.media_path).exists():
+                        video_name = unique_media_filename(safe_media_filename(segment.name, "video"), used_media_names)
+                        video_path = media_directory / video_name
+                        try:
+                            if Path(segment.media_path).resolve() != video_path.resolve():
+                                shutil.copy2(segment.media_path, video_path)
+                        except OSError as error:
+                            QMessageBox.critical(self, "Export failed", f"Could not copy {segment.name} to the ComfyUI input directory:\n{error}")
+                            return
+                        record.update({"imageFile": str(video_path), "fileName": video_name, "fileSize": video_path.stat().st_size})
+                        record["videoB64"] = data_url(str(video_path))
+                        audio_name = unique_media_filename(f"{video_path.stem}_extracted_audio.wav", used_media_names)
+                        audio_path = media_directory / audio_name
+                        try:
+                            audio_duration_frames, peaks = extract_audio_for_export(str(video_path), audio_path, FPS)
+                        except ValueError:
+                            pass
+                        else:
+                            audio_timeline.append({
+                                "id": f"{segment.id}_a", "type": "audio", "start": start,
+                                "length": length, "trimStart": segment.trim_start or 0,
+                                "audioDurationFrames": audio_duration_frames,
+                                "audioFile": str(audio_path), "fileName": video_name,
+                                "waveformPeaks": peaks, "fileSize": audio_path.stat().st_size,
+                            })
             timeline.append(record)
             cursor += length
         global_prompt = self.global_prompt.toPlainText()
@@ -3037,8 +3097,13 @@ class MainWindow(QMainWindow):
             payload = json.loads(Path(path).read_text(encoding="utf-8"))
             fps = float(payload.get("settings", {}).get("frame_rate", FPS))
             loaded = []
-            for index, raw in enumerate(payload["timeline"]["segments"][:MAX_SEGMENTS]):
-                if raw.get("type") not in ("image", "video"):
+            raw_segments = list(payload["timeline"]["segments"])
+            raw_segments = [raw for _, raw in sorted(enumerate(raw_segments), key=lambda item: (float(item[1].get("start", 0)), item[0]))]
+            for index, raw in enumerate(raw_segments[:MAX_SEGMENTS]):
+                if raw.get("type") not in ("image", "video", "text"):
+                    continue
+                if raw.get("type") == "text":
+                    loaded.append(text_segment_from_ltx(raw, index, fps))
                     continue
                 cache = APP_CACHE / f"import-{index}-{Path(path).stem}.jpg"
                 preview = raw.get("imageB64")
@@ -3053,7 +3118,7 @@ class MainWindow(QMainWindow):
                     media_path = str(video_path)
                 loaded.append(Segment(raw.get("fileName", f"Segment {index + 1}"), str(media_path), str(cache), raw.get("type", "image"), "end" if raw.get("isEndFrame") else "start", raw.get("prompt", ""), max(1, float(raw.get("length", FPS)) / fps), raw.get("videoDurationFrames"), raw.get("trimStart"), raw.get("id", "")))
             if not loaded:
-                raise ValueError("No supported embedded image or WebM segments were found.")
+                raise ValueError("No supported embedded image, WebM, or text segments were found.")
             self.segments = loaded
             settings = payload.get("settings", {})
             self.output_width.setValue(int(settings.get("custom_width", 1280)))
@@ -3076,8 +3141,8 @@ class MainWindow(QMainWindow):
         frames = []
         for segment in self.segments:
             value = segment.to_dict()
-            value["previewData"] = data_url(segment.preview_path)
-            value["sourceData"] = data_url(segment.media_path) if Path(segment.media_path).exists() else None
+            value["previewData"] = data_url(segment.preview_path) if segment.kind != "text" and segment.preview_path and Path(segment.preview_path).exists() else None
+            value["sourceData"] = data_url(segment.media_path) if segment.kind != "text" and segment.media_path and Path(segment.media_path).exists() else None
             frames.append(value)
         return {"app": "ltx-director-director", "projectVersion": 5, "globalPrompt": self.global_prompt.toPlainText(), "directorIntent": self.intent.toPlainText(), "directionOptions": {"requestedLength": self.requested_length.value(), "speakerLanguage": self.speaker_language.currentText(), "speakerAccent": self.speaker_accent.currentText()}, "magicBuild": {"sfx": self.sfx.isChecked(), "spokenDialog": self.spoken_dialog.isChecked(), "hdr": self.hdr.isChecked(), "reduceMusic": self.reduce_music.isChecked()}, "output": {"width": self.output_width.value(), "height": self.output_height.value()}, "timelineView": {"scale": self.pixels_per_second, "height": self.timeline_height}, "frames": frames}
 
@@ -3089,19 +3154,21 @@ class MainWindow(QMainWindow):
         cache_key = uuid4().hex[:10]
         for index, original in enumerate(payload.get("frames", [])[:MAX_SEGMENTS]):
             raw = dict(original)
+            is_text = raw.get("kind") == "text"
             preview_path = APP_CACHE / f"project-{cache_key}-{index}.jpg"
-            write_data_url(raw["previewData"], preview_path)
-            media_path = preview_path
+            if raw.get("previewData"):
+                write_data_url(raw["previewData"], preview_path)
+            media_path = "" if is_text else preview_path
             if raw.get("sourceData"):
                 suffix = ".webm" if raw.get("kind") == "video" else Path(raw.get("name", "image.png")).suffix or ".png"
                 media_path = APP_CACHE / f"project-source-{cache_key}-{index}{suffix}"
                 write_data_url(raw["sourceData"], media_path)
-            raw.update({"preview_path": str(preview_path), "media_path": str(media_path)})
+            raw.update({"preview_path": "" if is_text else str(preview_path), "media_path": str(media_path)})
             for key in ("previewData", "sourceData"):
                 raw.pop(key, None)
             loaded.append(Segment.from_dict(raw))
         if not loaded:
-            raise ValueError("Project contains no supported media.")
+            raise ValueError("Project contains no supported main-track segments.")
         self.segments = loaded
         self.global_prompt.setPlainText(payload.get("globalPrompt", ""))
         self.intent.setPlainText(payload.get("directorIntent", ""))
