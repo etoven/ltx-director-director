@@ -17,8 +17,8 @@ class AIResponseFormatError(ValueError):
 
 
 def build_prompts(segments: list[Segment], provider: str, model: str, api_key: str, intent: str, sfx: bool, spoken_dialog: bool, hdr: bool, reduce_music: bool, timeout: int = 400) -> dict:
-    images = [{"name": item.name, "role": item.role, "image": data_url(item.preview_path, max_edge=384)} for item in segments]
-    rules = _rules(len(images), intent, sfx, spoken_dialog, hdr, reduce_music)
+    images = [_segment_input(item) for item in segments]
+    rules = _rules(len(images), intent, sfx, spoken_dialog, hdr, reduce_music, sum(item.kind == "text" for item in segments))
     if provider == "openai":
         return _openai(images, api_key, rules, timeout, sfx, spoken_dialog)
     return _gemini(images, api_key, model, rules, timeout, sfx, spoken_dialog)
@@ -87,6 +87,13 @@ def refine_segment_prompt(segments: list[Segment], selected_index: int, provider
 MAX_SEQUENCE_SECONDS = 60.0
 
 
+def _segment_input(item: Segment) -> dict:
+    value = {"name": item.name, "role": item.role, "kind": item.kind}
+    if item.kind != "text" and item.preview_path:
+        value["image"] = data_url(item.preview_path, max_edge=384)
+    return value
+
+
 def _refinement_images(segments: list[Segment], selected_index: int) -> list[dict]:
     start = max(0, selected_index - 1)
     end = min(len(segments), selected_index + 2)
@@ -94,7 +101,8 @@ def _refinement_images(segments: list[Segment], selected_index: int) -> list[dic
         {
             "name": f"Segment {index + 1} {'SELECTED' if index == selected_index else ('PREVIOUS' if index < selected_index else 'NEXT')} — {item.name}",
             "role": item.role,
-            "image": data_url(item.preview_path, max_edge=384),
+            "kind": item.kind,
+            **({"image": data_url(item.preview_path, max_edge=384)} if item.kind != "text" and item.preview_path else {}),
         }
         for index, item in enumerate(segments[start:end], start)
     ]
@@ -104,8 +112,9 @@ def _segment_context(segments: list[Segment], selected_index: int) -> str:
     records = []
     for index, segment in enumerate(segments):
         relation = "SELECTED" if index == selected_index else ("PREVIOUS" if index == selected_index - 1 else ("NEXT" if index == selected_index + 1 else "SEQUENCE CONTEXT"))
+        anchor = "TEXT-ONLY SEGMENT" if segment.kind == "text" else f"{segment.role.upper()} FRAME"
         records.append(
-            f"Segment {index + 1} [{relation}; {segment.role.upper()} FRAME; current duration {segment.duration:.1f}s]\n"
+            f"Segment {index + 1} [{relation}; {anchor}; current duration {segment.duration:.1f}s]\n"
             f"Existing prompt (immutable unless SELECTED prompt refinement): {segment.prompt or '[empty]'}"
         )
     return "\n\n".join(records)
@@ -160,7 +169,7 @@ def _strict_duration(value: object, maximum: float) -> float:
     return round(duration * 2) / 2
 
 
-def _rules(count: int, intent: str, sfx: bool, spoken_dialog: bool, hdr: bool, reduce_music: bool) -> str:
+def _rules(count: int, intent: str, sfx: bool, spoken_dialog: bool, hdr: bool, reduce_music: bool, text_count: int = 0) -> str:
     if spoken_dialog and count == 1:
         spoken_rule = (
             "SPOKEN DIALOG IS ON: The single segment must include an appropriate clause beginning exactly `Spoken Dialog:` and containing actual audible words spoken by a visible character. "
@@ -190,7 +199,7 @@ def _rules(count: int, intent: str, sfx: bool, spoken_dialog: bool, hdr: bool, r
     else:
         sound_rule = "Do not add a [SOUND] ambience header unless the user explicitly requests one. "
     global_format = quality_rule + sound_rule
-    if count == 1:
+    if count == 1 and text_count == 0:
         frame_planning_rule = (
             "SINGLE-FRAME MODE: Treat the supplied frame as a strong visual anchor, not as a complete motion description. "
             "If it is labeled START FRAME, begin exactly from it and guide coherent action forward from that starting state; do not invent action before it. "
@@ -201,8 +210,14 @@ def _rules(count: int, intent: str, sfx: bool, spoken_dialog: bool, hdr: bool, r
             "The JSON must still use a segments array containing exactly one object; never return a singular segment object or a bare segment."
         )
         duration_rule = "Normally assign 1.0-12.0 seconds according to motion complexity; an explicit User-intent duration overrides that recommendation up to 60.0 seconds."
+    elif count == 1:
+        frame_planning_rule = (
+            "TEXT-ONLY MODE: No visual frame is supplied. Treat Director's Intent and the text segment's existing prompt as authoritative context. "
+            "Write a complete time-based LTX prompt and do not claim to see visual facts that were not provided."
+        )
+        duration_rule = "Assign 1.0-12.0 seconds in 0.5-second increments according to motion complexity."
     else:
-        frame_planning_rule = "Infer transitions only from adjacent frames."
+        frame_planning_rule = "Infer visual transitions only from adjacent supplied frames. Text-only segments deliberately have no image; use their ordered prompt context without inventing unseen visual facts."
         duration_rule = "Assign 1.0-12.0 seconds in 0.5-second increments according to motion complexity."
     authoritative_intent = intent.strip() or "Infer motion only from the ordered frames."
     return f"""EXPECTED SEGMENT COUNT: {count}
@@ -212,8 +227,8 @@ AUTHORITATIVE DIRECTOR'S INTENT:
 
 Before planning, identify every explicit constraint in Director's Intent—including requested duration, timing, action, pacing, camera, audio and ending state—and obey all of them. These constraints are mandatory, not suggestions. For a single-frame sequence, an explicitly requested total or scene duration is the duration of that one segment and must be returned exactly.
 
-You are LTXDirector, an expert prompt planner for LTX Video 2.3. Analyze all {count} supplied frames in order.
-Return exactly one segment per frame; never add, remove, merge or reorder. A start frame is the exact opening frame and an end frame is the exact target.
+You are LTXDirector, an expert prompt planner for LTX Video 2.3. Analyze all {count} supplied timeline items in order.
+Return exactly one segment per timeline item; never add, remove, merge or reorder. Visual items supply a frame; text-only items deliberately supply no image and must still receive a prompt and duration. A start frame is the exact opening frame and an end frame is the exact target.
 Write production-ready natural-language prompts describing visible subject, action, expression, physical change, secondary motion, environment and camera behavior. {frame_planning_rule} Preserve identity, outfit, scene, lighting, angle, composition, aspect ratio and style. Use a stationary camera unless the frames clearly demand otherwise. Require gradual motion, overlapping progression, direct continuity and no cross-fade. Do not invent visual facts.
 Treat the creative guidance above as defaults. When User intent explicitly requests something different, follow the user's instruction. User intent overrides conflicting creative defaults, but not the required segment count, frame order, start/end-frame meaning or strict JSON schema.
 {duration_rule} Use 0.5-second increments. {audio}
@@ -236,8 +251,11 @@ def _provider_raw(images: list[dict], provider: str, model: str, key: str, rules
 def _gemini_raw(images: list[dict], key: str, model: str, rules: str, timeout: int) -> str:
     parts: list[dict] = [{"text": rules}]
     for index, item in enumerate(images, 1):
-        mime, encoded = re.match(r"^data:([^;]+);base64,(.+)$", item["image"], re.S).groups()
-        parts.extend([{"text": f"IMAGE {index} OF {len(images)} — {item['role'].upper()} FRAME — {item['name']}"}, {"inline_data": {"mime_type": mime, "data": encoded}}])
+        label = "TEXT-ONLY SEGMENT" if item.get("kind") == "text" else f"{item['role'].upper()} FRAME"
+        parts.append({"text": f"SEGMENT {index} OF {len(images)} — {label} — {item['name']}"})
+        if item.get("image"):
+            mime, encoded = re.match(r"^data:([^;]+);base64,(.+)$", item["image"], re.S).groups()
+            parts.append({"inline_data": {"mime_type": mime, "data": encoded}})
     response = requests.post(
         f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
         headers={"x-goog-api-key": key, "content-type": "application/json"},
@@ -284,7 +302,10 @@ def _openai(images: list[dict], key: str, rules: str, timeout: int, sfx: bool, s
 def _openai_raw(images: list[dict], key: str, rules: str, timeout: int) -> str:
     content: list[dict] = [{"type": "input_text", "text": rules}]
     for index, item in enumerate(images, 1):
-        content.extend([{"type": "input_text", "text": f"IMAGE {index} OF {len(images)} — {item['role'].upper()} FRAME — {item['name']}"}, {"type": "input_image", "image_url": item["image"], "detail": "high"}])
+        label = "TEXT-ONLY SEGMENT" if item.get("kind") == "text" else f"{item['role'].upper()} FRAME"
+        content.append({"type": "input_text", "text": f"SEGMENT {index} OF {len(images)} — {label} — {item['name']}"})
+        if item.get("image"):
+            content.append({"type": "input_image", "image_url": item["image"], "detail": "high"})
     response = requests.post(
         "https://api.openai.com/v1/responses",
         headers={"authorization": f"Bearer {key}", "content-type": "application/json"},
