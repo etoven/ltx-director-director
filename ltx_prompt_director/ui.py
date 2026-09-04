@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
 )
 
 from .ai import GEMINI_MODELS, build_prompts, refine_segment_prompt, refine_timing, retryable_connection_error
-from .media import APP_CACHE, copy_media_for_export, data_url, extract_audio_for_export, prepare_media, safe_media_filename, unique_media_filename, write_data_url
+from .media import APP_CACHE, comfy_input_references, copy_media_for_export, data_url, extract_audio_for_export, prepare_media, safe_media_filename, unique_media_filename, write_data_url
 from .models import Segment, order_segments_by_ids, text_segment_from_ltx
 
 FPS = 24
@@ -3049,8 +3049,10 @@ class MainWindow(QMainWindow):
                     except OSError as error:
                         QMessageBox.critical(self, "Export failed", f"Could not copy {segment.name} to the ComfyUI input directory:\n{error}")
                         return
-                    record.update({"imageFile": str(image_path), "fileName": image_path.name, "fileSize": image_path.stat().st_size})
-                    record["imageB64"] = data_url(str(image_path))
+                    image_file, image_preview = comfy_input_references(image_path.name)
+                    record.update({"imageFile": image_file, "imageB64": image_preview})
+                    record.pop("fileName", None)
+                    record.pop("fileSize", None)
                 elif segment.kind == "video":
                     record.update({"trimStart": segment.trim_start or 0, "videoDurationFrames": segment.media_duration_frames or length})
                     if Path(segment.media_path).exists():
@@ -3060,7 +3062,8 @@ class MainWindow(QMainWindow):
                             QMessageBox.critical(self, "Export failed", f"Could not copy {segment.name} to the ComfyUI input directory:\n{error}")
                             return
                         video_name = video_path.name
-                        record.update({"imageFile": str(video_path), "fileName": video_name, "fileSize": video_path.stat().st_size})
+                        video_file, _ = comfy_input_references(video_name)
+                        record.update({"imageFile": video_file, "fileName": video_name, "fileSize": video_path.stat().st_size})
                         record["videoB64"] = data_url(str(video_path))
                         audio_name = unique_media_filename(f"{video_path.stem}_extracted_audio.wav", used_media_names)
                         audio_path = media_directory / audio_name
@@ -3106,6 +3109,8 @@ class MainWindow(QMainWindow):
             payload = json.loads(Path(path).read_text(encoding="utf-8"))
             fps = float(payload.get("settings", {}).get("frame_rate", FPS))
             loaded = []
+            configured_root = str(self.settings.value("comfy_root_dir", "") or "").strip()
+            comfy_input = Path(configured_root).expanduser() / "input" if configured_root else None
             raw_segments = list(payload["timeline"]["segments"])
             raw_segments = [raw for _, raw in sorted(enumerate(raw_segments), key=lambda item: (float(item[1].get("start", 0)), item[0]))]
             for index, raw in enumerate(raw_segments[:MAX_SEGMENTS]):
@@ -3116,11 +3121,17 @@ class MainWindow(QMainWindow):
                     continue
                 cache = APP_CACHE / f"import-{index}-{Path(path).stem}.jpg"
                 preview = raw.get("imageB64")
+                media_reference = str(raw.get("imageFile") or raw.get("fileName") or "")
+                media_candidate = Path(media_reference).expanduser()
+                if media_reference and not media_candidate.is_absolute() and comfy_input:
+                    media_candidate = comfy_input / Path(media_reference)
                 if preview and preview.startswith("data:image/"):
                     write_data_url(preview, cache)
+                elif media_candidate.is_file() and raw.get("type") == "image":
+                    cache = media_candidate
                 else:
                     continue
-                media_path = raw.get("imageFile") or raw.get("fileName") or str(cache)
+                media_path = str(media_candidate) if media_candidate.is_file() else str(cache)
                 if raw.get("type") == "video" and str(raw.get("videoB64", "")).startswith("data:video/webm"):
                     video_path = APP_CACHE / f"import-{index}-{Path(raw.get('fileName', 'clip.webm')).name}"
                     write_data_url(raw["videoB64"], video_path)
