@@ -102,6 +102,8 @@ def _refinement_images(segments: list[Segment], selected_index: int) -> list[dic
             "name": f"Segment {index + 1} {'SELECTED' if index == selected_index else ('PREVIOUS' if index < selected_index else 'NEXT')} — {item.name}",
             "role": item.role,
             "kind": item.kind,
+            "selected": index == selected_index,
+            "prompt": item.prompt,
             **({"image": data_url(item.preview_path, max_edge=384)} if item.kind != "text" and item.preview_path else {}),
         }
         for index, item in enumerate(segments[start:end], start)
@@ -147,7 +149,8 @@ def _prompt_refinement_rules(segments: list[Segment], selected_index: int, inten
         f"You may retime the selected segment from 1.0–{available:.1f} seconds in 0.5-second increments when the refined action or dialog needs it."
     )
     return f"""You are refining ONE existing segment prompt for LTX Video 2.3.
-Refine ONLY segment {selected_index + 1}. Preserve its visible facts and intended action while improving clarity, temporal progression, physical causality, camera direction, secondary motion, Spoken Dialog delivery and lip-sync direction where present.
+Refine ONLY segment {selected_index + 1}. The SELECTED CURRENT EDITOR PROMPT is the authoritative creative instruction and is the text the user explicitly asked you to refine. Preserve every requested action, change, camera instruction, timing cue and constraint from that prompt while improving clarity, temporal progression, physical causality, secondary motion, Spoken Dialog delivery and lip-sync direction where present.
+For an image segment, use the supplied image only to ground visible identity, pose, environment and composition. Never replace, ignore or reinterpret the user's selected prompt merely because its requested motion is not visible in the still frame.
 Use the immediately previous and next prompts and supplied adjacent frames for continuity, but do not rewrite or return any other prompt. Do not change the global prompt.
 {duration_instruction}
 Director's intent and planning controls:
@@ -256,6 +259,9 @@ def _gemini_raw(images: list[dict], key: str, model: str, rules: str, timeout: i
         if item.get("image"):
             mime, encoded = re.match(r"^data:([^;]+);base64,(.+)$", item["image"], re.S).groups()
             parts.append({"inline_data": {"mime_type": mime, "data": encoded}})
+        if "prompt" in item:
+            authority = "SELECTED CURRENT EDITOR PROMPT — AUTHORITATIVE; REFINE THIS EXACT INPUT" if item.get("selected") else "CONTEXT PROMPT — DO NOT REWRITE"
+            parts.append({"text": f"{authority}:\n{item.get('prompt') or '[empty]'}"})
     response = requests.post(
         f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
         headers={"x-goog-api-key": key, "content-type": "application/json"},
@@ -306,6 +312,9 @@ def _openai_raw(images: list[dict], key: str, rules: str, timeout: int) -> str:
         content.append({"type": "input_text", "text": f"SEGMENT {index} OF {len(images)} — {label} — {item['name']}"})
         if item.get("image"):
             content.append({"type": "input_image", "image_url": item["image"], "detail": "high"})
+        if "prompt" in item:
+            authority = "SELECTED CURRENT EDITOR PROMPT — AUTHORITATIVE; REFINE THIS EXACT INPUT" if item.get("selected") else "CONTEXT PROMPT — DO NOT REWRITE"
+            content.append({"type": "input_text", "text": f"{authority}:\n{item.get('prompt') or '[empty]'}"})
     response = requests.post(
         "https://api.openai.com/v1/responses",
         headers={"authorization": f"Bearer {key}", "content-type": "application/json"},
