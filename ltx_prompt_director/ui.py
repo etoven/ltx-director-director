@@ -12,11 +12,11 @@ from importlib.resources import files
 from pathlib import Path
 from uuid import uuid4
 
-from PySide6.QtCore import QEasingCurve, QEvent, QEventLoop, QObject, QRunnable, QRectF, QSettings, QSize, QStandardPaths, Qt, QThreadPool, QTimer, QVariantAnimation, Signal
+from PySide6.QtCore import QDateTime, QEasingCurve, QEvent, QEventLoop, QObject, QRunnable, QRectF, QSettings, QSize, QStandardPaths, Qt, QThreadPool, QTimer, QVariantAnimation, Signal
 from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
-    QDockWidget, QFileDialog, QFormLayout, QFrame, QHBoxLayout, QLabel, QLineEdit,
+    QDateTimeEdit, QDockWidget, QFileDialog, QFormLayout, QFrame, QHBoxLayout, QLabel, QLineEdit,
     QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox, QPushButton,
     QSizePolicy, QSlider, QSpinBox, QSplitter, QSplitterHandle, QStatusBar, QStyle, QTextEdit, QToolBar, QVBoxLayout, QWidget,
 )
@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 from .ai import GEMINI_MODELS, build_prompts, refine_segment_prompt, refine_timing, retryable_connection_error
 from .media import APP_CACHE, comfy_input_references, copy_media_for_export, data_url, extract_audio_for_export, prepare_media, safe_media_filename, unique_media_filename, write_data_url
 from .models import Segment, order_segments_by_ids, text_segment_from_ltx
+from .project_data import ARCHIVE_COLOR, load_project_tags, new_note, normalize_notes, tags_from_text, tags_to_text
 
 FPS = 24
 MAX_SECONDS = 60.0
@@ -899,6 +900,11 @@ class SettingsDialog(QDialog):
         comfy_directory_layout.setContentsMargins(0, 0, 0, 0)
         comfy_directory_layout.addWidget(self.comfy_root_dir, 1)
         comfy_directory_layout.addWidget(self.comfy_root_browse)
+        self.project_tags = QTextEdit()
+        self.project_tags.setPlainText(tags_to_text(load_project_tags(settings.value("project_tags", ""))))
+        self.project_tags.setPlaceholderText("Done | #367d4a\nConsider | #8a742f\nRe-shoot | #934545")
+        self.project_tags.setToolTip("One project state per line: Name | #hex color. Archive is built in.")
+        self.project_tags.setFixedHeight(86)
         form.addRow("Provider", self.provider)
         form.addRow("Gemini model", self.model)
         form.addRow("Gemini API key", self.gemini)
@@ -909,6 +915,7 @@ class SettingsDialog(QDialog):
         form.addRow("UI text scale (DPI)", text_scale_row)
         form.addRow("Default segment export folder", save_directory_row)
         form.addRow("ComfyUI working directory", comfy_directory_row)
+        form.addRow("Project color tags", self.project_tags)
         form.addRow("", self.remember)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self.accept)
@@ -919,6 +926,11 @@ class SettingsDialog(QDialog):
             self.restoreGeometry(geometry)
 
     def accept(self) -> None:
+        try:
+            project_tags = tags_from_text(self.project_tags.toPlainText())
+        except ValueError as error:
+            QMessageBox.warning(self, "Invalid project tags", str(error))
+            return
         self.settings.setValue("provider", self.provider.currentText())
         self.settings.setValue("gemini_model", self.model.currentText())
         self.settings.setValue("remember_keys", self.remember.isChecked())
@@ -928,6 +940,7 @@ class SettingsDialog(QDialog):
         self.settings.setValue("ui_text_scale", self.ui_text_scale.value())
         self.settings.setValue("segment_export_dir", self.segment_save_dir.text().strip())
         self.settings.setValue("comfy_root_dir", self.comfy_root_dir.text().strip())
+        self.settings.setValue("project_tags", json.dumps(project_tags))
         self.settings.setValue("dialogs/settings_geometry", self.saveGeometry())
         if self.remember.isChecked():
             self.settings.setValue("gemini_key", self.gemini.text().strip())
@@ -953,9 +966,44 @@ class SettingsDialog(QDialog):
         super().reject()
 
 
+class ProjectNoteRow(QFrame):
+    edit_requested = Signal(str)
+    delete_requested = Signal(str)
+
+    def __init__(self, note: dict, parent=None):
+        super().__init__(parent)
+        self.note_id = str(note["id"])
+        self.setObjectName("projectNoteRow")
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(7, 5, 5, 5)
+        layout.setSpacing(7)
+        note_time = QDateTime.fromString(str(note["date"]), Qt.DateFormat.ISODate)
+        stamp = QLabel(note_time.toLocalTime().toString("yyyy-MM-dd HH:mm") if note_time.isValid() else str(note["date"]).replace("T", " ")[:16])
+        stamp.setObjectName("projectNoteDate")
+        stamp.setFixedWidth(118)
+        stamp.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        text = QLabel(str(note["text"]))
+        text.setWordWrap(True)
+        text.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        remove = QPushButton("×")
+        remove.setObjectName("projectNoteDelete")
+        remove.setToolTip("Delete note")
+        remove.setFixedSize(24, 24)
+        remove.clicked.connect(lambda: self.delete_requested.emit(self.note_id))
+        layout.addWidget(stamp)
+        layout.addWidget(text, 1)
+        layout.addWidget(remove)
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.edit_requested.emit(self.note_id)
+        super().mousePressEvent(event)
+
+
 class ProjectDetailsDialog(QDialog):
     def __init__(self, suggested_description: str, parent=None, name: str = "", collection: str = "", collections: list[str] | None = None,
-                 thumbnail_options: list[tuple[str, str]] | None = None, thumbnail_data: str = "", thumbnail_source: str = ""):
+                 thumbnail_options: list[tuple[str, str]] | None = None, thumbnail_data: str = "", thumbnail_source: str = "",
+                 notes: list[dict] | None = None):
         super().__init__(parent)
         self.setWindowTitle("Save project to library")
         self.setMinimumWidth(430)
@@ -1004,10 +1052,36 @@ class ProjectDetailsDialog(QDialog):
         self.custom_thumbnail_button.clicked.connect(self.choose_custom_thumbnail)
         thumbnail_layout.addWidget(self.thumbnail_list)
         thumbnail_layout.addWidget(self.custom_thumbnail_button)
+        self.notes = normalize_notes(notes)
+        self.editing_note_id = ""
+        notes_box = QWidget()
+        notes_layout = QVBoxLayout(notes_box)
+        notes_layout.setContentsMargins(0, 0, 0, 0)
+        notes_layout.setSpacing(5)
+        note_entry = QHBoxLayout()
+        self.note_date = QDateTimeEdit(QDateTime.currentDateTime())
+        self.note_date.setCalendarPopup(True)
+        self.note_date.setDisplayFormat("yyyy-MM-dd HH:mm")
+        self.note_date.setToolTip("Note date and time; editing does not change it unless you do")
+        self.note_input = QLineEdit()
+        self.note_input.setPlaceholderText("Type a note and press Enter…")
+        self.note_input.returnPressed.connect(self.commit_note)
+        add_note = QPushButton("Add")
+        add_note.clicked.connect(self.commit_note)
+        note_entry.addWidget(self.note_date)
+        note_entry.addWidget(self.note_input, 1)
+        note_entry.addWidget(add_note)
+        self.notes_list = QListWidget()
+        self.notes_list.setObjectName("projectNotesList")
+        self.notes_list.setMinimumHeight(170)
+        notes_layout.addLayout(note_entry)
+        notes_layout.addWidget(self.notes_list)
+        self.refresh_notes()
         form.addRow("Name", self.name)
         form.addRow("Description", self.description)
         form.addRow("Collection", self.collection)
         form.addRow("Thumbnail", thumbnail_box)
+        form.addRow("Notes", notes_box)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
@@ -1017,6 +1091,8 @@ class ProjectDetailsDialog(QDialog):
             self.restoreGeometry(geometry)
 
     def accept(self) -> None:
+        if self.note_input.text().strip():
+            self.commit_note()
         if not self.name.text().strip():
             QMessageBox.warning(self, "Project name required", "Enter a name for this project.")
             return
@@ -1068,6 +1144,58 @@ class ProjectDetailsDialog(QDialog):
         if self.thumbnail_options:
             return "segment:0", self.thumbnail_options[0][1]
         return self.thumbnail_source, self.thumbnail_data
+
+    def refresh_notes(self) -> None:
+        self.notes = normalize_notes(self.notes)
+        self.notes_list.clear()
+        for note in self.notes:
+            item = QListWidgetItem()
+            row = ProjectNoteRow(note, self.notes_list)
+            row.edit_requested.connect(self.edit_note)
+            row.delete_requested.connect(self.delete_note)
+            item.setSizeHint(row.sizeHint())
+            item.setData(Qt.ItemDataRole.UserRole, note["id"])
+            self.notes_list.addItem(item)
+            self.notes_list.setItemWidget(item, row)
+        self.notes_list.scrollToBottom()
+
+    def commit_note(self) -> None:
+        text = self.note_input.text().strip()
+        if not text:
+            return
+        date = self.note_date.dateTime().toUTC().toString(Qt.DateFormat.ISODate)
+        existing = next((note for note in self.notes if note["id"] == self.editing_note_id), None)
+        if existing:
+            existing["text"] = text
+            existing["date"] = date
+        else:
+            self.notes.append(new_note(text, date))
+        self.editing_note_id = ""
+        self.note_input.clear()
+        self.note_date.setDateTime(QDateTime.currentDateTime())
+        self.refresh_notes()
+
+    def edit_note(self, note_id: str) -> None:
+        note = next((value for value in self.notes if value["id"] == note_id), None)
+        if not note:
+            return
+        self.editing_note_id = note_id
+        self.note_input.setText(note["text"])
+        value = QDateTime.fromString(note["date"], Qt.DateFormat.ISODate)
+        if value.isValid():
+            self.note_date.setDateTime(value.toLocalTime())
+        self.note_input.setFocus()
+        self.note_input.selectAll()
+
+    def delete_note(self, note_id: str) -> None:
+        self.notes = [note for note in self.notes if note["id"] != note_id]
+        if self.editing_note_id == note_id:
+            self.editing_note_id = ""
+            self.note_input.clear()
+        self.refresh_notes()
+
+    def notes_value(self) -> list[dict[str, str]]:
+        return normalize_notes(self.notes)
 
 
 class MainWindow(QMainWindow):
@@ -1596,6 +1724,14 @@ class MainWindow(QMainWindow):
         self.project_search.setPlaceholderText("Search projects…")
         self.project_search.setClearButtonEnabled(True)
         self.project_search.textChanged.connect(self.filter_projects)
+        self.project_filter_box = QFrame()
+        self.project_filter_box.setObjectName("projectFilters")
+        self.project_filter_layout = QHBoxLayout(self.project_filter_box)
+        self.project_filter_layout.setContentsMargins(3, 3, 3, 3)
+        self.project_filter_layout.setSpacing(3)
+        self.project_filter_buttons: dict[str, QPushButton] = {}
+        self.rebuild_project_filter_buttons()
+        layout.addWidget(self.project_filter_box)
         layout.addWidget(self.project_search)
 
         self.project_list = ProjectListWidget()
@@ -1610,6 +1746,8 @@ class MainWindow(QMainWindow):
         self.project_list.itemDoubleClicked.connect(lambda *_: self.open_library_project())
         self.project_list.drag_started.connect(self.activate_custom_sort_for_drag)
         self.project_list.order_changed.connect(self.save_custom_project_order)
+        self.project_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.project_list.customContextMenuRequested.connect(self.project_library_menu)
         layout.addWidget(self.project_list, 1)
 
         buttons = QHBoxLayout()
@@ -1625,9 +1763,13 @@ class MainWindow(QMainWindow):
         delete_button = QPushButton("Delete")
         delete_button.setObjectName("libraryDelete")
         delete_button.clicked.connect(self.delete_library_project)
+        archive_button = QPushButton("Archive")
+        archive_button.setObjectName("librarySecondary")
+        archive_button.clicked.connect(self.toggle_archive_selected)
         buttons.addWidget(self.save_library_button, 1)
         buttons.addWidget(open_button)
         buttons.addWidget(edit_button)
+        buttons.addWidget(archive_button)
         buttons.addWidget(delete_button)
         layout.addLayout(buttons)
         self.update_project_icon_controls()
@@ -1639,6 +1781,44 @@ class MainWindow(QMainWindow):
         self.project_dock.topLevelChanged.connect(lambda *_: self.save_window_panel_state())
         self.project_dock.hide()
         self.refresh_project_library()
+
+    def project_tags(self) -> list[dict[str, str]]:
+        return load_project_tags(self.settings.value("project_tags", ""))
+
+    def saved_project_filters(self) -> set[str]:
+        try:
+            value = json.loads(str(self.settings.value("project_tag_filters", "")))
+            if isinstance(value, list):
+                return {str(item) for item in value}
+        except (TypeError, ValueError):
+            pass
+        return {"__untagged__", *(tag["name"] for tag in self.project_tags())}
+
+    def rebuild_project_filter_buttons(self) -> None:
+        while self.project_filter_layout.count():
+            item = self.project_filter_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        selected = self.saved_project_filters()
+        self.project_filter_buttons = {}
+        definitions = [("__untagged__", "Untagged", "#56616a"), *((tag["name"], tag["name"], tag["color"]) for tag in self.project_tags()), ("__archive__", "Archive", ARCHIVE_COLOR)]
+        for key, label, color in definitions:
+            button = QPushButton(label)
+            button.setObjectName("projectFilterButton")
+            button.setCheckable(True)
+            button.setChecked(key in selected)
+            button.setStyleSheet(f"QPushButton:checked{{background:{color};border-color:{color};color:white}}")
+            button.toggled.connect(self.project_filter_changed)
+            self.project_filter_layout.addWidget(button)
+            self.project_filter_buttons[key] = button
+        self.project_filter_layout.addStretch(1)
+
+    def project_filter_changed(self, *_args) -> None:
+        selected = [key for key, button in self.project_filter_buttons.items() if button.isChecked()]
+        self.settings.setValue("project_tag_filters", json.dumps(selected))
+        self.queue_settings_sync()
+        if hasattr(self, "project_list"):
+            self.filter_projects(self.project_search.text())
 
     def project_dock_visibility_changed(self, visible: bool) -> None:
         if visible:
@@ -1750,6 +1930,7 @@ class MainWindow(QMainWindow):
         QDockWidget{background:#191d1f;color:#d9dcde;font-weight:bold} QDockWidget::title{background:#1b2022;border-bottom:1px solid #0e1011;padding:8px;text-align:left}
         #projectLibraryTitle,#magicOverlayTitle{font-size:15px;font-weight:bold;color:#f0f2f3} #libraryControls{background:#1c2225;border:1px solid #343e43;border-radius:5px} #projectSearch{background:#171c1e;border:1px solid #343d41;border-radius:5px;padding-left:10px} #projectSearch:focus{border-color:#4d829d;background:#1b2225} #projectList{background:#15191b;border:1px solid #30383c;border-radius:5px;padding:10px}
         #projectList::item{background:#22282b;border:1px solid #363f43;border-radius:6px;margin:4px;padding:7px;color:#dce0e2} #projectList::item:hover{border-color:#6488a1;background:#293136} #projectList::item:selected{border:2px solid #69a5d0;background:#27343b}
+        #projectFilters{background:#171c1e;border:1px solid #30383c;border-radius:5px} #projectFilterButton{min-height:17px;padding:2px 6px;background:#23292c;border-color:#394348;color:#aeb8bd} #projectFilterButton:hover{background:#303a3f;color:#fff} #projectNotesList{background:#171b1d;border:1px solid #3a4449;border-radius:4px;padding:3px} #projectNotesList::item{background:transparent;border:0;margin:2px;padding:0} #projectNoteRow{background:#22282b;border:1px solid #394348;border-radius:4px} #projectNoteRow:hover{border-color:#5e8295;background:#283136} #projectNoteDate{color:#86a9ba;font-size:9px} #projectNoteDelete{min-height:0;padding:0;background:transparent;border:0;color:#bca6a6;font-size:15px} #projectNoteDelete:hover{background:#713d3d;color:white}
         #librarySave{background:#3b78a5;border-color:#5994bd;font-weight:bold} #librarySave:hover{background:#5596ca;border-color:#8bc8f5;color:#fff} #librarySave:pressed{background:#214865;border:1px solid #b9e1ff;color:#fff} #librarySecondary{background:transparent;border-color:#3d484e;color:#bfc7cb} #librarySecondary:hover{background:#30393d;border-color:#596a73;color:#fff} #libraryDelete{background:transparent;border-color:#4b3b3b;color:#c8b7b7} #libraryDelete:hover{background:#713d3d;border-color:#9b5656;color:#fff}
         QMenu{background:#252a2c;border:1px solid #596267;padding:4px} QMenu::item{padding:7px 28px 7px 12px;border-radius:3px} QMenu::item:selected{background:#3b6f9c;color:#fff} QMenu::separator{height:1px;background:#4b5255;margin:4px 7px}
         QScrollBar:vertical{background:#171b1d;width:12px;margin:0;border:0;border-radius:6px} QScrollBar::handle:vertical{background:#46545c;min-height:28px;margin:2px;border-radius:4px} QScrollBar::handle:vertical:hover{background:#63869b} QScrollBar::handle:vertical:pressed{background:#74a8c6}
@@ -1844,7 +2025,7 @@ class MainWindow(QMainWindow):
                 name = str(meta["name"])
                 members = meta["members"]
                 item = QListWidgetItem(f"{name}\n{len(members)} project{'s' if len(members) != 1 else ''}")
-                item.setData(Qt.ItemDataRole.UserRole, {"kind": "collection", "name": name, "description": meta["description"]})
+                item.setData(Qt.ItemDataRole.UserRole, {"kind": "collection", "name": name, "description": meta["description"], "members": members})
                 item.setToolTip(f"Collection: {name}")
                 item.setSizeHint(QSize(self.project_icon_size + 28, self.project_icon_size + 76))
                 collection_cover = self.collection_pixmap(members[:4], self.project_icon_size)
@@ -1862,6 +2043,13 @@ class MainWindow(QMainWindow):
                 continue
             name = str(meta.get("name") or "Untitled project")
             description = " ".join(str(meta.get("description") or "No description").split())
+            state_labels = []
+            if meta.get("tag"):
+                state_labels.append(str(meta["tag"]))
+            if meta.get("archived"):
+                state_labels.append("Archive")
+            if state_labels:
+                description = f"[{' · '.join(state_labels)}] {description}"
             if len(description) > 105:
                 description = description[:102] + "…"
             item = QListWidgetItem(f"{name}\n{description}")
@@ -1874,6 +2062,21 @@ class MainWindow(QMainWindow):
                 pixmap.fill(QColor("#171a1b"))
             else:
                 pixmap = self.square_pixmap(pixmap, self.project_icon_size)
+            tag_colors = {tag["name"].casefold(): tag["color"] for tag in self.project_tags()}
+            tile_color = ARCHIVE_COLOR if meta.get("archived") else tag_colors.get(str(meta.get("tag", "")).casefold())
+            if tile_color:
+                tint = QColor(tile_color)
+                background = QColor(tile_color)
+                background.setAlpha(100)
+                item.setBackground(background)
+                pixmap = pixmap.copy()
+                painter = QPainter(pixmap)
+                overlay = QColor(tint)
+                overlay.setAlpha(55)
+                painter.fillRect(pixmap.rect(), overlay)
+                painter.setPen(QPen(tint.lighter(145), max(3, round(self.project_icon_size * .025))))
+                painter.drawRect(pixmap.rect().adjusted(2, 2, -2, -2))
+                painter.end()
             if self.project_is_dirty(str(meta.get("id", ""))):
                 pixmap = pixmap.copy()
                 painter = QPainter(pixmap)
@@ -1944,6 +2147,9 @@ class MainWindow(QMainWindow):
             try:
                 meta = json.loads(path.read_text(encoding="utf-8"))
                 if Path(meta.get("projectPath", "")).is_file():
+                    meta.setdefault("tag", "")
+                    meta.setdefault("archived", False)
+                    meta["notes"] = normalize_notes(meta.get("notes", []))
                     records.append(meta)
             except (OSError, ValueError, TypeError):
                 continue
@@ -1976,15 +2182,88 @@ class MainWindow(QMainWindow):
 
     def filter_projects(self, query: str) -> None:
         terms = query.casefold().split()
+        selected = {key for key, button in self.project_filter_buttons.items() if button.isChecked()}
+        configured = {tag["name"].casefold(): tag["name"] for tag in self.project_tags()}
+
+        def visible(meta: dict) -> bool:
+            notes = " ".join(str(note.get("text", "")) for note in meta.get("notes", []) if isinstance(note, dict))
+            haystack = f"{meta.get('name', '')} {meta.get('description', '')} {meta.get('tag', '')} {notes}".casefold()
+            if not all(term in haystack for term in terms):
+                return False
+            if meta.get("archived"):
+                return "__archive__" in selected
+            tag = str(meta.get("tag", "")).casefold()
+            key = configured.get(tag, "__untagged__")
+            return key in selected
+
         for row in range(self.project_list.count()):
             item = self.project_list.item(row)
             meta = item.data(Qt.ItemDataRole.UserRole) or {}
-            haystack = f"{meta.get('name', '')} {meta.get('description', '')}".casefold()
-            item.setHidden(not all(term in haystack for term in terms))
+            if meta.get("kind") == "collection":
+                item.setHidden(not any(visible(member) for member in meta.get("members", [])))
+            else:
+                item.setHidden(not visible(meta))
 
     def selected_library_project(self) -> dict | None:
         item = self.project_list.currentItem()
         return item.data(Qt.ItemDataRole.UserRole) if item else None
+
+    def project_library_menu(self, point) -> None:
+        item = self.project_list.itemAt(point)
+        if not item:
+            return
+        self.project_list.setCurrentItem(item)
+        meta = item.data(Qt.ItemDataRole.UserRole) or {}
+        if meta.get("kind") != "project":
+            return
+        menu = QMenu(self)
+        state_menu = menu.addMenu("Set clip state")
+        clear = state_menu.addAction("No state")
+        clear.setCheckable(True)
+        clear.setChecked(not meta.get("tag"))
+        clear.triggered.connect(lambda: self.set_selected_project_tag(""))
+        for tag in self.project_tags():
+            action = state_menu.addAction(tag["name"])
+            action.setCheckable(True)
+            action.setChecked(str(meta.get("tag", "")).casefold() == tag["name"].casefold())
+            action.triggered.connect(lambda checked=False, name=tag["name"]: self.set_selected_project_tag(name))
+        menu.addSeparator()
+        archive = menu.addAction("Restore from archive" if meta.get("archived") else "Archive project")
+        archive.triggered.connect(self.toggle_archive_selected)
+        menu.addSeparator()
+        menu.addAction("Edit project details", self.edit_library_project)
+        menu.addAction("Delete project", self.delete_library_project)
+        menu.exec(self.project_list.viewport().mapToGlobal(point))
+
+    def persist_library_metadata(self, meta: dict) -> None:
+        clean = {key: value for key, value in meta.items() if key not in {"kind", "members"}}
+        root = project_library_path()
+        (root / f"{clean['id']}.meta.json").write_text(json.dumps(clean, indent=2), encoding="utf-8")
+        project_path = Path(clean.get("projectPath", ""))
+        if project_path.is_file():
+            payload = json.loads(project_path.read_text(encoding="utf-8"))
+            payload["library"] = {key: clean.get(key, "") for key in ("id", "name", "description", "collection", "savedAt", "tag", "archived", "notes")}
+            project_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    def set_selected_project_tag(self, name: str) -> None:
+        meta = self.selected_library_project()
+        if not meta or meta.get("kind") != "project":
+            return
+        meta["tag"] = name
+        self.persist_library_metadata(meta)
+        self.refresh_project_library(str(meta["id"]))
+        self.statusBar().showMessage(f"Project state set to {name or 'No state'}: {meta.get('name', 'Untitled project')}")
+
+    def toggle_archive_selected(self) -> None:
+        meta = self.selected_library_project()
+        if not meta or meta.get("kind") != "project":
+            return
+        meta["archived"] = not bool(meta.get("archived"))
+        self.persist_library_metadata(meta)
+        project_id = str(meta["id"])
+        self.refresh_project_library(project_id)
+        action = "Archived" if meta["archived"] else "Restored"
+        self.statusBar().showMessage(f"{action} project: {meta.get('name', 'Untitled project')}")
 
     def project_is_dirty(self, project_id: str) -> bool:
         if project_id == self.current_project_id:
@@ -2080,6 +2359,7 @@ class MainWindow(QMainWindow):
                     "description": intent or f"Magic Build sequence generated from {source_name}.",
                     "collection": self.current_collection or "",
                     "projectPath": str(root / f"{project_id}.LTXD"),
+                    "tag": "", "archived": False, "notes": [],
                 }
             else:
                 collections = [str(record.get("collection")) for record in self.library_records() if record.get("collection")]
@@ -2092,6 +2372,7 @@ class MainWindow(QMainWindow):
                     "description": dialog.description.toPlainText().strip(),
                     "collection": dialog.collection_name(),
                     "projectPath": str(root / f"{project_id}.LTXD"),
+                    "tag": "", "archived": False, "notes": dialog.notes_value(),
                 }
             self.current_project_id = project_id
             self.current_project_name = meta["name"]
@@ -2103,7 +2384,7 @@ class MainWindow(QMainWindow):
             visual = next((segment for segment in self.segments if segment.kind != "text" and segment.preview_path), None)
             meta["thumbnailData"] = data_url(visual.preview_path, max_edge=360, quality=84) if visual else ""
         payload = self.project_payload()
-        payload["library"] = {key: meta.get(key, "") for key in ("id", "name", "description", "collection", "savedAt")}
+        payload["library"] = {key: meta.get(key, "") for key in ("id", "name", "description", "collection", "savedAt", "tag", "archived", "notes")}
         Path(meta["projectPath"]).write_text(json.dumps(payload, indent=2), encoding="utf-8")
         (root / f"{meta['id']}.meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
         self.project_dirty = False
@@ -2223,6 +2504,7 @@ class MainWindow(QMainWindow):
             collection=str(meta.get("collection", "")), collections=collections,
             thumbnail_options=thumbnail_options, thumbnail_data=str(meta.get("thumbnailData", "")),
             thumbnail_source=str(meta.get("thumbnailSource", "")),
+            notes=meta.get("notes", []),
         )
         if not dialog.exec():
             return
@@ -2233,15 +2515,10 @@ class MainWindow(QMainWindow):
             "collection": dialog.collection_name(),
             "thumbnailSource": thumbnail_source,
             "thumbnailData": thumbnail_data,
+            "notes": dialog.notes_value(),
             "savedAt": datetime.now(timezone.utc).isoformat(),
         })
-        meta.pop("kind", None)
-        root = project_library_path()
-        (root / f"{meta['id']}.meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
-        project_path = Path(meta["projectPath"])
-        payload = json.loads(project_path.read_text(encoding="utf-8"))
-        payload["library"] = {key: meta.get(key, "") for key in ("id", "name", "description", "collection", "savedAt")}
-        project_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        self.persist_library_metadata(meta)
         if self.current_project_id == meta["id"]:
             self.current_project_name = meta["name"]
             self.update_window_title()
@@ -2746,6 +3023,8 @@ class MainWindow(QMainWindow):
             self.ui_scale_spin.blockSignals(False)
             self._apply_theme()
             self.update_provider_button()
+            self.rebuild_project_filter_buttons()
+            self.refresh_project_library()
 
     def set_ui_text_scale(self, value: int) -> None:
         value = max(75, min(200, value))
