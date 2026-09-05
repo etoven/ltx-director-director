@@ -16,7 +16,7 @@ from PySide6.QtCore import QDateTime, QEasingCurve, QEvent, QEventLoop, QObject,
 from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
-    QDateTimeEdit, QDockWidget, QFileDialog, QFormLayout, QFrame, QHBoxLayout, QLabel, QLineEdit,
+    QColorDialog, QDateTimeEdit, QDockWidget, QFileDialog, QFormLayout, QFrame, QHBoxLayout, QLabel, QLineEdit,
     QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox, QPushButton,
     QSizePolicy, QSlider, QSpinBox, QSplitter, QSplitterHandle, QStatusBar, QStyle, QTextEdit, QToolBar, QVBoxLayout, QWidget,
 )
@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
 from .ai import GEMINI_MODELS, build_prompts, refine_segment_prompt, refine_timing, retryable_connection_error
 from .media import APP_CACHE, comfy_input_references, copy_media_for_export, data_url, extract_audio_for_export, prepare_media, safe_media_filename, unique_media_filename, write_data_url
 from .models import Segment, order_segments_by_ids, text_segment_from_ltx
-from .project_data import ARCHIVE_COLOR, load_project_tags, new_note, normalize_notes, tags_from_text, tags_to_text
+from .project_data import ARCHIVE_COLOR, load_project_tags, new_note, normalize_notes
 
 FPS = 24
 MAX_SECONDS = 60.0
@@ -831,6 +831,71 @@ class SegmentCard(QFrame):
         event.ignore()
 
 
+class TagEditor(QWidget):
+    def __init__(self, tags: list[dict[str, str]], parent=None):
+        super().__init__(parent)
+        self.rows: list[tuple[QWidget, QLineEdit, QPushButton]] = []
+        self.layout = QVBoxLayout(self)
+        self.layout.setContentsMargins(0, 0, 0, 0)
+        self.layout.setSpacing(4)
+        for tag in tags:
+            self.add_tag(tag["name"], tag["color"])
+        self.add_button = QPushButton("+ Add tag")
+        self.add_button.clicked.connect(lambda: self.add_tag("New tag", "#56616a"))
+        self.layout.addWidget(self.add_button)
+
+    @staticmethod
+    def style_color_button(button: QPushButton, color: str) -> None:
+        button.setProperty("tagColor", color)
+        button.setStyleSheet(f"background: {color}; border: 1px solid {QColor(color).lighter(150).name()}; border-radius: 4px;")
+
+    def add_tag(self, name: str, color: str) -> None:
+        row = QWidget()
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(5)
+        name_input = QLineEdit(name)
+        color_button = QPushButton()
+        color_button.setFixedWidth(42)
+        color_button.setToolTip("Choose tag color")
+        self.style_color_button(color_button, color)
+        color_button.clicked.connect(lambda: self.choose_color(color_button))
+        remove = QPushButton("×")
+        remove.setFixedWidth(28)
+        remove.setToolTip("Remove tag")
+        remove.clicked.connect(lambda: self.remove_tag(row))
+        layout.addWidget(name_input, 1)
+        layout.addWidget(color_button)
+        layout.addWidget(remove)
+        self.rows.append((row, name_input, color_button))
+        index = self.layout.count() - 1 if hasattr(self, "add_button") else self.layout.count()
+        self.layout.insertWidget(max(0, index), row)
+
+    def choose_color(self, button: QPushButton) -> None:
+        selected = QColorDialog.getColor(QColor(str(button.property("tagColor"))), self, "Choose tag color")
+        if selected.isValid():
+            self.style_color_button(button, selected.name())
+
+    def remove_tag(self, row: QWidget) -> None:
+        self.rows = [value for value in self.rows if value[0] is not row]
+        row.deleteLater()
+
+    def tags(self) -> list[dict[str, str]]:
+        result = []
+        names = set()
+        for _row, name_input, color_button in self.rows:
+            name = name_input.text().strip()
+            if not name:
+                raise ValueError("Every project tag needs a name.")
+            if name.casefold() in names:
+                raise ValueError(f"Duplicate project tag: {name}")
+            names.add(name.casefold())
+            result.append({"name": name, "color": str(color_button.property("tagColor"))})
+        if not result:
+            raise ValueError("Add at least one project tag.")
+        return result
+
+
 class SettingsDialog(QDialog):
     def __init__(self, settings: QSettings, parent=None):
         super().__init__(parent)
@@ -900,11 +965,8 @@ class SettingsDialog(QDialog):
         comfy_directory_layout.setContentsMargins(0, 0, 0, 0)
         comfy_directory_layout.addWidget(self.comfy_root_dir, 1)
         comfy_directory_layout.addWidget(self.comfy_root_browse)
-        self.project_tags = QTextEdit()
-        self.project_tags.setPlainText(tags_to_text(load_project_tags(settings.value("project_tags", ""))))
-        self.project_tags.setPlaceholderText("Done | #367d4a\nConsider | #8a742f\nRe-shoot | #934545")
-        self.project_tags.setToolTip("One project state per line: Name | #hex color. Archive is built in.")
-        self.project_tags.setFixedHeight(86)
+        self.project_tags = TagEditor(load_project_tags(settings.value("project_tags", "")))
+        self.project_tags.setToolTip("Edit tag names and click a color swatch to choose its color. Archive is built in.")
         form.addRow("Provider", self.provider)
         form.addRow("Gemini model", self.model)
         form.addRow("Gemini API key", self.gemini)
@@ -927,7 +989,7 @@ class SettingsDialog(QDialog):
 
     def accept(self) -> None:
         try:
-            project_tags = tags_from_text(self.project_tags.toPlainText())
+            project_tags = self.project_tags.tags()
         except ValueError as error:
             QMessageBox.warning(self, "Invalid project tags", str(error))
             return
@@ -1929,7 +1991,7 @@ class MainWindow(QMainWindow):
         #audioToggle,#qualityToggle,#frameToggle{background:transparent;border:1px solid #455057;color:#b8c0c4} #audioToggle:hover,#qualityToggle:hover,#frameToggle:hover{background:#293236;border-color:#65747c;color:#eef3f5} #audioToggle:checked,#qualityToggle:checked,#frameToggle:checked{background:#244d37;border-color:#4c9b6a;color:#c9f4d6} #copyButton{min-height:0;padding:1px 4px;margin:0;border:0;background:transparent;color:#aeb5b8} #copyButton:hover{background:#303a3f;color:#e5f4fc;border:0} #copyButton:pressed{background:#1b2429;color:#8fd3f7;border:0} QStatusBar{background:#171c1e;color:#7f898d;border-top:1px solid #30383c}
         QDockWidget{background:#191d1f;color:#d9dcde;font-weight:bold} QDockWidget::title{background:#1b2022;border-bottom:1px solid #0e1011;padding:8px;text-align:left}
         #projectLibraryTitle,#magicOverlayTitle{font-size:15px;font-weight:bold;color:#f0f2f3} #libraryControls{background:#1c2225;border:1px solid #343e43;border-radius:5px} #projectSearch{background:#171c1e;border:1px solid #343d41;border-radius:5px;padding-left:10px} #projectSearch:focus{border-color:#4d829d;background:#1b2225} #projectList{background:#15191b;border:1px solid #30383c;border-radius:5px;padding:10px}
-        #projectList::item{background:#22282b;border:1px solid #363f43;border-radius:6px;margin:4px;padding:7px;color:#dce0e2} #projectList::item:hover{border-color:#6488a1;background:#293136} #projectList::item:selected{border:2px solid #69a5d0;background:#27343b}
+        #projectList::item{background:transparent;border:1px solid #363f43;border-radius:6px;margin:4px;padding:7px;color:#dce0e2} #projectList::item:hover{border-color:#6488a1} #projectList::item:selected{border:2px solid #69a5d0}
         #projectFilters{background:#171c1e;border:1px solid #30383c;border-radius:5px} #projectFilterButton{min-height:17px;padding:2px 6px;background:#23292c;border-color:#394348;color:#aeb8bd} #projectFilterButton:hover{background:#303a3f;color:#fff} #projectNotesList{background:#171b1d;border:1px solid #3a4449;border-radius:4px;padding:3px} #projectNotesList::item{background:transparent;border:0;margin:2px;padding:0} #projectNoteRow{background:#22282b;border:1px solid #394348;border-radius:4px} #projectNoteRow:hover{border-color:#5e8295;background:#283136} #projectNoteDate{color:#86a9ba;font-size:9px} #projectNoteDelete{min-height:0;padding:0;background:transparent;border:0;color:#bca6a6;font-size:15px} #projectNoteDelete:hover{background:#713d3d;color:white}
         #librarySave{background:#3b78a5;border-color:#5994bd;font-weight:bold} #librarySave:hover{background:#5596ca;border-color:#8bc8f5;color:#fff} #librarySave:pressed{background:#214865;border:1px solid #b9e1ff;color:#fff} #librarySecondary{background:transparent;border-color:#3d484e;color:#bfc7cb} #librarySecondary:hover{background:#30393d;border-color:#596a73;color:#fff} #libraryDelete{background:transparent;border-color:#4b3b3b;color:#c8b7b7} #libraryDelete:hover{background:#713d3d;border-color:#9b5656;color:#fff}
         QMenu{background:#252a2c;border:1px solid #596267;padding:4px} QMenu::item{padding:7px 28px 7px 12px;border-radius:3px} QMenu::item:selected{background:#3b6f9c;color:#fff} QMenu::separator{height:1px;background:#4b5255;margin:4px 7px}
@@ -2025,10 +2087,21 @@ class MainWindow(QMainWindow):
                 name = str(meta["name"])
                 members = meta["members"]
                 item = QListWidgetItem(f"{name}\n{len(members)} project{'s' if len(members) != 1 else ''}")
+                item.setBackground(QColor("#22282b"))
                 item.setData(Qt.ItemDataRole.UserRole, {"kind": "collection", "name": name, "description": meta["description"], "members": members})
                 item.setToolTip(f"Collection: {name}")
                 item.setSizeHint(QSize(self.project_icon_size + 28, self.project_icon_size + 76))
                 collection_cover = self.collection_pixmap(members[:4], self.project_icon_size)
+                state_colors = {self.project_state_color(member) for member in members}
+                state_colors.discard(None)
+                if len(state_colors) == 1 and all(self.project_state_color(member) in state_colors for member in members):
+                    painter = QPainter(collection_cover)
+                    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+                    painter.setPen(QPen(QColor(next(iter(state_colors))).lighter(135), max(4, round(self.project_icon_size * .035))))
+                    painter.setBrush(Qt.BrushStyle.NoBrush)
+                    inset = max(2, round(self.project_icon_size * .02))
+                    painter.drawRoundedRect(collection_cover.rect().adjusted(inset, inset, -inset, -inset), 7, 7)
+                    painter.end()
                 if any(self.project_is_dirty(str(member.get("id", ""))) for member in members):
                     painter = QPainter(collection_cover)
                     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -2043,16 +2116,10 @@ class MainWindow(QMainWindow):
                 continue
             name = str(meta.get("name") or "Untitled project")
             description = " ".join(str(meta.get("description") or "No description").split())
-            state_labels = []
-            if meta.get("tag"):
-                state_labels.append(str(meta["tag"]))
-            if meta.get("archived"):
-                state_labels.append("Archive")
-            if state_labels:
-                description = f"[{' · '.join(state_labels)}] {description}"
             if len(description) > 105:
                 description = description[:102] + "…"
             item = QListWidgetItem(f"{name}\n{description}")
+            item.setBackground(QColor("#22282b"))
             item.setData(Qt.ItemDataRole.UserRole, {**meta, "kind": "project"})
             item.setToolTip(f"{name}\n\n{meta.get('description', '')}")
             item.setSizeHint(QSize(self.project_icon_size + 28, self.project_icon_size + 76))
@@ -2062,21 +2129,21 @@ class MainWindow(QMainWindow):
                 pixmap.fill(QColor("#171a1b"))
             else:
                 pixmap = self.square_pixmap(pixmap, self.project_icon_size)
-            tag_colors = {tag["name"].casefold(): tag["color"] for tag in self.project_tags()}
-            tile_color = ARCHIVE_COLOR if meta.get("archived") else tag_colors.get(str(meta.get("tag", "")).casefold())
+            tile_color = self.project_state_color(meta)
             if tile_color:
-                tint = QColor(tile_color)
                 background = QColor(tile_color)
-                background.setAlpha(100)
+                background.setAlpha(150)
                 item.setBackground(background)
                 pixmap = pixmap.copy()
-                painter = QPainter(pixmap)
-                overlay = QColor(tint)
-                overlay.setAlpha(55)
-                painter.fillRect(pixmap.rect(), overlay)
-                painter.setPen(QPen(tint.lighter(145), max(3, round(self.project_icon_size * .025))))
-                painter.drawRect(pixmap.rect().adjusted(2, 2, -2, -2))
-                painter.end()
+            labels = []
+            tag_colors = {tag["name"].casefold(): tag["color"] for tag in self.project_tags()}
+            tag_name = str(meta.get("tag", ""))
+            if tag_name:
+                labels.append((tag_name, tag_colors.get(tag_name.casefold(), "#56616a")))
+            if meta.get("archived"):
+                labels.append(("Archive", ARCHIVE_COLOR))
+            if labels:
+                pixmap = self.add_thumbnail_labels(pixmap, labels)
             if self.project_is_dirty(str(meta.get("id", ""))):
                 pixmap = pixmap.copy()
                 painter = QPainter(pixmap)
@@ -2099,6 +2166,41 @@ class MainWindow(QMainWindow):
     @staticmethod
     def project_entry_key(meta: dict) -> str:
         return f"collection:{meta.get('name', '')}" if meta.get("kind") == "collection" else f"project:{meta.get('id', '')}"
+
+    def project_state_color(self, meta: dict) -> str | None:
+        if meta.get("archived"):
+            return ARCHIVE_COLOR
+        colors = {tag["name"].casefold(): tag["color"] for tag in self.project_tags()}
+        return colors.get(str(meta.get("tag", "")).casefold())
+
+    @staticmethod
+    def add_thumbnail_labels(pixmap: QPixmap, labels: list[tuple[str, str]]) -> QPixmap:
+        result = pixmap.copy()
+        painter = QPainter(result)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        font = painter.font()
+        font.setBold(True)
+        font.setPixelSize(max(9, round(result.height() * .075)))
+        painter.setFont(font)
+        metrics = painter.fontMetrics()
+        margin = max(4, round(result.width() * .03))
+        pad_x = max(6, round(result.width() * .035))
+        height = metrics.height() + max(4, round(result.height() * .025))
+        bottom = result.height() - margin
+        for label, color in reversed(labels):
+            display = metrics.elidedText(label, Qt.TextElideMode.ElideRight, max(30, result.width() - margin * 2 - pad_x * 2))
+            width = min(result.width() - margin * 2, metrics.horizontalAdvance(display) + pad_x * 2)
+            rect = QRectF(result.width() - margin - width, bottom - height, width, height)
+            background = QColor(color)
+            background.setAlpha(235)
+            painter.setPen(QPen(background.lighter(145), 1))
+            painter.setBrush(background)
+            painter.drawRoundedRect(rect, height / 2, height / 2)
+            painter.setPen(QColor("#111416") if background.lightness() > 150 else QColor("#ffffff"))
+            painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, display)
+            bottom -= height + max(3, round(result.height() * .02))
+        painter.end()
+        return result
 
     def custom_order_settings_key(self) -> str:
         return f"project_custom_order/{self.current_collection or '__root__'}"
@@ -2214,19 +2316,24 @@ class MainWindow(QMainWindow):
             return
         self.project_list.setCurrentItem(item)
         meta = item.data(Qt.ItemDataRole.UserRole) or {}
-        if meta.get("kind") != "project":
-            return
         menu = QMenu(self)
-        state_menu = menu.addMenu("Set clip state")
+        is_collection = meta.get("kind") == "collection"
+        state_menu = menu.addMenu("Set group state" if is_collection else "Set clip state")
         clear = state_menu.addAction("No state")
         clear.setCheckable(True)
-        clear.setChecked(not meta.get("tag"))
+        clear.setChecked(not meta.get("tag") if not is_collection else all(not member.get("tag") for member in meta.get("members", [])))
         clear.triggered.connect(lambda: self.set_selected_project_tag(""))
         for tag in self.project_tags():
             action = state_menu.addAction(tag["name"])
             action.setCheckable(True)
-            action.setChecked(str(meta.get("tag", "")).casefold() == tag["name"].casefold())
+            action.setChecked(
+                str(meta.get("tag", "")).casefold() == tag["name"].casefold()
+                if not is_collection else bool(meta.get("members")) and all(str(member.get("tag", "")).casefold() == tag["name"].casefold() for member in meta["members"])
+            )
             action.triggered.connect(lambda checked=False, name=tag["name"]: self.set_selected_project_tag(name))
+        if is_collection:
+            menu.exec(self.project_list.viewport().mapToGlobal(point))
+            return
         menu.addSeparator()
         archive = menu.addAction("Restore from archive" if meta.get("archived") else "Archive project")
         archive.triggered.connect(self.toggle_archive_selected)
@@ -2247,7 +2354,17 @@ class MainWindow(QMainWindow):
 
     def set_selected_project_tag(self, name: str) -> None:
         meta = self.selected_library_project()
-        if not meta or meta.get("kind") != "project":
+        if not meta:
+            return
+        if meta.get("kind") == "collection":
+            members = meta.get("members", [])
+            for member in members:
+                member["tag"] = name
+                self.persist_library_metadata(member)
+            self.refresh_project_library()
+            self.statusBar().showMessage(f"Group state set to {name or 'No state'}: {meta.get('name', 'Collection')} ({len(members)} projects)")
+            return
+        if meta.get("kind") != "project":
             return
         meta["tag"] = name
         self.persist_library_metadata(meta)
