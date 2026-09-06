@@ -13,22 +13,23 @@ from pathlib import Path
 from uuid import uuid4
 
 from PySide6.QtCore import QDateTime, QEasingCurve, QEvent, QEventLoop, QObject, QRunnable, QRectF, QSettings, QSize, QStandardPaths, Qt, QThreadPool, QTimer, QVariantAnimation, Signal
-from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPen, QPixmap
+from PySide6.QtGui import QAction, QActionGroup, QBrush, QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
     QColorDialog, QDateTimeEdit, QDockWidget, QFileDialog, QFormLayout, QFrame, QHBoxLayout, QLabel, QLineEdit,
     QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox, QPushButton,
-    QSizePolicy, QSlider, QSpinBox, QSplitter, QSplitterHandle, QStatusBar, QStyle, QTextEdit, QToolBar, QVBoxLayout, QWidget,
+    QSizePolicy, QSlider, QSpinBox, QSplitter, QSplitterHandle, QStatusBar, QStyle, QStyledItemDelegate, QStyleOptionViewItem, QTextEdit, QToolBar, QVBoxLayout, QWidget,
 )
 
 from .ai import GEMINI_MODELS, build_prompts, refine_segment_prompt, refine_timing, retryable_connection_error
 from .media import APP_CACHE, comfy_input_references, copy_media_for_export, data_url, extract_audio_for_export, prepare_media, safe_media_filename, unique_media_filename, write_data_url
 from .models import Segment, order_segments_by_ids, text_segment_from_ltx
-from .project_data import ARCHIVE_COLOR, load_project_tags, new_note, normalize_notes
+from .project_data import ARCHIVE_COLOR, load_other_tags, load_project_tags, new_note, normalize_notes, normalize_project_labels
 
 FPS = 24
 MAX_SECONDS = 60.0
 MAX_SEGMENTS = 16
+PROJECT_CARD_COLOR_ROLE = int(Qt.ItemDataRole.UserRole) + 1
 
 
 def project_library_path() -> Path:
@@ -338,6 +339,29 @@ class ProjectListWidget(QListWidget):
             event.accept()
             return
         super().mouseReleaseEvent(event)
+
+
+class ProjectTileDelegate(QStyledItemDelegate):
+    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index) -> None:
+        color_value = str(index.data(PROJECT_CARD_COLOR_ROLE) or "")
+        border = QColor(color_value).lighter(125) if color_value else QColor("#3b464b")
+        card = option.rect.adjusted(4, 4, -4, -4)
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setBrush(QColor("#22282b"))
+        painter.setPen(QPen(border, 4 if color_value else 1))
+        painter.drawRoundedRect(card, 7, 7)
+        if option.state & QStyle.StateFlag.State_Selected:
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.setPen(QPen(QColor("#d9eefb"), 1))
+            painter.drawRoundedRect(card.adjusted(3, 3, -3, -3), 5, 5)
+        painter.restore()
+        clean = QStyleOptionViewItem(option)
+        clean.state &= ~QStyle.StateFlag.State_Selected
+        clean.state &= ~QStyle.StateFlag.State_MouseOver
+        clean.state &= ~QStyle.StateFlag.State_HasFocus
+        clean.backgroundBrush = QBrush(Qt.BrushStyle.NoBrush)
+        super().paint(painter, clean, index)
 
 
 class MagicSpinner(QWidget):
@@ -832,8 +856,9 @@ class SegmentCard(QFrame):
 
 
 class TagEditor(QWidget):
-    def __init__(self, tags: list[dict[str, str]], parent=None):
+    def __init__(self, tags: list[dict[str, str]], parent=None, allow_empty: bool = False):
         super().__init__(parent)
+        self.allow_empty = allow_empty
         self.rows: list[tuple[QWidget, QLineEdit, QPushButton]] = []
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
@@ -891,7 +916,7 @@ class TagEditor(QWidget):
                 raise ValueError(f"Duplicate project tag: {name}")
             names.add(name.casefold())
             result.append({"name": name, "color": str(color_button.property("tagColor"))})
-        if not result:
+        if not result and not self.allow_empty:
             raise ValueError("Add at least one project tag.")
         return result
 
@@ -965,8 +990,11 @@ class SettingsDialog(QDialog):
         comfy_directory_layout.setContentsMargins(0, 0, 0, 0)
         comfy_directory_layout.addWidget(self.comfy_root_dir, 1)
         comfy_directory_layout.addWidget(self.comfy_root_browse)
-        self.project_tags = TagEditor(load_project_tags(settings.value("project_tags", "")))
-        self.project_tags.setToolTip("Edit tag names and click a color swatch to choose its color. Archive is built in.")
+        status_value = settings.value("project_status_tags", settings.value("project_tags", ""))
+        self.project_status_tags = TagEditor(load_project_tags(status_value))
+        self.project_status_tags.setToolTip("A project can have one status. Its status controls the project card color.")
+        self.project_other_tags = TagEditor(load_other_tags(settings.value("project_other_tags", "")), allow_empty=True)
+        self.project_other_tags.setToolTip("A project can have any number of these labels. They appear as thumbnail pills.")
         form.addRow("Provider", self.provider)
         form.addRow("Gemini model", self.model)
         form.addRow("Gemini API key", self.gemini)
@@ -977,7 +1005,8 @@ class SettingsDialog(QDialog):
         form.addRow("UI text scale (DPI)", text_scale_row)
         form.addRow("Default segment export folder", save_directory_row)
         form.addRow("ComfyUI working directory", comfy_directory_row)
-        form.addRow("Project color tags", self.project_tags)
+        form.addRow("Status tags (choose one)", self.project_status_tags)
+        form.addRow("Other tags (choose many)", self.project_other_tags)
         form.addRow("", self.remember)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self.accept)
@@ -989,7 +1018,11 @@ class SettingsDialog(QDialog):
 
     def accept(self) -> None:
         try:
-            project_tags = self.project_tags.tags()
+            project_status_tags = self.project_status_tags.tags()
+            project_other_tags = self.project_other_tags.tags()
+            names = [tag["name"].casefold() for tag in project_status_tags + project_other_tags]
+            if len(names) != len(set(names)) or "archive" in names:
+                raise ValueError("Status and other tag names must be unique, and Archive is reserved.")
         except ValueError as error:
             QMessageBox.warning(self, "Invalid project tags", str(error))
             return
@@ -1002,7 +1035,9 @@ class SettingsDialog(QDialog):
         self.settings.setValue("ui_text_scale", self.ui_text_scale.value())
         self.settings.setValue("segment_export_dir", self.segment_save_dir.text().strip())
         self.settings.setValue("comfy_root_dir", self.comfy_root_dir.text().strip())
-        self.settings.setValue("project_tags", json.dumps(project_tags))
+        self.settings.setValue("project_status_tags", json.dumps(project_status_tags))
+        self.settings.setValue("project_other_tags", json.dumps(project_other_tags))
+        self.settings.setValue("project_tags", json.dumps(project_status_tags))
         self.settings.setValue("dialogs/settings_geometry", self.saveGeometry())
         if self.remember.isChecked():
             self.settings.setValue("gemini_key", self.gemini.text().strip())
@@ -1798,6 +1833,7 @@ class MainWindow(QMainWindow):
 
         self.project_list = ProjectListWidget()
         self.project_list.setObjectName("projectList")
+        self.project_list.setItemDelegate(ProjectTileDelegate(self.project_list))
         self.project_list.setViewMode(QListWidget.ViewMode.IconMode)
         self.project_list.setFlow(QListWidget.Flow.LeftToRight)
         self.project_list.setWrapping(True)
@@ -1844,8 +1880,11 @@ class MainWindow(QMainWindow):
         self.project_dock.hide()
         self.refresh_project_library()
 
-    def project_tags(self) -> list[dict[str, str]]:
-        return load_project_tags(self.settings.value("project_tags", ""))
+    def project_status_tags(self) -> list[dict[str, str]]:
+        return load_project_tags(self.settings.value("project_status_tags", self.settings.value("project_tags", "")))
+
+    def project_other_tags(self) -> list[dict[str, str]]:
+        return load_other_tags(self.settings.value("project_other_tags", ""))
 
     def saved_project_filters(self) -> set[str]:
         try:
@@ -1854,7 +1893,7 @@ class MainWindow(QMainWindow):
                 return {str(item) for item in value}
         except (TypeError, ValueError):
             pass
-        return {"__untagged__", *(tag["name"] for tag in self.project_tags())}
+        return {"__untagged__", *(f"status:{tag['name']}" for tag in self.project_status_tags())}
 
     def rebuild_project_filter_buttons(self) -> None:
         while self.project_filter_layout.count():
@@ -1863,7 +1902,14 @@ class MainWindow(QMainWindow):
                 item.widget().deleteLater()
         selected = self.saved_project_filters()
         self.project_filter_buttons = {}
-        definitions = [("__untagged__", "Untagged", "#56616a"), *((tag["name"], tag["name"], tag["color"]) for tag in self.project_tags()), ("__archive__", "Archive", ARCHIVE_COLOR)]
+        status_names = {tag["name"] for tag in self.project_status_tags()}
+        selected |= {f"status:{name}" for name in status_names if name in selected}
+        definitions = [
+            ("__untagged__", "No status", "#56616a"),
+            *((f"status:{tag['name']}", tag["name"], tag["color"]) for tag in self.project_status_tags()),
+            *((f"tag:{tag['name']}", tag["name"], tag["color"]) for tag in self.project_other_tags()),
+            ("__archive__", "Archive", ARCHIVE_COLOR),
+        ]
         for key, label, color in definitions:
             button = QPushButton(label)
             button.setObjectName("projectFilterButton")
@@ -2092,16 +2138,6 @@ class MainWindow(QMainWindow):
                 item.setToolTip(f"Collection: {name}")
                 item.setSizeHint(QSize(self.project_icon_size + 28, self.project_icon_size + 76))
                 collection_cover = self.collection_pixmap(members[:4], self.project_icon_size)
-                state_colors = {self.project_state_color(member) for member in members}
-                state_colors.discard(None)
-                if len(state_colors) == 1 and all(self.project_state_color(member) in state_colors for member in members):
-                    painter = QPainter(collection_cover)
-                    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-                    painter.setPen(QPen(QColor(next(iter(state_colors))).lighter(135), max(4, round(self.project_icon_size * .035))))
-                    painter.setBrush(Qt.BrushStyle.NoBrush)
-                    inset = max(2, round(self.project_icon_size * .02))
-                    painter.drawRoundedRect(collection_cover.rect().adjusted(inset, inset, -inset, -inset), 7, 7)
-                    painter.end()
                 if any(self.project_is_dirty(str(member.get("id", ""))) for member in members):
                     painter = QPainter(collection_cover)
                     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -2131,15 +2167,15 @@ class MainWindow(QMainWindow):
                 pixmap = self.square_pixmap(pixmap, self.project_icon_size)
             tile_color = self.project_state_color(meta)
             if tile_color:
-                background = QColor(tile_color)
-                background.setAlpha(150)
-                item.setBackground(background)
-                pixmap = pixmap.copy()
+                item.setData(PROJECT_CARD_COLOR_ROLE, tile_color)
             labels = []
-            tag_colors = {tag["name"].casefold(): tag["color"] for tag in self.project_tags()}
-            tag_name = str(meta.get("tag", ""))
-            if tag_name:
-                labels.append((tag_name, tag_colors.get(tag_name.casefold(), "#56616a")))
+            status_colors = {tag["name"].casefold(): tag["color"] for tag in self.project_status_tags()}
+            other_colors = {tag["name"].casefold(): tag["color"] for tag in self.project_other_tags()}
+            status = str(meta.get("status", ""))
+            if status:
+                labels.append((status, status_colors.get(status.casefold(), "#56616a")))
+            for label in meta.get("tags", []):
+                labels.append((str(label), other_colors.get(str(label).casefold(), "#56616a")))
             if meta.get("archived"):
                 labels.append(("Archive", ARCHIVE_COLOR))
             if labels:
@@ -2170,8 +2206,8 @@ class MainWindow(QMainWindow):
     def project_state_color(self, meta: dict) -> str | None:
         if meta.get("archived"):
             return ARCHIVE_COLOR
-        colors = {tag["name"].casefold(): tag["color"] for tag in self.project_tags()}
-        return colors.get(str(meta.get("tag", "")).casefold())
+        colors = {tag["name"].casefold(): tag["color"] for tag in self.project_status_tags()}
+        return colors.get(str(meta.get("status", meta.get("tag", ""))).casefold())
 
     @staticmethod
     def add_thumbnail_labels(pixmap: QPixmap, labels: list[tuple[str, str]]) -> QPixmap:
@@ -2249,7 +2285,7 @@ class MainWindow(QMainWindow):
             try:
                 meta = json.loads(path.read_text(encoding="utf-8"))
                 if Path(meta.get("projectPath", "")).is_file():
-                    meta.setdefault("tag", "")
+                    normalize_project_labels(meta)
                     meta.setdefault("archived", False)
                     meta["notes"] = normalize_notes(meta.get("notes", []))
                     records.append(meta)
@@ -2271,32 +2307,38 @@ class MainWindow(QMainWindow):
         cell = (size - gap) // 2
         second = cell + gap
         cells = ((0, 0), (second, 0), (0, second), (second, second))
+        line = max(3, round(size * .025))
         for member, (x, y) in zip(members, cells):
             pixmap = pixmap_from_data_url(str(member.get("thumbnailData", "")))
             if not pixmap.isNull():
                 painter.drawPixmap(x, y, self.square_pixmap(pixmap, cell))
-        painter.setPen(QPen(QColor("#657078"), gap))
-        divider = cell + gap // 2
-        painter.drawLine(divider, 0, divider, size)
-        painter.drawLine(0, divider, size, divider)
+            color = self.project_state_color(member) or "#657078"
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.setPen(QPen(QColor(color).lighter(125), line))
+            inset = max(1, line // 2)
+            painter.drawRect(x + inset, y + inset, cell - line, cell - line)
         painter.end()
         return result
 
     def filter_projects(self, query: str) -> None:
         terms = query.casefold().split()
         selected = {key for key, button in self.project_filter_buttons.items() if button.isChecked()}
-        configured = {tag["name"].casefold(): tag["name"] for tag in self.project_tags()}
+        statuses = {tag["name"].casefold(): tag["name"] for tag in self.project_status_tags()}
+        selected_other = {key.removeprefix("tag:").casefold() for key in selected if key.startswith("tag:")}
 
         def visible(meta: dict) -> bool:
             notes = " ".join(str(note.get("text", "")) for note in meta.get("notes", []) if isinstance(note, dict))
-            haystack = f"{meta.get('name', '')} {meta.get('description', '')} {meta.get('tag', '')} {notes}".casefold()
+            haystack = f"{meta.get('name', '')} {meta.get('description', '')} {meta.get('status', '')} {' '.join(meta.get('tags', []))} {notes}".casefold()
             if not all(term in haystack for term in terms):
                 return False
             if meta.get("archived"):
                 return "__archive__" in selected
-            tag = str(meta.get("tag", "")).casefold()
-            key = configured.get(tag, "__untagged__")
-            return key in selected
+            status = str(meta.get("status", "")).casefold()
+            status_key = f"status:{statuses[status]}" if status in statuses else "__untagged__"
+            if status_key not in selected:
+                return False
+            labels = {str(tag).casefold() for tag in meta.get("tags", [])}
+            return not selected_other or bool(labels & selected_other)
 
         for row in range(self.project_list.count()):
             item = self.project_list.item(row)
@@ -2318,25 +2360,42 @@ class MainWindow(QMainWindow):
         meta = item.data(Qt.ItemDataRole.UserRole) or {}
         menu = QMenu(self)
         is_collection = meta.get("kind") == "collection"
-        state_menu = menu.addMenu("Set group state" if is_collection else "Set clip state")
-        clear = state_menu.addAction("No state")
+        members = meta.get("members", []) if is_collection else [meta]
+        state_menu = menu.addMenu("Set group status" if is_collection else "Set status")
+        status_group = QActionGroup(state_menu)
+        status_group.setExclusive(True)
+        clear = state_menu.addAction("No status")
         clear.setCheckable(True)
-        clear.setChecked(not meta.get("tag") if not is_collection else all(not member.get("tag") for member in meta.get("members", [])))
-        clear.triggered.connect(lambda: self.set_selected_project_tag(""))
-        for tag in self.project_tags():
+        status_group.addAction(clear)
+        clear.setChecked(all(not member.get("status") for member in members))
+        clear.triggered.connect(lambda: self.set_selected_project_status(""))
+        for tag in self.project_status_tags():
             action = state_menu.addAction(tag["name"])
             action.setCheckable(True)
-            action.setChecked(
-                str(meta.get("tag", "")).casefold() == tag["name"].casefold()
-                if not is_collection else bool(meta.get("members")) and all(str(member.get("tag", "")).casefold() == tag["name"].casefold() for member in meta["members"])
-            )
-            action.triggered.connect(lambda checked=False, name=tag["name"]: self.set_selected_project_tag(name))
+            status_group.addAction(action)
+            action.setChecked(bool(members) and all(str(member.get("status", "")).casefold() == tag["name"].casefold() for member in members))
+            action.triggered.connect(lambda checked=False, name=tag["name"]: self.set_selected_project_status(name))
+
+        other_definitions = self.project_other_tags()
+        if other_definitions:
+            labels_menu = menu.addMenu("Group tags" if is_collection else "Tags")
+            for tag in other_definitions:
+                action = labels_menu.addAction(tag["name"])
+                action.setCheckable(True)
+                action.setChecked(bool(members) and all(tag["name"].casefold() in {str(value).casefold() for value in member.get("tags", [])} for member in members))
+                action.triggered.connect(lambda checked, name=tag["name"]: self.set_selected_project_label(name, checked))
+
+        menu.addSeparator()
+        all_archived = bool(members) and all(member.get("archived") for member in members)
+        archive = menu.addAction(
+            "Restore entire group" if is_collection and all_archived else
+            "Archive entire group" if is_collection else
+            "Restore from archive" if all_archived else "Archive project"
+        )
+        archive.triggered.connect(self.toggle_archive_selected)
         if is_collection:
             menu.exec(self.project_list.viewport().mapToGlobal(point))
             return
-        menu.addSeparator()
-        archive = menu.addAction("Restore from archive" if meta.get("archived") else "Archive project")
-        archive.triggered.connect(self.toggle_archive_selected)
         menu.addSeparator()
         menu.addAction("Edit project details", self.edit_library_project)
         menu.addAction("Delete project", self.delete_library_project)
@@ -2344,43 +2403,56 @@ class MainWindow(QMainWindow):
 
     def persist_library_metadata(self, meta: dict) -> None:
         clean = {key: value for key, value in meta.items() if key not in {"kind", "members"}}
+        normalize_project_labels(clean)
         root = project_library_path()
         (root / f"{clean['id']}.meta.json").write_text(json.dumps(clean, indent=2), encoding="utf-8")
         project_path = Path(clean.get("projectPath", ""))
         if project_path.is_file():
             payload = json.loads(project_path.read_text(encoding="utf-8"))
-            payload["library"] = {key: clean.get(key, "") for key in ("id", "name", "description", "collection", "savedAt", "tag", "archived", "notes")}
+            payload["library"] = {key: clean.get(key, "") for key in ("id", "name", "description", "collection", "savedAt", "status", "tags", "tag", "archived", "notes")}
             project_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
-    def set_selected_project_tag(self, name: str) -> None:
+    def selected_project_members(self) -> tuple[dict | None, list[dict]]:
         meta = self.selected_library_project()
+        return meta, (meta.get("members", []) if meta and meta.get("kind") == "collection" else [meta] if meta else [])
+
+    def set_selected_project_status(self, name: str) -> None:
+        meta, members = self.selected_project_members()
         if not meta:
             return
-        if meta.get("kind") == "collection":
-            members = meta.get("members", [])
-            for member in members:
-                member["tag"] = name
-                self.persist_library_metadata(member)
-            self.refresh_project_library()
-            self.statusBar().showMessage(f"Group state set to {name or 'No state'}: {meta.get('name', 'Collection')} ({len(members)} projects)")
+        for member in members:
+            member["status"] = name
+            member["tag"] = name
+            self.persist_library_metadata(member)
+        self.refresh_project_library(str(meta.get("id", "")) or None)
+        subject = f"group {meta.get('name', 'Collection')} ({len(members)} projects)" if meta.get("kind") == "collection" else f"project {meta.get('name', 'Untitled project')}"
+        self.statusBar().showMessage(f"Status set to {name or 'No status'} for {subject}")
+
+    def set_selected_project_label(self, name: str, enabled: bool) -> None:
+        meta, members = self.selected_project_members()
+        if not meta:
             return
-        if meta.get("kind") != "project":
-            return
-        meta["tag"] = name
-        self.persist_library_metadata(meta)
-        self.refresh_project_library(str(meta["id"]))
-        self.statusBar().showMessage(f"Project state set to {name or 'No state'}: {meta.get('name', 'Untitled project')}")
+        for member in members:
+            labels = [str(value) for value in member.get("tags", []) if str(value).casefold() != name.casefold()]
+            if enabled:
+                labels.append(name)
+            member["tags"] = labels
+            self.persist_library_metadata(member)
+        self.refresh_project_library(str(meta.get("id", "")) or None)
+        self.statusBar().showMessage(f"Tag {'added to' if enabled else 'removed from'} {len(members)} project{'s' if len(members) != 1 else ''}: {name}")
 
     def toggle_archive_selected(self) -> None:
-        meta = self.selected_library_project()
-        if not meta or meta.get("kind") != "project":
+        meta, members = self.selected_project_members()
+        if not meta:
             return
-        meta["archived"] = not bool(meta.get("archived"))
-        self.persist_library_metadata(meta)
-        project_id = str(meta["id"])
-        self.refresh_project_library(project_id)
-        action = "Archived" if meta["archived"] else "Restored"
-        self.statusBar().showMessage(f"{action} project: {meta.get('name', 'Untitled project')}")
+        archived = not (bool(members) and all(member.get("archived") for member in members))
+        for member in members:
+            member["archived"] = archived
+            self.persist_library_metadata(member)
+        self.refresh_project_library(str(meta.get("id", "")) or None)
+        action = "Archived" if archived else "Restored"
+        subject = f"group: {meta.get('name', 'Collection')} ({len(members)} projects)" if meta.get("kind") == "collection" else f"project: {meta.get('name', 'Untitled project')}"
+        self.statusBar().showMessage(f"{action} {subject}")
 
     def project_is_dirty(self, project_id: str) -> bool:
         if project_id == self.current_project_id:
@@ -2455,6 +2527,7 @@ class MainWindow(QMainWindow):
             if meta_path.exists():
                 try:
                     meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                    normalize_project_labels(meta)
                 except (OSError, ValueError):
                     meta = None
         if not meta:
@@ -2476,7 +2549,7 @@ class MainWindow(QMainWindow):
                     "description": intent or f"Magic Build sequence generated from {source_name}.",
                     "collection": self.current_collection or "",
                     "projectPath": str(root / f"{project_id}.LTXD"),
-                    "tag": "", "archived": False, "notes": [],
+                    "status": "", "tags": [], "tag": "", "archived": False, "notes": [],
                 }
             else:
                 collections = [str(record.get("collection")) for record in self.library_records() if record.get("collection")]
@@ -2489,7 +2562,7 @@ class MainWindow(QMainWindow):
                     "description": dialog.description.toPlainText().strip(),
                     "collection": dialog.collection_name(),
                     "projectPath": str(root / f"{project_id}.LTXD"),
-                    "tag": "", "archived": False, "notes": dialog.notes_value(),
+                    "status": "", "tags": [], "tag": "", "archived": False, "notes": dialog.notes_value(),
                 }
             self.current_project_id = project_id
             self.current_project_name = meta["name"]
@@ -2501,7 +2574,8 @@ class MainWindow(QMainWindow):
             visual = next((segment for segment in self.segments if segment.kind != "text" and segment.preview_path), None)
             meta["thumbnailData"] = data_url(visual.preview_path, max_edge=360, quality=84) if visual else ""
         payload = self.project_payload()
-        payload["library"] = {key: meta.get(key, "") for key in ("id", "name", "description", "collection", "savedAt", "tag", "archived", "notes")}
+        normalize_project_labels(meta)
+        payload["library"] = {key: meta.get(key, "") for key in ("id", "name", "description", "collection", "savedAt", "status", "tags", "tag", "archived", "notes")}
         Path(meta["projectPath"]).write_text(json.dumps(payload, indent=2), encoding="utf-8")
         (root / f"{meta['id']}.meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
         self.project_dirty = False

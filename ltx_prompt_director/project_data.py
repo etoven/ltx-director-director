@@ -11,6 +11,7 @@ DEFAULT_PROJECT_TAGS = [
     {"name": "Consider", "color": "#8a742f"},
     {"name": "Re-shoot", "color": "#934545"},
 ]
+DEFAULT_OTHER_TAGS: list[dict[str, str]] = []
 ARCHIVE_COLOR = "#59636b"
 
 
@@ -31,6 +32,43 @@ def load_project_tags(value: object) -> list[dict[str, str]]:
         seen.add(name.casefold())
         tags.append({"name": name, "color": color})
     return tags or [dict(item) for item in DEFAULT_PROJECT_TAGS]
+
+
+def load_other_tags(value: object) -> list[dict[str, str]]:
+    try:
+        raw = json.loads(str(value)) if isinstance(value, str) else value
+    except (TypeError, ValueError):
+        raw = None
+    tags: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in raw if isinstance(raw, list) else DEFAULT_OTHER_TAGS:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name", "")).strip()
+        color = str(item.get("color", "")).strip()
+        if not name or not re.fullmatch(r"#[0-9a-fA-F]{6}", color) or name.casefold() in seen or name.casefold() == "archive":
+            continue
+        seen.add(name.casefold())
+        tags.append({"name": name, "color": color})
+    return tags
+
+
+def normalize_project_labels(meta: dict) -> dict:
+    """Migrate legacy single-tag project metadata to status + multi-tag fields."""
+    meta["status"] = str(meta.get("status") or meta.get("tag") or "").strip()
+    raw_tags = meta.get("tags", [])
+    if isinstance(raw_tags, str):
+        raw_tags = [raw_tags]
+    seen = set()
+    labels = []
+    for item in raw_tags if isinstance(raw_tags, list) else []:
+        value = str(item).strip()
+        if value and value.casefold() not in seen:
+            seen.add(value.casefold())
+            labels.append(value)
+    meta["tags"] = labels
+    meta["tag"] = meta["status"]
+    return meta
 
 
 def tags_to_text(tags: list[dict[str, str]]) -> str:
