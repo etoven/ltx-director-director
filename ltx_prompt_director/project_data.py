@@ -90,7 +90,7 @@ def tags_from_text(value: str) -> list[dict[str, str]]:
     return parsed
 
 
-def normalize_notes(value: object) -> list[dict[str, str]]:
+def normalize_notes(value: object) -> list[dict]:
     result = []
     for item in value if isinstance(value, list) else []:
         if not isinstance(item, dict) or not str(item.get("text", "")).strip():
@@ -101,10 +101,11 @@ def normalize_notes(value: object) -> list[dict[str, str]]:
             "text": str(item["text"]).strip(),
             "createdAt": created,
             "date": str(item.get("date") or created),
+            "checked": bool(item.get("checked", False)),
         })
     return sorted(result, key=lambda note: (note["date"], note["createdAt"], note["id"]))
 
 
-def new_note(text: str, date: str | None = None) -> dict[str, str]:
+def new_note(text: str, date: str | None = None) -> dict:
     created = datetime.now(timezone.utc).isoformat()
-    return {"id": uuid4().hex, "text": text.strip(), "createdAt": created, "date": date or created}
+    return {"id": uuid4().hex, "text": text.strip(), "createdAt": created, "date": date or created, "checked": False}
