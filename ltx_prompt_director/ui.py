@@ -1682,7 +1682,7 @@ class MainWindow(QMainWindow):
         self.current_collection: str | None = None
         self.autofit_tail_extension = 0
         self._restoring_layout = True
-        self.project_panel_width = max(280, min(900, self.settings.value("project_panel_width", 330, int)))
+        self.project_panel_width = max(280, self.settings.value("project_panel_width", 330, int))
         saved_icon_size = self.settings.value("project_icon_size", 230, int)
         self.project_icon_size = min((96, 156, 230), key=lambda size: abs(size - saved_icon_size))
         self.pixels_per_second = 65
@@ -2170,7 +2170,6 @@ class MainWindow(QMainWindow):
             | QDockWidget.DockWidgetFeature.DockWidgetFloatable
         )
         self.project_dock.setMinimumWidth(280)
-        self.project_dock.setMaximumWidth(900)
 
         panel = QWidget()
         layout = QVBoxLayout(panel)
@@ -2340,7 +2339,7 @@ class MainWindow(QMainWindow):
         self._restoring_layout = False
 
     def set_project_panel_width(self, width: int, persist: bool = True) -> None:
-        width = max(280, min(900, int(width)))
+        width = max(280, int(width))
         self.project_panel_width = width
         if self.project_dock.isFloating():
             self.project_dock.resize(width, self.project_dock.height())
@@ -2391,7 +2390,7 @@ class MainWindow(QMainWindow):
     def eventFilter(self, watched, event) -> bool:
         if watched is getattr(self, "project_dock", None) and event.type() == QEvent.Type.Resize and not self._restoring_layout:
             width = self.project_dock.width()
-            if 280 <= width <= 900:
+            if width >= 280:
                 self.project_panel_width = width
                 self.settings.setValue("project_panel_width", width)
                 self.settings.setValue("window/state", self.saveState())
@@ -2408,7 +2407,7 @@ class MainWindow(QMainWindow):
             return max(1, round(size * scale))
 
         theme = """
-        QMainWindow,QWidget{background:#24292c;color:#d9dcde;font:11px Arial} QMainWindow::separator{width:__DOCK_GRIP_WIDTH__px;height:__DOCK_GRIP_WIDTH__px;background:#182023;border-left:1px solid #34434a;border-right:1px solid #0d1113;image:url("__DOCK_GRIP_IMAGE__")} QMainWindow::separator:hover{background:#2b3d45;border-color:#6893a7} QToolBar{background:#1b2023;border:0;border-bottom:1px solid #111517;spacing:3px;padding:5px} QToolBar::separator{background:#394247;width:1px;margin:7px 5px}
+        QMainWindow,QWidget{background:#24292c;color:#d9dcde;font:11px Arial} QMainWindow::separator{width:__DOCK_GRIP_WIDTH__px;height:__DOCK_GRIP_WIDTH__px;background:transparent;background-image:url("__DOCK_GRIP_IMAGE__");background-repeat:no-repeat;background-position:center} QMainWindow::separator:hover{background-color:rgba(88,118,134,35)} QToolBar{background:#1b2023;border:0;border-bottom:1px solid #111517;spacing:3px;padding:5px} QToolBar::separator{background:#394247;width:1px;margin:7px 5px}
         QToolButton,QPushButton,QComboBox,QSpinBox,QDoubleSpinBox,QLineEdit{background:#303436;border:1px solid #101213;border-radius:3px;padding:3px 7px;min-height:19px}
         #mainToolbar QToolButton{background:transparent;border:1px solid transparent;border-radius:4px;padding:5px 9px;color:#c5cdd1} #mainToolbar QToolButton:hover{background:#2b3438;border-color:#3a464c;color:#f3f7f9} #mainToolbar QToolButton:pressed{background:#17232a;border-color:#477d99;color:#bde6fb} #toolbarButton{background:#23343d;border:1px solid #385667;border-radius:5px;color:#c4e8fb;font-weight:bold}
         QToolButton:hover,QPushButton:hover{background:#41474a} QToolButton:pressed,QPushButton:pressed{background:#202729;border-color:#79a8c5} QLineEdit{background:#1e2122}
@@ -3286,7 +3285,7 @@ class MainWindow(QMainWindow):
             self.project_preview_panel.player.stop()
             if self.project_preview_panel.fullscreen_window.isVisible():
                 self.project_preview_panel.fullscreen_window.reject()
-        if hasattr(self, "project_dock") and 280 <= self.project_dock.width() <= 900:
+        if hasattr(self, "project_dock") and self.project_dock.width() >= 280:
             self.project_panel_width = self.project_dock.width()
             self.settings.setValue("project_panel_width", self.project_panel_width)
         if self.current_project_id:
