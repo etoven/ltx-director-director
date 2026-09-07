@@ -12,7 +12,7 @@ from importlib.resources import files
 from pathlib import Path
 from uuid import uuid4
 
-from PySide6.QtCore import QDateTime, QEasingCurve, QEvent, QEventLoop, QObject, QRunnable, QRectF, QSettings, QSize, QStandardPaths, Qt, QThreadPool, QTimer, QUrl, QVariantAnimation, Signal
+from PySide6.QtCore import QDateTime, QEasingCurve, QEventLoop, QObject, QRunnable, QRectF, QSettings, QSize, QStandardPaths, Qt, QThreadPool, QTimer, QUrl, QVariantAnimation, Signal
 from PySide6.QtGui import QAction, QActionGroup, QBrush, QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
@@ -2270,7 +2270,6 @@ class MainWindow(QMainWindow):
         layout.addLayout(buttons)
         self.update_project_icon_controls()
         self.project_dock.setWidget(panel)
-        self.project_dock.installEventFilter(self)
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.project_dock)
         self.project_dock.visibilityChanged.connect(self.project_dock_visibility_changed)
         self.project_dock.dockLocationChanged.connect(lambda *_: self.save_window_panel_state())
@@ -2386,16 +2385,6 @@ class MainWindow(QMainWindow):
     def save_window_panel_state(self) -> None:
         self.settings.setValue("window/state", self.saveState())
         self.queue_settings_sync()
-
-    def eventFilter(self, watched, event) -> bool:
-        if watched is getattr(self, "project_dock", None) and event.type() == QEvent.Type.Resize and not self._restoring_layout:
-            width = self.project_dock.width()
-            if width >= 280:
-                self.project_panel_width = width
-                self.settings.setValue("project_panel_width", width)
-                self.settings.setValue("window/state", self.saveState())
-                self.queue_settings_sync()
-        return super().eventFilter(watched, event)
 
     def _apply_theme(self) -> None:
         scale = max(75, min(200, self.settings.value("ui_text_scale", 100, int))) / 100
