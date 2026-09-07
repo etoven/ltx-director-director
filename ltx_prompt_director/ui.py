@@ -367,112 +367,22 @@ class ProjectTileDelegate(QStyledItemDelegate):
         super().paint(painter, clean, index)
 
 
-class ProjectDockResizeHandle(QFrame):
-    width_requested = Signal(int)
-
-    def __init__(self, dock: QDockWidget, window: QMainWindow):
-        super().__init__(dock)
-        self.dock = dock
-        self.window = window
-        self.press_x = 0
-        self.start_width = 0
-        self.setObjectName("projectDockResizeHandle")
-        self.setFixedWidth(14)
-        self.setCursor(Qt.CursorShape.SplitHCursor)
-        self.setToolTip("Drag to resize the Project Library")
-
-    def mousePressEvent(self, event) -> None:
-        if event.button() == Qt.MouseButton.LeftButton:
-            self.press_x = round(event.globalPosition().x())
-            self.start_width = self.dock.width()
-            self.grabMouse()
-            event.accept()
-            return
-        super().mousePressEvent(event)
-
-    def mouseMoveEvent(self, event) -> None:
-        if event.buttons() & Qt.MouseButton.LeftButton:
-            delta = round(event.globalPosition().x()) - self.press_x
-            direction = -1 if self.window.dockWidgetArea(self.dock) == Qt.DockWidgetArea.RightDockWidgetArea else 1
-            self.width_requested.emit(self.start_width + direction * delta)
-            event.accept()
-            return
-        super().mouseMoveEvent(event)
-
-    def mouseReleaseEvent(self, event) -> None:
-        if event.button() == Qt.MouseButton.LeftButton:
-            self.releaseMouse()
-            event.accept()
-            return
-        super().mouseReleaseEvent(event)
-
-    def paintEvent(self, event) -> None:
-        super().paintEvent(event)
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor("#657983"))
-        center = self.rect().center()
-        for offset in range(-24, 25, 8):
-            painter.drawEllipse(center.x() - 2, center.y() + offset - 2, 4, 4)
-        painter.end()
-
-
 class ProjectVideoWidget(QVideoWidget):
     video_dropped = Signal(str)
     drag_active_changed = Signal(bool)
     play_requested = Signal()
+    fullscreen_requested = Signal()
 
     VIDEO_SUFFIXES = {".mp4", ".webm", ".mov", ".mkv", ".avi", ".m4v"}
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAcceptDrops(True)
-        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setMinimumSize(320, 180)
-        self.fullscreen_controls = QFrame(self)
-        self.fullscreen_controls.setObjectName("fullscreenVideoControls")
-        control_layout = QHBoxLayout(self.fullscreen_controls)
-        control_layout.setContentsMargins(8, 6, 8, 6)
-        self.fullscreen_play = QPushButton("▶ Play")
-        self.fullscreen_play.clicked.connect(self.play_requested)
-        exit_fullscreen = QPushButton("✕ Exit Fullscreen")
-        exit_fullscreen.clicked.connect(lambda: self.setFullScreen(False))
-        control_layout.addWidget(self.fullscreen_play)
-        control_layout.addStretch(1)
-        control_layout.addWidget(exit_fullscreen)
-        self.fullscreen_controls.hide()
-        self.fullScreenChanged.connect(self._fullscreen_ui_changed)
-
-    def _fullscreen_ui_changed(self, fullscreen: bool) -> None:
-        self.fullscreen_controls.setVisible(fullscreen)
-        if fullscreen:
-            self.fullscreen_controls.raise_()
-            self.setFocus(Qt.FocusReason.ActiveWindowFocusReason)
-            self._position_fullscreen_controls()
-
-    def _position_fullscreen_controls(self) -> None:
-        height = self.fullscreen_controls.sizeHint().height()
-        self.fullscreen_controls.setGeometry(16, max(16, self.height() - height - 16), max(220, self.width() - 32), height)
-
-    def set_playback_state(self, playing: bool) -> None:
-        self.fullscreen_play.setText("❚❚ Pause" if playing else "▶ Play")
-
-    def resizeEvent(self, event) -> None:
-        super().resizeEvent(event)
-        if self.isFullScreen():
-            self._position_fullscreen_controls()
-
-    def keyPressEvent(self, event) -> None:
-        if event.key() == Qt.Key.Key_Escape and self.isFullScreen():
-            self.setFullScreen(False)
-            event.accept()
-            return
-        super().keyPressEvent(event)
 
     def mouseDoubleClickEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
-            self.setFullScreen(not self.isFullScreen())
+            self.fullscreen_requested.emit()
             event.accept()
             return
         super().mouseDoubleClickEvent(event)
@@ -541,6 +451,46 @@ class WorkflowDropList(QListWidget):
         event.ignore()
 
 
+class FullscreenVideoDialog(QDialog):
+    def __init__(self, player: QMediaPlayer, parent=None):
+        super().__init__(parent)
+        self.player = player
+        self.setWindowTitle("Project Video Preview")
+        self.setModal(False)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        self.video = QVideoWidget(self)
+        layout.addWidget(self.video, 1)
+        controls = QFrame()
+        controls.setObjectName("fullscreenPlayerControls")
+        controls_layout = QHBoxLayout(controls)
+        controls_layout.setContentsMargins(12, 8, 12, 8)
+        self.play = QPushButton("▶ Play")
+        self.play.clicked.connect(self.toggle_playback)
+        self.seek = QSlider(Qt.Orientation.Horizontal)
+        self.seek.sliderMoved.connect(self.player.setPosition)
+        self.position = QLabel("00:00 / 00:00")
+        exit_button = QPushButton("✕ Exit Fullscreen")
+        exit_button.clicked.connect(self.reject)
+        controls_layout.addWidget(self.play)
+        controls_layout.addWidget(self.seek, 1)
+        controls_layout.addWidget(self.position)
+        controls_layout.addWidget(exit_button)
+        layout.addWidget(controls)
+
+    def toggle_playback(self) -> None:
+        if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+            self.player.pause()
+        else:
+            self.player.play()
+
+    def update_position(self, position: int, duration: int) -> None:
+        if not self.seek.isSliderDown():
+            self.seek.setValue(position)
+        self.position.setText(f"{ProjectPreviewPanel.time_text(position)} / {ProjectPreviewPanel.time_text(duration)}")
+
+
 class ProjectPreviewPanel(QWidget):
     video_dropped = Signal(str)
     choose_requested = Signal()
@@ -559,11 +509,13 @@ class ProjectPreviewPanel(QWidget):
         self.audio = QAudioOutput(self)
         self.player.setAudioOutput(self.audio)
         self.video = ProjectVideoWidget(self)
+        self.fullscreen_window = FullscreenVideoDialog(self.player, self)
+        self.fullscreen_window.finished.connect(self.restore_embedded_video)
         self.player.setVideoOutput(self.video)
         self.video.video_dropped.connect(self.video_dropped)
         self.video.drag_active_changed.connect(self.set_drop_active)
         self.video.play_requested.connect(self.toggle_playback)
-        self.video.fullScreenChanged.connect(self.fullscreen_changed)
+        self.video.fullscreen_requested.connect(self.open_fullscreen)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)
         layout.setSpacing(5)
@@ -596,7 +548,7 @@ class ProjectPreviewPanel(QWidget):
         self.export = QPushButton("Export Video…")
         self.export.clicked.connect(self.export_requested)
         self.fullscreen = QPushButton("⛶ Fullscreen")
-        self.fullscreen.clicked.connect(lambda: self.video.setFullScreen(not self.video.isFullScreen()))
+        self.fullscreen.clicked.connect(self.open_fullscreen)
         controls.addWidget(self.play)
         controls.addWidget(self.choose)
         controls.addWidget(self.export)
@@ -715,6 +667,7 @@ class ProjectPreviewPanel(QWidget):
     def duration_changed(self, duration: int) -> None:
         self.duration = max(0, duration)
         self.seek.setRange(0, self.duration)
+        self.fullscreen_window.seek.setRange(0, self.duration)
         self.position_changed(self.player.position())
 
     def media_status_changed(self, status) -> None:
@@ -726,14 +679,29 @@ class ProjectPreviewPanel(QWidget):
         if not self.seek.isSliderDown():
             self.seek.setValue(position)
         self.position.setText(f"{self.time_text(position)} / {self.time_text(self.duration)}")
+        self.fullscreen_window.update_position(position, self.duration)
 
     def playback_changed(self, state) -> None:
         playing = state == QMediaPlayer.PlaybackState.PlayingState
         self.play.setText("❚❚ Pause" if playing else "▶ Play")
-        self.video.set_playback_state(playing)
+        self.fullscreen_window.play.setText("❚❚ Pause" if playing else "▶ Play")
 
     def fullscreen_changed(self, fullscreen: bool) -> None:
         self.fullscreen.setText("Exit Fullscreen" if fullscreen else "⛶ Fullscreen")
+
+    def open_fullscreen(self) -> None:
+        if self.fullscreen_window.isVisible():
+            self.fullscreen_window.reject()
+            return
+        self.player.setVideoOutput(self.fullscreen_window.video)
+        self.fullscreen_window.showFullScreen()
+        self.fullscreen_changed(True)
+
+    def restore_embedded_video(self, *_args) -> None:
+        position = self.player.position()
+        self.player.setVideoOutput(self.video)
+        self.player.setPosition(position)
+        self.fullscreen_changed(False)
 
     def workflow_selection_changed(self, row: int) -> None:
         enabled = row >= 0
@@ -2185,17 +2153,9 @@ class MainWindow(QMainWindow):
         self.project_preview_panel.workflow_dropped.connect(self.attach_project_workflow)
         self.project_preview_panel.workflow_export_requested.connect(self.export_project_workflow)
         self.project_preview_panel.workflow_remove_requested.connect(self.remove_project_workflow)
-        self.project_preview_wrap = QWidget()
-        self.project_preview_wrap_layout = QHBoxLayout(self.project_preview_wrap)
-        self.project_preview_wrap_layout.setContentsMargins(0, 0, 0, 0)
-        self.project_preview_wrap_layout.setSpacing(0)
-        self.project_preview_resize_handle = ProjectDockResizeHandle(self.project_preview_dock, self)
-        self.project_preview_resize_handle.width_requested.connect(self.set_preview_panel_width)
-        self.project_preview_wrap_layout.addWidget(self.project_preview_resize_handle)
-        self.project_preview_wrap_layout.addWidget(self.project_preview_panel, 1)
-        self.project_preview_dock.setWidget(self.project_preview_wrap)
+        self.project_preview_dock.setWidget(self.project_preview_panel)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.project_preview_dock)
-        self.project_preview_dock.dockLocationChanged.connect(self.project_preview_dock_location_changed)
+        self.project_preview_dock.dockLocationChanged.connect(lambda *_: self.save_window_panel_state())
         self.project_preview_dock.topLevelChanged.connect(lambda *_: self.save_window_panel_state())
         self.project_preview_dock.visibilityChanged.connect(lambda *_: self.save_window_panel_state())
         self.project_preview_dock.hide()
@@ -2310,19 +2270,11 @@ class MainWindow(QMainWindow):
         buttons.addWidget(delete_button)
         layout.addLayout(buttons)
         self.update_project_icon_controls()
-        self.project_dock_wrap = QWidget()
-        self.project_dock_wrap_layout = QHBoxLayout(self.project_dock_wrap)
-        self.project_dock_wrap_layout.setContentsMargins(0, 0, 0, 0)
-        self.project_dock_wrap_layout.setSpacing(0)
-        self.project_dock_resize_handle = ProjectDockResizeHandle(self.project_dock, self)
-        self.project_dock_resize_handle.width_requested.connect(self.set_project_panel_width)
-        self.project_dock_wrap_layout.addWidget(panel, 1)
-        self.project_dock_wrap_layout.addWidget(self.project_dock_resize_handle)
-        self.project_dock.setWidget(self.project_dock_wrap)
+        self.project_dock.setWidget(panel)
         self.project_dock.installEventFilter(self)
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.project_dock)
         self.project_dock.visibilityChanged.connect(self.project_dock_visibility_changed)
-        self.project_dock.dockLocationChanged.connect(self.project_dock_location_changed)
+        self.project_dock.dockLocationChanged.connect(lambda *_: self.save_window_panel_state())
         self.project_dock.topLevelChanged.connect(lambda *_: self.save_window_panel_state())
         self.project_dock.hide()
         self.refresh_project_library()
@@ -2378,30 +2330,6 @@ class MainWindow(QMainWindow):
     def project_dock_visibility_changed(self, visible: bool) -> None:
         if visible:
             QTimer.singleShot(0, lambda: self.set_project_panel_width(self.project_panel_width, persist=False))
-
-    @staticmethod
-    def position_dock_resize_handle(layout: QHBoxLayout, handle: QWidget, panel: QWidget, area) -> None:
-        layout.removeWidget(handle)
-        if area == Qt.DockWidgetArea.RightDockWidgetArea:
-            layout.insertWidget(0, handle)
-        else:
-            layout.addWidget(handle)
-
-    def project_dock_location_changed(self, area) -> None:
-        self.position_dock_resize_handle(self.project_dock_wrap_layout, self.project_dock_resize_handle, self.project_dock.widget(), area)
-        self.save_window_panel_state()
-
-    def project_preview_dock_location_changed(self, area) -> None:
-        self.position_dock_resize_handle(self.project_preview_wrap_layout, self.project_preview_resize_handle, self.project_preview_panel, area)
-        self.save_window_panel_state()
-
-    def set_preview_panel_width(self, width: int) -> None:
-        width = max(400, min(1100, int(width)))
-        if self.project_preview_dock.isFloating():
-            self.project_preview_dock.resize(width, self.project_preview_dock.height())
-        else:
-            self.resizeDocks([self.project_preview_dock], [width], Qt.Orientation.Horizontal)
-        self.save_window_panel_state()
 
     def restore_project_panel_width(self) -> None:
         """Restore the saved dock width without startup resize events overwriting it."""
@@ -2510,8 +2438,7 @@ class MainWindow(QMainWindow):
         #projectLibraryTitle,#magicOverlayTitle{font-size:15px;font-weight:bold;color:#f0f2f3} #libraryControls{background:#1c2225;border:1px solid #343e43;border-radius:5px} #projectSearch{background:#171c1e;border:1px solid #343d41;border-radius:5px;padding-left:10px} #projectSearch:focus{border-color:#4d829d;background:#1b2225} #projectList{background:#15191b;border:1px solid #30383c;border-radius:5px;padding:10px}
         #projectList::item{background:transparent;border:1px solid #363f43;border-radius:6px;margin:4px;padding:7px;color:#dce0e2} #projectList::item:hover{border-color:#6488a1} #projectList::item:selected{border:2px solid #69a5d0}
         #projectFilters{background:#171c1e;border:1px solid #30383c;border-radius:5px} #projectFilterButton{min-height:17px;padding:2px 6px;background:#23292c;border-color:#394348;color:#aeb8bd} #projectFilterButton:hover{background:#303a3f;color:#fff} #projectNotesList{background:#171b1d;border:1px solid #3a4449;border-radius:4px;padding:3px} #projectNotesList::item{background:transparent;border:0;margin:2px;padding:0} #projectNoteRow{background:#22282b;border:1px solid #394348;border-radius:4px} #projectNoteRow:hover{border-color:#5e8295;background:#283136} #projectNoteDate{color:#86a9ba;font-size:9px} #projectNoteDelete{min-height:0;padding:0;background:transparent;border:0;color:#bca6a6;font-size:15px} #projectNoteDelete:hover{background:#713d3d;color:white}
-        #projectPreviewPanel{border:1px solid transparent;background:#191d1f} #projectPreviewPanel[dropActive="true"]{border:3px solid #68b9ee;background:#13232c} #fullscreenVideoControls{background:rgba(14,18,20,220);border:1px solid #52636c;border-radius:6px} #previewTitle{background:#1a2023;border:1px solid #354047;border-radius:4px;padding:5px;color:#d7ebf5;font-weight:bold} #previewEmpty{background:#101314;border:1px dashed #4a565c;border-radius:4px;padding:24px;color:#87959c} #previewSectionTitle{color:#8ebbd1;font-size:8px;font-weight:bold;letter-spacing:1px} #projectWorkflowList{background:#171b1d;border:1px solid #354047;border-radius:4px;padding:3px} #projectWorkflowList[dropActive="true"]{border:3px solid #68b9ee;background:#13232c} #projectWorkflowList::item{background:#22282b;border:1px solid #394348;border-radius:3px;margin:2px;padding:4px} #projectWorkflowList::item:selected{background:#294356;border-color:#69a5d0}
-        #projectDockResizeHandle{background:#182023;border-left:1px solid #34434a;border-right:1px solid #0d1113} #projectDockResizeHandle:hover{background:#2b3d45;border-color:#6893a7}
+        #projectPreviewPanel{border:1px solid transparent;background:#191d1f} #projectPreviewPanel[dropActive="true"]{border:3px solid #68b9ee;background:#13232c} #previewTitle{background:#1a2023;border:1px solid #354047;border-radius:4px;padding:5px;color:#d7ebf5;font-weight:bold} #previewEmpty{background:#101314;border:1px dashed #4a565c;border-radius:4px;padding:24px;color:#87959c} #previewSectionTitle{color:#8ebbd1;font-size:8px;font-weight:bold;letter-spacing:1px} #projectWorkflowList{background:#171b1d;border:1px solid #354047;border-radius:4px;padding:3px} #projectWorkflowList[dropActive="true"]{border:3px solid #68b9ee;background:#13232c} #projectWorkflowList::item{background:#22282b;border:1px solid #394348;border-radius:3px;margin:2px;padding:4px} #projectWorkflowList::item:selected{background:#294356;border-color:#69a5d0}
         #librarySave{background:#3b78a5;border-color:#5994bd;font-weight:bold} #librarySave:hover{background:#5596ca;border-color:#8bc8f5;color:#fff} #librarySave:pressed{background:#214865;border:1px solid #b9e1ff;color:#fff} #librarySecondary{background:transparent;border-color:#3d484e;color:#bfc7cb} #librarySecondary:hover{background:#30393d;border-color:#596a73;color:#fff} #libraryDelete{background:transparent;border-color:#4b3b3b;color:#c8b7b7} #libraryDelete:hover{background:#713d3d;border-color:#9b5656;color:#fff}
         QMenu{background:#252a2c;border:1px solid #596267;padding:4px} QMenu::item{padding:7px 28px 7px 12px;border-radius:3px} QMenu::item:selected{background:#3b6f9c;color:#fff} QMenu::separator{height:1px;background:#4b5255;margin:4px 7px}
         QScrollBar:vertical{background:#171b1d;width:12px;margin:0;border:0;border-radius:6px} QScrollBar::handle:vertical{background:#46545c;min-height:28px;margin:2px;border-radius:4px} QScrollBar::handle:vertical:hover{background:#63869b} QScrollBar::handle:vertical:pressed{background:#74a8c6}
@@ -3357,8 +3284,8 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event) -> None:
         if hasattr(self, "project_preview_panel"):
             self.project_preview_panel.player.stop()
-            if self.project_preview_panel.video.isFullScreen():
-                self.project_preview_panel.video.setFullScreen(False)
+            if self.project_preview_panel.fullscreen_window.isVisible():
+                self.project_preview_panel.fullscreen_window.reject()
         if hasattr(self, "project_dock") and 280 <= self.project_dock.width() <= 900:
             self.project_panel_width = self.project_dock.width()
             self.settings.setValue("project_panel_width", self.project_panel_width)
