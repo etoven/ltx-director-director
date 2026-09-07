@@ -420,25 +420,125 @@ class ProjectDockResizeHandle(QFrame):
 
 class ProjectVideoWidget(QVideoWidget):
     video_dropped = Signal(str)
+    drag_active_changed = Signal(bool)
+    play_requested = Signal()
 
     VIDEO_SUFFIXES = {".mp4", ".webm", ".mov", ".mkv", ".avi", ".m4v"}
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAcceptDrops(True)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setMinimumSize(320, 180)
+        self.fullscreen_controls = QFrame(self)
+        self.fullscreen_controls.setObjectName("fullscreenVideoControls")
+        control_layout = QHBoxLayout(self.fullscreen_controls)
+        control_layout.setContentsMargins(8, 6, 8, 6)
+        self.fullscreen_play = QPushButton("▶ Play")
+        self.fullscreen_play.clicked.connect(self.play_requested)
+        exit_fullscreen = QPushButton("✕ Exit Fullscreen")
+        exit_fullscreen.clicked.connect(lambda: self.setFullScreen(False))
+        control_layout.addWidget(self.fullscreen_play)
+        control_layout.addStretch(1)
+        control_layout.addWidget(exit_fullscreen)
+        self.fullscreen_controls.hide()
+        self.fullScreenChanged.connect(self._fullscreen_ui_changed)
+
+    def _fullscreen_ui_changed(self, fullscreen: bool) -> None:
+        self.fullscreen_controls.setVisible(fullscreen)
+        if fullscreen:
+            self.fullscreen_controls.raise_()
+            self.setFocus(Qt.FocusReason.ActiveWindowFocusReason)
+            self._position_fullscreen_controls()
+
+    def _position_fullscreen_controls(self) -> None:
+        height = self.fullscreen_controls.sizeHint().height()
+        self.fullscreen_controls.setGeometry(16, max(16, self.height() - height - 16), max(220, self.width() - 32), height)
+
+    def set_playback_state(self, playing: bool) -> None:
+        self.fullscreen_play.setText("❚❚ Pause" if playing else "▶ Play")
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if self.isFullScreen():
+            self._position_fullscreen_controls()
+
+    def keyPressEvent(self, event) -> None:
+        if event.key() == Qt.Key.Key_Escape and self.isFullScreen():
+            self.setFullScreen(False)
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+    def mouseDoubleClickEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.setFullScreen(not self.isFullScreen())
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
 
     def dragEnterEvent(self, event) -> None:
         urls = event.mimeData().urls() if event.mimeData().hasUrls() else []
         if len(urls) == 1 and urls[0].isLocalFile() and Path(urls[0].toLocalFile()).suffix.lower() in self.VIDEO_SUFFIXES:
+            self.drag_active_changed.emit(True)
             event.acceptProposedAction()
             return
         event.ignore()
 
+    def dragLeaveEvent(self, event) -> None:
+        self.drag_active_changed.emit(False)
+        super().dragLeaveEvent(event)
+
     def dropEvent(self, event) -> None:
+        self.drag_active_changed.emit(False)
         path = event.mimeData().urls()[0].toLocalFile()
         self.video_dropped.emit(path)
         event.acceptProposedAction()
+
+
+class WorkflowDropList(QListWidget):
+    files_dropped = Signal(list)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAcceptDrops(True)
+
+    @staticmethod
+    def _json_paths(event) -> list[str]:
+        if not event.mimeData().hasUrls():
+            return []
+        return [url.toLocalFile() for url in event.mimeData().urls() if url.isLocalFile() and Path(url.toLocalFile()).is_file()]
+
+    def _set_drop_active(self, active: bool) -> None:
+        self.setProperty("dropActive", active)
+        self.style().unpolish(self)
+        self.style().polish(self)
+
+    def dragEnterEvent(self, event) -> None:
+        if self._json_paths(event):
+            self._set_drop_active(True)
+            event.acceptProposedAction()
+            return
+        event.ignore()
+
+    def dragMoveEvent(self, event) -> None:
+        if self._json_paths(event):
+            event.acceptProposedAction()
+            return
+        event.ignore()
+
+    def dragLeaveEvent(self, event) -> None:
+        self._set_drop_active(False)
+        super().dragLeaveEvent(event)
+
+    def dropEvent(self, event) -> None:
+        paths = self._json_paths(event)
+        self._set_drop_active(False)
+        if paths:
+            self.files_dropped.emit(paths)
+            event.acceptProposedAction()
+            return
+        event.ignore()
 
 
 class ProjectPreviewPanel(QWidget):
@@ -446,11 +546,13 @@ class ProjectPreviewPanel(QWidget):
     choose_requested = Signal()
     export_requested = Signal()
     workflow_add_requested = Signal()
+    workflow_dropped = Signal(str)
     workflow_export_requested = Signal()
     workflow_remove_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setObjectName("projectPreviewPanel")
         self.setAcceptDrops(True)
         self.duration = 0
         self.player = QMediaPlayer(self)
@@ -459,6 +561,8 @@ class ProjectPreviewPanel(QWidget):
         self.video = ProjectVideoWidget(self)
         self.player.setVideoOutput(self.video)
         self.video.video_dropped.connect(self.video_dropped)
+        self.video.drag_active_changed.connect(self.set_drop_active)
+        self.video.play_requested.connect(self.toggle_playback)
         self.video.fullScreenChanged.connect(self.fullscreen_changed)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)
@@ -498,13 +602,14 @@ class ProjectPreviewPanel(QWidget):
         controls.addWidget(self.export)
         controls.addWidget(self.fullscreen)
         layout.addLayout(controls)
-        workflow_title = QLabel("COMFYUI WORKSPACES")
+        workflow_title = QLabel("PROJECT FILES")
         workflow_title.setObjectName("previewSectionTitle")
-        self.workflows = QListWidget()
+        self.workflows = WorkflowDropList()
         self.workflows.setObjectName("projectWorkflowList")
+        self.workflows.files_dropped.connect(self.workflow_files_dropped)
         self.workflows.setMaximumHeight(105)
         workflow_controls = QHBoxLayout()
-        add_workflow = QPushButton("Add JSON…")
+        add_workflow = QPushButton("Add Files…")
         add_workflow.clicked.connect(self.workflow_add_requested)
         self.export_workflow = QPushButton("Export")
         self.export_workflow.clicked.connect(self.workflow_export_requested)
@@ -521,18 +626,34 @@ class ProjectPreviewPanel(QWidget):
         self.player.positionChanged.connect(self.position_changed)
         self.player.durationChanged.connect(self.duration_changed)
         self.player.playbackStateChanged.connect(self.playback_changed)
+        self.player.mediaStatusChanged.connect(self.media_status_changed)
         self.clear_project()
+
+    def workflow_files_dropped(self, paths: list[str]) -> None:
+        for path in paths:
+            self.workflow_dropped.emit(path)
 
     def dragEnterEvent(self, event) -> None:
         urls = event.mimeData().urls() if event.mimeData().hasUrls() else []
         if self.choose.isEnabled() and len(urls) == 1 and urls[0].isLocalFile() and Path(urls[0].toLocalFile()).suffix.lower() in ProjectVideoWidget.VIDEO_SUFFIXES:
+            self.set_drop_active(True)
             event.acceptProposedAction()
             return
         event.ignore()
 
+    def dragLeaveEvent(self, event) -> None:
+        self.set_drop_active(False)
+        super().dragLeaveEvent(event)
+
     def dropEvent(self, event) -> None:
+        self.set_drop_active(False)
         self.video_dropped.emit(event.mimeData().urls()[0].toLocalFile())
         event.acceptProposedAction()
+
+    def set_drop_active(self, active: bool) -> None:
+        self.setProperty("dropActive", active)
+        self.style().unpolish(self)
+        self.style().polish(self)
 
     @staticmethod
     def time_text(milliseconds: int) -> str:
@@ -596,13 +717,20 @@ class ProjectPreviewPanel(QWidget):
         self.seek.setRange(0, self.duration)
         self.position_changed(self.player.position())
 
+    def media_status_changed(self, status) -> None:
+        if status in {QMediaPlayer.MediaStatus.LoadedMedia, QMediaPlayer.MediaStatus.BufferedMedia} and self.player.position() == 0:
+            self.player.setPosition(1)
+            self.player.pause()
+
     def position_changed(self, position: int) -> None:
         if not self.seek.isSliderDown():
             self.seek.setValue(position)
         self.position.setText(f"{self.time_text(position)} / {self.time_text(self.duration)}")
 
     def playback_changed(self, state) -> None:
-        self.play.setText("❚❚ Pause" if state == QMediaPlayer.PlaybackState.PlayingState else "▶ Play")
+        playing = state == QMediaPlayer.PlaybackState.PlayingState
+        self.play.setText("❚❚ Pause" if playing else "▶ Play")
+        self.video.set_playback_state(playing)
 
     def fullscreen_changed(self, fullscreen: bool) -> None:
         self.fullscreen.setText("Exit Fullscreen" if fullscreen else "⛶ Fullscreen")
@@ -2054,6 +2182,7 @@ class MainWindow(QMainWindow):
         self.project_preview_panel.choose_requested.connect(self.choose_project_video)
         self.project_preview_panel.export_requested.connect(self.export_project_video)
         self.project_preview_panel.workflow_add_requested.connect(self.choose_project_workflow)
+        self.project_preview_panel.workflow_dropped.connect(self.attach_project_workflow)
         self.project_preview_panel.workflow_export_requested.connect(self.export_project_workflow)
         self.project_preview_panel.workflow_remove_requested.connect(self.remove_project_workflow)
         self.project_preview_wrap = QWidget()
@@ -2381,7 +2510,7 @@ class MainWindow(QMainWindow):
         #projectLibraryTitle,#magicOverlayTitle{font-size:15px;font-weight:bold;color:#f0f2f3} #libraryControls{background:#1c2225;border:1px solid #343e43;border-radius:5px} #projectSearch{background:#171c1e;border:1px solid #343d41;border-radius:5px;padding-left:10px} #projectSearch:focus{border-color:#4d829d;background:#1b2225} #projectList{background:#15191b;border:1px solid #30383c;border-radius:5px;padding:10px}
         #projectList::item{background:transparent;border:1px solid #363f43;border-radius:6px;margin:4px;padding:7px;color:#dce0e2} #projectList::item:hover{border-color:#6488a1} #projectList::item:selected{border:2px solid #69a5d0}
         #projectFilters{background:#171c1e;border:1px solid #30383c;border-radius:5px} #projectFilterButton{min-height:17px;padding:2px 6px;background:#23292c;border-color:#394348;color:#aeb8bd} #projectFilterButton:hover{background:#303a3f;color:#fff} #projectNotesList{background:#171b1d;border:1px solid #3a4449;border-radius:4px;padding:3px} #projectNotesList::item{background:transparent;border:0;margin:2px;padding:0} #projectNoteRow{background:#22282b;border:1px solid #394348;border-radius:4px} #projectNoteRow:hover{border-color:#5e8295;background:#283136} #projectNoteDate{color:#86a9ba;font-size:9px} #projectNoteDelete{min-height:0;padding:0;background:transparent;border:0;color:#bca6a6;font-size:15px} #projectNoteDelete:hover{background:#713d3d;color:white}
-        #previewTitle{background:#1a2023;border:1px solid #354047;border-radius:4px;padding:5px;color:#d7ebf5;font-weight:bold} #previewEmpty{background:#101314;border:1px dashed #4a565c;border-radius:4px;padding:24px;color:#87959c} #previewSectionTitle{color:#8ebbd1;font-size:8px;font-weight:bold;letter-spacing:1px} #projectWorkflowList{background:#171b1d;border:1px solid #354047;border-radius:4px;padding:3px} #projectWorkflowList::item{background:#22282b;border:1px solid #394348;border-radius:3px;margin:2px;padding:4px} #projectWorkflowList::item:selected{background:#294356;border-color:#69a5d0}
+        #projectPreviewPanel{border:1px solid transparent;background:#191d1f} #projectPreviewPanel[dropActive="true"]{border:3px solid #68b9ee;background:#13232c} #fullscreenVideoControls{background:rgba(14,18,20,220);border:1px solid #52636c;border-radius:6px} #previewTitle{background:#1a2023;border:1px solid #354047;border-radius:4px;padding:5px;color:#d7ebf5;font-weight:bold} #previewEmpty{background:#101314;border:1px dashed #4a565c;border-radius:4px;padding:24px;color:#87959c} #previewSectionTitle{color:#8ebbd1;font-size:8px;font-weight:bold;letter-spacing:1px} #projectWorkflowList{background:#171b1d;border:1px solid #354047;border-radius:4px;padding:3px} #projectWorkflowList[dropActive="true"]{border:3px solid #68b9ee;background:#13232c} #projectWorkflowList::item{background:#22282b;border:1px solid #394348;border-radius:3px;margin:2px;padding:4px} #projectWorkflowList::item:selected{background:#294356;border-color:#69a5d0}
         #projectDockResizeHandle{background:#182023;border-left:1px solid #34434a;border-right:1px solid #0d1113} #projectDockResizeHandle:hover{background:#2b3d45;border-color:#6893a7}
         #librarySave{background:#3b78a5;border-color:#5994bd;font-weight:bold} #librarySave:hover{background:#5596ca;border-color:#8bc8f5;color:#fff} #librarySave:pressed{background:#214865;border:1px solid #b9e1ff;color:#fff} #librarySecondary{background:transparent;border-color:#3d484e;color:#bfc7cb} #librarySecondary:hover{background:#30393d;border-color:#596a73;color:#fff} #libraryDelete{background:transparent;border-color:#4b3b3b;color:#c8b7b7} #libraryDelete:hover{background:#713d3d;border-color:#9b5656;color:#fff}
         QMenu{background:#252a2c;border:1px solid #596267;padding:4px} QMenu::item{padding:7px 28px 7px 12px;border-radius:3px} QMenu::item:selected{background:#3b6f9c;color:#fff} QMenu::separator{height:1px;background:#4b5255;margin:4px 7px}
@@ -2712,8 +2841,9 @@ class MainWindow(QMainWindow):
         if not meta:
             self.project_preview_panel.clear_project()
             return
-        workflows = [value for value in meta.get("workflowFiles", []) if isinstance(value, dict) and Path(str(value.get("path", ""))).is_file()]
-        self.project_preview_panel.set_project(str(meta.get("name") or "Untitled project"), str(meta.get("previewVideoPath", "")), workflows)
+        project_files = meta.get("projectFiles", meta.get("workflowFiles", []))
+        project_files = [value for value in project_files if isinstance(value, dict) and Path(str(value.get("path", ""))).is_file()]
+        self.project_preview_panel.set_project(str(meta.get("name") or "Untitled project"), str(meta.get("previewVideoPath", "")), project_files)
 
     def choose_project_video(self) -> None:
         initial = str(Path.home())
@@ -2749,7 +2879,7 @@ class MainWindow(QMainWindow):
         meta["previewVideoPath"] = str(destination)
         meta["previewVideoName"] = source.name
         self.persist_library_metadata(meta)
-        self.project_preview_panel.set_project(str(meta.get("name") or "Untitled project"), str(destination), meta.get("workflowFiles", []))
+        self.project_preview_panel.set_project(str(meta.get("name") or "Untitled project"), str(destination), meta.get("projectFiles", meta.get("workflowFiles", [])))
         self.project_preview_dock.show()
         self.statusBar().showMessage(f"Rendered video saved to project: {meta.get('name', 'Untitled project')}")
 
@@ -2775,50 +2905,51 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Project video exported: {target}")
 
     def choose_project_workflow(self) -> None:
+        source_name = choose_document_open(self, "Add project file", str(Path.home()), "All files (*)")
+        if source_name:
+            self.attach_project_workflow(source_name)
+
+    def attach_project_workflow(self, source_name: str) -> None:
         meta = self.current_library_metadata()
         if not meta:
-            QMessageBox.information(self, "Save project first", "Save or open a project before adding ComfyUI workspace files.")
-            return
-        source_name = choose_document_open(self, "Add ComfyUI workspace JSON", str(Path.home()), "JSON files (*.json)")
-        if not source_name:
+            QMessageBox.information(self, "Save project first", "Save or open a project before adding project files.")
             return
         source = Path(source_name)
-        try:
-            json.loads(source.read_text(encoding="utf-8"))
-        except (OSError, ValueError, UnicodeError) as error:
-            QMessageBox.warning(self, "Invalid workspace JSON", f"That file is not valid JSON.\n\n{error}")
+        if not source.is_file():
+            QMessageBox.warning(self, "Project file missing", "The dropped project file could not be found.")
             return
-        workflow_dir = project_library_path() / "workflows"
+        workflow_dir = project_library_path() / "project_files"
         workflow_dir.mkdir(parents=True, exist_ok=True)
-        destination = workflow_dir / f"{meta['id']}_{uuid4().hex[:8]}_{safe_media_filename(source.name, 'comfyui_workspace')}"
+        destination = workflow_dir / f"{meta['id']}_{uuid4().hex[:8]}_{safe_media_filename(source.name, 'project_file')}"
         try:
             shutil.copy2(source, destination)
         except OSError as error:
-            QMessageBox.critical(self, "Workspace import failed", str(error))
+            QMessageBox.critical(self, "Project file import failed", str(error))
             return
-        workflows = [value for value in meta.get("workflowFiles", []) if isinstance(value, dict)]
+        workflows = [value for value in meta.get("projectFiles", meta.get("workflowFiles", [])) if isinstance(value, dict)]
         workflows.append({"name": source.name, "path": str(destination)})
-        meta["workflowFiles"] = workflows
+        meta["projectFiles"] = workflows
+        meta.pop("workflowFiles", None)
         self.persist_library_metadata(meta)
         self.update_project_preview()
-        self.statusBar().showMessage(f"ComfyUI workspace added: {source.name}")
+        self.statusBar().showMessage(f"Project file added: {source.name}")
 
     def export_project_workflow(self) -> None:
         workflow = self.project_preview_panel.selected_workflow()
         source = Path(str(workflow.get("path", ""))) if workflow else Path()
         if not workflow or not source.is_file():
             return
-        suggested = str(Path.home() / safe_media_filename(str(workflow.get("name") or source.name), "comfyui_workspace"))
-        destination = choose_document_save(self, "Export ComfyUI workspace", suggested, "JSON files (*.json)")
+        suggested = str(Path.home() / safe_media_filename(str(workflow.get("name") or source.name), "project_file"))
+        destination = choose_document_save(self, "Export project file", suggested, "All files (*)")
         if not destination:
             return
         target = Path(destination)
-        if not target.suffix:
-            target = target.with_suffix(".json")
+        if not target.suffix and source.suffix:
+            target = target.with_suffix(source.suffix)
         try:
             shutil.copy2(source, target)
         except OSError as error:
-            QMessageBox.critical(self, "Workspace export failed", str(error))
+            QMessageBox.critical(self, "Project file export failed", str(error))
             return
         self.statusBar().showMessage(f"ComfyUI workspace exported: {target}")
 
@@ -2828,18 +2959,19 @@ class MainWindow(QMainWindow):
         if not meta or not selected:
             return
         selected_path = Path(str(selected.get("path", "")))
-        meta["workflowFiles"] = [
-            value for value in meta.get("workflowFiles", [])
+        meta["projectFiles"] = [
+            value for value in meta.get("projectFiles", meta.get("workflowFiles", []))
             if not isinstance(value, dict) or str(value.get("path", "")) != str(selected_path)
         ]
+        meta.pop("workflowFiles", None)
         try:
-            if selected_path.is_file() and selected_path.parent == project_library_path() / "workflows":
+            if selected_path.is_file() and selected_path.parent in {project_library_path() / "project_files", project_library_path() / "workflows"}:
                 selected_path.unlink()
         except OSError as error:
-            QMessageBox.warning(self, "Workspace removal warning", str(error))
+            QMessageBox.warning(self, "Project file removal warning", str(error))
         self.persist_library_metadata(meta)
         self.update_project_preview()
-        self.statusBar().showMessage(f"ComfyUI workspace removed: {selected.get('name', selected_path.name)}")
+        self.statusBar().showMessage(f"Project file removed: {selected.get('name', selected_path.name)}")
 
     def project_library_menu(self, point) -> None:
         item = self.project_list.itemAt(point)
@@ -2898,7 +3030,7 @@ class MainWindow(QMainWindow):
         project_path = Path(clean.get("projectPath", ""))
         if project_path.is_file():
             payload = json.loads(project_path.read_text(encoding="utf-8"))
-            payload["library"] = {key: clean.get(key, "") for key in ("id", "name", "description", "collection", "savedAt", "status", "tags", "tag", "archived", "notes", "previewVideoPath", "previewVideoName", "workflowFiles")}
+            payload["library"] = {key: clean.get(key, "") for key in ("id", "name", "description", "collection", "savedAt", "status", "tags", "tag", "archived", "notes", "previewVideoPath", "previewVideoName", "projectFiles", "workflowFiles")}
             project_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
     def selected_project_members(self) -> tuple[dict | None, list[dict]]:
@@ -3064,7 +3196,7 @@ class MainWindow(QMainWindow):
             meta["thumbnailData"] = data_url(visual.preview_path, max_edge=360, quality=84) if visual else ""
         payload = self.project_payload()
         normalize_project_labels(meta)
-        payload["library"] = {key: meta.get(key, "") for key in ("id", "name", "description", "collection", "savedAt", "status", "tags", "tag", "archived", "notes", "previewVideoPath", "previewVideoName", "workflowFiles")}
+        payload["library"] = {key: meta.get(key, "") for key in ("id", "name", "description", "collection", "savedAt", "status", "tags", "tag", "archived", "notes", "previewVideoPath", "previewVideoName", "projectFiles", "workflowFiles")}
         Path(meta["projectPath"]).write_text(json.dumps(payload, indent=2), encoding="utf-8")
         (root / f"{meta['id']}.meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
         self.project_dirty = False
@@ -3142,9 +3274,9 @@ class MainWindow(QMainWindow):
             self.project_preview_panel.player.stop()
             self.project_preview_panel.player.setSource(QUrl())
         attached_paths = [Path(str(meta.get("previewVideoPath", "")))]
-        attached_paths.extend(Path(str(value.get("path", ""))) for value in meta.get("workflowFiles", []) if isinstance(value, dict))
+        attached_paths.extend(Path(str(value.get("path", ""))) for value in meta.get("projectFiles", meta.get("workflowFiles", [])) if isinstance(value, dict))
         for attached in attached_paths:
-            if attached.is_file() and attached.parent in {project_library_path() / "previews", project_library_path() / "workflows"}:
+            if attached.is_file() and attached.parent in {project_library_path() / "previews", project_library_path() / "project_files", project_library_path() / "workflows"}:
                 attached.unlink()
         if project_path.is_file():
             project_path.unlink()
