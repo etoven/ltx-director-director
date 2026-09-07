@@ -12,8 +12,10 @@ from importlib.resources import files
 from pathlib import Path
 from uuid import uuid4
 
-from PySide6.QtCore import QDateTime, QEasingCurve, QEvent, QEventLoop, QObject, QRunnable, QRectF, QSettings, QSize, QStandardPaths, Qt, QThreadPool, QTimer, QVariantAnimation, Signal
+from PySide6.QtCore import QDateTime, QEasingCurve, QEvent, QEventLoop, QObject, QRunnable, QRectF, QSettings, QSize, QStandardPaths, Qt, QThreadPool, QTimer, QUrl, QVariantAnimation, Signal
 from PySide6.QtGui import QAction, QActionGroup, QBrush, QColor, QIcon, QPainter, QPen, QPixmap
+from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
+from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
     QColorDialog, QDateTimeEdit, QDockWidget, QFileDialog, QFormLayout, QFrame, QHBoxLayout, QLabel, QLineEdit,
@@ -348,8 +350,9 @@ class ProjectTileDelegate(QStyledItemDelegate):
         card = option.rect.adjusted(4, 4, -4, -4)
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setBrush(QColor("#22282b"))
-        painter.setPen(QPen(border, 4 if color_value else 1))
+        fill = QColor(color_value).darker(150) if color_value else QColor("#22282b")
+        painter.setBrush(fill)
+        painter.setPen(QPen(border, 2 if color_value else 1))
         painter.drawRoundedRect(card, 7, 7)
         if option.state & QStyle.StateFlag.State_Selected:
             painter.setBrush(Qt.BrushStyle.NoBrush)
@@ -362,6 +365,205 @@ class ProjectTileDelegate(QStyledItemDelegate):
         clean.state &= ~QStyle.StateFlag.State_HasFocus
         clean.backgroundBrush = QBrush(Qt.BrushStyle.NoBrush)
         super().paint(painter, clean, index)
+
+
+class ProjectVideoWidget(QVideoWidget):
+    video_dropped = Signal(str)
+
+    VIDEO_SUFFIXES = {".mp4", ".webm", ".mov", ".mkv", ".avi", ".m4v"}
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAcceptDrops(True)
+        self.setMinimumSize(320, 180)
+
+    def dragEnterEvent(self, event) -> None:
+        urls = event.mimeData().urls() if event.mimeData().hasUrls() else []
+        if len(urls) == 1 and urls[0].isLocalFile() and Path(urls[0].toLocalFile()).suffix.lower() in self.VIDEO_SUFFIXES:
+            event.acceptProposedAction()
+            return
+        event.ignore()
+
+    def dropEvent(self, event) -> None:
+        path = event.mimeData().urls()[0].toLocalFile()
+        self.video_dropped.emit(path)
+        event.acceptProposedAction()
+
+
+class ProjectPreviewPanel(QWidget):
+    video_dropped = Signal(str)
+    choose_requested = Signal()
+    export_requested = Signal()
+    workflow_add_requested = Signal()
+    workflow_export_requested = Signal()
+    workflow_remove_requested = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAcceptDrops(True)
+        self.duration = 0
+        self.player = QMediaPlayer(self)
+        self.audio = QAudioOutput(self)
+        self.player.setAudioOutput(self.audio)
+        self.video = ProjectVideoWidget(self)
+        self.player.setVideoOutput(self.video)
+        self.video.video_dropped.connect(self.video_dropped)
+        self.video.fullScreenChanged.connect(self.fullscreen_changed)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setSpacing(5)
+        self.title = QLabel("No saved project selected")
+        self.title.setObjectName("previewTitle")
+        self.title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.empty = QLabel("Save or open a project, then drop a rendered video here")
+        self.empty.setObjectName("previewEmpty")
+        self.empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.empty.setWordWrap(True)
+        video_stack = QVBoxLayout()
+        video_stack.setContentsMargins(0, 0, 0, 0)
+        video_stack.addWidget(self.video, 1)
+        video_stack.addWidget(self.empty)
+        layout.addWidget(self.title)
+        layout.addLayout(video_stack, 1)
+        seek_row = QHBoxLayout()
+        self.position = QLabel("00:00 / 00:00")
+        self.seek = QSlider(Qt.Orientation.Horizontal)
+        self.seek.setRange(0, 0)
+        self.seek.sliderMoved.connect(self.player.setPosition)
+        seek_row.addWidget(self.seek, 1)
+        seek_row.addWidget(self.position)
+        layout.addLayout(seek_row)
+        controls = QHBoxLayout()
+        self.play = QPushButton("▶ Play")
+        self.play.clicked.connect(self.toggle_playback)
+        self.choose = QPushButton("Add Video…")
+        self.choose.clicked.connect(self.choose_requested)
+        self.export = QPushButton("Export Video…")
+        self.export.clicked.connect(self.export_requested)
+        self.fullscreen = QPushButton("⛶ Fullscreen")
+        self.fullscreen.clicked.connect(lambda: self.video.setFullScreen(not self.video.isFullScreen()))
+        controls.addWidget(self.play)
+        controls.addWidget(self.choose)
+        controls.addWidget(self.export)
+        controls.addWidget(self.fullscreen)
+        layout.addLayout(controls)
+        workflow_title = QLabel("COMFYUI WORKSPACES")
+        workflow_title.setObjectName("previewSectionTitle")
+        self.workflows = QListWidget()
+        self.workflows.setObjectName("projectWorkflowList")
+        self.workflows.setMaximumHeight(105)
+        workflow_controls = QHBoxLayout()
+        add_workflow = QPushButton("Add JSON…")
+        add_workflow.clicked.connect(self.workflow_add_requested)
+        self.export_workflow = QPushButton("Export")
+        self.export_workflow.clicked.connect(self.workflow_export_requested)
+        self.remove_workflow = QPushButton("Remove")
+        self.remove_workflow.clicked.connect(self.workflow_remove_requested)
+        workflow_controls.addWidget(add_workflow)
+        workflow_controls.addWidget(self.export_workflow)
+        workflow_controls.addWidget(self.remove_workflow)
+        layout.addWidget(workflow_title)
+        layout.addWidget(self.workflows)
+        layout.addLayout(workflow_controls)
+        self.workflows.currentRowChanged.connect(self.workflow_selection_changed)
+        self.add_workflow = add_workflow
+        self.player.positionChanged.connect(self.position_changed)
+        self.player.durationChanged.connect(self.duration_changed)
+        self.player.playbackStateChanged.connect(self.playback_changed)
+        self.clear_project()
+
+    def dragEnterEvent(self, event) -> None:
+        urls = event.mimeData().urls() if event.mimeData().hasUrls() else []
+        if self.choose.isEnabled() and len(urls) == 1 and urls[0].isLocalFile() and Path(urls[0].toLocalFile()).suffix.lower() in ProjectVideoWidget.VIDEO_SUFFIXES:
+            event.acceptProposedAction()
+            return
+        event.ignore()
+
+    def dropEvent(self, event) -> None:
+        self.video_dropped.emit(event.mimeData().urls()[0].toLocalFile())
+        event.acceptProposedAction()
+
+    @staticmethod
+    def time_text(milliseconds: int) -> str:
+        total = max(0, int(milliseconds) // 1000)
+        return f"{total // 60:02d}:{total % 60:02d}"
+
+    def set_project(self, name: str, video_path: str = "", workflows: list[dict] | None = None) -> None:
+        self.player.stop()
+        self.title.setText(name)
+        self.choose.setEnabled(True)
+        self.add_workflow.setEnabled(True)
+        self.workflows.clear()
+        for workflow in workflows or []:
+            item = QListWidgetItem(str(workflow.get("name") or Path(str(workflow.get("path", ""))).name))
+            item.setData(Qt.ItemDataRole.UserRole, workflow)
+            self.workflows.addItem(item)
+        if self.workflows.count():
+            self.workflows.setCurrentRow(0)
+        else:
+            self.workflow_selection_changed(-1)
+        path = Path(video_path)
+        if path.is_file():
+            self.player.setSource(QUrl.fromLocalFile(str(path)))
+            self.empty.hide()
+            self.video.show()
+            self.export.setEnabled(True)
+            self.fullscreen.setEnabled(True)
+        else:
+            self.player.stop()
+            self.player.setSource(QUrl())
+            self.video.hide()
+            self.empty.setText("Drop a rendered video here\nor use Add Video")
+            self.empty.show()
+            self.export.setEnabled(False)
+            self.fullscreen.setEnabled(False)
+
+    def clear_project(self) -> None:
+        self.player.stop()
+        self.player.setSource(QUrl())
+        self.title.setText("No saved project selected")
+        self.video.hide()
+        self.empty.setText("Save or open a project, then drop a rendered video here")
+        self.empty.show()
+        self.choose.setEnabled(False)
+        self.add_workflow.setEnabled(False)
+        self.workflows.clear()
+        self.workflow_selection_changed(-1)
+        self.export.setEnabled(False)
+        self.fullscreen.setEnabled(False)
+        self.seek.setRange(0, 0)
+        self.position.setText("00:00 / 00:00")
+
+    def toggle_playback(self) -> None:
+        if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+            self.player.pause()
+        else:
+            self.player.play()
+
+    def duration_changed(self, duration: int) -> None:
+        self.duration = max(0, duration)
+        self.seek.setRange(0, self.duration)
+        self.position_changed(self.player.position())
+
+    def position_changed(self, position: int) -> None:
+        if not self.seek.isSliderDown():
+            self.seek.setValue(position)
+        self.position.setText(f"{self.time_text(position)} / {self.time_text(self.duration)}")
+
+    def playback_changed(self, state) -> None:
+        self.play.setText("❚❚ Pause" if state == QMediaPlayer.PlaybackState.PlayingState else "▶ Play")
+
+    def fullscreen_changed(self, fullscreen: bool) -> None:
+        self.fullscreen.setText("Exit Fullscreen" if fullscreen else "⛶ Fullscreen")
+
+    def workflow_selection_changed(self, row: int) -> None:
+        enabled = row >= 0
+        self.export_workflow.setEnabled(enabled)
+        self.remove_workflow.setEnabled(enabled)
+
+    def selected_workflow(self) -> dict | None:
+        item = self.workflows.currentItem()
+        return item.data(Qt.ItemDataRole.UserRole) if item else None
 
 
 class MagicSpinner(QWidget):
@@ -1066,6 +1268,7 @@ class SettingsDialog(QDialog):
 class ProjectNoteRow(QFrame):
     edit_requested = Signal(str)
     delete_requested = Signal(str)
+    checked_changed = Signal(str, bool)
 
     def __init__(self, note: dict, parent=None):
         super().__init__(parent)
@@ -1074,6 +1277,10 @@ class ProjectNoteRow(QFrame):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(7, 5, 5, 5)
         layout.setSpacing(7)
+        completed = QCheckBox()
+        completed.setChecked(bool(note.get("checked", False)))
+        completed.setToolTip("Mark note complete")
+        completed.toggled.connect(lambda checked: self.checked_changed.emit(self.note_id, checked))
         note_time = QDateTime.fromString(str(note["date"]), Qt.DateFormat.ISODate)
         stamp = QLabel(note_time.toLocalTime().toString("yyyy-MM-dd HH:mm") if note_time.isValid() else str(note["date"]).replace("T", " ")[:16])
         stamp.setObjectName("projectNoteDate")
@@ -1081,12 +1288,18 @@ class ProjectNoteRow(QFrame):
         stamp.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         text = QLabel(str(note["text"]))
         text.setWordWrap(True)
+        if note.get("checked"):
+            font = text.font()
+            font.setStrikeOut(True)
+            text.setFont(font)
+            text.setStyleSheet("color:#839097")
         text.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         remove = QPushButton("×")
         remove.setObjectName("projectNoteDelete")
         remove.setToolTip("Delete note")
         remove.setFixedSize(24, 24)
         remove.clicked.connect(lambda: self.delete_requested.emit(self.note_id))
+        layout.addWidget(completed)
         layout.addWidget(stamp)
         layout.addWidget(text, 1)
         layout.addWidget(remove)
@@ -1250,6 +1463,7 @@ class ProjectDetailsDialog(QDialog):
             row = ProjectNoteRow(note, self.notes_list)
             row.edit_requested.connect(self.edit_note)
             row.delete_requested.connect(self.delete_note)
+            row.checked_changed.connect(self.set_note_checked)
             item.setSizeHint(row.sizeHint())
             item.setData(Qt.ItemDataRole.UserRole, note["id"])
             self.notes_list.addItem(item)
@@ -1291,7 +1505,13 @@ class ProjectDetailsDialog(QDialog):
             self.note_input.clear()
         self.refresh_notes()
 
-    def notes_value(self) -> list[dict[str, str]]:
+    def set_note_checked(self, note_id: str, checked: bool) -> None:
+        note = next((value for value in self.notes if value["id"] == note_id), None)
+        if note:
+            note["checked"] = checked
+            self.refresh_notes()
+
+    def notes_value(self) -> list[dict]:
         return normalize_notes(self.notes)
 
 
@@ -1338,6 +1558,7 @@ class MainWindow(QMainWindow):
 
     def _build_ui(self) -> None:
         self._build_project_dock()
+        self._build_project_preview_dock()
         toolbar = QToolBar("Project")
         toolbar.setObjectName("mainToolbar")
         toolbar.setMovable(False)
@@ -1346,6 +1567,10 @@ class MainWindow(QMainWindow):
         projects_action.setText("Projects")
         projects_action.setIcon(QIcon.fromTheme("folder", self.style().standardIcon(QStyle.StandardPixmap.SP_DirIcon)))
         toolbar.addAction(projects_action)
+        preview_action = self.project_preview_dock.toggleViewAction()
+        preview_action.setText("Preview")
+        preview_action.setIcon(QIcon.fromTheme("video-x-generic", self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay)))
+        toolbar.addAction(preview_action)
         toolbar.addSeparator()
         action_groups = [
             (("New Project", "document-new", QStyle.StandardPixmap.SP_FileIcon, self.new_project),
@@ -1761,6 +1986,32 @@ class MainWindow(QMainWindow):
         self.setStatusBar(QStatusBar())
         self.update_summary()
 
+    def _build_project_preview_dock(self) -> None:
+        self.project_preview_dock = QDockWidget("PROJECT VIDEO PREVIEW", self)
+        self.project_preview_dock.setObjectName("projectPreviewDock")
+        self.project_preview_dock.setAllowedAreas(
+            Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea | Qt.DockWidgetArea.BottomDockWidgetArea
+        )
+        self.project_preview_dock.setFeatures(
+            QDockWidget.DockWidgetFeature.DockWidgetClosable
+            | QDockWidget.DockWidgetFeature.DockWidgetMovable
+            | QDockWidget.DockWidgetFeature.DockWidgetFloatable
+        )
+        self.project_preview_dock.setMinimumWidth(400)
+        self.project_preview_panel = ProjectPreviewPanel(self.project_preview_dock)
+        self.project_preview_panel.video_dropped.connect(self.attach_project_video)
+        self.project_preview_panel.choose_requested.connect(self.choose_project_video)
+        self.project_preview_panel.export_requested.connect(self.export_project_video)
+        self.project_preview_panel.workflow_add_requested.connect(self.choose_project_workflow)
+        self.project_preview_panel.workflow_export_requested.connect(self.export_project_workflow)
+        self.project_preview_panel.workflow_remove_requested.connect(self.remove_project_workflow)
+        self.project_preview_dock.setWidget(self.project_preview_panel)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.project_preview_dock)
+        self.project_preview_dock.dockLocationChanged.connect(lambda *_: self.save_window_panel_state())
+        self.project_preview_dock.topLevelChanged.connect(lambda *_: self.save_window_panel_state())
+        self.project_preview_dock.visibilityChanged.connect(lambda *_: self.save_window_panel_state())
+        self.project_preview_dock.hide()
+
     def _build_project_dock(self) -> None:
         self.project_dock = QDockWidget("PROJECT LIBRARY", self)
         self.project_dock.setObjectName("projectDock")
@@ -2039,6 +2290,7 @@ class MainWindow(QMainWindow):
         #projectLibraryTitle,#magicOverlayTitle{font-size:15px;font-weight:bold;color:#f0f2f3} #libraryControls{background:#1c2225;border:1px solid #343e43;border-radius:5px} #projectSearch{background:#171c1e;border:1px solid #343d41;border-radius:5px;padding-left:10px} #projectSearch:focus{border-color:#4d829d;background:#1b2225} #projectList{background:#15191b;border:1px solid #30383c;border-radius:5px;padding:10px}
         #projectList::item{background:transparent;border:1px solid #363f43;border-radius:6px;margin:4px;padding:7px;color:#dce0e2} #projectList::item:hover{border-color:#6488a1} #projectList::item:selected{border:2px solid #69a5d0}
         #projectFilters{background:#171c1e;border:1px solid #30383c;border-radius:5px} #projectFilterButton{min-height:17px;padding:2px 6px;background:#23292c;border-color:#394348;color:#aeb8bd} #projectFilterButton:hover{background:#303a3f;color:#fff} #projectNotesList{background:#171b1d;border:1px solid #3a4449;border-radius:4px;padding:3px} #projectNotesList::item{background:transparent;border:0;margin:2px;padding:0} #projectNoteRow{background:#22282b;border:1px solid #394348;border-radius:4px} #projectNoteRow:hover{border-color:#5e8295;background:#283136} #projectNoteDate{color:#86a9ba;font-size:9px} #projectNoteDelete{min-height:0;padding:0;background:transparent;border:0;color:#bca6a6;font-size:15px} #projectNoteDelete:hover{background:#713d3d;color:white}
+        #previewTitle{background:#1a2023;border:1px solid #354047;border-radius:4px;padding:5px;color:#d7ebf5;font-weight:bold} #previewEmpty{background:#101314;border:1px dashed #4a565c;border-radius:4px;padding:24px;color:#87959c} #previewSectionTitle{color:#8ebbd1;font-size:8px;font-weight:bold;letter-spacing:1px} #projectWorkflowList{background:#171b1d;border:1px solid #354047;border-radius:4px;padding:3px} #projectWorkflowList::item{background:#22282b;border:1px solid #394348;border-radius:3px;margin:2px;padding:4px} #projectWorkflowList::item:selected{background:#294356;border-color:#69a5d0}
         #librarySave{background:#3b78a5;border-color:#5994bd;font-weight:bold} #librarySave:hover{background:#5596ca;border-color:#8bc8f5;color:#fff} #librarySave:pressed{background:#214865;border:1px solid #b9e1ff;color:#fff} #librarySecondary{background:transparent;border-color:#3d484e;color:#bfc7cb} #librarySecondary:hover{background:#30393d;border-color:#596a73;color:#fff} #libraryDelete{background:transparent;border-color:#4b3b3b;color:#c8b7b7} #libraryDelete:hover{background:#713d3d;border-color:#9b5656;color:#fff}
         QMenu{background:#252a2c;border:1px solid #596267;padding:4px} QMenu::item{padding:7px 28px 7px 12px;border-radius:3px} QMenu::item:selected{background:#3b6f9c;color:#fff} QMenu::separator{height:1px;background:#4b5255;margin:4px 7px}
         QScrollBar:vertical{background:#171b1d;width:12px;margin:0;border:0;border-radius:6px} QScrollBar::handle:vertical{background:#46545c;min-height:28px;margin:2px;border-radius:4px} QScrollBar::handle:vertical:hover{background:#63869b} QScrollBar::handle:vertical:pressed{background:#74a8c6}
@@ -2352,6 +2604,151 @@ class MainWindow(QMainWindow):
         item = self.project_list.currentItem()
         return item.data(Qt.ItemDataRole.UserRole) if item else None
 
+    def current_library_metadata(self) -> dict | None:
+        if not self.current_project_id:
+            return None
+        path = project_library_path() / f"{self.current_project_id}.meta.json"
+        try:
+            meta = json.loads(path.read_text(encoding="utf-8"))
+            normalize_project_labels(meta)
+            return meta
+        except (OSError, ValueError, TypeError):
+            return None
+
+    def update_project_preview(self) -> None:
+        meta = self.current_library_metadata()
+        if not meta:
+            self.project_preview_panel.clear_project()
+            return
+        workflows = [value for value in meta.get("workflowFiles", []) if isinstance(value, dict) and Path(str(value.get("path", ""))).is_file()]
+        self.project_preview_panel.set_project(str(meta.get("name") or "Untitled project"), str(meta.get("previewVideoPath", "")), workflows)
+
+    def choose_project_video(self) -> None:
+        initial = str(Path.home())
+        meta = self.current_library_metadata()
+        if meta and meta.get("previewVideoPath"):
+            initial = str(Path(meta["previewVideoPath"]).parent)
+        path = choose_document_open(self, "Choose rendered project video", initial, "Videos (*.mp4 *.webm *.mov *.mkv *.avi *.m4v)")
+        if path:
+            self.attach_project_video(path)
+
+    def attach_project_video(self, source_path: str) -> None:
+        meta = self.current_library_metadata()
+        source = Path(source_path)
+        if not meta:
+            QMessageBox.information(self, "Save project first", "Save or open a project before adding its rendered video.")
+            return
+        if not source.is_file() or source.suffix.lower() not in ProjectVideoWidget.VIDEO_SUFFIXES:
+            QMessageBox.warning(self, "Unsupported video", "Choose an MP4, WebM, MOV, MKV, AVI, or M4V video.")
+            return
+        preview_dir = project_library_path() / "previews"
+        preview_dir.mkdir(parents=True, exist_ok=True)
+        safe_name = safe_media_filename(source.name, "project_preview")
+        destination = preview_dir / f"{meta['id']}_{safe_name}"
+        previous = Path(str(meta.get("previewVideoPath", "")))
+        try:
+            if source.resolve() != destination.resolve():
+                shutil.copy2(source, destination)
+            if previous.is_file() and previous.resolve() != destination.resolve() and previous.parent == preview_dir:
+                previous.unlink()
+        except OSError as error:
+            QMessageBox.critical(self, "Video import failed", str(error))
+            return
+        meta["previewVideoPath"] = str(destination)
+        meta["previewVideoName"] = source.name
+        self.persist_library_metadata(meta)
+        self.project_preview_panel.set_project(str(meta.get("name") or "Untitled project"), str(destination), meta.get("workflowFiles", []))
+        self.project_preview_dock.show()
+        self.statusBar().showMessage(f"Rendered video saved to project: {meta.get('name', 'Untitled project')}")
+
+    def export_project_video(self) -> None:
+        meta = self.current_library_metadata()
+        source = Path(str(meta.get("previewVideoPath", ""))) if meta else Path()
+        if not meta or not source.is_file():
+            QMessageBox.information(self, "No project video", "Add a rendered video to this project first.")
+            return
+        original = str(meta.get("previewVideoName") or source.name)
+        suggested = str(Path.home() / safe_media_filename(original, "project_video"))
+        destination = choose_document_save(self, "Export rendered project video", suggested, "Videos (*%s);;All files (*)" % source.suffix.lower())
+        if not destination:
+            return
+        target = Path(destination)
+        if not target.suffix:
+            target = target.with_suffix(source.suffix)
+        try:
+            shutil.copy2(source, target)
+        except OSError as error:
+            QMessageBox.critical(self, "Video export failed", str(error))
+            return
+        self.statusBar().showMessage(f"Project video exported: {target}")
+
+    def choose_project_workflow(self) -> None:
+        meta = self.current_library_metadata()
+        if not meta:
+            QMessageBox.information(self, "Save project first", "Save or open a project before adding ComfyUI workspace files.")
+            return
+        source_name = choose_document_open(self, "Add ComfyUI workspace JSON", str(Path.home()), "JSON files (*.json)")
+        if not source_name:
+            return
+        source = Path(source_name)
+        try:
+            json.loads(source.read_text(encoding="utf-8"))
+        except (OSError, ValueError, UnicodeError) as error:
+            QMessageBox.warning(self, "Invalid workspace JSON", f"That file is not valid JSON.\n\n{error}")
+            return
+        workflow_dir = project_library_path() / "workflows"
+        workflow_dir.mkdir(parents=True, exist_ok=True)
+        destination = workflow_dir / f"{meta['id']}_{uuid4().hex[:8]}_{safe_media_filename(source.name, 'comfyui_workspace')}"
+        try:
+            shutil.copy2(source, destination)
+        except OSError as error:
+            QMessageBox.critical(self, "Workspace import failed", str(error))
+            return
+        workflows = [value for value in meta.get("workflowFiles", []) if isinstance(value, dict)]
+        workflows.append({"name": source.name, "path": str(destination)})
+        meta["workflowFiles"] = workflows
+        self.persist_library_metadata(meta)
+        self.update_project_preview()
+        self.statusBar().showMessage(f"ComfyUI workspace added: {source.name}")
+
+    def export_project_workflow(self) -> None:
+        workflow = self.project_preview_panel.selected_workflow()
+        source = Path(str(workflow.get("path", ""))) if workflow else Path()
+        if not workflow or not source.is_file():
+            return
+        suggested = str(Path.home() / safe_media_filename(str(workflow.get("name") or source.name), "comfyui_workspace"))
+        destination = choose_document_save(self, "Export ComfyUI workspace", suggested, "JSON files (*.json)")
+        if not destination:
+            return
+        target = Path(destination)
+        if not target.suffix:
+            target = target.with_suffix(".json")
+        try:
+            shutil.copy2(source, target)
+        except OSError as error:
+            QMessageBox.critical(self, "Workspace export failed", str(error))
+            return
+        self.statusBar().showMessage(f"ComfyUI workspace exported: {target}")
+
+    def remove_project_workflow(self) -> None:
+        meta = self.current_library_metadata()
+        selected = self.project_preview_panel.selected_workflow()
+        if not meta or not selected:
+            return
+        selected_path = Path(str(selected.get("path", "")))
+        meta["workflowFiles"] = [
+            value for value in meta.get("workflowFiles", [])
+            if not isinstance(value, dict) or str(value.get("path", "")) != str(selected_path)
+        ]
+        try:
+            if selected_path.is_file() and selected_path.parent == project_library_path() / "workflows":
+                selected_path.unlink()
+        except OSError as error:
+            QMessageBox.warning(self, "Workspace removal warning", str(error))
+        self.persist_library_metadata(meta)
+        self.update_project_preview()
+        self.statusBar().showMessage(f"ComfyUI workspace removed: {selected.get('name', selected_path.name)}")
+
     def project_library_menu(self, point) -> None:
         item = self.project_list.itemAt(point)
         if not item:
@@ -2409,7 +2806,7 @@ class MainWindow(QMainWindow):
         project_path = Path(clean.get("projectPath", ""))
         if project_path.is_file():
             payload = json.loads(project_path.read_text(encoding="utf-8"))
-            payload["library"] = {key: clean.get(key, "") for key in ("id", "name", "description", "collection", "savedAt", "status", "tags", "tag", "archived", "notes")}
+            payload["library"] = {key: clean.get(key, "") for key in ("id", "name", "description", "collection", "savedAt", "status", "tags", "tag", "archived", "notes", "previewVideoPath", "previewVideoName", "workflowFiles")}
             project_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
     def selected_project_members(self) -> tuple[dict | None, list[dict]]:
@@ -2575,7 +2972,7 @@ class MainWindow(QMainWindow):
             meta["thumbnailData"] = data_url(visual.preview_path, max_edge=360, quality=84) if visual else ""
         payload = self.project_payload()
         normalize_project_labels(meta)
-        payload["library"] = {key: meta.get(key, "") for key in ("id", "name", "description", "collection", "savedAt", "status", "tags", "tag", "archived", "notes")}
+        payload["library"] = {key: meta.get(key, "") for key in ("id", "name", "description", "collection", "savedAt", "status", "tags", "tag", "archived", "notes", "previewVideoPath", "previewVideoName", "workflowFiles")}
         Path(meta["projectPath"]).write_text(json.dumps(payload, indent=2), encoding="utf-8")
         (root / f"{meta['id']}.meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
         self.project_dirty = False
@@ -2585,6 +2982,7 @@ class MainWindow(QMainWindow):
             "state": self.capture_workspace_state(),
         }
         self.refresh_project_library(meta["id"])
+        self.update_project_preview()
         self.project_dock.show()
         self.settings.setValue("last_project_id", str(meta["id"]))
         self.queue_settings_sync()
@@ -2622,6 +3020,7 @@ class MainWindow(QMainWindow):
             }
             self.update_window_title()
             self.refresh_project_library(project_id)
+            self.update_project_preview()
             self.settings.setValue("last_project_id", project_id)
             self.queue_settings_sync()
             self.statusBar().showMessage(f"Project opened: {meta['name']}")
@@ -2647,6 +3046,14 @@ class MainWindow(QMainWindow):
             return
         project_path = Path(meta.get("projectPath", ""))
         meta_path = project_library_path() / f"{meta.get('id')}.meta.json"
+        if self.current_project_id == meta.get("id"):
+            self.project_preview_panel.player.stop()
+            self.project_preview_panel.player.setSource(QUrl())
+        attached_paths = [Path(str(meta.get("previewVideoPath", "")))]
+        attached_paths.extend(Path(str(value.get("path", ""))) for value in meta.get("workflowFiles", []) if isinstance(value, dict))
+        for attached in attached_paths:
+            if attached.is_file() and attached.parent in {project_library_path() / "previews", project_library_path() / "workflows"}:
+                attached.unlink()
         if project_path.is_file():
             project_path.unlink()
         if meta_path.is_file():
@@ -2655,6 +3062,7 @@ class MainWindow(QMainWindow):
         if self.current_project_id == meta.get("id"):
             self.current_project_id = None
             self.project_dirty = True
+            self.update_project_preview()
         self.refresh_project_library()
         self.statusBar().showMessage(f"Project deleted: {meta.get('name', 'Untitled project')}")
 
@@ -2713,6 +3121,7 @@ class MainWindow(QMainWindow):
         if self.current_project_id == meta["id"]:
             self.current_project_name = meta["name"]
             self.update_window_title()
+            self.update_project_preview()
         if str(meta["id"]) in self.project_sessions:
             self.project_sessions[str(meta["id"])]["name"] = meta["name"]
         self.refresh_project_library(meta["id"])
@@ -2722,6 +3131,10 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"LTX Director - Director :: {self.current_project_name}")
 
     def closeEvent(self, event) -> None:
+        if hasattr(self, "project_preview_panel"):
+            self.project_preview_panel.player.stop()
+            if self.project_preview_panel.video.isFullScreen():
+                self.project_preview_panel.video.setFullScreen(False)
         if hasattr(self, "project_dock") and 280 <= self.project_dock.width() <= 900:
             self.project_panel_width = self.project_dock.width()
             self.settings.setValue("project_panel_width", self.project_panel_width)
@@ -2765,6 +3178,7 @@ class MainWindow(QMainWindow):
         self.segments = []
         self.current_project_id = None
         self.current_project_name = "Untitled"
+        self.update_project_preview()
         self.intent.clear()
         self.requested_length.setValue(0)
         self.speaker_language.setCurrentText("(Image/context provided)")
@@ -3622,6 +4036,7 @@ class MainWindow(QMainWindow):
             self.speaker_accent.setCurrentText("(Image/context provided)")
             self.current_project_id = None
             self.current_project_name = Path(path).stem
+            self.update_project_preview()
             self.update_window_title()
             self.refresh_timeline()
             self.project_dirty = False
@@ -3710,6 +4125,7 @@ class MainWindow(QMainWindow):
             self.load_project_payload(payload)
             self.current_project_id = None
             self.current_project_name = str(payload.get("library", {}).get("name") or Path(path).stem)
+            self.update_project_preview()
             self.update_window_title()
             self.project_dirty = False
             self.statusBar().showMessage(f"Project opened: {path}")
