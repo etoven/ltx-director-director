@@ -367,6 +367,57 @@ class ProjectTileDelegate(QStyledItemDelegate):
         super().paint(painter, clean, index)
 
 
+class ProjectDockResizeHandle(QFrame):
+    width_requested = Signal(int)
+
+    def __init__(self, dock: QDockWidget, window: QMainWindow):
+        super().__init__(dock)
+        self.dock = dock
+        self.window = window
+        self.press_x = 0
+        self.start_width = 0
+        self.setObjectName("projectDockResizeHandle")
+        self.setFixedWidth(14)
+        self.setCursor(Qt.CursorShape.SplitHCursor)
+        self.setToolTip("Drag to resize the Project Library")
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.press_x = round(event.globalPosition().x())
+            self.start_width = self.dock.width()
+            self.grabMouse()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        if event.buttons() & Qt.MouseButton.LeftButton:
+            delta = round(event.globalPosition().x()) - self.press_x
+            direction = -1 if self.window.dockWidgetArea(self.dock) == Qt.DockWidgetArea.RightDockWidgetArea else 1
+            self.width_requested.emit(self.start_width + direction * delta)
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.releaseMouse()
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor("#657983"))
+        center = self.rect().center()
+        for offset in range(-24, 25, 8):
+            painter.drawEllipse(center.x() - 2, center.y() + offset - 2, 4, 4)
+        painter.end()
+
+
 class ProjectVideoWidget(QVideoWidget):
     video_dropped = Signal(str)
 
@@ -2005,9 +2056,17 @@ class MainWindow(QMainWindow):
         self.project_preview_panel.workflow_add_requested.connect(self.choose_project_workflow)
         self.project_preview_panel.workflow_export_requested.connect(self.export_project_workflow)
         self.project_preview_panel.workflow_remove_requested.connect(self.remove_project_workflow)
-        self.project_preview_dock.setWidget(self.project_preview_panel)
+        self.project_preview_wrap = QWidget()
+        self.project_preview_wrap_layout = QHBoxLayout(self.project_preview_wrap)
+        self.project_preview_wrap_layout.setContentsMargins(0, 0, 0, 0)
+        self.project_preview_wrap_layout.setSpacing(0)
+        self.project_preview_resize_handle = ProjectDockResizeHandle(self.project_preview_dock, self)
+        self.project_preview_resize_handle.width_requested.connect(self.set_preview_panel_width)
+        self.project_preview_wrap_layout.addWidget(self.project_preview_resize_handle)
+        self.project_preview_wrap_layout.addWidget(self.project_preview_panel, 1)
+        self.project_preview_dock.setWidget(self.project_preview_wrap)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.project_preview_dock)
-        self.project_preview_dock.dockLocationChanged.connect(lambda *_: self.save_window_panel_state())
+        self.project_preview_dock.dockLocationChanged.connect(self.project_preview_dock_location_changed)
         self.project_preview_dock.topLevelChanged.connect(lambda *_: self.save_window_panel_state())
         self.project_preview_dock.visibilityChanged.connect(lambda *_: self.save_window_panel_state())
         self.project_preview_dock.hide()
@@ -2122,11 +2181,19 @@ class MainWindow(QMainWindow):
         buttons.addWidget(delete_button)
         layout.addLayout(buttons)
         self.update_project_icon_controls()
-        self.project_dock.setWidget(panel)
+        self.project_dock_wrap = QWidget()
+        self.project_dock_wrap_layout = QHBoxLayout(self.project_dock_wrap)
+        self.project_dock_wrap_layout.setContentsMargins(0, 0, 0, 0)
+        self.project_dock_wrap_layout.setSpacing(0)
+        self.project_dock_resize_handle = ProjectDockResizeHandle(self.project_dock, self)
+        self.project_dock_resize_handle.width_requested.connect(self.set_project_panel_width)
+        self.project_dock_wrap_layout.addWidget(panel, 1)
+        self.project_dock_wrap_layout.addWidget(self.project_dock_resize_handle)
+        self.project_dock.setWidget(self.project_dock_wrap)
         self.project_dock.installEventFilter(self)
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.project_dock)
         self.project_dock.visibilityChanged.connect(self.project_dock_visibility_changed)
-        self.project_dock.dockLocationChanged.connect(lambda *_: self.save_window_panel_state())
+        self.project_dock.dockLocationChanged.connect(self.project_dock_location_changed)
         self.project_dock.topLevelChanged.connect(lambda *_: self.save_window_panel_state())
         self.project_dock.hide()
         self.refresh_project_library()
@@ -2182,6 +2249,30 @@ class MainWindow(QMainWindow):
     def project_dock_visibility_changed(self, visible: bool) -> None:
         if visible:
             QTimer.singleShot(0, lambda: self.set_project_panel_width(self.project_panel_width, persist=False))
+
+    @staticmethod
+    def position_dock_resize_handle(layout: QHBoxLayout, handle: QWidget, panel: QWidget, area) -> None:
+        layout.removeWidget(handle)
+        if area == Qt.DockWidgetArea.RightDockWidgetArea:
+            layout.insertWidget(0, handle)
+        else:
+            layout.addWidget(handle)
+
+    def project_dock_location_changed(self, area) -> None:
+        self.position_dock_resize_handle(self.project_dock_wrap_layout, self.project_dock_resize_handle, self.project_dock.widget(), area)
+        self.save_window_panel_state()
+
+    def project_preview_dock_location_changed(self, area) -> None:
+        self.position_dock_resize_handle(self.project_preview_wrap_layout, self.project_preview_resize_handle, self.project_preview_panel, area)
+        self.save_window_panel_state()
+
+    def set_preview_panel_width(self, width: int) -> None:
+        width = max(400, min(1100, int(width)))
+        if self.project_preview_dock.isFloating():
+            self.project_preview_dock.resize(width, self.project_preview_dock.height())
+        else:
+            self.resizeDocks([self.project_preview_dock], [width], Qt.Orientation.Horizontal)
+        self.save_window_panel_state()
 
     def restore_project_panel_width(self) -> None:
         """Restore the saved dock width without startup resize events overwriting it."""
@@ -2291,6 +2382,7 @@ class MainWindow(QMainWindow):
         #projectList::item{background:transparent;border:1px solid #363f43;border-radius:6px;margin:4px;padding:7px;color:#dce0e2} #projectList::item:hover{border-color:#6488a1} #projectList::item:selected{border:2px solid #69a5d0}
         #projectFilters{background:#171c1e;border:1px solid #30383c;border-radius:5px} #projectFilterButton{min-height:17px;padding:2px 6px;background:#23292c;border-color:#394348;color:#aeb8bd} #projectFilterButton:hover{background:#303a3f;color:#fff} #projectNotesList{background:#171b1d;border:1px solid #3a4449;border-radius:4px;padding:3px} #projectNotesList::item{background:transparent;border:0;margin:2px;padding:0} #projectNoteRow{background:#22282b;border:1px solid #394348;border-radius:4px} #projectNoteRow:hover{border-color:#5e8295;background:#283136} #projectNoteDate{color:#86a9ba;font-size:9px} #projectNoteDelete{min-height:0;padding:0;background:transparent;border:0;color:#bca6a6;font-size:15px} #projectNoteDelete:hover{background:#713d3d;color:white}
         #previewTitle{background:#1a2023;border:1px solid #354047;border-radius:4px;padding:5px;color:#d7ebf5;font-weight:bold} #previewEmpty{background:#101314;border:1px dashed #4a565c;border-radius:4px;padding:24px;color:#87959c} #previewSectionTitle{color:#8ebbd1;font-size:8px;font-weight:bold;letter-spacing:1px} #projectWorkflowList{background:#171b1d;border:1px solid #354047;border-radius:4px;padding:3px} #projectWorkflowList::item{background:#22282b;border:1px solid #394348;border-radius:3px;margin:2px;padding:4px} #projectWorkflowList::item:selected{background:#294356;border-color:#69a5d0}
+        #projectDockResizeHandle{background:#182023;border-left:1px solid #34434a;border-right:1px solid #0d1113} #projectDockResizeHandle:hover{background:#2b3d45;border-color:#6893a7}
         #librarySave{background:#3b78a5;border-color:#5994bd;font-weight:bold} #librarySave:hover{background:#5596ca;border-color:#8bc8f5;color:#fff} #librarySave:pressed{background:#214865;border:1px solid #b9e1ff;color:#fff} #librarySecondary{background:transparent;border-color:#3d484e;color:#bfc7cb} #librarySecondary:hover{background:#30393d;border-color:#596a73;color:#fff} #libraryDelete{background:transparent;border-color:#4b3b3b;color:#c8b7b7} #libraryDelete:hover{background:#713d3d;border-color:#9b5656;color:#fff}
         QMenu{background:#252a2c;border:1px solid #596267;padding:4px} QMenu::item{padding:7px 28px 7px 12px;border-radius:3px} QMenu::item:selected{background:#3b6f9c;color:#fff} QMenu::separator{height:1px;background:#4b5255;margin:4px 7px}
         QScrollBar:vertical{background:#171b1d;width:12px;margin:0;border:0;border-radius:6px} QScrollBar::handle:vertical{background:#46545c;min-height:28px;margin:2px;border-radius:4px} QScrollBar::handle:vertical:hover{background:#63869b} QScrollBar::handle:vertical:pressed{background:#74a8c6}
