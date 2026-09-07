@@ -18,7 +18,7 @@ from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
-    QColorDialog, QDateTimeEdit, QDockWidget, QFileDialog, QFormLayout, QFrame, QHBoxLayout, QLabel, QLineEdit,
+    QColorDialog, QDateTimeEdit, QDockWidget, QFileDialog, QFormLayout, QFrame, QHBoxLayout, QLabel, QLayout, QLineEdit,
     QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox, QPushButton,
     QSizePolicy, QSlider, QSpinBox, QSplitter, QSplitterHandle, QStatusBar, QStyle, QStyledItemDelegate, QStyleOptionViewItem, QTextEdit, QToolBar, QVBoxLayout, QWidget,
 )
@@ -1689,6 +1689,7 @@ class MainWindow(QMainWindow):
         self.timeline_height = max(184, min(430, self.settings.value("timeline_panel_height", 184, int)))
         self.thread_pool = QThreadPool.globalInstance()
         self._loading = False
+        self.setDockNestingEnabled(True)
         self._build_ui()
         self._apply_theme()
         self.magic_overlay = MagicBuildOverlay(self)
@@ -2173,6 +2174,7 @@ class MainWindow(QMainWindow):
 
         panel = QWidget()
         layout = QVBoxLayout(panel)
+        layout.setSizeConstraint(QLayout.SizeConstraint.SetNoConstraint)
         layout.setContentsMargins(9, 9, 9, 9)
         layout.setSpacing(8)
         library_controls = QFrame()
@@ -2221,6 +2223,8 @@ class MainWindow(QMainWindow):
         self.project_search.textChanged.connect(self.filter_projects)
         self.project_filter_box = QFrame()
         self.project_filter_box.setObjectName("projectFilters")
+        self.project_filter_box.setMinimumWidth(0)
+        self.project_filter_box.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.project_filter_layout = QHBoxLayout(self.project_filter_box)
         self.project_filter_layout.setContentsMargins(3, 3, 3, 3)
         self.project_filter_layout.setSpacing(3)
@@ -2396,7 +2400,7 @@ class MainWindow(QMainWindow):
             return max(1, round(size * scale))
 
         theme = """
-        QMainWindow,QWidget{background:#24292c;color:#d9dcde;font:11px Arial} QMainWindow::separator{width:__DOCK_GRIP_WIDTH__px;height:__DOCK_GRIP_WIDTH__px;background:transparent;background-image:url("__DOCK_GRIP_IMAGE__");background-repeat:no-repeat;background-position:center} QMainWindow::separator:hover{background-color:rgba(88,118,134,35)} QToolBar{background:#1b2023;border:0;border-bottom:1px solid #111517;spacing:3px;padding:5px} QToolBar::separator{background:#394247;width:1px;margin:7px 5px}
+        QMainWindow,QWidget{background:#24292c;color:#d9dcde;font:11px Arial} QMainWindow::separator{width:__DOCK_GRIP_WIDTH__px;height:__DOCK_GRIP_WIDTH__px;background:transparent;background-repeat:no-repeat;background-position:center} QMainWindow::separator:horizontal{background-image:url("__DOCK_GRIP_IMAGE__")} QMainWindow::separator:vertical{background-image:url("__DOCK_GRIP_HORIZONTAL_IMAGE__")} QMainWindow::separator:hover{background-color:rgba(88,118,134,35)} QToolBar{background:#1b2023;border:0;border-bottom:1px solid #111517;spacing:3px;padding:5px} QToolBar::separator{background:#394247;width:1px;margin:7px 5px}
         QToolButton,QPushButton,QComboBox,QSpinBox,QDoubleSpinBox,QLineEdit{background:#303436;border:1px solid #101213;border-radius:3px;padding:3px 7px;min-height:19px}
         #mainToolbar QToolButton{background:transparent;border:1px solid transparent;border-radius:4px;padding:5px 9px;color:#c5cdd1} #mainToolbar QToolButton:hover{background:#2b3438;border-color:#3a464c;color:#f3f7f9} #mainToolbar QToolButton:pressed{background:#17232a;border-color:#477d99;color:#bde6fb} #toolbarButton{background:#23343d;border:1px solid #385667;border-radius:5px;color:#c4e8fb;font-weight:bold}
         QToolButton:hover,QPushButton:hover{background:#41474a} QToolButton:pressed,QPushButton:pressed{background:#202729;border-color:#79a8c5} QLineEdit{background:#1e2122}
@@ -2447,7 +2451,8 @@ class MainWindow(QMainWindow):
         theme = theme.replace("__SLIDER_GROOVE__", str(metric(6))).replace("__SLIDER_RADIUS__", str(metric(3)))
         theme = theme.replace("__SLIDER_HANDLE__", str(metric(16))).replace("__SLIDER_MARGIN__", str(metric(6))).replace("__SLIDER_HANDLE_RADIUS__", str(metric(8)))
         dock_grip = str(files("ltx_prompt_director").joinpath("assets/dock-grip.png")).replace("\\", "/")
-        theme = theme.replace("__DOCK_GRIP_WIDTH__", str(metric(14))).replace("__DOCK_GRIP_IMAGE__", dock_grip)
+        dock_grip_horizontal = str(files("ltx_prompt_director").joinpath("assets/dock-grip-horizontal.png")).replace("\\", "/")
+        theme = theme.replace("__DOCK_GRIP_WIDTH__", str(metric(14))).replace("__DOCK_GRIP_IMAGE__", dock_grip).replace("__DOCK_GRIP_HORIZONTAL_IMAGE__", dock_grip_horizontal)
         spin_up = str(files("ltx_prompt_director").joinpath("assets/spin-up.svg")).replace("\\", "/")
         spin_down = str(files("ltx_prompt_director").joinpath("assets/spin-down.svg")).replace("\\", "/")
         theme = theme.replace("__SPIN_UP_IMAGE__", spin_up).replace("__SPIN_DOWN_IMAGE__", spin_down)
