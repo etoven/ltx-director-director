@@ -1,3 +1,3 @@
 """LTX Director - Director native desktop application."""
 
-__version__ = "1.12.12"
+__version__ = "1.12.13"
