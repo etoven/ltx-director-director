@@ -30,7 +30,7 @@ def refine_timing(segments: list[Segment], selected_index: int, provider: str, m
         raise ValueError("Select a segment to refine its timing.")
     maximum = 60.0 if len(segments) == 1 else 12.0
     untouched_total = sum(segment.duration for index, segment in enumerate(segments) if index != selected_index)
-    available = min(maximum, MAX_SEQUENCE_SECONDS - untouched_total)
+    available = maximum
     required = None
     if requested_total > 0:
         required = round((requested_total - untouched_total) * 2) / 2
@@ -60,7 +60,7 @@ def refine_segment_prompt(segments: list[Segment], selected_index: int, provider
         raise ValueError("The selected segment needs an existing prompt before it can be refined.")
     maximum = 60.0 if len(segments) == 1 else 12.0
     untouched_total = sum(segment.duration for index, segment in enumerate(segments) if index != selected_index)
-    available = min(maximum, MAX_SEQUENCE_SECONDS - untouched_total)
+    available = maximum
     required = None
     if requested_total > 0:
         required = round((requested_total - untouched_total) * 2) / 2
@@ -78,13 +78,13 @@ def refine_segment_prompt(segments: list[Segment], selected_index: int, provider
     prompt = result.get("prompt") or result.get("segmentPrompt") or result.get("segment_prompt")
     if not isinstance(prompt, str) or not prompt.strip():
         raise AIResponseFormatError("The AI returned no refined prompt. The operation will retry.")
+    image_prompt = _image_prompt_value(result)
+    if not image_prompt:
+        raise AIResponseFormatError("The AI returned no Gemini image-generation prompt. The operation will retry.")
     duration = _strict_duration(result.get("duration"), available)
     if required is not None and duration != required:
         raise AIResponseFormatError(f"The AI ignored the required {required:.1f}s selected-segment duration. The operation will retry.")
-    return {"prompt": prompt.strip(), "duration": duration}
-
-
-MAX_SEQUENCE_SECONDS = 60.0
+    return {"prompt": prompt.strip(), "imagePrompt": image_prompt, "duration": duration}
 
 
 def _segment_input(item: Segment) -> dict:
@@ -131,7 +131,7 @@ def _timing_rules(segments: list[Segment], selected_index: int, intent: str, ava
     return f"""You are performing a TIMING-ONLY refinement for LTX Video 2.3.
 Analyze the complete ordered segment plan below so the selected segment still fits the sequence. Use the immediately previous and next prompts and supplied adjacent frames as the primary motion and continuity context.
 Change ONLY the duration of selected segment {selected_index + 1}. Every prompt is immutable: do not rewrite, summarize or return any prompt text. Do not change any other duration.
-Estimate the time genuinely needed for the selected prompt's action, physical progression, camera motion, Spoken Dialog and lip sync. Respect its start/end-frame role, surrounding continuity, the 60-second sequence ceiling and the selected segment's available maximum.
+Estimate the time genuinely needed for the selected prompt's action, physical progression, camera motion, Spoken Dialog and lip sync. Respect its start/end-frame role, surrounding continuity and the selected segment's available maximum. There is no total sequence-length ceiling.
 {duration_instruction}
 Director's intent and planning controls:
 {intent.strip() or 'No additional intent supplied.'}
@@ -152,6 +152,7 @@ def _prompt_refinement_rules(segments: list[Segment], selected_index: int, inten
 Refine ONLY segment {selected_index + 1}. The SELECTED CURRENT EDITOR PROMPT is the authoritative creative instruction and is the text the user explicitly asked you to refine. Preserve every requested action, change, camera instruction, timing cue and constraint from that prompt while improving clarity, temporal progression, physical causality, secondary motion, Spoken Dialog delivery and lip-sync direction where present.
 For an image segment, use the supplied image only to ground visible identity, pose, environment and composition. Never replace, ignore or reinterpret the user's selected prompt merely because its requested motion is not visible in the still frame.
 Use the immediately previous and next prompts and supplied adjacent frames for continuity, but do not rewrite or return any other prompt. Do not change the global prompt.
+Also return `imagePrompt` as a separate Gemini still-image generation prompt derived from the refined selected prompt. Do not simplify, replace, or remove audio/vocal language from `prompt`; the established production-ready video prompt remains authoritative and complete. In `imagePrompt` only, preserve its visible subject, transformation state or action moment, pose, expression, environment, composition, camera, lighting and style, but remove every audio-only instruction including SFX, Foley, ambience, music, Spoken Dialog, voice, accent, vocalization, lip-sync and sound cues. Describe one representative still frame rather than a timed video sequence.
 {duration_instruction}
 Director's intent and planning controls:
 {intent.strip() or 'No additional intent supplied.'}
@@ -159,7 +160,7 @@ Director's intent and planning controls:
 ORDERED EXISTING PLAN:
 {_segment_context(segments, selected_index)}
 
-Return strict JSON containing only: {{"prompt":"refined selected prompt","duration":5.0}}"""
+Return strict JSON containing only: {{"prompt":"refined selected prompt","imagePrompt":"Gemini still-image prompt with no audio or vocal directions","duration":5.0}}"""
 
 
 def _strict_duration(value: object, maximum: float) -> float:
@@ -170,6 +171,11 @@ def _strict_duration(value: object, maximum: float) -> float:
     if duration < 1.0 or duration > maximum or abs(duration * 2 - round(duration * 2)) > 1e-6:
         raise AIResponseFormatError(f"The AI returned a duration outside 1.0–{maximum:.1f}s in 0.5s increments. The operation will retry.")
     return round(duration * 2) / 2
+
+
+def _image_prompt_value(value: dict) -> str:
+    prompt = value.get("imagePrompt") or value.get("image_prompt") or value.get("geminiImagePrompt") or value.get("gemini_image_prompt")
+    return prompt.strip() if isinstance(prompt, str) else ""
 
 
 def _rules(count: int, intent: str, sfx: bool, spoken_dialog: bool, hdr: bool, reduce_music: bool, text_count: int = 0) -> str:
@@ -233,11 +239,12 @@ Before planning, identify every explicit constraint in Director's Intent—inclu
 You are LTXDirector, an expert prompt planner for LTX Video 2.3. Analyze all {count} supplied timeline items in order.
 Return exactly one segment per timeline item; never add, remove, merge or reorder. Visual items supply a frame; text-only items deliberately supply no image and must still receive a prompt and duration. A start frame is the exact opening frame and an end frame is the exact target.
 Write production-ready natural-language prompts describing visible subject, action, expression, physical change, secondary motion, environment and camera behavior. {frame_planning_rule} Preserve identity, outfit, scene, lighting, angle, composition, aspect ratio and style. Use a stationary camera unless the frames clearly demand otherwise. Require gradual motion, overlapping progression, direct continuity and no cross-fade. Do not invent visual facts.
+For every segment, also return `imagePrompt` as a separate Gemini still-image generation prompt derived from that segment's video prompt. Do not simplify, replace, or remove audio/vocal language from `prompt`; the established production-ready video prompt remains authoritative and complete. In `imagePrompt` only, preserve the visible subject, transformation state or action moment, pose, expression, environment, composition, camera, lighting and style. Remove every audio-only instruction, including SFX, Foley, ambience, music, Spoken Dialog, voice, accent, vocalization, lip-sync and sound cues. Describe one representative still frame rather than a timed video sequence.
 Treat the creative guidance above as defaults. When User intent explicitly requests something different, follow the user's instruction. User intent overrides conflicting creative defaults, but not the required segment count, frame order, start/end-frame meaning or strict JSON schema.
 {duration_rule} Use 0.5-second increments. {audio}
 The globalPrompt contains persistent subject, scene, camera, lighting, style, continuity and negative constraints only. {global_format}
 Recheck the JSON against AUTHORITATIVE DIRECTOR'S INTENT before returning it. Correct any duration or prompt that fails an explicit constraint.
-Return strict JSON: {{"segments":[{{"duration":5,"prompt":"..."}}],"globalPrompt":"..."}}"""
+Return strict JSON: {{"segments":[{{"duration":5,"prompt":"...","imagePrompt":"Gemini still-image prompt with no audio or vocal directions"}}],"globalPrompt":"..."}}"""
 
 
 def _gemini(images: list[dict], key: str, model: str, rules: str, timeout: int, sfx: bool, spoken_dialog: bool) -> dict:
@@ -344,6 +351,9 @@ def _validate(raw: str, expected: int, require_sfx: bool = False, require_spoken
         prompt = segment.get("prompt") or segment.get("segmentPrompt") or segment.get("segment_prompt")
         if not isinstance(prompt, str) or not prompt.strip():
             raise AIResponseFormatError("The AI returned a segment without a prompt. Magic Build will retry.")
+        image_prompt = _image_prompt_value(segment)
+        if not image_prompt:
+            raise AIResponseFormatError("The AI returned a segment without a Gemini image-generation prompt. Magic Build will retry.")
         prompt_lower = prompt.casefold()
         if require_sfx and "sfx:" not in prompt_lower:
             raise AIResponseFormatError("The AI omitted required SFX direction. Magic Build will retry.")
@@ -353,7 +363,7 @@ def _validate(raw: str, expected: int, require_sfx: bool = False, require_spoken
             raise AIResponseFormatError("The AI returned an invalid segment duration. Magic Build will retry.")
         maximum_duration = 60.0 if expected == 1 else 12.0
         duration = max(1.0, min(maximum_duration, round(float(match.group()) * 2) / 2))
-        normalized_segments.append({"duration": duration, "prompt": prompt.strip()})
+        normalized_segments.append({"duration": duration, "prompt": prompt.strip(), "imagePrompt": image_prompt})
     if require_spoken_dialog:
         dialog_segments = [segment for segment in normalized_segments if "spoken dialog:" in segment["prompt"].casefold()]
         if not dialog_segments:
@@ -407,7 +417,7 @@ def _normalize_single_frame_result(result: object) -> object:
         if isinstance(singular, dict):
             normalized["segments"] = [singular]
         elif any(key in normalized for key in ("prompt", "segmentPrompt", "segment_prompt")):
-            normalized["segments"] = [{key: normalized[key] for key in ("duration", "prompt", "segmentPrompt", "segment_prompt") if key in normalized}]
+            normalized["segments"] = [{key: normalized[key] for key in ("duration", "prompt", "segmentPrompt", "segment_prompt", "imagePrompt", "image_prompt", "geminiImagePrompt", "gemini_image_prompt") if key in normalized}]
     return normalized
 
 
