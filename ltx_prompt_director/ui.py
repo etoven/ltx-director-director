@@ -29,8 +29,7 @@ from .models import Segment, order_segments_by_ids, text_segment_from_ltx
 from .project_data import ARCHIVE_COLOR, load_other_tags, load_project_tags, new_note, normalize_notes, normalize_project_labels
 
 FPS = 24
-MAX_SECONDS = 60.0
-MAX_SEGMENTS = 16
+MIN_DURATION = 0.01
 PROJECT_CARD_COLOR_ROLE = int(Qt.ItemDataRole.UserRole) + 1
 
 
@@ -249,6 +248,7 @@ class TimelineListWidget(QListWidget):
 class ProjectListWidget(QListWidget):
     drag_started = Signal()
     order_changed = Signal()
+    files_dropped = Signal(list)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -258,6 +258,7 @@ class ProjectListWidget(QListWidget):
         self._scroll_animation = None
         self._scroll_target = 0
         self.setDragDropMode(QListWidget.DragDropMode.NoDragDrop)
+        self.setAcceptDrops(True)
         self.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self.verticalScrollBar().setSingleStep(24)
 
@@ -341,6 +342,44 @@ class ProjectListWidget(QListWidget):
             event.accept()
             return
         super().mouseReleaseEvent(event)
+
+    @staticmethod
+    def _project_paths(event) -> list[str]:
+        if not event.mimeData().hasUrls():
+            return []
+        supported = {".ltxd", ".json"}
+        return [url.toLocalFile() for url in event.mimeData().urls() if url.isLocalFile() and Path(url.toLocalFile()).is_file() and Path(url.toLocalFile()).suffix.casefold() in supported]
+
+    def _set_drop_active(self, active: bool) -> None:
+        self.setProperty("dropActive", active)
+        self.style().unpolish(self)
+        self.style().polish(self)
+
+    def dragEnterEvent(self, event) -> None:
+        if self._project_paths(event):
+            self._set_drop_active(True)
+            event.acceptProposedAction()
+            return
+        event.ignore()
+
+    def dragMoveEvent(self, event) -> None:
+        if self._project_paths(event):
+            event.acceptProposedAction()
+            return
+        event.ignore()
+
+    def dragLeaveEvent(self, event) -> None:
+        self._set_drop_active(False)
+        super().dragLeaveEvent(event)
+
+    def dropEvent(self, event) -> None:
+        paths = self._project_paths(event)
+        self._set_drop_active(False)
+        if paths:
+            self.files_dropped.emit(paths)
+            event.acceptProposedAction()
+            return
+        event.ignore()
 
 
 class ProjectTileDelegate(QStyledItemDelegate):
@@ -451,6 +490,71 @@ class WorkflowDropList(QListWidget):
         event.ignore()
 
 
+class ProjectFilesPanel(QWidget):
+    add_requested = Signal()
+    file_dropped = Signal(str)
+    export_requested = Signal()
+    remove_requested = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("projectFilesPanel")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setSpacing(5)
+        self.title = QLabel("No saved project selected")
+        self.title.setObjectName("previewTitle")
+        self.title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.files = WorkflowDropList()
+        self.files.setObjectName("projectWorkflowList")
+        self.files.files_dropped.connect(self.files_dropped)
+        controls = QHBoxLayout()
+        self.add_button = QPushButton("Add Files…")
+        self.add_button.clicked.connect(self.add_requested)
+        self.export_button = QPushButton("Export")
+        self.export_button.clicked.connect(self.export_requested)
+        self.remove_button = QPushButton("Remove")
+        self.remove_button.clicked.connect(self.remove_requested)
+        controls.addWidget(self.add_button)
+        controls.addWidget(self.export_button)
+        controls.addWidget(self.remove_button)
+        layout.addWidget(self.title)
+        layout.addWidget(self.files, 1)
+        layout.addLayout(controls)
+        self.files.currentRowChanged.connect(self.selection_changed)
+        self.clear_project()
+
+    def files_dropped(self, paths: list[str]) -> None:
+        for path in paths:
+            self.file_dropped.emit(path)
+
+    def selection_changed(self, row: int) -> None:
+        enabled = row >= 0
+        self.export_button.setEnabled(enabled)
+        self.remove_button.setEnabled(enabled)
+
+    def selected_file(self) -> dict | None:
+        item = self.files.currentItem()
+        return item.data(Qt.ItemDataRole.UserRole) if item else None
+
+    def set_project(self, name: str, project_files: list[dict] | None = None) -> None:
+        self.title.setText(name)
+        self.add_button.setEnabled(True)
+        self.files.clear()
+        for project_file in project_files or []:
+            item = QListWidgetItem(str(project_file.get("name") or Path(str(project_file.get("path", ""))).name))
+            item.setData(Qt.ItemDataRole.UserRole, project_file)
+            self.files.addItem(item)
+        self.files.setCurrentRow(0 if self.files.count() else -1)
+        self.selection_changed(self.files.currentRow())
+
+    def clear_project(self) -> None:
+        self.title.setText("No saved project selected")
+        self.add_button.setEnabled(False)
+        self.files.clear()
+        self.selection_changed(-1)
+
+
 class FullscreenVideoDialog(QDialog):
     def __init__(self, player: QMediaPlayer, parent=None):
         super().__init__(parent)
@@ -495,10 +599,6 @@ class ProjectPreviewPanel(QWidget):
     video_dropped = Signal(str)
     choose_requested = Signal()
     export_requested = Signal()
-    workflow_add_requested = Signal()
-    workflow_dropped = Signal(str)
-    workflow_export_requested = Signal()
-    workflow_remove_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -554,36 +654,11 @@ class ProjectPreviewPanel(QWidget):
         controls.addWidget(self.export)
         controls.addWidget(self.fullscreen)
         layout.addLayout(controls)
-        workflow_title = QLabel("PROJECT FILES")
-        workflow_title.setObjectName("previewSectionTitle")
-        self.workflows = WorkflowDropList()
-        self.workflows.setObjectName("projectWorkflowList")
-        self.workflows.files_dropped.connect(self.workflow_files_dropped)
-        self.workflows.setMaximumHeight(105)
-        workflow_controls = QHBoxLayout()
-        add_workflow = QPushButton("Add Files…")
-        add_workflow.clicked.connect(self.workflow_add_requested)
-        self.export_workflow = QPushButton("Export")
-        self.export_workflow.clicked.connect(self.workflow_export_requested)
-        self.remove_workflow = QPushButton("Remove")
-        self.remove_workflow.clicked.connect(self.workflow_remove_requested)
-        workflow_controls.addWidget(add_workflow)
-        workflow_controls.addWidget(self.export_workflow)
-        workflow_controls.addWidget(self.remove_workflow)
-        layout.addWidget(workflow_title)
-        layout.addWidget(self.workflows)
-        layout.addLayout(workflow_controls)
-        self.workflows.currentRowChanged.connect(self.workflow_selection_changed)
-        self.add_workflow = add_workflow
         self.player.positionChanged.connect(self.position_changed)
         self.player.durationChanged.connect(self.duration_changed)
         self.player.playbackStateChanged.connect(self.playback_changed)
         self.player.mediaStatusChanged.connect(self.media_status_changed)
         self.clear_project()
-
-    def workflow_files_dropped(self, paths: list[str]) -> None:
-        for path in paths:
-            self.workflow_dropped.emit(path)
 
     def dragEnterEvent(self, event) -> None:
         urls = event.mimeData().urls() if event.mimeData().hasUrls() else []
@@ -612,20 +687,10 @@ class ProjectPreviewPanel(QWidget):
         total = max(0, int(milliseconds) // 1000)
         return f"{total // 60:02d}:{total % 60:02d}"
 
-    def set_project(self, name: str, video_path: str = "", workflows: list[dict] | None = None) -> None:
+    def set_project(self, name: str, video_path: str = "") -> None:
         self.player.stop()
         self.title.setText(name)
         self.choose.setEnabled(True)
-        self.add_workflow.setEnabled(True)
-        self.workflows.clear()
-        for workflow in workflows or []:
-            item = QListWidgetItem(str(workflow.get("name") or Path(str(workflow.get("path", ""))).name))
-            item.setData(Qt.ItemDataRole.UserRole, workflow)
-            self.workflows.addItem(item)
-        if self.workflows.count():
-            self.workflows.setCurrentRow(0)
-        else:
-            self.workflow_selection_changed(-1)
         path = Path(video_path)
         if path.is_file():
             self.player.setSource(QUrl.fromLocalFile(str(path)))
@@ -650,9 +715,6 @@ class ProjectPreviewPanel(QWidget):
         self.empty.setText("Save or open a project, then drop a rendered video here")
         self.empty.show()
         self.choose.setEnabled(False)
-        self.add_workflow.setEnabled(False)
-        self.workflows.clear()
-        self.workflow_selection_changed(-1)
         self.export.setEnabled(False)
         self.fullscreen.setEnabled(False)
         self.seek.setRange(0, 0)
@@ -702,16 +764,6 @@ class ProjectPreviewPanel(QWidget):
         self.player.setVideoOutput(self.video)
         self.player.setPosition(position)
         self.fullscreen_changed(False)
-
-    def workflow_selection_changed(self, row: int) -> None:
-        enabled = row >= 0
-        self.export_workflow.setEnabled(enabled)
-        self.remove_workflow.setEnabled(enabled)
-
-    def selected_workflow(self) -> dict | None:
-        item = self.workflows.currentItem()
-        return item.data(Qt.ItemDataRole.UserRole) if item else None
-
 
 class MagicSpinner(QWidget):
     def __init__(self, parent=None):
@@ -927,18 +979,17 @@ class ResizeHandle(QFrame):
     preview = Signal(float)
     finished = Signal()
 
-    def __init__(self, duration: float, pixels_per_second: int, maximum_duration: float = 12.0):
+    def __init__(self, duration: float, pixels_per_second: int):
         super().__init__()
         self.duration = duration
         self.start_duration = duration
         self.start_x: float | None = None
         self.pixels_per_second = pixels_per_second
-        self.maximum_duration = maximum_duration
         self.setObjectName("resizeHandle")
         # Keep a comfortable hit target while drawing only a slim dotted grip.
         self.setFixedWidth(12)
         self.setCursor(Qt.CursorShape.SizeHorCursor)
-        self.setToolTip("Drag to resize segment (1 second minimum)")
+        self.setToolTip("Drag to resize segment")
 
     def paintEvent(self, event) -> None:
         super().paintEvent(event)
@@ -973,7 +1024,7 @@ class ResizeHandle(QFrame):
 
     def mouseMoveEvent(self, event):
         if self.start_x is not None:
-            value = max(1, min(self.maximum_duration, round((self.start_duration + (event.globalPosition().x() - self.start_x) / self.pixels_per_second) * 2) / 2))
+            value = max(MIN_DURATION, round(self.start_duration + (event.globalPosition().x() - self.start_x) / self.pixels_per_second, 2))
             if value != self.duration:
                 self.duration = value
                 self.preview.emit(value)
@@ -1103,7 +1154,7 @@ class SegmentCard(QFrame):
     delete_requested = Signal()
     resize_finished = Signal()
 
-    def __init__(self, segment: Segment, preview_height: int, pixels_per_second: int, maximum_duration: float = 12.0):
+    def __init__(self, segment: Segment, preview_height: int, pixels_per_second: int):
         super().__init__()
         self.segment = segment
         self.setCursor(Qt.CursorShape.OpenHandCursor)
@@ -1151,12 +1202,12 @@ class SegmentCard(QFrame):
         title.setWordWrap(False)
         title.setObjectName("tileTitle")
         layout.addWidget(title)
-        self.duration_label = QLabel(f"{segment.duration:.1f}s")
+        self.duration_label = QLabel(f"{segment.duration:.2f}s")
         self.duration_label.setAlignment(Qt.AlignmentFlag.AlignRight)
         self.duration_label.setObjectName("tileDuration")
         layout.addWidget(self.duration_label)
         self.outer_layout.addWidget(self.content, 1)
-        self.resize_handle = ResizeHandle(segment.duration, pixels_per_second, maximum_duration)
+        self.resize_handle = ResizeHandle(segment.duration, pixels_per_second)
         self.resize_handle.preview.connect(self._preview_duration)
         self.resize_handle.finished.connect(self.resize_finished)
         self.outer_layout.addWidget(self.resize_handle)
@@ -1182,18 +1233,16 @@ class SegmentCard(QFrame):
         self.preview.setMinimumHeight(height)
         if not self.source_pixmap.isNull():
             scaled = self.source_pixmap.scaled(
-                width, height, Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                width, height, Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
             )
-            left = max(0, (scaled.width() - width) // 2)
-            top = max(0, (scaled.height() - height) // 2)
-            self.preview.setPixmap(scaled.copy(left, top, width, height))
+            self.preview.setPixmap(scaled)
         self.resize_handle.pixels_per_second = pixels_per_second
         self.resize_handle.duration = self.segment.duration
-        self.duration_label.setText(f"{self.segment.duration:.1f}s")
+        self.duration_label.setText(f"{self.segment.duration:.2f}s")
 
     def _preview_duration(self, value: float) -> None:
-        self.duration_label.setText(f"{value:.1f}s")
+        self.duration_label.setText(f"{value:.2f}s")
         self.duration_changed.emit(value)
 
     def mousePressEvent(self, event):
@@ -1709,6 +1758,7 @@ class MainWindow(QMainWindow):
     def _build_ui(self) -> None:
         self._build_project_dock()
         self._build_project_preview_dock()
+        self._build_project_files_dock()
         toolbar = QToolBar("Project")
         toolbar.setObjectName("mainToolbar")
         toolbar.setMovable(False)
@@ -1721,6 +1771,10 @@ class MainWindow(QMainWindow):
         preview_action.setText("Preview")
         preview_action.setIcon(QIcon.fromTheme("video-x-generic", self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay)))
         toolbar.addAction(preview_action)
+        files_action = self.project_files_dock.toggleViewAction()
+        files_action.setText("Project Files")
+        files_action.setIcon(QIcon.fromTheme("folder-documents", self.style().standardIcon(QStyle.StandardPixmap.SP_FileIcon)))
+        toolbar.addAction(files_action)
         toolbar.addSeparator()
         action_groups = [
             (("New Project", "document-new", QStyle.StandardPixmap.SP_FileIcon, self.new_project),
@@ -1959,9 +2013,9 @@ class MainWindow(QMainWindow):
         length_label.setObjectName("groupLabel")
         self.requested_length = QDoubleSpinBox()
         self.requested_length.setObjectName("timelineSpin")
-        self.requested_length.setRange(0, 999999.99)
-        self.requested_length.setSingleStep(.5)
-        self.requested_length.setDecimals(1)
+        self.requested_length.setRange(0, sys.float_info.max)
+        self.requested_length.setSingleStep(.01)
+        self.requested_length.setDecimals(2)
         self.requested_length.setSuffix(" s")
         self.requested_length.setSpecialValueText("Auto")
         self.requested_length.setToolTip("Requested total sequence length; Auto lets Magic Build choose")
@@ -2048,11 +2102,11 @@ class MainWindow(QMainWindow):
         duration_control_layout.setContentsMargins(0, 0, 0, 0)
         self.duration_spin = QDoubleSpinBox()
         self.duration_spin.setObjectName("timelineSpin")
-        self.duration_spin.setRange(1, 12)
-        self.duration_spin.setSingleStep(.5)
-        self.duration_spin.setDecimals(1)
+        self.duration_spin.setRange(MIN_DURATION, sys.float_info.max)
+        self.duration_spin.setSingleStep(.01)
+        self.duration_spin.setDecimals(2)
         self.duration_spin.setSuffix(" s")
-        self.duration_spin.setToolTip("Segment duration in seconds (1–12)")
+        self.duration_spin.setToolTip("Segment duration in seconds")
         self.duration_spin.valueChanged.connect(self.editor_duration_changed)
         duration_control_layout.addWidget(self.duration_spin)
         self.start_button.clicked.connect(lambda: self.set_role("start"))
@@ -2160,16 +2214,36 @@ class MainWindow(QMainWindow):
         self.project_preview_panel.video_dropped.connect(self.attach_project_video)
         self.project_preview_panel.choose_requested.connect(self.choose_project_video)
         self.project_preview_panel.export_requested.connect(self.export_project_video)
-        self.project_preview_panel.workflow_add_requested.connect(self.choose_project_workflow)
-        self.project_preview_panel.workflow_dropped.connect(self.attach_project_workflow)
-        self.project_preview_panel.workflow_export_requested.connect(self.export_project_workflow)
-        self.project_preview_panel.workflow_remove_requested.connect(self.remove_project_workflow)
         self.project_preview_dock.setWidget(self.project_preview_panel)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.project_preview_dock)
         self.project_preview_dock.dockLocationChanged.connect(lambda *_: self.save_window_panel_state())
         self.project_preview_dock.topLevelChanged.connect(lambda *_: self.save_window_panel_state())
         self.project_preview_dock.visibilityChanged.connect(lambda *_: self.save_window_panel_state())
         self.project_preview_dock.hide()
+
+    def _build_project_files_dock(self) -> None:
+        self.project_files_dock = QDockWidget("PROJECT FILES", self)
+        self.project_files_dock.setObjectName("projectFilesDock")
+        self.project_files_dock.setAllowedAreas(
+            Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea
+            | Qt.DockWidgetArea.TopDockWidgetArea | Qt.DockWidgetArea.BottomDockWidgetArea
+        )
+        self.project_files_dock.setFeatures(
+            QDockWidget.DockWidgetFeature.DockWidgetClosable
+            | QDockWidget.DockWidgetFeature.DockWidgetMovable
+            | QDockWidget.DockWidgetFeature.DockWidgetFloatable
+        )
+        self.project_files_panel = ProjectFilesPanel(self.project_files_dock)
+        self.project_files_panel.add_requested.connect(self.choose_project_workflow)
+        self.project_files_panel.file_dropped.connect(self.attach_project_workflow)
+        self.project_files_panel.export_requested.connect(self.export_project_workflow)
+        self.project_files_panel.remove_requested.connect(self.remove_project_workflow)
+        self.project_files_dock.setWidget(self.project_files_panel)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.project_files_dock)
+        self.project_files_dock.dockLocationChanged.connect(lambda *_: self.save_window_panel_state())
+        self.project_files_dock.topLevelChanged.connect(lambda *_: self.save_window_panel_state())
+        self.project_files_dock.visibilityChanged.connect(lambda *_: self.save_window_panel_state())
+        self.project_files_dock.hide()
 
     def _build_project_dock(self) -> None:
         self.project_dock = QDockWidget("PROJECT LIBRARY", self)
@@ -2256,6 +2330,7 @@ class MainWindow(QMainWindow):
         self.project_list.itemDoubleClicked.connect(lambda *_: self.open_library_project())
         self.project_list.drag_started.connect(self.activate_custom_sort_for_drag)
         self.project_list.order_changed.connect(self.save_custom_project_order)
+        self.project_list.files_dropped.connect(self.project_files_dropped)
         self.project_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.project_list.customContextMenuRequested.connect(self.project_library_menu)
         layout.addWidget(self.project_list, 1)
@@ -2437,7 +2512,7 @@ class MainWindow(QMainWindow):
         QTextEdit{background:#252728;border:0;color:#e1e4e5;font:11px 'Courier New';padding:4px} #promptEditor{background:#202527;border:0;color:#e1e4e5;padding:7px} #magicButton{background:#3b78a5;border:1px solid #5b9bc6;border-radius:5px;color:#f4fbff;font-weight:bold;padding-left:12px;padding-right:12px} #magicButton:hover{background:#4b8dbd;border-color:#8bc6ea} #magicButton:pressed{background:#285b7c}
         #audioToggle,#qualityToggle,#frameToggle{background:transparent;border:1px solid #455057;color:#b8c0c4} #audioToggle:hover,#qualityToggle:hover,#frameToggle:hover{background:#293236;border-color:#65747c;color:#eef3f5} #audioToggle:checked,#qualityToggle:checked,#frameToggle:checked{background:#244d37;border-color:#4c9b6a;color:#c9f4d6} #copyButton{min-height:0;padding:1px 4px;margin:0;border:0;background:transparent;color:#aeb5b8} #copyButton:hover{background:#303a3f;color:#e5f4fc;border:0} #copyButton:pressed{background:#1b2429;color:#8fd3f7;border:0} QStatusBar{background:#171c1e;color:#7f898d;border-top:1px solid #30383c}
         QDockWidget{background:#191d1f;color:#d9dcde;font-weight:bold} QDockWidget::title{background:#1b2022;border-bottom:1px solid #0e1011;padding:8px;text-align:left}
-        #projectLibraryTitle,#magicOverlayTitle{font-size:15px;font-weight:bold;color:#f0f2f3} #libraryControls{background:#1c2225;border:1px solid #343e43;border-radius:5px} #projectSearch{background:#171c1e;border:1px solid #343d41;border-radius:5px;padding-left:10px} #projectSearch:focus{border-color:#4d829d;background:#1b2225} #projectList{background:#15191b;border:1px solid #30383c;border-radius:5px;padding:10px}
+        #projectLibraryTitle,#magicOverlayTitle{font-size:15px;font-weight:bold;color:#f0f2f3} #libraryControls{background:#1c2225;border:1px solid #343e43;border-radius:5px} #projectSearch{background:#171c1e;border:1px solid #343d41;border-radius:5px;padding-left:10px} #projectSearch:focus{border-color:#4d829d;background:#1b2225} #projectList{background:#15191b;border:1px solid #30383c;border-radius:5px;padding:10px} #projectList[dropActive="true"]{border:3px solid #68b9ee;background:#13232c}
         #projectList::item{background:transparent;border:1px solid #363f43;border-radius:6px;margin:4px;padding:7px;color:#dce0e2} #projectList::item:hover{border-color:#6488a1} #projectList::item:selected{border:2px solid #69a5d0}
         #projectFilters{background:#171c1e;border:1px solid #30383c;border-radius:5px} #projectFilterButton{min-height:17px;padding:2px 6px;background:#23292c;border-color:#394348;color:#aeb8bd} #projectFilterButton:hover{background:#303a3f;color:#fff} #projectNotesList{background:#171b1d;border:1px solid #3a4449;border-radius:4px;padding:3px} #projectNotesList::item{background:transparent;border:0;margin:2px;padding:0} #projectNoteRow{background:#22282b;border:1px solid #394348;border-radius:4px} #projectNoteRow:hover{border-color:#5e8295;background:#283136} #projectNoteDate{color:#86a9ba;font-size:9px} #projectNoteDelete{min-height:0;padding:0;background:transparent;border:0;color:#bca6a6;font-size:15px} #projectNoteDelete:hover{background:#713d3d;color:white}
         #projectPreviewPanel{border:1px solid transparent;background:#191d1f} #projectPreviewPanel[dropActive="true"]{border:3px solid #68b9ee;background:#13232c} #previewTitle{background:#1a2023;border:1px solid #354047;border-radius:4px;padding:5px;color:#d7ebf5;font-weight:bold} #previewEmpty{background:#101314;border:1px dashed #4a565c;border-radius:4px;padding:24px;color:#87959c} #previewSectionTitle{color:#8ebbd1;font-size:8px;font-weight:bold;letter-spacing:1px} #projectWorkflowList{background:#171b1d;border:1px solid #354047;border-radius:4px;padding:3px} #projectWorkflowList[dropActive="true"]{border:3px solid #68b9ee;background:#13232c} #projectWorkflowList::item{background:#22282b;border:1px solid #394348;border-radius:3px;margin:2px;padding:4px} #projectWorkflowList::item:selected{background:#294356;border-color:#69a5d0}
@@ -2682,6 +2757,15 @@ class MainWindow(QMainWindow):
         if meta.get("kind") == "project":
             self.open_library_project()
 
+    def project_files_dropped(self, paths: list[str]) -> None:
+        if not paths:
+            return
+        path = paths[0]
+        if Path(path).suffix.casefold() == ".ltxd":
+            self.open_project(path=path)
+        else:
+            self.import_ltx(path=path)
+
     def library_records(self) -> list[dict]:
         records = []
         for path in project_library_path().glob("*.meta.json"):
@@ -2770,10 +2854,13 @@ class MainWindow(QMainWindow):
         meta = self.current_library_metadata()
         if not meta:
             self.project_preview_panel.clear_project()
+            self.project_files_panel.clear_project()
             return
         project_files = meta.get("projectFiles", meta.get("workflowFiles", []))
         project_files = [value for value in project_files if isinstance(value, dict) and Path(str(value.get("path", ""))).is_file()]
-        self.project_preview_panel.set_project(str(meta.get("name") or "Untitled project"), str(meta.get("previewVideoPath", "")), project_files)
+        name = str(meta.get("name") or "Untitled project")
+        self.project_preview_panel.set_project(name, str(meta.get("previewVideoPath", "")))
+        self.project_files_panel.set_project(name, project_files)
 
     def choose_project_video(self) -> None:
         initial = str(Path.home())
@@ -2809,7 +2896,7 @@ class MainWindow(QMainWindow):
         meta["previewVideoPath"] = str(destination)
         meta["previewVideoName"] = source.name
         self.persist_library_metadata(meta)
-        self.project_preview_panel.set_project(str(meta.get("name") or "Untitled project"), str(destination), meta.get("projectFiles", meta.get("workflowFiles", [])))
+        self.project_preview_panel.set_project(str(meta.get("name") or "Untitled project"), str(destination))
         self.project_preview_dock.show()
         self.statusBar().showMessage(f"Rendered video saved to project: {meta.get('name', 'Untitled project')}")
 
@@ -2862,10 +2949,11 @@ class MainWindow(QMainWindow):
         meta.pop("workflowFiles", None)
         self.persist_library_metadata(meta)
         self.update_project_preview()
+        self.project_files_dock.show()
         self.statusBar().showMessage(f"Project file added: {source.name}")
 
     def export_project_workflow(self) -> None:
-        workflow = self.project_preview_panel.selected_workflow()
+        workflow = self.project_files_panel.selected_file()
         source = Path(str(workflow.get("path", ""))) if workflow else Path()
         if not workflow or not source.is_file():
             return
@@ -2885,7 +2973,7 @@ class MainWindow(QMainWindow):
 
     def remove_project_workflow(self) -> None:
         meta = self.current_library_metadata()
-        selected = self.project_preview_panel.selected_workflow()
+        selected = self.project_files_panel.selected_file()
         if not meta or not selected:
             return
         selected_path = Path(str(selected.get("path", "")))
@@ -3067,7 +3155,7 @@ class MainWindow(QMainWindow):
         self.current_collection = None
         self.refresh_project_library(preserve_scroll=False)
 
-    def save_library_project(self, automatic: bool = False) -> None:
+    def save_library_project(self, automatic: bool = False, source_filename: str | None = None) -> None:
         if not self.segments:
             QMessageBox.information(self, "Nothing to save", "Add at least one image, WebM, or text segment first.")
             return
@@ -3086,7 +3174,7 @@ class MainWindow(QMainWindow):
             if automatic:
                 intent = " ".join(self.intent.toPlainText().split())
                 source_name = Path(self.segments[0].name).stem if self.segments else "Sequence"
-                suggested = re.split(r"[.!?]", intent, maxsplit=1)[0].strip() if intent else source_name
+                suggested = Path(source_filename).stem.strip() if source_filename else (re.split(r"[.!?]", intent, maxsplit=1)[0].strip() if intent else source_name)
                 suggested = suggested[:52].rstrip(" -—,:;") or "Magic Build"
                 existing_names = {str(record.get("name", "")).casefold() for record in self.library_records()}
                 name = suggested
@@ -3097,7 +3185,7 @@ class MainWindow(QMainWindow):
                 meta = {
                     "id": project_id,
                     "name": name,
-                    "description": intent or f"Magic Build sequence generated from {source_name}.",
+                    "description": f"Imported from {Path(source_filename).name}." if source_filename else (intent or f"Magic Build sequence generated from {source_name}."),
                     "collection": self.current_collection or "",
                     "projectPath": str(root / f"{project_id}.LTXD"),
                     "status": "", "tags": [], "tag": "", "archived": False, "notes": [],
@@ -3437,8 +3525,6 @@ class MainWindow(QMainWindow):
         self.add_media_paths(paths)
 
     def add_text_segment(self) -> None:
-        if len(self.segments) >= MAX_SEGMENTS:
-            return
         number = sum(segment.kind == "text" for segment in self.segments) + 1
         self.segments.append(Segment(f"Text {number}", "", "", "text", "text", "", 5.0))
         self.mark_dirty()
@@ -3452,7 +3538,7 @@ class MainWindow(QMainWindow):
             return
         self.settings.setValue("last_media_dir", str(Path(paths[0]).parent))
         added = 0
-        for path in paths[: max(0, MAX_SEGMENTS - len(self.segments))]:
+        for path in paths:
             try:
                 kind, preview, frames, trim = prepare_media(path)
                 duration = 1.0 if kind == "video" else 5.0
@@ -3480,7 +3566,7 @@ class MainWindow(QMainWindow):
                 item.setData(Qt.ItemDataRole.UserRole, segment.id)
                 item.setSizeHint(QSize(max(48, int(segment.duration * self.pixels_per_second)), card_height))
                 self.timeline.addItem(item)
-                card = SegmentCard(segment, preview_height, self.pixels_per_second, MAX_SECONDS if len(self.segments) == 1 else 12.0)
+                card = SegmentCard(segment, preview_height, self.pixels_per_second)
                 card.duration_changed.connect(lambda value, sid=segment.id: self.change_duration(sid, value))
                 card.delete_requested.connect(lambda sid=segment.id: self.delete_by_id(sid))
                 card.resize_finished.connect(lambda sid=segment.id: self.finish_resize(sid))
@@ -3556,8 +3642,8 @@ class MainWindow(QMainWindow):
     def load_editor(self, row: int) -> None:
         self._loading = True
         segment = self.current_segment()
-        self.duration_spin.setMaximum(MAX_SECONDS if len(self.segments) == 1 else 12.0)
-        self.duration_spin.setToolTip(f"Segment duration in seconds (1–{int(self.duration_spin.maximum())})")
+        self.duration_spin.setMaximum(sys.float_info.max)
+        self.duration_spin.setToolTip("Segment duration in seconds")
         self.segment_prompt.setPlainText(segment.prompt if segment else "")
         visual = bool(segment and segment.kind != "text")
         self.start_button.setEnabled(visual)
@@ -3598,8 +3684,8 @@ class MainWindow(QMainWindow):
         if not segment:
             return
         self.duration_spin.blockSignals(True)
-        self.duration_spin.setMaximum(MAX_SECONDS if len(self.segments) == 1 else 12.0)
-        self.duration_spin.setToolTip(f"Segment duration in seconds (1–{int(self.duration_spin.maximum())})")
+        self.duration_spin.setMaximum(sys.float_info.max)
+        self.duration_spin.setToolTip("Segment duration in seconds")
         self.duration_spin.setValue(segment.duration)
         self.duration_spin.blockSignals(False)
 
@@ -3657,7 +3743,7 @@ class MainWindow(QMainWindow):
     def change_duration(self, segment_id: str, value: float) -> None:
         self.autofit_tail_extension = 0
         segment = next(item for item in self.segments if item.id == segment_id)
-        segment.duration = max(1, round(value * 2) / 2)
+        segment.duration = max(MIN_DURATION, round(value, 2))
         self.mark_dirty()
         for row in range(self.timeline.count()):
             item = self.timeline.item(row)
@@ -3683,12 +3769,12 @@ class MainWindow(QMainWindow):
         total = self.total_duration()
         self.sequence_bar.setText(f"Sequence     Start: 0.00s  |  End: {total:.2f}s  |  Length: {total:.2f}s")
         self.add_tile.setText("＋\nAdd media")
-        self.add_tile.setEnabled(len(self.segments) < MAX_SEGMENTS)
-        self.add_text_tile.setEnabled(len(self.segments) < MAX_SEGMENTS)
+        self.add_tile.setEnabled(True)
+        self.add_text_tile.setEnabled(True)
         self.applied_label.setText(f"Applied across all {len(self.segments)} segments")
         visual_count = sum(segment.kind != "text" for segment in self.segments)
         text_count = len(self.segments) - visual_count
-        self.statusBar().showMessage(f"{visual_count} visual · {text_count} text · {total:.1f}s")
+        self.statusBar().showMessage(f"{visual_count} visual · {text_count} text · {total:.2f}s")
 
     def update_counts(self) -> None:
         self.segment_count.setText(f"{len(self.segment_prompt.toPlainText())} characters")
@@ -3968,7 +4054,7 @@ class MainWindow(QMainWindow):
             self.mark_dirty()
             self.animate_timeline_durations(durations)
             self.save_library_project(automatic=True)
-            self.statusBar().showMessage(f"Segment {index + 1} timing refined to {durations[index]:.1f}s; prompt text unchanged")
+            self.statusBar().showMessage(f"Segment {index + 1} timing refined to {durations[index]:.2f}s; prompt text unchanged")
         self.set_ai_controls_enabled(True)
         self.magic_overlay.hide_overlay()
 
@@ -4015,8 +4101,7 @@ class MainWindow(QMainWindow):
         for segment, generated in zip(self.segments, generated_segments):
             segment.prompt = str(generated.get("prompt", segment.prompt))
             segment.image_prompt = str(generated.get("imagePrompt", segment.image_prompt)).strip()
-            maximum_duration = MAX_SECONDS if len(generated_segments) == 1 else 12.0
-            recommended = max(1, min(maximum_duration, round(float(generated.get("duration", segment.duration)) * 2) / 2))
+            recommended = max(MIN_DURATION, round(float(generated.get("duration", segment.duration)), 2))
             target_durations.append(recommended)
         global_prompt = str(result.get("globalPrompt", "")).strip()
         quality = "(4K, HDR, Realistic)"
@@ -4063,7 +4148,7 @@ class MainWindow(QMainWindow):
                 item.setSizeHint(QSize(round(start + (target - start) * progress), max(152, self.timeline_height - 32)))
                 card = self.timeline.itemWidget(item)
                 if card and hasattr(card, "duration_label"):
-                    card.duration_label.setText(f"{target_durations[row]:.1f}s")
+                    card.duration_label.setText(f"{target_durations[row]:.2f}s")
             self.timeline.doItemsLayout()
             self.timeline.viewport().update()
 
@@ -4111,7 +4196,7 @@ class MainWindow(QMainWindow):
         used_media_names: set[str] = set()
         for segment in self.segments:
             start = cursor
-            length = max(FPS, round(segment.duration * FPS))
+            length = max(1, round(segment.duration * FPS))
             record = {"id": segment.id, "type": segment.kind, "start": start, "length": length, "prompt": segment.prompt, "isEndFrame": False if segment.kind == "text" else segment.role == "end"}
             if segment.kind != "text":
                 record.update({"imageFile": segment.media_path, "fileName": segment.name, "fileSize": Path(segment.media_path).stat().st_size if Path(segment.media_path).exists() else 0, "imageB64": data_url(segment.preview_path)})
@@ -4173,8 +4258,8 @@ class MainWindow(QMainWindow):
         self.settings.sync()
         return root
 
-    def import_ltx(self) -> None:
-        path = choose_document_open(self, "Import LTX Director JSON", self.settings.value("last_document_dir", str(Path.home())), "LTX Director JSON (*.json)")
+    def import_ltx(self, checked: bool = False, path: str | None = None) -> None:
+        path = path or choose_document_open(self, "Import LTX Director JSON", self.settings.value("last_document_dir", str(Path.home())), "LTX Director JSON (*.json)")
         if not path:
             return
         self.settings.setValue("last_document_dir", str(Path(path).parent))
@@ -4186,7 +4271,7 @@ class MainWindow(QMainWindow):
             comfy_input = Path(configured_root).expanduser() / "input" if configured_root else None
             raw_segments = list(payload["timeline"]["segments"])
             raw_segments = [raw for _, raw in sorted(enumerate(raw_segments), key=lambda item: (float(item[1].get("start", 0)), item[0]))]
-            for index, raw in enumerate(raw_segments[:MAX_SEGMENTS]):
+            for index, raw in enumerate(raw_segments):
                 if raw.get("type") not in ("image", "video", "text"):
                     continue
                 if raw.get("type") == "text":
@@ -4209,7 +4294,7 @@ class MainWindow(QMainWindow):
                     video_path = APP_CACHE / f"import-{index}-{Path(raw.get('fileName', 'clip.webm')).name}"
                     write_data_url(raw["videoB64"], video_path)
                     media_path = str(video_path)
-                loaded.append(Segment(raw.get("fileName", f"Segment {index + 1}"), str(media_path), str(cache), raw.get("type", "image"), "end" if raw.get("isEndFrame") else "start", raw.get("prompt", ""), max(1, float(raw.get("length", FPS)) / fps), raw.get("videoDurationFrames"), raw.get("trimStart"), raw.get("id", "")))
+                loaded.append(Segment(raw.get("fileName", f"Segment {index + 1}"), str(media_path), str(cache), raw.get("type", "image"), "end" if raw.get("isEndFrame") else "start", raw.get("prompt", ""), max(MIN_DURATION, round(float(raw.get("length", FPS)) / fps, 2)), raw.get("videoDurationFrames"), raw.get("trimStart"), raw.get("id", "")))
             if not loaded:
                 raise ValueError("No supported embedded image, WebM, or text segments were found.")
             self.segments = loaded
@@ -4224,10 +4309,11 @@ class MainWindow(QMainWindow):
             self.speaker_accent.setCurrentText("(Image/context provided)")
             self.current_project_id = None
             self.current_project_name = Path(path).stem
-            self.update_project_preview()
             self.update_window_title()
             self.refresh_timeline()
             self.project_dirty = False
+            self.save_library_project(automatic=True, source_filename=Path(path).name)
+            self.statusBar().showMessage(f"Imported into Project Library: {self.current_project_name}")
         except Exception as error:
             QMessageBox.critical(self, "Import failed", str(error))
 
@@ -4246,7 +4332,7 @@ class MainWindow(QMainWindow):
         self._loading = True
         loaded = []
         cache_key = uuid4().hex[:10]
-        for index, original in enumerate(payload.get("frames", [])[:MAX_SEGMENTS]):
+        for index, original in enumerate(payload.get("frames", [])):
             raw = dict(original)
             is_text = raw.get("kind") == "text"
             preview_path = APP_CACHE / f"project-{cache_key}-{index}.jpg"
@@ -4303,8 +4389,8 @@ class MainWindow(QMainWindow):
         self.project_dirty = False
         self.statusBar().showMessage(f"Project saved: {path}")
 
-    def open_project(self) -> None:
-        path = choose_document_open(self, "Open Project", self.settings.value("last_document_dir", str(Path.home())), "LTX Director - Director Project (*.LTXD *.ltxd)")
+    def open_project(self, checked: bool = False, path: str | None = None) -> None:
+        path = path or choose_document_open(self, "Open Project", self.settings.value("last_document_dir", str(Path.home())), "LTX Director - Director Project (*.LTXD *.ltxd)")
         if not path:
             return
         self.settings.setValue("last_document_dir", str(Path(path).parent))
@@ -4312,11 +4398,11 @@ class MainWindow(QMainWindow):
             payload = json.loads(Path(path).read_text(encoding="utf-8"))
             self.load_project_payload(payload)
             self.current_project_id = None
-            self.current_project_name = str(payload.get("library", {}).get("name") or Path(path).stem)
-            self.update_project_preview()
+            self.current_project_name = Path(path).stem
             self.update_window_title()
             self.project_dirty = False
-            self.statusBar().showMessage(f"Project opened: {path}")
+            self.save_library_project(automatic=True, source_filename=Path(path).name)
+            self.statusBar().showMessage(f"Opened and added to Project Library: {self.current_project_name}")
         except Exception as error:
             self._loading = False
             QMessageBox.critical(self, "Open project failed", str(error))
