@@ -908,9 +908,11 @@ class TimelineRuler(QWidget):
         painter = QPainter(self)
         painter.fillRect(self.rect(), QColor("#17191a"))
         painter.setFont(self.font())
-        label_width = painter.fontMetrics().horizontalAdvance("60.00") + 8
+        visible_end = max(0, (self.offset + self.width() + 30) // max(1, self.scale) + 1)
+        label_width = painter.fontMetrics().horizontalAdvance(f"{visible_end}.00") + 8
         label_interval = max(1, (label_width + self.scale - 1) // self.scale)
-        for second in range(61):
+        first_second = max(0, (self.offset - 30) // max(1, self.scale))
+        for second in range(first_second, visible_end + 1):
             x = second * self.scale - self.offset
             if x < -30 or x > self.width() + 30:
                 continue
@@ -1868,7 +1870,7 @@ class MainWindow(QMainWindow):
         self.timeline.horizontalScrollBar().valueChanged.connect(self.ruler.set_offset)
         self.timeline_loading = TimelineLoadingOverlay(self.timeline.viewport())
         track_row.addWidget(self.timeline, 1)
-        self.add_tile = QPushButton("＋\nAdd media\n60.0s available")
+        self.add_tile = QPushButton("＋\nAdd media")
         self.add_tile.setObjectName("addTile")
         self.add_tile.clicked.connect(self.add_media)
         self.add_text_tile = QPushButton("＋\nAdd text")
@@ -1957,7 +1959,7 @@ class MainWindow(QMainWindow):
         length_label.setObjectName("groupLabel")
         self.requested_length = QDoubleSpinBox()
         self.requested_length.setObjectName("timelineSpin")
-        self.requested_length.setRange(0, MAX_SECONDS)
+        self.requested_length.setRange(0, 999999.99)
         self.requested_length.setSingleStep(.5)
         self.requested_length.setDecimals(1)
         self.requested_length.setSuffix(" s")
@@ -2084,9 +2086,17 @@ class MainWindow(QMainWindow):
         self.copy_segment.setFlat(True)
         self.copy_segment.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.copy_segment.clicked.connect(lambda: QApplication.clipboard().setText(self.segment_prompt.toPlainText()))
+        self.copy_image_prompt = QPushButton("□ Copy Gemini Image")
+        self.copy_image_prompt.setObjectName("copyButton")
+        self.copy_image_prompt.setFlat(True)
+        self.copy_image_prompt.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.copy_image_prompt.setToolTip("Copy the selected segment's audio-free Gemini image-generation prompt")
+        self.copy_image_prompt.clicked.connect(self.copy_selected_image_prompt)
+        self.copy_image_prompt.setEnabled(False)
         segment_footer.addWidget(self.segment_count)
         segment_footer.addStretch()
         segment_footer.addWidget(self.copy_segment, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        segment_footer.addWidget(self.copy_image_prompt, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         segment_layout.addLayout(segment_footer)
         global_panel = QFrame()
         global_panel.setObjectName("promptPanel")
@@ -2481,7 +2491,7 @@ class MainWindow(QMainWindow):
         self.duration_spin.setFixedWidth(metric(82))
         self.add_tile_wrap.setFixedWidth(metric(128))
         self.add_tile_layout.setContentsMargins(metric(8), 0, metric(8), 0)
-        for button in (self.copy_segment, self.copy_global):
+        for button in (self.copy_segment, self.copy_image_prompt, self.copy_global):
             button.setFixedHeight(button.fontMetrics().height() + metric(4))
             button.setMinimumWidth(button.fontMetrics().horizontalAdvance(button.text()) + metric(10))
         if hasattr(self, "timeline_loading"):
@@ -3427,11 +3437,10 @@ class MainWindow(QMainWindow):
         self.add_media_paths(paths)
 
     def add_text_segment(self) -> None:
-        room = MAX_SECONDS - self.total_duration()
-        if len(self.segments) >= MAX_SEGMENTS or room < 1:
+        if len(self.segments) >= MAX_SEGMENTS:
             return
         number = sum(segment.kind == "text" for segment in self.segments) + 1
-        self.segments.append(Segment(f"Text {number}", "", "", "text", "text", "", min(5.0, room)))
+        self.segments.append(Segment(f"Text {number}", "", "", "text", "text", "", 5.0))
         self.mark_dirty()
         self.refresh_timeline(len(self.segments) - 1)
         self.segment_prompt.setFocus()
@@ -3442,16 +3451,12 @@ class MainWindow(QMainWindow):
         if not paths:
             return
         self.settings.setValue("last_media_dir", str(Path(paths[0]).parent))
-        room = MAX_SECONDS - self.total_duration()
         added = 0
         for path in paths[: max(0, MAX_SEGMENTS - len(self.segments))]:
-            if room < 1:
-                break
             try:
                 kind, preview, frames, trim = prepare_media(path)
-                duration = 1.0 if kind == "video" else min(5.0, room)
+                duration = 1.0 if kind == "video" else 5.0
                 self.segments.append(Segment(Path(path).name, path, preview, kind, "end" if len(self.segments) % 2 else "start", duration=duration, media_duration_frames=frames, trim_start=trim))
-                room -= duration
                 added += 1
             except Exception as error:
                 QMessageBox.warning(self, "Media error", f"{Path(path).name}: {error}")
@@ -3559,6 +3564,7 @@ class MainWindow(QMainWindow):
         self.end_button.setEnabled(visual)
         self.refine_timing_button.setEnabled(bool(segment))
         self.refine_prompt_button.setEnabled(bool(segment and segment.prompt.strip()))
+        self.copy_image_prompt.setEnabled(bool(segment and segment.image_prompt.strip()))
         if segment:
             self.start_button.setChecked(segment.role == "start" if visual else False)
             self.end_button.setChecked(segment.role == "end" if visual else False)
@@ -3581,6 +3587,7 @@ class MainWindow(QMainWindow):
         self._loading = True
         try:
             self.segment_prompt.setPlainText(self.segments[row].prompt)
+            self.copy_image_prompt.setEnabled(bool(self.segments[row].image_prompt.strip()))
         finally:
             self._loading = previous_loading
         self.update_counts()
@@ -3607,6 +3614,13 @@ class MainWindow(QMainWindow):
                     card.set_text_preview(self.current_segment().prompt)
             self.mark_dirty()
             self.update_counts()
+
+    def copy_selected_image_prompt(self) -> None:
+        segment = self.current_segment()
+        if not segment or not segment.image_prompt.strip():
+            return
+        QApplication.clipboard().setText(segment.image_prompt.strip())
+        self.statusBar().showMessage("Gemini image-generation prompt copied")
 
     def refresh_text_segment_previews(self) -> None:
         by_id = {segment.id: segment for segment in self.segments}
@@ -3643,8 +3657,7 @@ class MainWindow(QMainWindow):
     def change_duration(self, segment_id: str, value: float) -> None:
         self.autofit_tail_extension = 0
         segment = next(item for item in self.segments if item.id == segment_id)
-        allowed = min(value, MAX_SECONDS - (self.total_duration() - segment.duration))
-        segment.duration = max(1, round(allowed * 2) / 2)
+        segment.duration = max(1, round(value * 2) / 2)
         self.mark_dirty()
         for row in range(self.timeline.count()):
             item = self.timeline.item(row)
@@ -3668,10 +3681,10 @@ class MainWindow(QMainWindow):
 
     def update_summary(self) -> None:
         total = self.total_duration()
-        self.sequence_bar.setText(f"Sequence     Start: 0.00s  |  End: {total:.2f}s  |  Length: {total:.2f}s  |  Remaining: {MAX_SECONDS - total:.2f}s")
-        self.add_tile.setText(f"＋\nAdd media\n{MAX_SECONDS - total:.1f}s available")
-        self.add_tile.setEnabled(len(self.segments) < MAX_SEGMENTS and total <= MAX_SECONDS - 1)
-        self.add_text_tile.setEnabled(len(self.segments) < MAX_SEGMENTS and total <= MAX_SECONDS - 1)
+        self.sequence_bar.setText(f"Sequence     Start: 0.00s  |  End: {total:.2f}s  |  Length: {total:.2f}s")
+        self.add_tile.setText("＋\nAdd media")
+        self.add_tile.setEnabled(len(self.segments) < MAX_SEGMENTS)
+        self.add_text_tile.setEnabled(len(self.segments) < MAX_SEGMENTS)
         self.applied_label.setText(f"Applied across all {len(self.segments)} segments")
         visual_count = sum(segment.kind != "text" for segment in self.segments)
         text_count = len(self.segments) - visual_count
@@ -3695,6 +3708,7 @@ class MainWindow(QMainWindow):
         menu = QMenu(self)
         if segment and segment.kind == "text":
             menu.addAction("Edit text prompt", self.segment_prompt.setFocus)
+            menu.addAction("Convert to image segment…", self.convert_text_segment_to_image)
         else:
             menu.addAction("Replace media", self.replace_selected)
             menu.addAction("Export video" if segment and segment.kind == "video" else "Export image", self.export_selected_segment)
@@ -3703,6 +3717,35 @@ class MainWindow(QMainWindow):
         menu.addSeparator()
         menu.addAction("Delete segment", self.delete_selected)
         menu.exec(self.timeline.mapToGlobal(point))
+
+    def convert_text_segment_to_image(self) -> None:
+        segment = self.current_segment()
+        if not segment or segment.kind != "text":
+            return
+        initial = str(self.settings.value("last_media_dir", str(Path.home())))
+        path = choose_document_open(self, "Choose image for text segment", initial, "Images (*.png *.jpg *.jpeg *.webp *.gif)")
+        if not path:
+            return
+        try:
+            kind, preview, frames, trim = prepare_media(path)
+        except Exception as error:
+            QMessageBox.warning(self, "Image error", f"{Path(path).name}: {error}")
+            return
+        if kind != "image":
+            QMessageBox.warning(self, "Image required", "Choose a PNG, JPEG, WebP, or GIF image.")
+            return
+        row = self.timeline.currentRow()
+        segment.name = Path(path).name
+        segment.media_path = path
+        segment.preview_path = preview
+        segment.kind = "image"
+        segment.role = "end" if row % 2 else "start"
+        segment.media_duration_frames = frames
+        segment.trim_start = trim
+        self.settings.setValue("last_media_dir", str(Path(path).parent))
+        self.mark_dirty()
+        self.refresh_timeline(row)
+        self.statusBar().showMessage(f"Text segment converted to image: {segment.name}; prompt preserved")
 
     def export_selected_segment(self) -> None:
         segment = self.current_segment()
@@ -3934,10 +3977,12 @@ class MainWindow(QMainWindow):
         if target:
             index, segment = target
             segment.prompt = str(result["prompt"]).strip()
+            segment.image_prompt = str(result["imagePrompt"]).strip()
             durations = [item.duration for item in self.segments]
             durations[index] = float(result["duration"])
             if self.timeline.currentRow() == index:
                 self.refresh_segment_prompt_box(index)
+                self.copy_image_prompt.setEnabled(bool(segment.image_prompt))
             self.refresh_text_segment_previews()
             self.mark_dirty()
             self.animate_timeline_durations(durations)
@@ -3966,16 +4011,13 @@ class MainWindow(QMainWindow):
 
     def magic_finished(self, result: dict) -> None:
         target_durations = []
-        remaining = MAX_SECONDS
         generated_segments = result["segments"]
-        for index, (segment, generated) in enumerate(zip(self.segments, generated_segments)):
+        for segment, generated in zip(self.segments, generated_segments):
             segment.prompt = str(generated.get("prompt", segment.prompt))
+            segment.image_prompt = str(generated.get("imagePrompt", segment.image_prompt)).strip()
             maximum_duration = MAX_SECONDS if len(generated_segments) == 1 else 12.0
             recommended = max(1, min(maximum_duration, round(float(generated.get("duration", segment.duration)) * 2) / 2))
-            reserve = max(0, len(generated_segments) - index - 1)
-            target = max(1, min(recommended, remaining - reserve))
-            target_durations.append(target)
-            remaining -= target
+            target_durations.append(recommended)
         global_prompt = str(result.get("globalPrompt", "")).strip()
         quality = "(4K, HDR, Realistic)"
         if self.hdr.isChecked() and not global_prompt.startswith(quality):
@@ -3987,6 +4029,8 @@ class MainWindow(QMainWindow):
             global_prompt = "\n".join(lines)
         self.global_prompt.setPlainText(global_prompt)
         self.refresh_segment_prompt_box(self.timeline.currentRow())
+        current = self.current_segment()
+        self.copy_image_prompt.setEnabled(bool(current and current.image_prompt.strip()))
         self.refresh_text_segment_previews()
         self.mark_dirty()
         self.set_ai_controls_enabled(True)

@@ -17,6 +17,7 @@ class Segment:
     media_duration_frames: int | None = None
     trim_start: int | None = None
     id: str = ""
+    image_prompt: str = ""
 
     def __post_init__(self) -> None:
         self.id = self.id or str(uuid4())
@@ -57,4 +58,5 @@ def text_segment_from_ltx(value: dict, index: int, fps: float) -> Segment:
         str(value.get("prompt") or ""),
         max(1.0, float(value.get("length", fps)) / fps),
         id=str(value.get("id") or ""),
+        image_prompt=str(value.get("imagePrompt") or value.get("image_prompt") or ""),
     )
