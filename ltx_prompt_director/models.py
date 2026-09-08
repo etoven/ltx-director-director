@@ -21,7 +21,7 @@ class Segment:
 
     def __post_init__(self) -> None:
         self.id = self.id or str(uuid4())
-        self.duration = max(1.0, round(float(self.duration) * 2) / 2)
+        self.duration = max(0.01, round(float(self.duration), 2))
 
     @property
     def exists(self) -> bool:
@@ -56,7 +56,7 @@ def text_segment_from_ltx(value: dict, index: int, fps: float) -> Segment:
         "text",
         "text",
         str(value.get("prompt") or ""),
-        max(1.0, float(value.get("length", fps)) / fps),
+        max(0.01, round(float(value.get("length", fps)) / fps, 2)),
         id=str(value.get("id") or ""),
         image_prompt=str(value.get("imagePrompt") or value.get("image_prompt") or ""),
     )
