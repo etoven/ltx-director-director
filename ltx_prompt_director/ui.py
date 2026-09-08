@@ -174,12 +174,13 @@ class MagicWorker(QRunnable):
 
 
 class TimelineListWidget(QListWidget):
-    files_dropped = Signal(list)
+    files_dropped = Signal(list, int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._scroll_animation = None
         self._scroll_target = 0
+        self._drop_index = -1
         self.setAcceptDrops(True)
         self.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self.horizontalScrollBar().setSingleStep(24)
@@ -248,6 +249,8 @@ class TimelineListWidget(QListWidget):
 
     def dragMoveEvent(self, event) -> None:
         if self._media_paths(event):
+            self._drop_index = self.insertion_index(event.position().toPoint())
+            self.viewport().update()
             event.acceptProposedAction()
             return
         super().dragMoveEvent(event)
@@ -258,17 +261,42 @@ class TimelineListWidget(QListWidget):
 
     def dropEvent(self, event) -> None:
         paths = self._media_paths(event)
+        insertion_index = self.insertion_index(event.position().toPoint())
         self._clear_drop_state()
         if paths:
-            self.files_dropped.emit(paths)
+            self.files_dropped.emit(paths, insertion_index)
             event.acceptProposedAction()
             return
         super().dropEvent(event)
 
     def _clear_drop_state(self) -> None:
+        self._drop_index = -1
         self.setProperty("dropActive", False)
         self.style().unpolish(self)
         self.style().polish(self)
+        self.viewport().update()
+
+    def insertion_index(self, point) -> int:
+        item = self.itemAt(point)
+        if item is None:
+            return self.count()
+        row = self.row(item)
+        rect = self.visualItemRect(item)
+        return row + (1 if point.x() >= rect.center().x() else 0)
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        if self._drop_index < 0:
+            return
+        if self._drop_index < self.count():
+            x = self.visualItemRect(self.item(self._drop_index)).left()
+        elif self.count():
+            x = self.visualItemRect(self.item(self.count() - 1)).right()
+        else:
+            x = 4
+        painter = QPainter(self.viewport())
+        painter.setPen(QPen(QColor("#68b9ee"), 4))
+        painter.drawLine(x, 4, x, self.viewport().height() - 4)
 
 
 class ProjectListWidget(QListWidget):
@@ -1009,27 +1037,28 @@ class TimelineRuler(QWidget):
         self.offset = value
         self.update()
 
-    def set_scale(self, value: int) -> None:
-        self.scale = value
+    def set_scale(self, value: float) -> None:
+        self.scale = max(0.000001, float(value))
         self.update()
 
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
         painter.fillRect(self.rect(), QColor("#17191a"))
         painter.setFont(self.font())
-        visible_end = max(0, (self.offset + self.width() + 30) // max(1, self.scale) + 1)
-        label_width = painter.fontMetrics().horizontalAdvance(f"{visible_end}.00") + 8
-        label_interval = max(1, (label_width + self.scale - 1) // self.scale)
-        first_second = max(0, (self.offset - 30) // max(1, self.scale))
-        for second in range(first_second, visible_end + 1):
-            x = second * self.scale - self.offset
-            if x < -30 or x > self.width() + 30:
-                continue
+        scale = max(0.000001, float(self.scale))
+        visible_start = max(0.0, (self.offset - 30) / scale)
+        visible_end = max(0.0, (self.offset + self.width() + 30) / scale)
+        label_width = painter.fontMetrics().horizontalAdvance(f"{math.ceil(visible_end)}.00") + 8
+        minimum_interval = max(1, math.ceil(label_width / scale))
+        magnitude = 10 ** math.floor(math.log10(minimum_interval))
+        label_interval = next(step * magnitude for step in (1, 2, 5, 10) if step * magnitude >= minimum_interval)
+        first_second = max(0, math.floor(visible_start / label_interval) * label_interval)
+        for second in range(first_second, math.ceil(visible_end) + label_interval, label_interval):
+            x = round(second * scale - self.offset)
             painter.setPen(QPen(QColor("#303538")))
             painter.drawLine(x, 12, x, 24)
-            if second == 0 or second % label_interval == 0:
-                painter.setPen(QColor("#ff5757") if second == 0 else QColor("#788186"))
-                painter.drawText(x + 4, 16, "0" if second == 0 else f"{second}.00")
+            painter.setPen(QColor("#ff5757") if second == 0 else QColor("#788186"))
+            painter.drawText(x + 4, 16, "0" if second == 0 else f"{second}.00")
 
 
 class ResizeHandle(QFrame):
@@ -1789,11 +1818,21 @@ class MainWindow(QMainWindow):
         self.project_sessions: dict[str, dict] = {}
         self.current_collection: str | None = None
         self.autofit_tail_extension = 0
+        self.timeline_fit_mode = False
         self._restoring_layout = True
         self.project_panel_width = max(280, self.settings.value("project_panel_width", 330, int))
         saved_icon_size = self.settings.value("project_icon_size", 230, int)
         self.project_icon_size = min((96, 156, 230), key=lambda size: abs(size - saved_icon_size))
         self.pixels_per_second = 65
+        self._timeline_fit_timer = QTimer(self)
+        self._timeline_fit_timer.setSingleShot(True)
+        self._timeline_fit_timer.setInterval(60)
+        self._timeline_fit_timer.timeout.connect(self.apply_timeline_fit)
+        self._project_open_timer = QTimer(self)
+        self._project_open_timer.setSingleShot(True)
+        self._project_open_timer.setInterval(90)
+        self._project_open_timer.timeout.connect(self.open_pending_library_project)
+        self._pending_project_id: str | None = None
         self.timeline_height = max(184, min(430, self.settings.value("timeline_panel_height", 184, int)))
         self.thread_pool = QThreadPool.globalInstance()
         self._loading = False
@@ -1931,10 +1970,10 @@ class MainWindow(QMainWindow):
         scale_label.setObjectName("timelineControlLabel")
         self.timeline_controls.addWidget(scale_label)
         self.timeline_scale = QSlider(Qt.Orientation.Horizontal)
-        self.timeline_scale.setRange(20, 160)
+        self.timeline_scale.setRange(0, 160)
         self.timeline_scale.setValue(self.pixels_per_second)
         self.timeline_scale.setFixedWidth(150)
-        self.timeline_scale.setToolTip("Timeline pixels per second")
+        self.timeline_scale.setToolTip("Timeline scale (far left fits the full sequence)")
         self.timeline_scale.valueChanged.connect(self.set_timeline_scale)
         self.timeline_controls.addWidget(self.timeline_scale)
         autofit = QPushButton("↔  Auto fit")
@@ -2382,7 +2421,7 @@ class MainWindow(QMainWindow):
         self.project_list.setMovement(QListWidget.Movement.Static)
         self.project_list.setSpacing(4)
         self.project_list.itemClicked.connect(self.activate_clicked_project)
-        self.project_list.itemDoubleClicked.connect(lambda *_: self.open_library_project())
+        self.project_list.itemDoubleClicked.connect(self.activate_clicked_project)
         self.project_list.drag_started.connect(self.activate_custom_sort_for_drag)
         self.project_list.order_changed.connect(self.save_custom_project_order)
         self.project_list.files_dropped.connect(self.project_files_dropped)
@@ -2818,7 +2857,14 @@ class MainWindow(QMainWindow):
     def activate_clicked_project(self, item: QListWidgetItem) -> None:
         meta = item.data(Qt.ItemDataRole.UserRole) or {}
         if meta.get("kind") == "project":
-            self.open_library_project()
+            self._pending_project_id = str(meta.get("id", ""))
+            self._project_open_timer.start()
+
+    def open_pending_library_project(self) -> None:
+        project_id = self._pending_project_id
+        self._pending_project_id = None
+        if project_id:
+            self.open_library_project(project_id=project_id)
 
     def project_files_dropped(self, paths: list[str]) -> None:
         if not paths:
@@ -3176,6 +3222,7 @@ class MainWindow(QMainWindow):
             "outputWidth": self.output_width.value(),
             "outputHeight": self.output_height.value(),
             "timelineScale": self.pixels_per_second,
+            "timelineAutoFit": self.timeline_fit_mode,
             "timelineHeight": self.timeline_height,
         }
 
@@ -3205,14 +3252,18 @@ class MainWindow(QMainWindow):
         self.timeline_height = max(184, min(430, int(state.get("timelineHeight", 184))))
         self.timeline_height_handle.current_height = self.timeline_height
         self.set_timeline_height(self.timeline_height)
-        scale = max(20, min(160, int(state.get("timelineScale", 65))))
+        auto_fit = bool(state.get("timelineAutoFit", False))
+        scale = max(1, min(160, int(state.get("timelineScale", 65))))
         self.timeline_scale.blockSignals(True)
-        self.timeline_scale.setValue(scale)
+        self.timeline_scale.setValue(0 if auto_fit else scale)
         self.timeline_scale.blockSignals(False)
         self.pixels_per_second = scale
+        self.timeline_fit_mode = auto_fit
         self.ruler.set_scale(scale)
         self._loading = False
         self.refresh_timeline()
+        if auto_fit:
+            self.apply_timeline_fit()
 
     def leave_collection(self) -> None:
         self.current_collection = None
@@ -3293,8 +3344,13 @@ class MainWindow(QMainWindow):
         self.queue_settings_sync()
         self.statusBar().showMessage(f"Project saved to library: {meta['name']}")
 
-    def open_library_project(self) -> None:
-        meta = self.selected_library_project()
+    def open_library_project(self, checked: bool = False, project_id: str | None = None) -> None:
+        self._project_open_timer.stop()
+        self._pending_project_id = None
+        if project_id:
+            meta = next((record for record in self.library_records() if str(record.get("id", "")) == project_id), None)
+        else:
+            meta = self.selected_library_project()
         if not meta:
             return
         if meta.get("kind") == "collection":
@@ -3456,6 +3512,8 @@ class MainWindow(QMainWindow):
         super().resizeEvent(event)
         if hasattr(self, "magic_overlay") and self.magic_overlay.isVisible():
             self.magic_overlay.setGeometry(self.rect())
+        if getattr(self, "timeline_fit_mode", False) and hasattr(self, "_timeline_fit_timer"):
+            self._timeline_fit_timer.start()
 
     def mark_dirty(self, *_args) -> None:
         if not self._loading:
@@ -3503,28 +3561,63 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("New project ready")
 
     def set_timeline_scale(self, value: int) -> None:
+        if value == 0:
+            self.autofit_timeline()
+            return
+        self.timeline_fit_mode = False
         self.autofit_tail_extension = 0
-        self.pixels_per_second = value
+        self.pixels_per_second = float(value)
         self.ruler.set_scale(value)
         self.update_timeline_layout()
         self.mark_dirty()
 
     def autofit_timeline(self) -> None:
+        self.timeline_fit_mode = True
+        self.timeline_scale.blockSignals(True)
+        self.timeline_scale.setValue(0)
+        self.timeline_scale.blockSignals(False)
+        self.apply_timeline_fit()
+        self.mark_dirty()
+
+    def apply_timeline_fit(self) -> None:
+        if not self.timeline_fit_mode:
+            return
         total = self.total_duration()
         if total <= 0:
             return
-        available = max(200, self.timeline.viewport().width() - 6)
-        fitted = max(20, min(160, int(available / total)))
-        self.timeline_scale.blockSignals(True)
-        self.timeline_scale.setValue(fitted)
-        self.timeline_scale.blockSignals(False)
-        self.pixels_per_second = fitted
-        self.ruler.set_scale(fitted)
-        base_width = sum(max(48, int(segment.duration * fitted)) for segment in self.segments)
-        self.autofit_tail_extension = max(0, available - base_width)
+        available = max(1, self.timeline.viewport().width() - 6)
+        self.pixels_per_second = available / total
+        self.ruler.set_scale(self.pixels_per_second)
+        self.autofit_tail_extension = 0
         self.update_timeline_layout()
         self.timeline.horizontalScrollBar().setValue(0)
-        self.mark_dirty()
+
+    def timeline_item_widths(self, durations: list[float] | None = None) -> list[int]:
+        values = durations if durations is not None else [segment.duration for segment in self.segments]
+        if not self.timeline_fit_mode:
+            widths = [max(48, int(value * self.pixels_per_second)) for value in values]
+            if widths:
+                widths[-1] += self.autofit_tail_extension
+            return widths
+        available = max(1, self.timeline.viewport().width() - 6)
+        total = sum(max(MIN_DURATION, value) for value in values)
+        if durations is None and total > 0:
+            self.pixels_per_second = available / total
+            self.ruler.set_scale(self.pixels_per_second)
+        boundaries = [0]
+        elapsed = 0.0
+        for value in values:
+            elapsed += max(MIN_DURATION, value)
+            boundaries.append(round(available * elapsed / total))
+        widths = [max(1, boundaries[index + 1] - boundaries[index]) for index in range(len(values))]
+        overflow = sum(widths) - available
+        for index in range(len(widths) - 1, -1, -1):
+            if overflow <= 0:
+                break
+            reduction = min(overflow, widths[index] - 1)
+            widths[index] -= reduction
+            overflow -= reduction
+        return widths
 
     def maximum_safe_timeline_height(self) -> int:
         """Keep timeline growth inside the current desktop-sized client area."""
@@ -3595,22 +3688,24 @@ class MainWindow(QMainWindow):
         self.segment_prompt.setFocus()
         self.statusBar().showMessage("Text-only segment added; enter its prompt or use Magic Build")
 
-    def add_media_paths(self, paths: list[str]) -> None:
+    def add_media_paths(self, paths: list[str], insert_index: int | None = None) -> None:
         paths = [path for path in paths if Path(path).is_file()]
         if not paths:
             return
         self.settings.setValue("last_media_dir", str(Path(paths[0]).parent))
         added = 0
+        target = len(self.segments) if insert_index is None else max(0, min(insert_index, len(self.segments)))
         for path in paths:
             try:
                 kind, preview, frames, trim = prepare_media(path)
                 duration = 1.0 if kind == "video" else 5.0
-                self.segments.append(Segment(Path(path).name, path, preview, kind, "end" if len(self.segments) % 2 else "start", duration=duration, media_duration_frames=frames, trim_start=trim))
+                self.segments.insert(target, Segment(Path(path).name, path, preview, kind, "end" if target % 2 else "start", duration=duration, media_duration_frames=frames, trim_start=trim))
+                target += 1
                 added += 1
             except Exception as error:
                 QMessageBox.warning(self, "Media error", f"{Path(path).name}: {error}")
         self.mark_dirty()
-        self.refresh_timeline(len(self.segments) - 1)
+        self.refresh_timeline(max(0, target - 1))
         self.statusBar().showMessage(f"Added {added} media file{'s' if added != 1 else ''}")
 
     def refresh_timeline(self, selected: int = 0) -> None:
@@ -3624,10 +3719,11 @@ class MainWindow(QMainWindow):
             self.timeline.clear()
             card_height = max(152, self.timeline_height - 32)
             preview_height = max(80, card_height - 55)
+            widths = self.timeline_item_widths()
             for index, segment in enumerate(self.segments):
                 item = QListWidgetItem()
                 item.setData(Qt.ItemDataRole.UserRole, segment.id)
-                item.setSizeHint(QSize(max(48, int(segment.duration * self.pixels_per_second)), card_height))
+                item.setSizeHint(QSize(widths[index], card_height))
                 self.timeline.addItem(item)
                 card = SegmentCard(segment, preview_height, self.pixels_per_second)
                 card.duration_changed.connect(lambda value, sid=segment.id: self.change_duration(sid, value))
@@ -3655,14 +3751,13 @@ class MainWindow(QMainWindow):
             card_height = max(152, self.timeline_height - 32)
             preview_height = max(80, card_height - 55)
             by_id = {segment.id: segment for segment in self.segments}
+            widths = self.timeline_item_widths()
             for row in range(self.timeline.count()):
                 item = self.timeline.item(row)
                 segment = by_id.get(item.data(Qt.ItemDataRole.UserRole))
                 if not segment:
                     continue
-                width = max(48, int(segment.duration * self.pixels_per_second))
-                if row == self.timeline.count() - 1:
-                    width += self.autofit_tail_extension
+                width = widths[row] if row < len(widths) else 1
                 item.setSizeHint(QSize(width, card_height))
                 card = self.timeline.itemWidget(item)
                 if isinstance(card, SegmentCard):
@@ -4192,7 +4287,7 @@ class MainWindow(QMainWindow):
             self.refresh_timeline(self.timeline.currentRow())
             return
         start_widths = [self.timeline.item(row).sizeHint().width() for row in range(self.timeline.count())]
-        target_widths = [max(48, int(duration * self.pixels_per_second)) for duration in target_durations]
+        target_widths = self.timeline_item_widths(target_durations)
         for segment, target in zip(self.segments, target_durations):
             segment.duration = target
         self.sync_selected_duration_control()
@@ -4384,7 +4479,7 @@ class MainWindow(QMainWindow):
             value["previewData"] = data_url(segment.preview_path) if segment.kind != "text" and segment.preview_path and Path(segment.preview_path).exists() else None
             value["sourceData"] = data_url(segment.media_path) if segment.kind != "text" and segment.media_path and Path(segment.media_path).exists() else None
             frames.append(value)
-        return {"app": "ltx-director-director", "projectVersion": 5, "globalPrompt": self.global_prompt.toPlainText(), "directorIntent": self.intent.toPlainText(), "directionOptions": {"requestedLength": self.requested_length.value(), "speakerLanguage": self.speaker_language.currentText(), "speakerAccent": self.speaker_accent.currentText()}, "magicBuild": {"sfx": self.sfx.isChecked(), "spokenDialog": self.spoken_dialog.isChecked(), "hdr": self.hdr.isChecked(), "reduceMusic": self.reduce_music.isChecked()}, "output": {"width": self.output_width.value(), "height": self.output_height.value()}, "timelineView": {"scale": self.pixels_per_second, "height": self.timeline_height}, "frames": frames}
+        return {"app": "ltx-director-director", "projectVersion": 5, "globalPrompt": self.global_prompt.toPlainText(), "directorIntent": self.intent.toPlainText(), "directionOptions": {"requestedLength": self.requested_length.value(), "speakerLanguage": self.speaker_language.currentText(), "speakerAccent": self.speaker_accent.currentText()}, "magicBuild": {"sfx": self.sfx.isChecked(), "spokenDialog": self.spoken_dialog.isChecked(), "hdr": self.hdr.isChecked(), "reduceMusic": self.reduce_music.isChecked()}, "output": {"width": self.output_width.value(), "height": self.output_height.value()}, "timelineView": {"scale": self.pixels_per_second, "autoFit": self.timeline_fit_mode, "height": self.timeline_height}, "frames": frames}
 
     def load_project_payload(self, payload: dict) -> None:
         if payload.get("app") not in {"ltx-director-director", "ltx-prompt-director-python"}:
@@ -4429,9 +4524,13 @@ class MainWindow(QMainWindow):
         self.timeline_height = max(184, min(430, int(view.get("height", self.timeline_height))))
         self.timeline_height_handle.current_height = self.timeline_height
         self.set_timeline_height(self.timeline_height)
-        self.timeline_scale.setValue(max(20, min(160, int(view.get("scale", self.pixels_per_second)))))
+        auto_fit = bool(view.get("autoFit", False))
+        self.timeline_scale.setValue(0 if auto_fit else max(1, min(160, int(view.get("scale", self.pixels_per_second)))))
+        self.timeline_fit_mode = auto_fit
         self._loading = False
         self.refresh_timeline()
+        if auto_fit:
+            self.apply_timeline_fit()
         self.project_dirty = False
 
     def export_project(self) -> None:
