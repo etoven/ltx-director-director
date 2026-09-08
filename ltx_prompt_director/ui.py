@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import math
 import re
 import shutil
 import subprocess
@@ -12,8 +13,8 @@ from importlib.resources import files
 from pathlib import Path
 from uuid import uuid4
 
-from PySide6.QtCore import QDateTime, QEasingCurve, QEventLoop, QObject, QRunnable, QRectF, QSettings, QSize, QStandardPaths, Qt, QThreadPool, QTimer, QUrl, QVariantAnimation, Signal
-from PySide6.QtGui import QAction, QActionGroup, QBrush, QColor, QIcon, QPainter, QPen, QPixmap
+from PySide6.QtCore import QDateTime, QEasingCurve, QObject, QRunnable, QRectF, QSettings, QSize, QStandardPaths, Qt, QThreadPool, QTimer, QUrl, QVariantAnimation, Signal
+from PySide6.QtGui import QAction, QActionGroup, QBrush, QColor, QIcon, QImageReader, QPainter, QPen, QPixmap
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
@@ -52,6 +53,31 @@ def pixmap_from_data_url(value: str) -> QPixmap:
     except (IndexError, ValueError):
         pass
     return pixmap
+
+
+def timeline_preview_pixmap(path: str) -> QPixmap:
+    """Decode a timeline-sized preview instead of retaining an unbounded source image."""
+    if not path:
+        return QPixmap()
+    reader = QImageReader(path)
+    reader.setAutoTransform(True)
+    size = reader.size()
+    if size.isValid() and (size.width() > 1024 or size.height() > 1024):
+        size.scale(QSize(1024, 1024), Qt.AspectRatioMode.KeepAspectRatio)
+        reader.setScaledSize(size)
+    image = reader.read()
+    return QPixmap.fromImage(image) if not image.isNull() else QPixmap()
+
+
+def requested_length_value(value: object) -> float:
+    """Map legacy Auto/null project values to the spin box's zero=Auto value."""
+    if value is None or (isinstance(value, str) and value.strip().casefold() in {"", "auto", "none", "null"}):
+        return 0.0
+    try:
+        duration = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    return duration if math.isfinite(duration) and duration > 0 else 0.0
 
 
 def choose_media_files(parent: QWidget, multiple: bool, initial: str) -> list[str]:
@@ -1190,7 +1216,7 @@ class SegmentCard(QFrame):
         self.preview = QLabel()
         self.preview.setObjectName("segmentPreview")
         self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.source_pixmap = QPixmap(segment.preview_path) if segment.preview_path else QPixmap()
+        self.source_pixmap = timeline_preview_pixmap(segment.preview_path)
         if segment.kind == "text":
             self.preview.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
             self.preview.setMargin(8)
@@ -1750,9 +1776,7 @@ class MainWindow(QMainWindow):
             self.restoreGeometry(geometry)
         if state:
             self.restoreState(state)
-        QTimer.singleShot(0, self.restore_project_panel_width)
-        QTimer.singleShot(0, self.restore_timeline_panel_height)
-        QTimer.singleShot(0, self.restore_last_project)
+        QTimer.singleShot(0, self.restore_startup_workspace)
         self.update_window_title()
 
     def _build_ui(self) -> None:
@@ -2421,7 +2445,13 @@ class MainWindow(QMainWindow):
     def restore_project_panel_width(self) -> None:
         """Restore the saved dock width without startup resize events overwriting it."""
         self.set_project_panel_width(self.project_panel_width, persist=False)
-        QTimer.singleShot(0, self.finish_layout_restore)
+
+    def restore_startup_workspace(self) -> None:
+        """Settle saved geometry before loading the previous project's media timeline."""
+        self.restore_project_panel_width()
+        self.restore_timeline_panel_height()
+        self.finish_layout_restore()
+        QTimer.singleShot(0, self.restore_last_project)
 
     def finish_layout_restore(self) -> None:
         self._restoring_layout = False
@@ -2472,6 +2502,8 @@ class MainWindow(QMainWindow):
         self._settings_sync_timer.start()
 
     def save_window_panel_state(self) -> None:
+        if self._restoring_layout:
+            return
         self.settings.setValue("window/state", self.saveState())
         self.queue_settings_sync()
 
@@ -3130,7 +3162,7 @@ class MainWindow(QMainWindow):
         self.segments = state.get("segments", [])
         self.global_prompt.setPlainText(str(state.get("globalPrompt", "")))
         self.intent.setPlainText(str(state.get("directorIntent", "")))
-        self.requested_length.setValue(float(state.get("requestedLength", 0)))
+        self.requested_length.setValue(requested_length_value(state.get("requestedLength")))
         self.speaker_language.setCurrentText(str(state.get("speakerLanguage", "(Image/context provided)")))
         self.speaker_accent.setCurrentText(str(state.get("speakerAccent", state.get("speakerNationality", "(Image/context provided)"))))
         self.sfx.setChecked(bool(state.get("sfx")))
@@ -3555,7 +3587,7 @@ class MainWindow(QMainWindow):
         indicator = getattr(self, "timeline_loading", None) if self.segments else None
         if indicator:
             indicator.show_loading()
-            QApplication.processEvents(QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents)
+            indicator.repaint()
         self._loading = True
         try:
             self.timeline.clear()
@@ -3572,9 +3604,6 @@ class MainWindow(QMainWindow):
                 card.resize_finished.connect(lambda sid=segment.id: self.finish_resize(sid))
                 card.set_timeline_edges(index == 0, index == len(self.segments) - 1)
                 self.timeline.setItemWidget(item, card)
-                if indicator:
-                    indicator.raise_()
-                    QApplication.processEvents(QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents)
             self._loading = False
             if self.segments:
                 self.timeline.setCurrentRow(max(0, min(selected, len(self.segments) - 1)))
@@ -4353,7 +4382,7 @@ class MainWindow(QMainWindow):
         self.global_prompt.setPlainText(payload.get("globalPrompt", ""))
         self.intent.setPlainText(payload.get("directorIntent", ""))
         direction_options = payload.get("directionOptions", {})
-        self.requested_length.setValue(float(direction_options.get("requestedLength", 0)))
+        self.requested_length.setValue(requested_length_value(direction_options.get("requestedLength")))
         self.speaker_language.setCurrentText(str(direction_options.get("speakerLanguage", "(Image/context provided)")))
         self.speaker_accent.setCurrentText(str(direction_options.get("speakerAccent", direction_options.get("speakerNationality", "(Image/context provided)"))))
         self.sfx.setChecked(bool(payload.get("magicBuild", {}).get("sfx")))
