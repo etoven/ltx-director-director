@@ -631,6 +631,7 @@ class ProjectPreviewPanel(QWidget):
         self.setObjectName("projectPreviewPanel")
         self.setAcceptDrops(True)
         self.duration = 0
+        self._source_generation = 0
         self.player = QMediaPlayer(self)
         self.audio = QAudioOutput(self)
         self.player.setAudioOutput(self.audio)
@@ -684,6 +685,7 @@ class ProjectPreviewPanel(QWidget):
         self.player.durationChanged.connect(self.duration_changed)
         self.player.playbackStateChanged.connect(self.playback_changed)
         self.player.mediaStatusChanged.connect(self.media_status_changed)
+        self.player.errorOccurred.connect(self.media_error)
         self.clear_project()
 
     def dragEnterEvent(self, event) -> None:
@@ -714,26 +716,52 @@ class ProjectPreviewPanel(QWidget):
         return f"{total // 60:02d}:{total % 60:02d}"
 
     def set_project(self, name: str, video_path: str = "") -> None:
+        self._source_generation += 1
+        generation = self._source_generation
         self.player.stop()
+        self.player.setSource(QUrl())
         self.title.setText(name)
         self.choose.setEnabled(True)
         path = Path(video_path)
-        if path.is_file():
-            self.player.setSource(QUrl.fromLocalFile(str(path)))
-            self.empty.hide()
-            self.video.show()
+        try:
+            valid_preview = path.is_file() and path.suffix.casefold() in ProjectVideoWidget.VIDEO_SUFFIXES and path.stat().st_size > 0
+        except OSError:
+            valid_preview = False
+        if valid_preview:
+            self.video.hide()
+            self.empty.setText("Loading saved video preview…")
+            self.empty.show()
             self.export.setEnabled(True)
-            self.fullscreen.setEnabled(True)
+            self.fullscreen.setEnabled(False)
+            QTimer.singleShot(0, lambda p=str(path), token=generation: self.load_project_video(p, token))
         else:
-            self.player.stop()
-            self.player.setSource(QUrl())
             self.video.hide()
             self.empty.setText("Drop a rendered video here\nor use Add Video")
             self.empty.show()
             self.export.setEnabled(False)
             self.fullscreen.setEnabled(False)
 
+    def load_project_video(self, path: str, generation: int) -> None:
+        """Activate saved preview media only after project/timeline loading has returned."""
+        if generation != self._source_generation:
+            return
+        source = Path(path)
+        if not source.is_file() or source.suffix.casefold() not in ProjectVideoWidget.VIDEO_SUFFIXES:
+            self.media_error()
+            return
+        self.player.setSource(QUrl.fromLocalFile(str(source)))
+
+    def media_error(self, *_args) -> None:
+        self.player.stop()
+        self.player.setSource(QUrl())
+        self.video.hide()
+        self.empty.setText("Saved video preview could not be loaded\nDrop a replacement video here")
+        self.empty.show()
+        self.export.setEnabled(False)
+        self.fullscreen.setEnabled(False)
+
     def clear_project(self) -> None:
+        self._source_generation += 1
         self.player.stop()
         self.player.setSource(QUrl())
         self.title.setText("No saved project selected")
@@ -760,6 +788,9 @@ class ProjectPreviewPanel(QWidget):
 
     def media_status_changed(self, status) -> None:
         if status in {QMediaPlayer.MediaStatus.LoadedMedia, QMediaPlayer.MediaStatus.BufferedMedia} and self.player.position() == 0:
+            self.empty.hide()
+            self.video.show()
+            self.fullscreen.setEnabled(True)
             self.player.setPosition(1)
             self.player.pause()
 
