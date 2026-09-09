@@ -1277,6 +1277,21 @@ class SegmentCard(QFrame):
         self.preview.setObjectName("segmentPreview")
         self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.source_pixmap = timeline_preview_pixmap(segment.preview_path)
+        self.resolution_badge = QLabel(self.preview)
+        self.resolution_badge.setObjectName("resolutionPill")
+        self.resolution_badge.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.resolution_badge.setStyleSheet(
+            "background:rgba(20,25,28,220);color:#e3f4ff;border:1px solid #668594;"
+            "border-radius:8px;padding:2px 6px;font-size:9px;font-weight:bold"
+        )
+        resolution_source = segment.media_path if segment.kind == "image" else segment.preview_path
+        resolution = QImageReader(resolution_source).size() if segment.kind in {"image", "video"} and resolution_source else QSize()
+        if resolution.isValid():
+            self.resolution_badge.setText(f"{resolution.width()} × {resolution.height()}")
+            self.resolution_badge.adjustSize()
+            self.resolution_badge.show()
+        else:
+            self.resolution_badge.hide()
         if segment.kind == "text":
             self.preview.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
             self.preview.setMargin(8)
@@ -1326,6 +1341,21 @@ class SegmentCard(QFrame):
         self.resize_handle.pixels_per_second = pixels_per_second
         self.resize_handle.duration = self.segment.duration
         self.duration_label.setText(f"{self.segment.duration:.2f}s")
+        self.position_resolution_badge()
+
+    def position_resolution_badge(self) -> None:
+        if self.resolution_badge.isHidden():
+            return
+        self.resolution_badge.adjustSize()
+        self.resolution_badge.move(
+            max(4, self.preview.width() - self.resolution_badge.width() - 6),
+            max(4, self.preview.height() - self.resolution_badge.height() - 6),
+        )
+        self.resolution_badge.raise_()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self.position_resolution_badge()
 
     def _preview_duration(self, value: float) -> None:
         self.duration_label.setText(f"{value:.2f}s")
@@ -3952,12 +3982,55 @@ class MainWindow(QMainWindow):
             menu.addAction("Convert to image segment…", self.convert_text_segment_to_image)
         else:
             menu.addAction("Replace media", self.replace_selected)
+            if segment and segment.kind == "image":
+                menu.addAction("Copy image", self.copy_selected_image)
+                paste_action = menu.addAction("Paste image to replace", self.paste_image_to_replace)
+                paste_action.setEnabled(QApplication.clipboard().mimeData().hasImage())
             menu.addAction("Export video" if segment and segment.kind == "video" else "Export image", self.export_selected_segment)
             menu.addAction("Set as start frame", lambda: self.set_role("start"))
             menu.addAction("Set as end frame", lambda: self.set_role("end"))
         menu.addSeparator()
         menu.addAction("Delete segment", self.delete_selected)
         menu.exec(self.timeline.mapToGlobal(point))
+
+    def copy_selected_image(self) -> None:
+        segment = self.current_segment()
+        if not segment or segment.kind != "image":
+            return
+        source = Path(segment.media_path)
+        if not source.is_file():
+            QMessageBox.warning(self, "Image missing", "The full-resolution source image could not be found.")
+            return
+        reader = QImageReader(str(source))
+        reader.setAutoTransform(True)
+        image = reader.read()
+        if image.isNull():
+            QMessageBox.warning(self, "Copy failed", "The full-resolution source image could not be decoded.")
+            return
+        QApplication.clipboard().setImage(image)
+        self.statusBar().showMessage(f"Full-resolution image copied: {image.width()} × {image.height()}")
+
+    def paste_image_to_replace(self) -> None:
+        segment = self.current_segment()
+        if not segment or segment.kind != "image":
+            return
+        image = QApplication.clipboard().image()
+        if image.isNull():
+            QMessageBox.information(self, "No clipboard image", "Copy an image to the clipboard first.")
+            return
+        destination = APP_CACHE / f"clipboard-{uuid4().hex}.png"
+        if not image.save(str(destination), "PNG"):
+            QMessageBox.warning(self, "Paste failed", "The clipboard image could not be saved.")
+            return
+        row = self.timeline.currentRow()
+        segment.name = f"clipboard-{datetime.now().strftime('%Y%m%d-%H%M%S')}.png"
+        segment.media_path = str(destination)
+        segment.preview_path = str(destination)
+        segment.media_duration_frames = None
+        segment.trim_start = None
+        self.mark_dirty()
+        self.refresh_timeline(row)
+        self.statusBar().showMessage(f"Image replaced from clipboard at full resolution: {image.width()} × {image.height()}")
 
     def convert_text_segment_to_image(self) -> None:
         segment = self.current_segment()
