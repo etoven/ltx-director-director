@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
     QColorDialog, QDateTimeEdit, QDockWidget, QFileDialog, QFormLayout, QFrame, QHBoxLayout, QLabel, QLayout, QLineEdit,
     QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox, QPushButton,
-    QSizePolicy, QSlider, QSpinBox, QSplitter, QSplitterHandle, QStatusBar, QStyle, QStyledItemDelegate, QStyleOptionViewItem, QTextEdit, QToolBar, QVBoxLayout, QWidget,
+    QSizePolicy, QSlider, QSpinBox, QSplitter, QSplitterHandle, QStatusBar, QStyle, QStyledItemDelegate, QStyleOptionSlider, QStyleOptionViewItem, QTextEdit, QToolBar, QVBoxLayout, QWidget,
 )
 
 from .ai import GEMINI_MODELS, build_prompts, refine_segment_prompt, refine_timing, retryable_connection_error
@@ -460,11 +460,47 @@ class ProjectTileDelegate(QStyledItemDelegate):
         super().paint(painter, clean, index)
 
 
+class SeekSlider(QSlider):
+    """A normal slider that also seeks directly to a clicked groove position."""
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() != Qt.MouseButton.LeftButton or self.orientation() != Qt.Orientation.Horizontal:
+            super().mousePressEvent(event)
+            return
+
+        option = QStyleOptionSlider()
+        self.initStyleOption(option)
+        handle = self.style().subControlRect(
+            QStyle.ComplexControl.CC_Slider,
+            option,
+            QStyle.SubControl.SC_SliderHandle,
+            self,
+        )
+        if handle.contains(event.position().toPoint()):
+            super().mousePressEvent(event)
+            return
+
+        span = max(1, self.width() - handle.width())
+        click_position = round(event.position().x() - handle.width() / 2)
+        value = QStyle.sliderValueFromPosition(
+            self.minimum(),
+            self.maximum(),
+            max(0, min(span, click_position)),
+            span,
+            option.upsideDown,
+        )
+        self.setValue(value)
+        self.sliderMoved.emit(value)
+        event.accept()
+
+
 class ProjectVideoWidget(QVideoWidget):
     video_dropped = Signal(str)
     drag_active_changed = Signal(bool)
     play_requested = Signal()
     fullscreen_requested = Signal()
+    export_frame_requested = Signal()
+    copy_frame_requested = Signal()
 
     VIDEO_SUFFIXES = {".mp4", ".webm", ".mov", ".mkv", ".avi", ".m4v"}
 
@@ -479,6 +515,17 @@ class ProjectVideoWidget(QVideoWidget):
             event.accept()
             return
         super().mouseDoubleClickEvent(event)
+
+    def contextMenuEvent(self, event) -> None:
+        menu = QMenu(self)
+        export_frame = menu.addAction("Export Current Frame…")
+        copy_frame = menu.addAction("Copy Current Frame to Clipboard")
+        selected = menu.exec(event.globalPos())
+        if selected == export_frame:
+            self.export_frame_requested.emit()
+        elif selected == copy_frame:
+            self.copy_frame_requested.emit()
+        event.accept()
 
     def dragEnterEvent(self, event) -> None:
         urls = event.mimeData().urls() if event.mimeData().hasUrls() else []
@@ -618,7 +665,7 @@ class FullscreenVideoDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        self.video = QVideoWidget(self)
+        self.video = ProjectVideoWidget(self)
         layout.addWidget(self.video, 1)
         controls = QFrame()
         controls.setObjectName("fullscreenPlayerControls")
@@ -626,7 +673,7 @@ class FullscreenVideoDialog(QDialog):
         controls_layout.setContentsMargins(12, 8, 12, 8)
         self.play = QPushButton("▶ Play")
         self.play.clicked.connect(self.toggle_playback)
-        self.seek = QSlider(Qt.Orientation.Horizontal)
+        self.seek = SeekSlider(Qt.Orientation.Horizontal)
         self.seek.sliderMoved.connect(self.player.setPosition)
         self.position = QLabel("00:00 / 00:00")
         exit_button = QPushButton("✕ Exit Fullscreen")
@@ -660,6 +707,7 @@ class ProjectPreviewPanel(QWidget):
         self.setAcceptDrops(True)
         self.duration = 0
         self._source_generation = 0
+        self.current_frame = None
         self.player = QMediaPlayer(self)
         self.audio = QAudioOutput(self)
         self.player.setAudioOutput(self.audio)
@@ -671,6 +719,11 @@ class ProjectPreviewPanel(QWidget):
         self.video.drag_active_changed.connect(self.set_drop_active)
         self.video.play_requested.connect(self.toggle_playback)
         self.video.fullscreen_requested.connect(self.open_fullscreen)
+        for video_output in (self.video, self.fullscreen_window.video):
+            video_output.export_frame_requested.connect(self.export_current_frame)
+            video_output.copy_frame_requested.connect(self.copy_current_frame)
+            video_output.videoSink().videoFrameChanged.connect(self.capture_frame)
+        self.fullscreen_window.video.fullscreen_requested.connect(self.fullscreen_window.reject)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)
         layout.setSpacing(5)
@@ -689,7 +742,7 @@ class ProjectPreviewPanel(QWidget):
         layout.addLayout(video_stack, 1)
         seek_row = QHBoxLayout()
         self.position = QLabel("00:00 / 00:00")
-        self.seek = QSlider(Qt.Orientation.Horizontal)
+        self.seek = SeekSlider(Qt.Orientation.Horizontal)
         self.seek.setRange(0, 0)
         self.seek.sliderMoved.connect(self.player.setPosition)
         seek_row.addWidget(self.seek, 1)
@@ -715,6 +768,50 @@ class ProjectPreviewPanel(QWidget):
         self.player.mediaStatusChanged.connect(self.media_status_changed)
         self.player.errorOccurred.connect(self.media_error)
         self.clear_project()
+
+    def capture_frame(self, frame) -> None:
+        image = frame.toImage()
+        if not image.isNull():
+            self.current_frame = image.copy()
+
+    def frame_available(self) -> bool:
+        if self.current_frame is not None and not self.current_frame.isNull():
+            return True
+        QMessageBox.information(self, "Video Frame", "No video frame is available yet.")
+        return False
+
+    def export_current_frame(self) -> None:
+        if not self.frame_available():
+            return
+        source = Path(self.player.source().toLocalFile())
+        stem = source.stem or "video"
+        suggested = f"{stem}_{self.player.position():010d}ms.png"
+        filename, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Current Frame",
+            suggested,
+            "PNG Image (*.png);;JPEG Image (*.jpg *.jpeg)",
+        )
+        if not filename:
+            return
+        path = Path(filename)
+        if path.suffix.lower() not in {".png", ".jpg", ".jpeg"}:
+            path = path.with_suffix(".png")
+        if not self.current_frame.save(str(path)):
+            QMessageBox.warning(self, "Export Current Frame", "The current frame could not be saved.")
+            return
+        self.show_player_message(f"Exported frame to {path.name}")
+
+    def copy_current_frame(self) -> None:
+        if not self.frame_available():
+            return
+        QApplication.clipboard().setImage(self.current_frame)
+        self.show_player_message("Copied current frame to the clipboard")
+
+    def show_player_message(self, message: str) -> None:
+        window = self.window()
+        if isinstance(window, QMainWindow):
+            window.statusBar().showMessage(message, 3500)
 
     def dragEnterEvent(self, event) -> None:
         urls = event.mimeData().urls() if event.mimeData().hasUrls() else []
@@ -747,6 +844,7 @@ class ProjectPreviewPanel(QWidget):
         self._source_generation += 1
         generation = self._source_generation
         self.player.stop()
+        self.current_frame = None
         self.player.setSource(QUrl())
         self.title.setText(name)
         self.choose.setEnabled(True)
@@ -781,6 +879,7 @@ class ProjectPreviewPanel(QWidget):
 
     def media_error(self, *_args) -> None:
         self.player.stop()
+        self.current_frame = None
         self.player.setSource(QUrl())
         self.video.hide()
         self.empty.setText("Saved video preview could not be loaded\nDrop a replacement video here")
@@ -791,6 +890,7 @@ class ProjectPreviewPanel(QWidget):
     def clear_project(self) -> None:
         self._source_generation += 1
         self.player.stop()
+        self.current_frame = None
         self.player.setSource(QUrl())
         self.title.setText("No saved project selected")
         self.video.hide()
@@ -4469,7 +4569,7 @@ class MainWindow(QMainWindow):
             cursor += length
         global_prompt = self.global_prompt.toPlainText()
         self.normalize_output_dimensions()
-        payload = {"version": 1, "settings": {"start_second": 0, "end_second": cursor / FPS, "duration_seconds": cursor / FPS, "start_frame": 0, "end_frame": cursor, "duration_frames": cursor, "epsilon": .99, "use_custom_audio": bool(audio_timeline), "use_custom_motion": False, "inpaint_audio": False, "frame_rate": FPS, "display_mode": "seconds", "custom_width": self.output_width.value(), "custom_height": self.output_height.value(), "resize_method": "maintain aspect ratio", "divisible_by": 32, "img_compression": 0, "override_audio": False}, "global_prompt": global_prompt, "retake_global_prompt": "", "timeline": {"mainTrackEnabled": True, "audioTrackEnabled": bool(audio_timeline), "motionTrackEnabled": False, "showFilenames": True, "overrideAudio": False, "inpaint_audio": False, "propHeight": 163, "globalPropHeight": 124, "global_prompt": global_prompt, "retake_global_prompt": "", "retakeMode": False, "retakeStart": 0, "retakeLength": 0, "retakePrompt": "", "retakeStrength": 1, "retakeVideo": None, "normalStartFrame": 0, "normalDurationFrames": cursor, "segments": timeline, "motionSegments": [], "audioSegments": audio_timeline}}
+        payload = {"version": 1, "settings": {"start_second": 0, "end_second": cursor / FPS, "duration_seconds": cursor / FPS, "start_frame": 0, "end_frame": cursor, "duration_frames": cursor, "epsilon": .99, "use_custom_audio": bool(audio_timeline), "use_custom_motion": False, "inpaint_audio": True, "frame_rate": FPS, "display_mode": "seconds", "custom_width": self.output_width.value(), "custom_height": self.output_height.value(), "resize_method": "crop", "divisible_by": 32, "img_compression": 0, "override_audio": False}, "global_prompt": global_prompt, "retake_global_prompt": "", "timeline": {"mainTrackEnabled": True, "audioTrackEnabled": bool(audio_timeline), "motionTrackEnabled": False, "showFilenames": True, "overrideAudio": False, "inpaint_audio": True, "propHeight": 163, "globalPropHeight": 124, "global_prompt": global_prompt, "retake_global_prompt": "", "retakeMode": False, "retakeStart": 0, "retakeLength": 0, "retakePrompt": "", "retakeStrength": 1, "retakeVideo": None, "normalStartFrame": 0, "normalDurationFrames": cursor, "segments": timeline, "motionSegments": [], "audioSegments": audio_timeline}}
         Path(path).write_text(json.dumps(payload, indent=2), encoding="utf-8")
         self.statusBar().showMessage(f"LTX Director export saved: {path}")
 
