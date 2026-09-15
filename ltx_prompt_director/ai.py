@@ -2,14 +2,16 @@ from __future__ import annotations
 
 import json
 import re
+from pathlib import Path
 
 import requests
 
-from .media import data_url
+from .media import data_url, video_storyboard_data_urls
 from .models import Segment
 
 
 GEMINI_MODELS = ["gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite"]
+MAX_INLINE_VIDEO_BYTES = 12 * 1024 * 1024
 
 
 class AIResponseFormatError(ValueError):
@@ -28,7 +30,7 @@ def build_minimax_h3_prompt(segments: list[Segment], provider: str, model: str, 
     """Synthesize the complete ordered timeline into one MiniMax H3 prompt."""
     if not segments:
         raise ValueError("Add at least one timeline item before exporting a MiniMax H3 prompt.")
-    inputs = _minimax_h3_inputs(segments)
+    inputs = _minimax_h3_inputs(segments, provider)
     rules = _minimax_h3_rules(segments, intent, global_prompt, sfx, spoken_dialog, reduce_music)
     raw = _provider_raw(inputs, provider, model, api_key, rules, timeout)
     result = _parse_json(raw)
@@ -116,15 +118,18 @@ def _segment_input(item: Segment) -> dict:
     return value
 
 
-def _minimax_h3_inputs(segments: list[Segment]) -> list[dict]:
+def _minimax_h3_inputs(segments: list[Segment], provider: str = "gemini") -> list[dict]:
     inputs = []
     cursor = 0.0
     picture_number = 0
+    video_number = 0
     for item in segments:
         start = cursor
         end = start + item.duration
-        if item.kind != "text":
+        if item.kind == "image":
             picture_number += 1
+        elif item.kind == "video":
+            video_number += 1
         value = {
             "name": item.name,
             "role": item.role,
@@ -135,10 +140,24 @@ def _minimax_h3_inputs(segments: list[Segment]) -> list[dict]:
             "prompt": item.prompt.strip() or "[No existing segment prompt; infer conservatively from supplied visual and sequence context.]",
             "prompt_label": "CURRENT TIMELINE PROMPT — SOURCE MATERIAL FOR MINIMAX H3 SYNTHESIS",
             "image_prompt": item.image_prompt.strip(),
-            "picture_number": picture_number if item.kind != "text" else None,
+            "picture_number": picture_number if item.kind == "image" else None,
+            "video_number": video_number if item.kind == "video" else None,
         }
-        if item.kind != "text" and item.preview_path:
+        source = Path(item.media_path) if item.media_path else None
+        if item.kind == "video" and source and source.is_file():
+            value["source_duration"] = round((item.media_duration_frames or 0) / 24, 3) or None
+            value["trim_start_frame"] = item.trim_start
+            if provider != "openai" and source.stat().st_size <= MAX_INLINE_VIDEO_BYTES:
+                value["video"] = data_url(str(source))
+                value["video_analysis_mode"] = "full source video"
+            else:
+                value["video_frames"] = video_storyboard_data_urls(str(source))
+                value["video_analysis_mode"] = "timestamped samples across the full source video"
+        if item.kind == "image" and item.preview_path:
             value["image"] = data_url(item.preview_path, max_edge=512)
+        elif item.kind == "video" and not value.get("video") and not value.get("video_frames") and item.preview_path:
+            value["image"] = data_url(item.preview_path, max_edge=512)
+            value["video_analysis_mode"] = "single preview fallback; infer motion only from the authoritative video prompt"
         inputs.append(value)
         cursor = end
     return inputs
@@ -146,11 +165,12 @@ def _minimax_h3_inputs(segments: list[Segment]) -> list[dict]:
 
 def _minimax_h3_rules(segments: list[Segment], intent: str, global_prompt: str, sfx: bool, spoken_dialog: bool, reduce_music: bool) -> str:
     total = sum(item.duration for item in segments)
-    visual_count = sum(item.kind != "text" for item in segments)
+    image_count = sum(item.kind == "image" for item in segments)
+    video_count = sum(item.kind == "video" for item in segments)
     sound_rule = (
-        "Write a concise overall_soundscape grounded in visible actions, materials, environments, and existing SFX instructions."
+        "Write a concise overall_soundscape grounded in visible actions, materials, environments, clearly audible video-reference content, and existing SFX instructions."
         if sfx else
-        "Do not invent Foley or ambient sound. If no source prompt explicitly requests sound, write `None specified.` under overall_soundscape."
+        "Do not invent Foley or ambient sound. Preserve clearly audible video-reference content when the provider exposes it; otherwise, if no source prompt explicitly requests sound, write `None specified.` under overall_soundscape."
     )
     dialog_rule = (
         "Preserve any actual spoken words, delivery, language, accent, and lip-sync requirements in the appropriate shot."
@@ -167,10 +187,12 @@ def _minimax_h3_rules(segments: list[Segment], intent: str, global_prompt: str, 
 The supplied example establishes structure only. Never copy its woman, apples, swim caps, colors, props, locations, timing, or fashion-film content. Derive all facts exclusively from the supplied timeline frames, current prompts, global prompt, and Director's Intent. Never invent unsupported identity, anatomy, clothing, setting, dialogue, or transformation facts.
 
 TIMELINE FACTS:
-- {len(segments)} ordered timeline items, including {visual_count} supplied visual reference(s)
+- {len(segments)} ordered timeline items, including {image_count} still-image reference(s) and {video_count} video reference(s)
 - exact total duration: {total:.2f} seconds
-- each record supplies exact start/end time, duration, frame role, current video prompt, and when available an audio-free still-image prompt
-- START frames establish exact opening states; END frames are exact targets and must not be described as later action
+- each record supplies exact start/end time, duration, media kind, current video prompt, and when available an audio-free still-image prompt
+- still-image START frames establish exact opening states; still-image END frames are exact targets and must not be described as later action
+- VIDEO records are temporal references: inspect their complete ordered motion, action progression, camera behavior, transformations, ending state, and clearly audible content when accessible instead of treating their preview or sampled frames as unrelated still pictures
+- when a VIDEO is represented by timestamped samples, interpret them as ordered observations from one continuous source clip; never invent motion that is unsupported by their progression or the authoritative current prompt
 
 AUTHORITATIVE DIRECTOR'S INTENT:
 {intent.strip() or 'No additional director intent supplied.'}
@@ -181,16 +203,16 @@ GLOBAL CONTINUITY PROMPT:
 OUTPUT STRUCTURE — use these six lowercase headings exactly, in this order, with no Markdown fences:
 
 subject_definitions:
-Define each distinct recurring visible subject as <Subject N>. Define every supplied visual reference in timeline order as <Picture N>, and state whether it is a first frame, end frame, or keyframe for its shot. Connect recurring identities only when supported. Text-only items do not create Picture references.
+Define each distinct recurring visible subject as <Subject N>. Define every supplied still image in timeline order as <Picture N>, stating whether it is a first frame, end frame, or keyframe. Define every supplied video clip in timeline order as <Video N>, summarizing its observed temporal action and camera movement without reducing it to one frame. Connect recurring identities only when supported. Text-only items do not create visual references.
 
 summary:
 Begin with `[keyframe completion + reference generation]`. In one compact paragraph, state the complete creative arc, ordered shot progression, principal motion, transitions, and ending state.
 
 retention_analysis:
-Give one line per recurring subject and one line per <Picture N>. Include shot appearances and exactly one status—fully_preserved, partially_preserved, or not_preserved—followed by a concise reason. Explain deliberate transformations, outfit changes, scene changes, and end-frame targets as intended progression rather than continuity mistakes.
+Give one line per recurring subject, one per <Picture N>, and one per <Video N>. Include shot appearances and exactly one status—fully_preserved, partially_preserved, or not_preserved—followed by a concise reason. For video references, explicitly state which observed motion, action progression, camera behavior, and ending state are retained. Explain deliberate transformations, outfit changes, scene changes, and end-frame targets as intended progression rather than continuity mistakes.
 
 detailed_description:
-Start with one brief sentence defining the overall medium, visual style, and pacing. Then write chronological `[Shot N]` paragraphs with exact `At HH:MM:SS.mmm` start timestamps derived from the supplied timing. Consolidate adjacent timeline items into the same shot when they are a continuous action, scene, or start-to-end progression; begin a new shot only for an actual cut, distinct setup, or explicit source instruction. Reference <Subject N> and <Picture N> consistently. Use two to five precise sentences per shot covering opening anchor, visible action over time, camera behavior, physical causality, continuity, and resolved ending. Preserve explicit stationary-camera rules and avoid adding camera moves merely to make prose exciting.
+Start with one brief sentence defining the overall medium, visual style, and pacing. Then write chronological `[Shot N]` paragraphs with exact `At HH:MM:SS.mmm` start timestamps derived from the supplied timing. Consolidate adjacent timeline items into the same shot when they are a continuous action, scene, or start-to-end progression; begin a new shot only for an actual cut, distinct setup, or explicit source instruction. Reference <Subject N>, <Picture N>, and <Video N> consistently. Use two to five precise sentences per shot covering opening anchor, visible action over time, camera behavior, physical causality, continuity, and resolved ending. A <Video N> contributes its full temporal behavior to the shot—not merely its first, middle, or last sampled frame. Preserve explicit stationary-camera rules and avoid adding camera moves merely to make prose exciting.
 
 overall_soundscape:
 {sound_rule} {dialog_rule}
@@ -368,12 +390,26 @@ def _provider_raw(images: list[dict], provider: str, model: str, key: str, rules
 def _gemini_raw(images: list[dict], key: str, model: str, rules: str, timeout: int) -> str:
     parts: list[dict] = [{"text": rules}]
     for index, item in enumerate(images, 1):
-        label = "TEXT-ONLY SEGMENT" if item.get("kind") == "text" else f"{item['role'].upper()} FRAME"
+        label = (
+            "TEXT-ONLY SEGMENT" if item.get("kind") == "text" else
+            "VIDEO SEGMENT — ANALYZE COMPLETE TEMPORAL CONTENT" if item.get("kind") == "video" else
+            f"{item['role'].upper()} FRAME"
+        )
         picture = f" — PICTURE {item['picture_number']}" if item.get("picture_number") else ""
+        video = f" — VIDEO {item['video_number']}" if item.get("video_number") else ""
         timing = ""
         if "start_time" in item and "end_time" in item:
             timing = f" — {float(item['start_time']):.3f}s to {float(item['end_time']):.3f}s ({float(item.get('duration', 0)):.3f}s)"
-        parts.append({"text": f"SEGMENT {index} OF {len(images)} — {label}{picture} — {item['name']}{timing}"})
+        analysis_mode = f" — {item['video_analysis_mode']}" if item.get("video_analysis_mode") else ""
+        source_duration = f" — source clip {float(item['source_duration']):.3f}s" if item.get("source_duration") else ""
+        parts.append({"text": f"SEGMENT {index} OF {len(images)} — {label}{picture}{video} — {item['name']}{timing}{source_duration}{analysis_mode}"})
+        if item.get("video"):
+            mime, encoded = re.match(r"^data:([^;]+);base64,(.+)$", item["video"], re.S).groups()
+            parts.append({"inline_data": {"mime_type": mime, "data": encoded}})
+        for frame in item.get("video_frames") or []:
+            parts.append({"text": f"VIDEO {item['video_number']} OBSERVATION AT SOURCE {float(frame['timestamp']):.3f}s"})
+            mime, encoded = re.match(r"^data:([^;]+);base64,(.+)$", frame["image"], re.S).groups()
+            parts.append({"inline_data": {"mime_type": mime, "data": encoded}})
         if item.get("image"):
             mime, encoded = re.match(r"^data:([^;]+);base64,(.+)$", item["image"], re.S).groups()
             parts.append({"inline_data": {"mime_type": mime, "data": encoded}})
@@ -428,12 +464,22 @@ def _openai(images: list[dict], key: str, rules: str, timeout: int, sfx: bool, s
 def _openai_raw(images: list[dict], key: str, rules: str, timeout: int) -> str:
     content: list[dict] = [{"type": "input_text", "text": rules}]
     for index, item in enumerate(images, 1):
-        label = "TEXT-ONLY SEGMENT" if item.get("kind") == "text" else f"{item['role'].upper()} FRAME"
+        label = (
+            "TEXT-ONLY SEGMENT" if item.get("kind") == "text" else
+            "VIDEO SEGMENT — ANALYZE ORDERED TEMPORAL OBSERVATIONS" if item.get("kind") == "video" else
+            f"{item['role'].upper()} FRAME"
+        )
         picture = f" — PICTURE {item['picture_number']}" if item.get("picture_number") else ""
+        video = f" — VIDEO {item['video_number']}" if item.get("video_number") else ""
         timing = ""
         if "start_time" in item and "end_time" in item:
             timing = f" — {float(item['start_time']):.3f}s to {float(item['end_time']):.3f}s ({float(item.get('duration', 0)):.3f}s)"
-        content.append({"type": "input_text", "text": f"SEGMENT {index} OF {len(images)} — {label}{picture} — {item['name']}{timing}"})
+        analysis_mode = f" — {item['video_analysis_mode']}" if item.get("video_analysis_mode") else ""
+        source_duration = f" — source clip {float(item['source_duration']):.3f}s" if item.get("source_duration") else ""
+        content.append({"type": "input_text", "text": f"SEGMENT {index} OF {len(images)} — {label}{picture}{video} — {item['name']}{timing}{source_duration}{analysis_mode}"})
+        for frame in item.get("video_frames") or []:
+            content.append({"type": "input_text", "text": f"VIDEO {item['video_number']} OBSERVATION AT SOURCE {float(frame['timestamp']):.3f}s"})
+            content.append({"type": "input_image", "image_url": frame["image"], "detail": "high"})
         if item.get("image"):
             content.append({"type": "input_image", "image_url": item["image"], "detail": "high"})
         if "prompt" in item:

@@ -70,6 +70,42 @@ def data_url(path: str, max_edge: int | None = None, quality: int = 82) -> str:
     return f"data:{mime};base64," + base64.b64encode(source.read_bytes()).decode()
 
 
+def probe_video_duration(path: str) -> float:
+    """Return a video's duration in seconds using the bundled FFmpeg binary."""
+    ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+    probe = subprocess.run([ffmpeg, "-hide_banner", "-i", str(path)], capture_output=True, text=True, check=False)
+    match = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", probe.stderr)
+    if not match:
+        return 0.0
+    return int(match.group(1)) * 3600 + int(match.group(2)) * 60 + float(match.group(3))
+
+
+def video_storyboard_data_urls(path: str, count: int = 6, max_edge: int = 512) -> list[dict[str, float | str]]:
+    """Sample timestamped frames across a video for providers without native video input."""
+    source = Path(path)
+    if not source.is_file():
+        return []
+    duration = probe_video_duration(str(source))
+    if duration <= 0:
+        return []
+    count = max(2, min(10, int(count)))
+    final_timestamp = max(0.0, duration - min(.1, duration / (count * 2)))
+    timestamps = [final_timestamp * index / (count - 1) for index in range(count)]
+    frames: list[dict[str, float | str]] = []
+    ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+    with tempfile.TemporaryDirectory(prefix="ltx-video-analysis-") as directory:
+        for index, timestamp in enumerate(timestamps):
+            output = Path(directory) / f"frame-{index:02d}.jpg"
+            result = subprocess.run(
+                [ffmpeg, "-y", "-ss", f"{timestamp:.3f}", "-i", str(source), "-frames:v", "1", "-q:v", "2", str(output)],
+                capture_output=True,
+                check=False,
+            )
+            if not result.returncode and output.is_file():
+                frames.append({"timestamp": round(timestamp, 3), "image": data_url(str(output), max_edge=max_edge)})
+    return frames
+
+
 def write_data_url(value: str, destination: Path) -> None:
     _, encoded = value.split(",", 1)
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -79,11 +115,7 @@ def write_data_url(value: str, destination: Path) -> None:
 def capture_webm_preview(path: str, fps_out: int = 24) -> tuple[str, int, int]:
     source = Path(path)
     ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
-    probe = subprocess.run([ffmpeg, "-hide_banner", "-i", str(source)], capture_output=True, text=True, check=False)
-    match = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", probe.stderr)
-    duration = 1.0
-    if match:
-        duration = int(match.group(1)) * 3600 + int(match.group(2)) * 60 + float(match.group(3))
+    duration = probe_video_duration(str(source)) or 1.0
     preview = APP_CACHE / f"{source.stem}-{source.stat().st_mtime_ns}.jpg"
     seek = max(0.0, duration - 1.0)
     command = [ffmpeg, "-y", "-ss", f"{seek:.3f}", "-i", str(source), "-frames:v", "1", "-q:v", "2", str(preview)]
