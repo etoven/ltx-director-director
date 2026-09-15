@@ -1340,7 +1340,7 @@ class SegmentCard(QFrame):
     delete_requested = Signal()
     resize_finished = Signal()
 
-    def __init__(self, segment: Segment, preview_height: int, pixels_per_second: int):
+    def __init__(self, segment: Segment, start_time: float, preview_height: int, pixels_per_second: int):
         super().__init__()
         self.segment = segment
         self.setCursor(Qt.CursorShape.OpenHandCursor)
@@ -1403,10 +1403,18 @@ class SegmentCard(QFrame):
         title.setWordWrap(False)
         title.setObjectName("tileTitle")
         layout.addWidget(title)
+        timing = QHBoxLayout()
+        timing.setContentsMargins(0, 0, 0, 0)
+        self.start_time_label = QLabel()
+        self.start_time_label.setObjectName("tileStartTime")
+        self.set_start_time(start_time)
+        timing.addWidget(self.start_time_label)
+        timing.addStretch()
         self.duration_label = QLabel(f"{segment.duration:.2f}s")
         self.duration_label.setAlignment(Qt.AlignmentFlag.AlignRight)
         self.duration_label.setObjectName("tileDuration")
-        layout.addWidget(self.duration_label)
+        timing.addWidget(self.duration_label)
+        layout.addLayout(timing)
         self.outer_layout.addWidget(self.content, 1)
         self.resize_handle = ResizeHandle(segment.duration, pixels_per_second)
         self.resize_handle.preview.connect(self._preview_duration)
@@ -1423,6 +1431,9 @@ class SegmentCard(QFrame):
             return
         self.segment.role = role
         self.role_badge.setText(role.upper())
+
+    def set_start_time(self, value: float) -> None:
+        self.start_time_label.setText(f"START {max(0.0, value):.2f}s")
 
     def set_text_preview(self, text: str) -> None:
         if self.segment.kind == "text":
@@ -2737,7 +2748,7 @@ class MainWindow(QMainWindow):
         QListWidget{background:#0d0f10;border:0;padding:0} QListWidget::item{border:1px solid #696b6c;background:#252728;margin:0} QListWidget::item:selected{border:2px solid #f1f1f1;background:#293034}
         #timeline{padding:3px;background:#0d0f10;outline:0} #timeline::item,#timeline::item:selected,#timeline::item:focus{background:#0d0f10;border:0;outline:0} #timeline[dropActive="true"]{border:3px solid #68b9ee;background:#13232c} #timeline[dropActive="false"]{border:1px solid #323638}
         #segmentCard{background:transparent;border:1px solid transparent} #segmentCard[selected="true"]{background:#17262e;border:1px solid #73a9c4} #segmentCardBody{background:#252728;border:0} #mediaBadge{background:#e5e5e5;color:#262626;font-weight:bold;padding:2px} #roleBadge{background:#36393a;color:#eee;padding:2px}
-        #tileDelete{padding:0;min-height:0;max-height:20px;background:#454849;color:#ddd;border:0} #tileDelete:hover{background:#a94444;color:#fff;border:1px solid #e07878} #tileTitle{background:#242627;padding:3px;font-size:9px} #tileDuration{color:#a2a7a9;font-size:8px}
+        #tileDelete{padding:0;min-height:0;max-height:20px;background:#454849;color:#ddd;border:0} #tileDelete:hover{background:#a94444;color:#fff;border:1px solid #e07878} #tileTitle{background:#242627;padding:3px;font-size:9px} #tileStartTime{color:#79b8d7;font-size:8px;font-weight:bold} #tileDuration{color:#a2a7a9;font-size:8px}
         #resizeHandle{background:transparent;border:0} #resizeHandle:hover{background:rgba(88,118,134,35);border:0}
         #timelineHeightHandle{background:transparent;border:0} #timelineHeightHandle:hover{background:rgba(88,118,134,35);border:0}
         #promptSplitter::handle{background:transparent;border:0} #promptSplitter::handle:hover{background:rgba(88,118,134,35);border:0}
@@ -3854,17 +3865,19 @@ class MainWindow(QMainWindow):
             card_height = max(152, self.timeline_height - 32)
             preview_height = max(80, card_height - 55)
             widths = self.timeline_item_widths()
+            start_time = 0.0
             for index, segment in enumerate(self.segments):
                 item = QListWidgetItem()
                 item.setData(Qt.ItemDataRole.UserRole, segment.id)
                 item.setSizeHint(QSize(widths[index], card_height))
                 self.timeline.addItem(item)
-                card = SegmentCard(segment, preview_height, self.pixels_per_second)
+                card = SegmentCard(segment, start_time, preview_height, self.pixels_per_second)
                 card.duration_changed.connect(lambda value, sid=segment.id: self.change_duration(sid, value))
                 card.delete_requested.connect(lambda sid=segment.id: self.delete_by_id(sid))
                 card.resize_finished.connect(lambda sid=segment.id: self.finish_resize(sid))
                 card.set_timeline_edges(index == 0, index == len(self.segments) - 1)
                 self.timeline.setItemWidget(item, card)
+                start_time += segment.duration
             self._loading = False
             if self.segments:
                 self.timeline.setCurrentRow(max(0, min(selected, len(self.segments) - 1)))
@@ -3886,6 +3899,7 @@ class MainWindow(QMainWindow):
             preview_height = max(80, card_height - 55)
             by_id = {segment.id: segment for segment in self.segments}
             widths = self.timeline_item_widths()
+            start_time = 0.0
             for row in range(self.timeline.count()):
                 item = self.timeline.item(row)
                 segment = by_id.get(item.data(Qt.ItemDataRole.UserRole))
@@ -3896,7 +3910,9 @@ class MainWindow(QMainWindow):
                 card = self.timeline.itemWidget(item)
                 if isinstance(card, SegmentCard):
                     card.set_timeline_edges(row == 0, row == self.timeline.count() - 1)
+                    card.set_start_time(start_time)
                     card.update_layout(preview_height, self.pixels_per_second)
+                start_time += segment.duration
             self.timeline.doItemsLayout()
             self.update_summary()
         finally:
@@ -3923,6 +3939,19 @@ class MainWindow(QMainWindow):
         self.segments = order_segments_by_ids(self.segments, ordered_ids)
         self.update_timeline_layout()
         self.mark_dirty()
+
+    def update_segment_start_times(self) -> None:
+        start_time = 0.0
+        by_id = {segment.id: segment for segment in self.segments}
+        for row in range(self.timeline.count()):
+            item = self.timeline.item(row)
+            segment = by_id.get(item.data(Qt.ItemDataRole.UserRole))
+            if not segment:
+                continue
+            card = self.timeline.itemWidget(item)
+            if isinstance(card, SegmentCard):
+                card.set_start_time(start_time)
+            start_time += segment.duration
 
     def current_segment(self) -> Segment | None:
         row = self.timeline.currentRow()
@@ -4049,6 +4078,7 @@ class MainWindow(QMainWindow):
                     card.content.update()
                 break
         self.timeline.viewport().update()
+        self.update_segment_start_times()
         self.update_summary()
 
     def finish_resize(self, segment_id: str) -> None:
