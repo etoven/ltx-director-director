@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
     QSizePolicy, QSlider, QSpinBox, QSplitter, QSplitterHandle, QStatusBar, QStyle, QStyledItemDelegate, QStyleOptionSlider, QStyleOptionViewItem, QTextEdit, QToolBar, QVBoxLayout, QWidget,
 )
 
-from .ai import GEMINI_MODELS, build_prompts, refine_segment_prompt, refine_timing, retryable_connection_error
+from .ai import GEMINI_MODELS, build_minimax_h3_prompt, build_prompts, refine_segment_prompt, refine_timing, retryable_connection_error
 from .media import APP_CACHE, comfy_input_references, copy_media_for_export, data_url, extract_audio_for_export, prepare_media, safe_media_filename, unique_media_filename, write_data_url
 from .models import Segment, order_segments_by_ids, text_segment_from_ltx
 from .project_data import ARCHIVE_COLOR, load_other_tags, load_project_tags, new_note, normalize_notes, normalize_project_labels
@@ -2005,13 +2005,17 @@ class MainWindow(QMainWindow):
              ("Open", "document-open", QStyle.StandardPixmap.SP_DialogOpenButton, self.open_project),
              ("Save Project", "document-save", QStyle.StandardPixmap.SP_DialogSaveButton, self.export_project)),
             (("Import", "document-import", QStyle.StandardPixmap.SP_ArrowDown, self.import_ltx),
-             ("Export", "document-export", QStyle.StandardPixmap.SP_ArrowUp, self.export_ltx)),
+             ("Export", "document-export", QStyle.StandardPixmap.SP_ArrowUp, self.export_ltx),
+             ("MiniMax H3", "edit-copy", QStyle.StandardPixmap.SP_FileIcon, self.export_minimax_h3)),
             (("Delete selected", "edit-delete", QStyle.StandardPixmap.SP_TrashIcon, self.delete_selected),),
         ]
         for group_index, group in enumerate(action_groups):
             for label, theme_icon, fallback_icon, callback in group:
                 action = QAction(QIcon.fromTheme(theme_icon, self.style().standardIcon(fallback_icon)), label, self)
                 action.triggered.connect(callback)
+                if label == "MiniMax H3":
+                    self.minimax_export_action = action
+                    action.setToolTip("Analyze the complete sequence, create one MiniMax H3 prompt, and copy it to the clipboard")
                 toolbar.addAction(action)
             if group_index < len(action_groups) - 1:
                 toolbar.addSeparator()
@@ -4305,6 +4309,7 @@ class MainWindow(QMainWindow):
 
     def set_ai_controls_enabled(self, enabled: bool) -> None:
         self.magic_button.setEnabled(enabled)
+        self.minimax_export_action.setEnabled(enabled)
         segment = self.current_segment()
         self.refine_timing_button.setEnabled(enabled and bool(segment))
         self.refine_prompt_button.setEnabled(enabled and bool(segment and segment.prompt.strip()))
@@ -4313,7 +4318,12 @@ class MainWindow(QMainWindow):
         retries = self.settings.value("api_retries", 2, int)
         retry_cooldown = self.settings.value("api_retry_cooldown", 10, int)
         self.set_ai_controls_enabled(False)
-        self.ai_activity_title = "Magic Build" if operation is build_prompts else ("Refine Timing" if operation is refine_timing else "Refine Prompt")
+        self.ai_activity_title = (
+            "Magic Build" if operation is build_prompts else
+            "MiniMax H3 Export" if operation is build_minimax_h3_prompt else
+            "Refine Timing" if operation is refine_timing else
+            "Refine Prompt"
+        )
         self.magic_overlay.update_attempt(1, retries + 1, activity)
         self.magic_overlay.show_overlay()
         worker = MagicWorker(operation, args, retries, retry_cooldown, activity)
@@ -4451,6 +4461,62 @@ class MainWindow(QMainWindow):
         self.animate_timeline_durations(target_durations)
         self.save_library_project(automatic=True)
         self.statusBar().showMessage("Magic Build complete")
+
+    def export_minimax_h3(self) -> None:
+        if not self.segments:
+            QMessageBox.information(self, "MiniMax H3 Export", "Add at least one timeline item before exporting a MiniMax H3 prompt.")
+            return
+        credentials = self.ai_credentials()
+        if not credentials:
+            return
+        provider, model, key = credentials
+        timeout = self.settings.value("api_timeout", 400, int)
+        self.statusBar().showMessage("Analyzing the complete sequence for MiniMax H3…")
+        self.start_ai_worker(
+            build_minimax_h3_prompt,
+            (
+                self.segments.copy(), provider, model, key, self.build_director_request(),
+                self.global_prompt.toPlainText(), self.sfx.isChecked(), self.spoken_dialog.isChecked(),
+                self.reduce_music.isChecked(), timeout,
+            ),
+            "Boiling the complete sequence down to one MiniMax H3 prompt…",
+            self.minimax_h3_finished,
+        )
+
+    def minimax_h3_finished(self, prompt: str) -> None:
+        QApplication.clipboard().setText(prompt)
+        self.set_ai_controls_enabled(True)
+        self.magic_overlay.hide_overlay()
+        message = "MiniMax H3 prompt copied to clipboard"
+        self.statusBar().showMessage(message, 4000)
+        self.show_toast(message)
+
+    def show_toast(self, message: str, duration: int = 3200) -> None:
+        toast = getattr(self, "_toast_label", None)
+        if toast is None:
+            toast = QLabel(self)
+            toast.setObjectName("toastMessage")
+            toast.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            toast.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            toast.setStyleSheet(
+                "#toastMessage{background:#17242c;color:#e8f7ff;border:1px solid #68b9ee;"
+                "border-radius:7px;padding:9px 16px;font-weight:bold;}"
+            )
+            self._toast_label = toast
+        self._toast_generation = getattr(self, "_toast_generation", 0) + 1
+        generation = self._toast_generation
+        toast.setText(message)
+        toast.adjustSize()
+        toast.resize(max(280, toast.width()), toast.height())
+        toast.move(max(12, (self.width() - toast.width()) // 2), max(12, self.height() - self.statusBar().height() - toast.height() - 18))
+        toast.show()
+        toast.raise_()
+
+        def hide_current_toast() -> None:
+            if getattr(self, "_toast_generation", 0) == generation:
+                toast.hide()
+
+        QTimer.singleShot(duration, hide_current_toast)
 
     def animate_timeline_durations(self, target_durations: list[float]) -> None:
         self.autofit_tail_extension = 0

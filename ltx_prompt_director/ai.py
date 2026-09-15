@@ -24,6 +24,32 @@ def build_prompts(segments: list[Segment], provider: str, model: str, api_key: s
     return _gemini(images, api_key, model, rules, timeout, sfx, spoken_dialog)
 
 
+def build_minimax_h3_prompt(segments: list[Segment], provider: str, model: str, api_key: str, intent: str, global_prompt: str, sfx: bool, spoken_dialog: bool, reduce_music: bool, timeout: int = 400) -> str:
+    """Synthesize the complete ordered timeline into one MiniMax H3 prompt."""
+    if not segments:
+        raise ValueError("Add at least one timeline item before exporting a MiniMax H3 prompt.")
+    inputs = _minimax_h3_inputs(segments)
+    rules = _minimax_h3_rules(segments, intent, global_prompt, sfx, spoken_dialog, reduce_music)
+    raw = _provider_raw(inputs, provider, model, api_key, rules, timeout)
+    result = _parse_json(raw)
+    if not isinstance(result, dict):
+        raise AIResponseFormatError("The AI returned an invalid MiniMax H3 response. The operation will retry.")
+    prompt = result.get("prompt") or result.get("minimaxPrompt") or result.get("minimax_prompt")
+    if not isinstance(prompt, str) or not prompt.strip():
+        raise AIResponseFormatError("The AI returned no MiniMax H3 prompt. The operation will retry.")
+    prompt = prompt.strip()
+    required_sections = (
+        "subject_definitions", "summary", "retention_analysis", "detailed_description",
+        "overall_soundscape", "non_diegetic_music",
+    )
+    missing = [section for section in required_sections if not re.search(rf"(?im)^\s*{section}\s*:", prompt)]
+    if missing:
+        raise AIResponseFormatError(
+            f"The AI omitted required MiniMax H3 section(s): {', '.join(missing)}. The operation will retry."
+        )
+    return prompt
+
+
 def refine_timing(segments: list[Segment], selected_index: int, provider: str, model: str, api_key: str, intent: str, requested_total: float, timeout: int = 400) -> dict:
     """Retiming pass that may change only the selected segment's duration."""
     if not 0 <= selected_index < len(segments):
@@ -88,6 +114,91 @@ def _segment_input(item: Segment) -> dict:
     if item.kind != "text" and item.preview_path:
         value["image"] = data_url(item.preview_path, max_edge=384)
     return value
+
+
+def _minimax_h3_inputs(segments: list[Segment]) -> list[dict]:
+    inputs = []
+    cursor = 0.0
+    picture_number = 0
+    for item in segments:
+        start = cursor
+        end = start + item.duration
+        if item.kind != "text":
+            picture_number += 1
+        value = {
+            "name": item.name,
+            "role": item.role,
+            "kind": item.kind,
+            "start_time": start,
+            "end_time": end,
+            "duration": item.duration,
+            "prompt": item.prompt.strip() or "[No existing segment prompt; infer conservatively from supplied visual and sequence context.]",
+            "prompt_label": "CURRENT TIMELINE PROMPT — SOURCE MATERIAL FOR MINIMAX H3 SYNTHESIS",
+            "image_prompt": item.image_prompt.strip(),
+            "picture_number": picture_number if item.kind != "text" else None,
+        }
+        if item.kind != "text" and item.preview_path:
+            value["image"] = data_url(item.preview_path, max_edge=512)
+        inputs.append(value)
+        cursor = end
+    return inputs
+
+
+def _minimax_h3_rules(segments: list[Segment], intent: str, global_prompt: str, sfx: bool, spoken_dialog: bool, reduce_music: bool) -> str:
+    total = sum(item.duration for item in segments)
+    visual_count = sum(item.kind != "text" for item in segments)
+    sound_rule = (
+        "Write a concise overall_soundscape grounded in visible actions, materials, environments, and existing SFX instructions."
+        if sfx else
+        "Do not invent Foley or ambient sound. If no source prompt explicitly requests sound, write `None specified.` under overall_soundscape."
+    )
+    dialog_rule = (
+        "Preserve any actual spoken words, delivery, language, accent, and lip-sync requirements in the appropriate shot."
+        if spoken_dialog else
+        "Do not invent spoken dialogue; preserve it only if it is already explicitly written in the source prompts or Director's Intent."
+    )
+    music_rule = (
+        "Write `None. Use only the described diegetic soundscape.` under non_diegetic_music unless the source explicitly requires music."
+        if reduce_music else
+        "Summarize explicitly requested music; otherwise infer only a brief, stylistically compatible music direction when it materially supports the sequence."
+    )
+    return f"""You are a sequence prompt editor for MiniMax H3 video generation. Convert the complete ordered LTX Director timeline below into ONE compact, production-ready MiniMax H3 multi-shot prompt. This is synthesis, not concatenation: boil repeated details down, preserve every important action and continuity constraint, and describe the entire sequence in chronological order.
+
+The supplied example establishes structure only. Never copy its woman, apples, swim caps, colors, props, locations, timing, or fashion-film content. Derive all facts exclusively from the supplied timeline frames, current prompts, global prompt, and Director's Intent. Never invent unsupported identity, anatomy, clothing, setting, dialogue, or transformation facts.
+
+TIMELINE FACTS:
+- {len(segments)} ordered timeline items, including {visual_count} supplied visual reference(s)
+- exact total duration: {total:.2f} seconds
+- each record supplies exact start/end time, duration, frame role, current video prompt, and when available an audio-free still-image prompt
+- START frames establish exact opening states; END frames are exact targets and must not be described as later action
+
+AUTHORITATIVE DIRECTOR'S INTENT:
+{intent.strip() or 'No additional director intent supplied.'}
+
+GLOBAL CONTINUITY PROMPT:
+{global_prompt.strip() or 'No global prompt supplied.'}
+
+OUTPUT STRUCTURE — use these six lowercase headings exactly, in this order, with no Markdown fences:
+
+subject_definitions:
+Define each distinct recurring visible subject as <Subject N>. Define every supplied visual reference in timeline order as <Picture N>, and state whether it is a first frame, end frame, or keyframe for its shot. Connect recurring identities only when supported. Text-only items do not create Picture references.
+
+summary:
+Begin with `[keyframe completion + reference generation]`. In one compact paragraph, state the complete creative arc, ordered shot progression, principal motion, transitions, and ending state.
+
+retention_analysis:
+Give one line per recurring subject and one line per <Picture N>. Include shot appearances and exactly one status—fully_preserved, partially_preserved, or not_preserved—followed by a concise reason. Explain deliberate transformations, outfit changes, scene changes, and end-frame targets as intended progression rather than continuity mistakes.
+
+detailed_description:
+Start with one brief sentence defining the overall medium, visual style, and pacing. Then write chronological `[Shot N]` paragraphs with exact `At HH:MM:SS.mmm` start timestamps derived from the supplied timing. Consolidate adjacent timeline items into the same shot when they are a continuous action, scene, or start-to-end progression; begin a new shot only for an actual cut, distinct setup, or explicit source instruction. Reference <Subject N> and <Picture N> consistently. Use two to five precise sentences per shot covering opening anchor, visible action over time, camera behavior, physical causality, continuity, and resolved ending. Preserve explicit stationary-camera rules and avoid adding camera moves merely to make prose exciting.
+
+overall_soundscape:
+{sound_rule} {dialog_rule}
+
+non_diegetic_music:
+{music_rule}
+
+Keep the result concise enough to function as one prompt. Do not include analysis, alternatives, warnings, JSON, or commentary inside the prompt. Return strict transport JSON containing only: {{"prompt":"the complete multiline MiniMax H3 prompt"}}"""
 
 
 def _refinement_images(segments: list[Segment], selected_index: int) -> list[dict]:
@@ -258,13 +369,19 @@ def _gemini_raw(images: list[dict], key: str, model: str, rules: str, timeout: i
     parts: list[dict] = [{"text": rules}]
     for index, item in enumerate(images, 1):
         label = "TEXT-ONLY SEGMENT" if item.get("kind") == "text" else f"{item['role'].upper()} FRAME"
-        parts.append({"text": f"SEGMENT {index} OF {len(images)} — {label} — {item['name']}"})
+        picture = f" — PICTURE {item['picture_number']}" if item.get("picture_number") else ""
+        timing = ""
+        if "start_time" in item and "end_time" in item:
+            timing = f" — {float(item['start_time']):.3f}s to {float(item['end_time']):.3f}s ({float(item.get('duration', 0)):.3f}s)"
+        parts.append({"text": f"SEGMENT {index} OF {len(images)} — {label}{picture} — {item['name']}{timing}"})
         if item.get("image"):
             mime, encoded = re.match(r"^data:([^;]+);base64,(.+)$", item["image"], re.S).groups()
             parts.append({"inline_data": {"mime_type": mime, "data": encoded}})
         if "prompt" in item:
-            authority = "SELECTED CURRENT EDITOR PROMPT — AUTHORITATIVE; REFINE THIS EXACT INPUT" if item.get("selected") else "CONTEXT PROMPT — DO NOT REWRITE"
+            authority = item.get("prompt_label") or ("SELECTED CURRENT EDITOR PROMPT — AUTHORITATIVE; REFINE THIS EXACT INPUT" if item.get("selected") else "CONTEXT PROMPT — DO NOT REWRITE")
             parts.append({"text": f"{authority}:\n{item.get('prompt') or '[empty]'}"})
+        if item.get("image_prompt"):
+            parts.append({"text": f"AUDIO-FREE VISUAL CONTEXT FOR THIS SEGMENT:\n{item['image_prompt']}"})
     response = requests.post(
         f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
         headers={"x-goog-api-key": key, "content-type": "application/json"},
@@ -312,12 +429,18 @@ def _openai_raw(images: list[dict], key: str, rules: str, timeout: int) -> str:
     content: list[dict] = [{"type": "input_text", "text": rules}]
     for index, item in enumerate(images, 1):
         label = "TEXT-ONLY SEGMENT" if item.get("kind") == "text" else f"{item['role'].upper()} FRAME"
-        content.append({"type": "input_text", "text": f"SEGMENT {index} OF {len(images)} — {label} — {item['name']}"})
+        picture = f" — PICTURE {item['picture_number']}" if item.get("picture_number") else ""
+        timing = ""
+        if "start_time" in item and "end_time" in item:
+            timing = f" — {float(item['start_time']):.3f}s to {float(item['end_time']):.3f}s ({float(item.get('duration', 0)):.3f}s)"
+        content.append({"type": "input_text", "text": f"SEGMENT {index} OF {len(images)} — {label}{picture} — {item['name']}{timing}"})
         if item.get("image"):
             content.append({"type": "input_image", "image_url": item["image"], "detail": "high"})
         if "prompt" in item:
-            authority = "SELECTED CURRENT EDITOR PROMPT — AUTHORITATIVE; REFINE THIS EXACT INPUT" if item.get("selected") else "CONTEXT PROMPT — DO NOT REWRITE"
+            authority = item.get("prompt_label") or ("SELECTED CURRENT EDITOR PROMPT — AUTHORITATIVE; REFINE THIS EXACT INPUT" if item.get("selected") else "CONTEXT PROMPT — DO NOT REWRITE")
             content.append({"type": "input_text", "text": f"{authority}:\n{item.get('prompt') or '[empty]'}"})
+        if item.get("image_prompt"):
+            content.append({"type": "input_text", "text": f"AUDIO-FREE VISUAL CONTEXT FOR THIS SEGMENT:\n{item['image_prompt']}"})
     response = requests.post(
         "https://api.openai.com/v1/responses",
         headers={"authorization": f"Bearer {key}", "content-type": "application/json"},
