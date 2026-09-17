@@ -69,6 +69,8 @@ def build_minimax_h3_prompt(segments: list[Segment], provider: str, model: str, 
         raise AIResponseFormatError("The AI added structural shot headers that can force hard cuts. The operation will retry.")
     if re.search(r"(?i)<(?:Picture|Video)\s+\d+>", detailed):
         raise AIResponseFormatError("The AI exposed reference labels in the motion description. The operation will retry.")
+    if re.search(r"(?m)^\s*\d{2,}:\d{2}:\d{3}\s+\[[^\]\n]+\]", detailed):
+        raise AIResponseFormatError("The AI added a bracketed camera or shot command after a timeline cue. The operation will retry.")
     if re.search(r"(?i)\b(?:hard|jump)\s+cut\b|\bcuts?\s+to\b", detailed):
         raise AIResponseFormatError("The AI added an editorial cut instruction. The operation will retry.")
     return prompt
@@ -256,8 +258,8 @@ MINIMAX H3 PROMPTING PRINCIPLES:
 - front-load the persistent subject and environment, then describe concrete action, physical causality, camera behavior, lighting, and style in direct literal language
 - because the visual references already establish appearance and setting, spend the detailed motion description primarily on what moves, how it progresses, how the camera behaves, and what remains stable
 - state continuity positively: the same subject, environment, lighting, screen direction, and transformation state continue smoothly unless the source explicitly changes them
-- preserve an explicitly stationary camera; otherwise use at most one clear camera-movement idea within each timed beat and avoid decorative camera changes
-- if useful, use MiniMax camera grammar such as `[Static shot]`, `[Push in]`, `[Pull out]`, `[Zoom in]`, `[Zoom out]`, `[Pan left]`, `[Pan right]`, `[Tilt up]`, `[Tilt down]`, `[Truck left]`, `[Truck right]`, `[Pedestal up]`, `[Pedestal down]`, or `[Tracking shot]`, placed immediately where the movement occurs; one bracket means one movement, comma-separated moves are simultaneous, and separate brackets are sequential
+- establish an explicitly stationary or persistent camera baseline once in the detailed-description introduction; otherwise use at most one clear camera-movement idea within each timed beat and avoid decorative camera changes
+- express an essential camera movement as ordinary natural prose inside the timed action, exactly where it begins; keep bracketed camera commands out of timestamped lines so the timestamp remains the only structural cue
 - express sequential actions as short sentences in causal order, with overlapping motion where appropriate; every reference continues the existing visual state rather than creating an editing decision
 
 AUTHORITATIVE DIRECTOR'S INTENT:
@@ -278,7 +280,7 @@ retention_analysis:
 Give one line per recurring subject, one per <Picture N>, and one per <Video N>. State where each appears along the timeline and use exactly one status—fully_preserved, partially_preserved, or not_preserved—followed by a concise reason. For video references, explicitly state which observed motion, action progression, camera behavior, and ending state are retained. Explain deliberate transformations, outfit changes, scene changes, and end-frame targets as continuous intended progression rather than continuity mistakes.
 
 detailed_description:
-Start with one brief sentence defining the overall medium, visual style, persistent environment, camera baseline, lighting, and pacing. Then write exactly {len(segments)} chronological motion-cue lines, one for each supplied timeline segment. Start each line with its exact bare `MM:SS:mmm` timestamp followed immediately by natural action prose; use exactly these timestamps in order: {cue_list}. The timestamp must be the line's only prefix. Refer directly to the visible subject, action, and environment, keeping all analysis-only subject, picture, video, segment, and shot labels confined to the earlier sections. The references inform the prose invisibly as continuity anchors rather than appearing as generation commands. Each cue naturally carries the current subject, pose, environment, camera, and transformation state into the next cue as one unbroken progression. Use one to three compact sentences per cue to cover visible action over time, physical causality, relevant camera behavior, stable elements, and the resolved state. A video reference contributes its full temporal behavior to its corresponding cue—not merely its first, middle, or last sampled frame. Preserve explicit stationary-camera rules and use camera movement only when it supports the source action.
+Start with one brief sentence defining the overall medium, visual style, persistent environment, camera baseline, lighting, and pacing. Then write exactly {len(segments)} chronological motion-cue lines, one for each supplied timeline segment. Start each line with its exact bare `MM:SS:mmm` timestamp followed immediately by natural action prose; use exactly these timestamps in order: {cue_list}. The timestamp must be the line's only prefix, followed directly by an ordinary sentence—not a bracketed camera command. Refer directly to the visible subject, action, and environment, keeping all analysis-only subject, picture, video, segment, and shot labels confined to the earlier sections. The references inform the prose invisibly as continuity anchors rather than appearing as generation commands. Each cue naturally carries the current subject, pose, environment, camera, and transformation state into the next cue as one unbroken progression. Use one to three compact sentences per cue to cover visible action over time, physical causality, relevant camera behavior, stable elements, and the resolved state. A video reference contributes its full temporal behavior to its corresponding cue—not merely its first, middle, or last sampled frame. Preserve explicit stationary-camera rules and describe a new camera movement in prose only when it supports the source action.
 
 overall_soundscape:
 {sound_rule} {dialog_rule}
@@ -307,7 +309,7 @@ overall_soundscape:
 non_diegetic_music:
 {{concise timeline-specific music direction or the required None statement}}
 
-Before returning, count the timeline records and bare timestamp-started lines in detailed_description. There must be exactly {len(segments)}, in the prescribed order, with no skipped or duplicate timestamp. Confirm that every detailed line starts with only its timestamp and describes continuous action in natural prose. Keep the result concise enough to function as one prompt. Do not include analysis, alternatives, warnings, JSON, or commentary inside the prompt. Return strict transport JSON containing only: {{"prompt":"the complete multiline MiniMax H3 prompt"}}"""
+Before returning, count the timeline records and bare timestamp-started lines in detailed_description. There must be exactly {len(segments)}, in the prescribed order, with no skipped or duplicate timestamp. Confirm that every detailed line starts with only its timestamp and continues immediately with natural action prose, without any bracketed command. Keep the result concise enough to function as one prompt. Do not include analysis, alternatives, warnings, JSON, or commentary inside the prompt. Return strict transport JSON containing only: {{"prompt":"the complete multiline MiniMax H3 prompt"}}"""
 
 
 def _refinement_images(segments: list[Segment], selected_index: int) -> list[dict]:
