@@ -2566,7 +2566,7 @@ class MainWindow(QMainWindow):
         self.project_list.setMovement(QListWidget.Movement.Static)
         self.project_list.setSpacing(4)
         self.project_list.itemClicked.connect(self.activate_clicked_project)
-        self.project_list.itemDoubleClicked.connect(self.activate_clicked_project)
+        self.project_list.itemDoubleClicked.connect(self.activate_double_clicked_project)
         self.project_list.drag_started.connect(self.activate_custom_sort_for_drag)
         self.project_list.order_changed.connect(self.save_custom_project_order)
         self.project_list.files_dropped.connect(self.project_files_dropped)
@@ -3004,6 +3004,17 @@ class MainWindow(QMainWindow):
         if meta.get("kind") == "project":
             self._pending_project_id = str(meta.get("id", ""))
             self._project_open_timer.start()
+
+    def activate_double_clicked_project(self, item: QListWidgetItem) -> None:
+        """Open either a project or a collection from the same tile gesture."""
+        meta = item.data(Qt.ItemDataRole.UserRole) or {}
+        if meta.get("kind") == "collection":
+            self._project_open_timer.stop()
+            self._pending_project_id = None
+            self.project_list.setCurrentItem(item)
+            self.open_library_project()
+            return
+        self.activate_clicked_project(item)
 
     def open_pending_library_project(self) -> None:
         project_id = self._pending_project_id

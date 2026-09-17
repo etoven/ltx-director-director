@@ -49,6 +49,13 @@ def build_minimax_h3_prompt(segments: list[Segment], provider: str, model: str, 
         raise AIResponseFormatError(
             f"The AI omitted required MiniMax H3 section(s): {', '.join(missing)}. The operation will retry."
         )
+    shot_numbers = [int(number) for number in re.findall(r"(?im)^\s*\[Shot\s+(\d+)\]", prompt)]
+    expected_shots = list(range(1, len(segments) + 1))
+    if shot_numbers != expected_shots:
+        raise AIResponseFormatError(
+            f"The AI returned {len(shot_numbers)} MiniMax shot(s), but the timeline requires exactly "
+            f"{len(segments)} in order. The operation will retry."
+        )
     return prompt
 
 
@@ -188,6 +195,7 @@ The supplied example establishes structure only. Never copy its woman, apples, s
 
 TIMELINE FACTS:
 - {len(segments)} ordered timeline items, including {image_count} still-image reference(s) and {video_count} video reference(s)
+- the output must contain exactly {len(segments)} shots: timeline Segment N maps directly and exclusively to [Shot N]
 - exact total duration: {total:.2f} seconds
 - each record supplies exact start/end time, duration, media kind, current video prompt, and when available an audio-free still-image prompt
 - still-image START frames establish exact opening states; still-image END frames are exact targets and must not be described as later action
@@ -206,13 +214,13 @@ subject_definitions:
 Define each distinct recurring visible subject as <Subject N>. Define every supplied still image in timeline order as <Picture N>, stating whether it is a first frame, end frame, or keyframe. Define every supplied video clip in timeline order as <Video N>, summarizing its observed temporal action and camera movement without reducing it to one frame. Connect recurring identities only when supported. Text-only items do not create visual references.
 
 summary:
-Begin with `[keyframe completion + reference generation]`. In one compact paragraph, state the complete creative arc, ordered shot progression, principal motion, transitions, and ending state.
+Begin with `[keyframe completion + reference generation]`. In one compact paragraph, state the complete creative arc across all {len(segments)} ordered shots, principal motion, transitions, and ending state. Do not summarize multiple timeline segments as one shot.
 
 retention_analysis:
 Give one line per recurring subject, one per <Picture N>, and one per <Video N>. Include shot appearances and exactly one status—fully_preserved, partially_preserved, or not_preserved—followed by a concise reason. For video references, explicitly state which observed motion, action progression, camera behavior, and ending state are retained. Explain deliberate transformations, outfit changes, scene changes, and end-frame targets as intended progression rather than continuity mistakes.
 
 detailed_description:
-Start with one brief sentence defining the overall medium, visual style, and pacing. Then write chronological `[Shot N]` paragraphs with exact `At HH:MM:SS.mmm` start timestamps derived from the supplied timing. Consolidate adjacent timeline items into the same shot when they are a continuous action, scene, or start-to-end progression; begin a new shot only for an actual cut, distinct setup, or explicit source instruction. Reference <Subject N>, <Picture N>, and <Video N> consistently. Use two to five precise sentences per shot covering opening anchor, visible action over time, camera behavior, physical causality, continuity, and resolved ending. A <Video N> contributes its full temporal behavior to the shot—not merely its first, middle, or last sampled frame. Preserve explicit stationary-camera rules and avoid adding camera moves merely to make prose exciting.
+Start with one brief sentence defining the overall medium, visual style, and pacing. Then write exactly {len(segments)} chronological shot paragraphs, numbered consecutively `[Shot 1]` through `[Shot {len(segments)}]`, with one and only one shot for each supplied timeline segment. Segment N must map directly to `[Shot N]`, using that segment's exact `At HH:MM:SS.mmm` start timestamp. Never merge, consolidate, omit, or renumber adjacent segments, even when they depict one continuous action or share a scene; express continuity between their separate shot paragraphs instead. Reference <Subject N>, <Picture N>, and <Video N> consistently, and place each visual reference in the shot belonging to its source segment. Use two to five precise sentences per shot covering opening anchor, visible action over time, camera behavior, physical causality, continuity, and resolved ending. A <Video N> contributes its full temporal behavior to its corresponding shot—not merely its first, middle, or last sampled frame. Preserve explicit stationary-camera rules and avoid adding camera moves merely to make prose exciting.
 
 overall_soundscape:
 {sound_rule} {dialog_rule}
@@ -220,7 +228,7 @@ overall_soundscape:
 non_diegetic_music:
 {music_rule}
 
-Keep the result concise enough to function as one prompt. Do not include analysis, alternatives, warnings, JSON, or commentary inside the prompt. Return strict transport JSON containing only: {{"prompt":"the complete multiline MiniMax H3 prompt"}}"""
+Before returning, count the timeline records and `[Shot N]` headers. They must match exactly, with no skipped or duplicate shot number. Keep the result concise enough to function as one prompt. Do not include analysis, alternatives, warnings, JSON, or commentary inside the prompt. Return strict transport JSON containing only: {{"prompt":"the complete multiline MiniMax H3 prompt"}}"""
 
 
 def _refinement_images(segments: list[Segment], selected_index: int) -> list[dict]:
