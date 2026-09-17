@@ -49,13 +49,28 @@ def build_minimax_h3_prompt(segments: list[Segment], provider: str, model: str, 
         raise AIResponseFormatError(
             f"The AI omitted required MiniMax H3 section(s): {', '.join(missing)}. The operation will retry."
         )
-    shot_numbers = [int(number) for number in re.findall(r"(?im)^\s*\[Shot\s+(\d+)\]", prompt)]
-    expected_shots = list(range(1, len(segments) + 1))
-    if shot_numbers != expected_shots:
+    detailed_match = re.search(
+        r"(?ims)^\s*detailed_description\s*:\s*(.*?)(?=^\s*overall_soundscape\s*:)",
+        prompt,
+    )
+    detailed = detailed_match.group(1) if detailed_match else ""
+    cue_timestamps = re.findall(r"(?m)^\s*(\d{2,}:\d{2}:\d{3})\b", detailed)
+    expected_timestamps = []
+    cursor = 0.0
+    for segment in segments:
+        expected_timestamps.append(_minimax_timestamp(cursor))
+        cursor += segment.duration
+    if cue_timestamps != expected_timestamps:
         raise AIResponseFormatError(
-            f"The AI returned {len(shot_numbers)} MiniMax shot(s), but the timeline requires exactly "
-            f"{len(segments)} in order. The operation will retry."
+            f"The AI returned {len(cue_timestamps)} valid MiniMax timeline cue(s), but the timeline requires "
+            f"exactly {len(segments)} at the prescribed start times. The operation will retry."
         )
+    if re.search(r"(?im)^\s*\[Shot\s+\d+\]", detailed):
+        raise AIResponseFormatError("The AI added structural shot headers that can force hard cuts. The operation will retry.")
+    if re.search(r"(?i)<(?:Picture|Video)\s+\d+>", detailed):
+        raise AIResponseFormatError("The AI exposed reference labels in the motion description. The operation will retry.")
+    if re.search(r"(?i)\b(?:hard|jump)\s+cut\b|\bcuts?\s+to\b", detailed):
+        raise AIResponseFormatError("The AI added an editorial cut instruction. The operation will retry.")
     return prompt
 
 
@@ -125,6 +140,14 @@ def _segment_input(item: Segment) -> dict:
     return value
 
 
+def _minimax_timestamp(seconds: float) -> str:
+    """Format a MiniMax motion cue as MM:SS:mmm without implying an edit point."""
+    total_milliseconds = max(0, round(float(seconds) * 1000))
+    minutes, remainder = divmod(total_milliseconds, 60_000)
+    whole_seconds, milliseconds = divmod(remainder, 1000)
+    return f"{minutes:02d}:{whole_seconds:02d}:{milliseconds:03d}"
+
+
 def _minimax_h3_inputs(segments: list[Segment], provider: str = "gemini") -> list[dict]:
     inputs = []
     cursor = 0.0
@@ -144,6 +167,7 @@ def _minimax_h3_inputs(segments: list[Segment], provider: str = "gemini") -> lis
             "start_time": start,
             "end_time": end,
             "duration": item.duration,
+            "cue_timestamp": _minimax_timestamp(start),
             "prompt": item.prompt.strip() or "[No existing segment prompt; infer conservatively from supplied visual and sequence context.]",
             "prompt_label": "CURRENT TIMELINE PROMPT — SOURCE MATERIAL FOR MINIMAX H3 SYNTHESIS",
             "image_prompt": item.image_prompt.strip(),
@@ -174,13 +198,37 @@ def _minimax_h3_rules(segments: list[Segment], intent: str, global_prompt: str, 
     total = sum(item.duration for item in segments)
     image_count = sum(item.kind == "image" for item in segments)
     video_count = sum(item.kind == "video" for item in segments)
+    cue_timestamps = []
+    cursor = 0.0
+    for item in segments:
+        cue_timestamps.append(_minimax_timestamp(cursor))
+        cursor += item.duration
+    cue_list = ", ".join(cue_timestamps)
+    cue_template = "\n".join(
+        f"{timestamp} {{natural continuous action prose for timeline segment {index}; carry the existing visual state forward}}"
+        for index, timestamp in enumerate(cue_timestamps, 1)
+    )
+    definition_template = "\n".join(
+        line for line in (
+            "<Subject 1>: {persistent visible subject definition, when supported}",
+            "<Picture 1>: {still-reference definition and frame role}" if image_count else "",
+            "<Video 1>: {temporal action and camera behavior across the video reference}" if video_count else "",
+        ) if line
+    )
+    retention_template = "\n".join(
+        line for line in (
+            "<Subject 1>: fully_preserved - {concise continuity reason}",
+            "<Picture 1>: fully_preserved - {concise retained-state reason}" if image_count else "",
+            "<Video 1>: fully_preserved - {concise retained-motion reason}" if video_count else "",
+        ) if line
+    )
     sound_rule = (
         "Write a concise overall_soundscape grounded in visible actions, materials, environments, clearly audible video-reference content, and existing SFX instructions."
         if sfx else
         "Do not invent Foley or ambient sound. Preserve clearly audible video-reference content when the provider exposes it; otherwise, if no source prompt explicitly requests sound, write `None specified.` under overall_soundscape."
     )
     dialog_rule = (
-        "Preserve any actual spoken words, delivery, language, accent, and lip-sync requirements in the appropriate shot."
+        "Preserve any actual spoken words, delivery, language, accent, and lip-sync requirements in the appropriate timed motion beat."
         if spoken_dialog else
         "Do not invent spoken dialogue; preserve it only if it is already explicitly written in the source prompts or Director's Intent."
     )
@@ -189,18 +237,28 @@ def _minimax_h3_rules(segments: list[Segment], intent: str, global_prompt: str, 
         if reduce_music else
         "Summarize explicitly requested music; otherwise infer only a brief, stylistically compatible music direction when it materially supports the sequence."
     )
-    return f"""You are a sequence prompt editor for MiniMax H3 video generation. Convert the complete ordered LTX Director timeline below into ONE compact, production-ready MiniMax H3 multi-shot prompt. This is synthesis, not concatenation: boil repeated details down, preserve every important action and continuity constraint, and describe the entire sequence in chronological order.
+    return f"""You are a sequence prompt editor for MiniMax H3 video generation. Convert the complete ordered LTX Director timeline below into ONE compact, production-ready continuous-flow video prompt. This is synthesis, not concatenation: boil repeated details down, preserve every important action and continuity constraint, and describe one uninterrupted chronological progression whose visual state flows naturally from cue to cue.
 
 The supplied example establishes structure only. Never copy its woman, apples, swim caps, colors, props, locations, timing, or fashion-film content. Derive all facts exclusively from the supplied timeline frames, current prompts, global prompt, and Director's Intent. Never invent unsupported identity, anatomy, clothing, setting, dialogue, or transformation facts.
 
 TIMELINE FACTS:
 - {len(segments)} ordered timeline items, including {image_count} still-image reference(s) and {video_count} video reference(s)
-- the output must contain exactly {len(segments)} shots: timeline Segment N maps directly and exclusively to [Shot N]
+- the output must contain exactly {len(segments)} bare timestamped motion cues, one for each timeline Segment N, while still describing a single continuous video
+- required cue timestamps, in order: {cue_list}
 - exact total duration: {total:.2f} seconds
 - each record supplies exact start/end time, duration, media kind, current video prompt, and when available an audio-free still-image prompt
 - still-image START frames establish exact opening states; still-image END frames are exact targets and must not be described as later action
 - VIDEO records are temporal references: inspect their complete ordered motion, action progression, camera behavior, transformations, ending state, and clearly audible content when accessible instead of treating their preview or sampled frames as unrelated still pictures
 - when a VIDEO is represented by timestamped samples, interpret them as ordered observations from one continuous source clip; never invent motion that is unsupported by their progression or the authoritative current prompt
+
+MINIMAX H3 PROMPTING PRINCIPLES:
+- treat all supplied images, videos, prompts, and audio context as one unified creative context; references guide identity, motion, framing, atmosphere, and continuity but are not edit points
+- front-load the persistent subject and environment, then describe concrete action, physical causality, camera behavior, lighting, and style in direct literal language
+- because the visual references already establish appearance and setting, spend the detailed motion description primarily on what moves, how it progresses, how the camera behaves, and what remains stable
+- state continuity positively: the same subject, environment, lighting, screen direction, and transformation state continue smoothly unless the source explicitly changes them
+- preserve an explicitly stationary camera; otherwise use at most one clear camera-movement idea within each timed beat and avoid decorative camera changes
+- if useful, use MiniMax camera grammar such as `[Static shot]`, `[Push in]`, `[Pull out]`, `[Zoom in]`, `[Zoom out]`, `[Pan left]`, `[Pan right]`, `[Tilt up]`, `[Tilt down]`, `[Truck left]`, `[Truck right]`, `[Pedestal up]`, `[Pedestal down]`, or `[Tracking shot]`, placed immediately where the movement occurs; one bracket means one movement, comma-separated moves are simultaneous, and separate brackets are sequential
+- express sequential actions as short sentences in causal order, with overlapping motion where appropriate; every reference continues the existing visual state rather than creating an editing decision
 
 AUTHORITATIVE DIRECTOR'S INTENT:
 {intent.strip() or 'No additional director intent supplied.'}
@@ -208,19 +266,19 @@ AUTHORITATIVE DIRECTOR'S INTENT:
 GLOBAL CONTINUITY PROMPT:
 {global_prompt.strip() or 'No global prompt supplied.'}
 
-OUTPUT STRUCTURE — use these six lowercase headings exactly, in this order, with no Markdown fences:
+REQUIRED OUTPUT SECTIONS — use the following lowercase headings exactly, in this order, with no Markdown fences:
 
 subject_definitions:
-Define each distinct recurring visible subject as <Subject N>. Define every supplied still image in timeline order as <Picture N>, stating whether it is a first frame, end frame, or keyframe. Define every supplied video clip in timeline order as <Video N>, summarizing its observed temporal action and camera movement without reducing it to one frame. Connect recurring identities only when supported. Text-only items do not create visual references.
+Define each distinct recurring visible subject as <Subject N>. Define every supplied still image in timeline order as <Picture N>, stating whether it is a first frame, end frame, or keyframe. Define every supplied video clip in timeline order as <Video N>, summarizing its observed temporal action and camera movement without reducing it to one frame. Connect recurring identities only when supported. Text-only items do not create visual references. These labels exist only for analysis and must not appear in detailed_description.
 
 summary:
-Begin with `[keyframe completion + reference generation]`. In one compact paragraph, state the complete creative arc across all {len(segments)} ordered shots, principal motion, transitions, and ending state. Do not summarize multiple timeline segments as one shot.
+Begin with `[keyframe completion + reference generation]`. In one compact paragraph, state the complete creative arc across all {len(segments)} ordered motion beats, principal continuous action, and ending state. Describe a single flowing video with persistent spatial and temporal continuity.
 
 retention_analysis:
-Give one line per recurring subject, one per <Picture N>, and one per <Video N>. Include shot appearances and exactly one status—fully_preserved, partially_preserved, or not_preserved—followed by a concise reason. For video references, explicitly state which observed motion, action progression, camera behavior, and ending state are retained. Explain deliberate transformations, outfit changes, scene changes, and end-frame targets as intended progression rather than continuity mistakes.
+Give one line per recurring subject, one per <Picture N>, and one per <Video N>. State where each appears along the timeline and use exactly one status—fully_preserved, partially_preserved, or not_preserved—followed by a concise reason. For video references, explicitly state which observed motion, action progression, camera behavior, and ending state are retained. Explain deliberate transformations, outfit changes, scene changes, and end-frame targets as continuous intended progression rather than continuity mistakes.
 
 detailed_description:
-Start with one brief sentence defining the overall medium, visual style, and pacing. Then write exactly {len(segments)} chronological shot paragraphs, numbered consecutively `[Shot 1]` through `[Shot {len(segments)}]`, with one and only one shot for each supplied timeline segment. Segment N must map directly to `[Shot N]`, using that segment's exact `At HH:MM:SS.mmm` start timestamp. Never merge, consolidate, omit, or renumber adjacent segments, even when they depict one continuous action or share a scene; express continuity between their separate shot paragraphs instead. Reference <Subject N>, <Picture N>, and <Video N> consistently, and place each visual reference in the shot belonging to its source segment. Use two to five precise sentences per shot covering opening anchor, visible action over time, camera behavior, physical causality, continuity, and resolved ending. A <Video N> contributes its full temporal behavior to its corresponding shot—not merely its first, middle, or last sampled frame. Preserve explicit stationary-camera rules and avoid adding camera moves merely to make prose exciting.
+Start with one brief sentence defining the overall medium, visual style, persistent environment, camera baseline, lighting, and pacing. Then write exactly {len(segments)} chronological motion-cue lines, one for each supplied timeline segment. Start each line with its exact bare `MM:SS:mmm` timestamp followed immediately by natural action prose; use exactly these timestamps in order: {cue_list}. The timestamp must be the line's only prefix. Refer directly to the visible subject, action, and environment, keeping all analysis-only subject, picture, video, segment, and shot labels confined to the earlier sections. The references inform the prose invisibly as continuity anchors rather than appearing as generation commands. Each cue naturally carries the current subject, pose, environment, camera, and transformation state into the next cue as one unbroken progression. Use one to three compact sentences per cue to cover visible action over time, physical causality, relevant camera behavior, stable elements, and the resolved state. A video reference contributes its full temporal behavior to its corresponding cue—not merely its first, middle, or last sampled frame. Preserve explicit stationary-camera rules and use camera movement only when it supports the source action.
 
 overall_soundscape:
 {sound_rule} {dialog_rule}
@@ -228,7 +286,28 @@ overall_soundscape:
 non_diegetic_music:
 {music_rule}
 
-Before returning, count the timeline records and `[Shot N]` headers. They must match exactly, with no skipped or duplicate shot number. Keep the result concise enough to function as one prompt. Do not include analysis, alternatives, warnings, JSON, or commentary inside the prompt. Return strict transport JSON containing only: {{"prompt":"the complete multiline MiniMax H3 prompt"}}"""
+FORMAT TEMPLATE FOR THIS {len(segments)}-SEGMENT TIMELINE — replace every brace-delimited placeholder with timeline-specific content, extend the numbered analysis definitions as needed, and preserve the template's headings, ordering, and the {len(segments)} dynamically generated bare timestamp lines:
+
+subject_definitions:
+{definition_template}
+
+summary:
+[keyframe completion + reference generation] {{one compact paragraph describing a single continuous creative arc}}
+
+retention_analysis:
+{retention_template}
+
+detailed_description:
+{{overall medium, visual style, persistent environment, camera baseline, lighting, and pacing}}
+{cue_template}
+
+overall_soundscape:
+{{concise timeline-specific soundscape or the required None statement}}
+
+non_diegetic_music:
+{{concise timeline-specific music direction or the required None statement}}
+
+Before returning, count the timeline records and bare timestamp-started lines in detailed_description. There must be exactly {len(segments)}, in the prescribed order, with no skipped or duplicate timestamp. Confirm that every detailed line starts with only its timestamp and describes continuous action in natural prose. Keep the result concise enough to function as one prompt. Do not include analysis, alternatives, warnings, JSON, or commentary inside the prompt. Return strict transport JSON containing only: {{"prompt":"the complete multiline MiniMax H3 prompt"}}"""
 
 
 def _refinement_images(segments: list[Segment], selected_index: int) -> list[dict]:
@@ -408,9 +487,10 @@ def _gemini_raw(images: list[dict], key: str, model: str, rules: str, timeout: i
         timing = ""
         if "start_time" in item and "end_time" in item:
             timing = f" — {float(item['start_time']):.3f}s to {float(item['end_time']):.3f}s ({float(item.get('duration', 0)):.3f}s)"
+        cue = f" — REQUIRED OUTPUT CUE {item['cue_timestamp']}" if item.get("cue_timestamp") else ""
         analysis_mode = f" — {item['video_analysis_mode']}" if item.get("video_analysis_mode") else ""
         source_duration = f" — source clip {float(item['source_duration']):.3f}s" if item.get("source_duration") else ""
-        parts.append({"text": f"SEGMENT {index} OF {len(images)} — {label}{picture}{video} — {item['name']}{timing}{source_duration}{analysis_mode}"})
+        parts.append({"text": f"SEGMENT {index} OF {len(images)} — {label}{picture}{video} — {item['name']}{timing}{cue}{source_duration}{analysis_mode}"})
         if item.get("video"):
             mime, encoded = re.match(r"^data:([^;]+);base64,(.+)$", item["video"], re.S).groups()
             parts.append({"inline_data": {"mime_type": mime, "data": encoded}})
@@ -482,9 +562,10 @@ def _openai_raw(images: list[dict], key: str, rules: str, timeout: int) -> str:
         timing = ""
         if "start_time" in item and "end_time" in item:
             timing = f" — {float(item['start_time']):.3f}s to {float(item['end_time']):.3f}s ({float(item.get('duration', 0)):.3f}s)"
+        cue = f" — REQUIRED OUTPUT CUE {item['cue_timestamp']}" if item.get("cue_timestamp") else ""
         analysis_mode = f" — {item['video_analysis_mode']}" if item.get("video_analysis_mode") else ""
         source_duration = f" — source clip {float(item['source_duration']):.3f}s" if item.get("source_duration") else ""
-        content.append({"type": "input_text", "text": f"SEGMENT {index} OF {len(images)} — {label}{picture}{video} — {item['name']}{timing}{source_duration}{analysis_mode}"})
+        content.append({"type": "input_text", "text": f"SEGMENT {index} OF {len(images)} — {label}{picture}{video} — {item['name']}{timing}{cue}{source_duration}{analysis_mode}"})
         for frame in item.get("video_frames") or []:
             content.append({"type": "input_text", "text": f"VIDEO {item['video_number']} OBSERVATION AT SOURCE {float(frame['timestamp']):.3f}s"})
             content.append({"type": "input_image", "image_url": frame["image"], "detail": "high"})
