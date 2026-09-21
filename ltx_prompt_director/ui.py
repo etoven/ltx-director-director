@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QSizePolicy, QSlider, QSpinBox, QSplitter, QSplitterHandle, QStatusBar, QStyle, QStyledItemDelegate, QStyleOptionSlider, QStyleOptionViewItem, QTextEdit, QToolBar, QVBoxLayout, QWidget,
 )
 
+from . import __version__
 from .ai import GEMINI_MODELS, build_minimax_h3_prompt, build_prompts, refine_segment_prompt, refine_timing, retryable_connection_error
 from .media import APP_CACHE, TIMELINE_VIDEO_SUFFIXES, comfy_input_references, copy_media_for_export, data_url, extract_audio_for_export, prepare_media, safe_media_filename, unique_media_filename, write_data_url
 from .models import Segment, order_segments_by_ids, text_segment_from_ltx
@@ -78,6 +79,11 @@ def requested_length_value(value: object) -> float:
     except (TypeError, ValueError):
         return 0.0
     return duration if math.isfinite(duration) and duration > 0 else 0.0
+
+
+def application_window_title(project_name: str = "") -> str:
+    title = f"LTX Director - Director v{__version__}"
+    return f"{title} :: {project_name}" if project_name else title
 
 
 def segment_media_suffix(segment: Segment) -> str:
@@ -1975,7 +1981,7 @@ class ProjectDetailsDialog(QDialog):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("LTX Director - Director")
+        self.setWindowTitle(application_window_title())
         self.setWindowIcon(QIcon(str(files("ltx_prompt_director").joinpath("assets/icon.png"))))
         self.resize(1450, 900)
         self.settings = QSettings()
@@ -3678,7 +3684,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Project details updated: {meta['name']}")
 
     def update_window_title(self) -> None:
-        self.setWindowTitle(f"LTX Director - Director :: {self.current_project_name}")
+        self.setWindowTitle(application_window_title(self.current_project_name))
 
     def closeEvent(self, event) -> None:
         if hasattr(self, "project_preview_panel"):
