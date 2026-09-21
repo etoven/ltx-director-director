@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (
 )
 
 from .ai import GEMINI_MODELS, build_minimax_h3_prompt, build_prompts, refine_segment_prompt, refine_timing, retryable_connection_error
-from .media import APP_CACHE, comfy_input_references, copy_media_for_export, data_url, extract_audio_for_export, prepare_media, safe_media_filename, unique_media_filename, write_data_url
+from .media import APP_CACHE, TIMELINE_VIDEO_SUFFIXES, comfy_input_references, copy_media_for_export, data_url, extract_audio_for_export, prepare_media, safe_media_filename, unique_media_filename, write_data_url
 from .models import Segment, order_segments_by_ids, text_segment_from_ltx
 from .project_data import ARCHIVE_COLOR, load_other_tags, load_project_tags, new_note, normalize_notes, normalize_project_labels
 
@@ -80,11 +80,25 @@ def requested_length_value(value: object) -> float:
     return duration if math.isfinite(duration) and duration > 0 else 0.0
 
 
+def segment_media_suffix(segment: Segment) -> str:
+    """Preserve a segment's real container instead of renaming video bytes."""
+    return Path(segment.name).suffix or Path(segment.media_path).suffix or (".webm" if segment.kind == "video" else ".png")
+
+
+def segment_kind_label(segment: Segment) -> str:
+    if segment.kind == "text":
+        return "TEXT"
+    if segment.kind == "image":
+        return "IMAGE"
+    container = segment_media_suffix(segment).lstrip(".").upper()
+    return container if container in {"WEBM", "MP4"} else "VIDEO"
+
+
 def choose_media_files(parent: QWidget, multiple: bool, initial: str) -> list[str]:
     """Prefer the desktop's actual file picker, then fall back to QFileDialog."""
-    media_filter = "Supported Media (*.png *.jpg *.jpeg *.webp *.gif *.webm)"
+    media_filter = "Supported Media (*.png *.jpg *.jpeg *.webp *.gif *.webm *.mp4)"
     if sys.platform.startswith("linux") and shutil.which("kdialog"):
-        command = ["kdialog", "--title", "Choose images or WebM files"]
+        command = ["kdialog", "--title", "Choose images or video files"]
         if multiple:
             command.extend(["--multiple", "--separate-output"])
         command.extend(["--getopenfilename", initial or ":ltxPromptDirectorMedia", media_filter])
@@ -93,7 +107,7 @@ def choose_media_files(parent: QWidget, multiple: bool, initial: str) -> list[st
             return [line.strip() for line in result.stdout.splitlines() if line.strip()]
         return []
     if sys.platform.startswith("linux") and shutil.which("zenity"):
-        command = ["zenity", "--file-selection", "--title=Choose images or WebM files", f"--filename={initial.rstrip('/')}/", "--file-filter=Supported media | *.png *.jpg *.jpeg *.webp *.gif *.webm"]
+        command = ["zenity", "--file-selection", "--title=Choose images or video files", f"--filename={initial.rstrip('/')}/", "--file-filter=Supported media | *.png *.jpg *.jpeg *.webp *.gif *.webm *.mp4"]
         if multiple:
             command.extend(["--multiple", "--separator=\n"])
         result = subprocess.run(command, capture_output=True, text=True, check=False)
@@ -101,7 +115,7 @@ def choose_media_files(parent: QWidget, multiple: bool, initial: str) -> list[st
             return [line.strip() for line in result.stdout.splitlines() if line.strip()]
         return []
     if multiple:
-        files, _ = QFileDialog.getOpenFileNames(parent, "Add images or WebM", initial, media_filter)
+        files, _ = QFileDialog.getOpenFileNames(parent, "Add images or video", initial, media_filter)
         return files
     file, _ = QFileDialog.getOpenFileName(parent, "Replace media", initial, media_filter)
     return [file] if file else []
@@ -175,6 +189,7 @@ class MagicWorker(QRunnable):
 
 class TimelineListWidget(QListWidget):
     files_dropped = Signal(list, int)
+    projects_dropped = Signal(list)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -235,11 +250,21 @@ class TimelineListWidget(QListWidget):
     def _media_paths(event) -> list[str]:
         if not event.mimeData().hasUrls():
             return []
-        supported = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".webm"}
+        supported = {".png", ".jpg", ".jpeg", ".webp", ".gif", *TIMELINE_VIDEO_SUFFIXES}
         return [url.toLocalFile() for url in event.mimeData().urls() if url.isLocalFile() and Path(url.toLocalFile()).suffix.lower() in supported]
 
+    @staticmethod
+    def _project_paths(event) -> list[str]:
+        if not event.mimeData().hasUrls():
+            return []
+        supported = {".ltxd", ".json"}
+        return [
+            url.toLocalFile() for url in event.mimeData().urls()
+            if url.isLocalFile() and Path(url.toLocalFile()).is_file() and Path(url.toLocalFile()).suffix.casefold() in supported
+        ]
+
     def dragEnterEvent(self, event) -> None:
-        if self._media_paths(event):
+        if self._media_paths(event) or self._project_paths(event):
             self.setProperty("dropActive", True)
             self.style().unpolish(self)
             self.style().polish(self)
@@ -248,8 +273,10 @@ class TimelineListWidget(QListWidget):
         super().dragEnterEvent(event)
 
     def dragMoveEvent(self, event) -> None:
-        if self._media_paths(event):
-            self._drop_index = self.insertion_index(event.position().toPoint())
+        media_paths = self._media_paths(event)
+        project_paths = self._project_paths(event)
+        if media_paths or project_paths:
+            self._drop_index = self.insertion_index(event.position().toPoint()) if media_paths else -1
             self.viewport().update()
             event.acceptProposedAction()
             return
@@ -261,8 +288,13 @@ class TimelineListWidget(QListWidget):
 
     def dropEvent(self, event) -> None:
         paths = self._media_paths(event)
+        project_paths = self._project_paths(event)
         insertion_index = self.insertion_index(event.position().toPoint())
         self._clear_drop_state()
+        if project_paths:
+            self.projects_dropped.emit(project_paths)
+            event.acceptProposedAction()
+            return
         if paths:
             self.files_dropped.emit(paths, insertion_index)
             event.acceptProposedAction()
@@ -1358,7 +1390,7 @@ class SegmentCard(QFrame):
         layout.setSpacing(1)
         badges = QHBoxLayout()
         badges.setContentsMargins(0, 0, 0, 0)
-        kind = QLabel("TEXT" if segment.kind == "text" else ("WEBM" if segment.kind == "video" else "IMAGE"))
+        kind = QLabel(segment_kind_label(segment))
         kind.setObjectName("mediaBadge")
         self.role_badge = QLabel("PROMPT" if segment.kind == "text" else segment.role.upper())
         self.role_badge.setObjectName("roleBadge")
@@ -2160,6 +2192,7 @@ class MainWindow(QMainWindow):
         self.timeline.itemClicked.connect(self.reload_clicked_segment)
         self.timeline.model().rowsMoved.connect(lambda *_: self.sync_order())
         self.timeline.files_dropped.connect(self.add_media_paths)
+        self.timeline.projects_dropped.connect(self.project_files_dropped)
         self.timeline.horizontalScrollBar().valueChanged.connect(self.ruler.set_offset)
         self.timeline_loading = TimelineLoadingOverlay(self.timeline.viewport())
         track_row.addWidget(self.timeline, 1)
@@ -3427,7 +3460,7 @@ class MainWindow(QMainWindow):
 
     def save_library_project(self, automatic: bool = False, source_filename: str | None = None) -> None:
         if not self.segments:
-            QMessageBox.information(self, "Nothing to save", "Add at least one image, WebM, or text segment first.")
+            QMessageBox.information(self, "Nothing to save", "Add at least one image, WebM, MP4, or text segment first.")
             return
         root = project_library_path()
         meta = None
@@ -4212,7 +4245,7 @@ class MainWindow(QMainWindow):
             return
         downloads = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DownloadLocation) or str(Path.home())
         directory = Path(str(self.settings.value("segment_export_dir", self.settings.value("segment_save_dir", downloads))))
-        suffix = ".webm" if segment.kind == "video" else (Path(segment.name).suffix or Path(segment.media_path).suffix or ".png")
+        suffix = segment_media_suffix(segment)
         source = Path(segment.media_path)
         if not source.is_file():
             QMessageBox.warning(self, "Media unavailable", "The complete source media for this segment is not available.")
@@ -4725,13 +4758,13 @@ class MainWindow(QMainWindow):
                 else:
                     continue
                 media_path = str(media_candidate) if media_candidate.is_file() else str(cache)
-                if raw.get("type") == "video" and str(raw.get("videoB64", "")).startswith("data:video/webm"):
+                if raw.get("type") == "video" and str(raw.get("videoB64", "")).startswith(("data:video/webm", "data:video/mp4")):
                     video_path = APP_CACHE / f"import-{index}-{Path(raw.get('fileName', 'clip.webm')).name}"
                     write_data_url(raw["videoB64"], video_path)
                     media_path = str(video_path)
                 loaded.append(Segment(raw.get("fileName", f"Segment {index + 1}"), str(media_path), str(cache), raw.get("type", "image"), "end" if raw.get("isEndFrame") else "start", raw.get("prompt", ""), max(MIN_DURATION, round(float(raw.get("length", FPS)) / fps, 2)), raw.get("videoDurationFrames"), raw.get("trimStart"), raw.get("id", "")))
             if not loaded:
-                raise ValueError("No supported embedded image, WebM, or text segments were found.")
+                raise ValueError("No supported embedded image, video, or text segments were found.")
             self.segments = loaded
             settings = payload.get("settings", {})
             self.output_width.setValue(int(settings.get("custom_width", 1280)))
@@ -4775,7 +4808,12 @@ class MainWindow(QMainWindow):
                 write_data_url(raw["previewData"], preview_path)
             media_path = "" if is_text else preview_path
             if raw.get("sourceData"):
-                suffix = ".webm" if raw.get("kind") == "video" else Path(raw.get("name", "image.png")).suffix or ".png"
+                original_suffix = Path(raw.get("name", "")).suffix.lower()
+                suffix = (
+                    original_suffix if raw.get("kind") == "video" and original_suffix in TIMELINE_VIDEO_SUFFIXES else
+                    ".webm" if raw.get("kind") == "video" else
+                    original_suffix or ".png"
+                )
                 media_path = APP_CACHE / f"project-source-{cache_key}-{index}{suffix}"
                 write_data_url(raw["sourceData"], media_path)
             raw.update({"preview_path": "" if is_text else str(preview_path), "media_path": str(media_path)})

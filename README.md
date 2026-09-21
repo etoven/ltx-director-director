@@ -1,6 +1,6 @@
 # LTX Director - Director
 
-**LTX Director - Director** is a native companion app for the [LTXDirector custom node for ComfyUI](https://github.com/WhatDreamsCost/WhatDreamsCost-ComfyUI). Its primary purpose is to prepare image and WebM timelines outside ComfyUI, use Gemini or OpenAI to build LTX Video 2.3 prompts, and export the finished sequence directly into LTXDirector.
+**LTX Director - Director** is a native companion app for the [LTXDirector custom node for ComfyUI](https://github.com/WhatDreamsCost/WhatDreamsCost-ComfyUI). Its primary purpose is to prepare image, WebM, and MP4 timelines outside ComfyUI, use Gemini or OpenAI to build LTX Video 2.3 prompts, and export the finished sequence directly into LTXDirector.
 
 ![LTX Director - Director application overview](docs/images/ltx-director-director-overview.png)
 
@@ -8,7 +8,7 @@
 
 LTX Director - Director turns a folder of reference frames into a structured LTX Video 2.3 sequence:
 
-1. Start a project, add images or WebM clips, and arrange them directly on the visual timeline.
+1. Start a project, add images, WebM clips, or MP4 clips, and arrange them directly on the visual timeline.
 2. Mark each segment as a start frame or end frame, then drag its edge to set the duration.
 3. Describe the overall scene in the multiline **Director's Intent**, optionally set an exact total sequence length, and enable SFX or Spoken Dialog with speaker context when needed.
 4. Run **Magic Build** to refine timing and generate a focused prompt for every segment.
@@ -34,7 +34,7 @@ Save working projects directly into the searchable project library and organize 
 
 The app is designed around moving a prepared sequence into [LTXDirector for ComfyUI](https://github.com/WhatDreamsCost/WhatDreamsCost-ComfyUI), where generation and final timeline work take place.
 
-- **LTX Director Export** writes an LTXDirector-compatible JSON file containing the supported timeline segments, timing, output width and height, start/end-frame roles, per-segment prompts, global prompt, and referenced media. WebM segments remain complete videos in the export even though Magic Build sends only a single optimized preview frame to the vision model.
+- **LTX Director Export** writes an LTXDirector-compatible JSON file containing the supported timeline segments, timing, output width and height, start/end-frame roles, per-segment prompts, global prompt, and referenced media. WebM and MP4 segments remain complete videos in the export even though Magic Build sends only a single optimized preview frame to the vision model.
 - **Open** brings supported LTXDirector JSON data back into the desktop timeline for further prompt and timing work.
 - **Project Export** saves the complete editable LTX Director - Director project as a `.LTXD` file, including embedded media and app-specific state. Use this format when you intend to reopen the project in this app.
 - **Import** restores a `.LTXD` project without requiring the original media files to remain in their previous locations. Legacy project JSON files remain readable.
@@ -56,8 +56,8 @@ In short: use **Project Export** for lossless editing and safekeeping; use **LTX
 - Right-click replace, one-click segment export, role assignment, and deletion
 - Direct KDE `kdialog`, GNOME `zenity`, macOS, and Windows native media-picker integration
 - Branded application icon and automatic per-user Linux desktop-menu installation
-- WebM support with a preview captured at the start of the final second
-- Only one optimized frame per WebM is sent to vision AI
+- WebM and MP4 support with a preview captured at the start of the final second
+- Only one optimized frame per timeline video is sent to vision AI during Magic Build
 - Gemini and OpenAI support with local key storage, configurable API timeout, retry count, and cooldown countdown between transient connection retries
 - Blocking in-app Magic Build overlay with custom animation
 - Independent SFX, Spoken Dialog, HDR, and Reduce Music controls
@@ -99,7 +99,7 @@ python3 -m pip install --upgrade "$(wget -qO- https://api.github.com/repos/etove
 Or download the `.whl` file from the latest GitHub release, then install it with:
 
 ```bash
-python3 -m pip install ./ltx_prompt_director-1.12.33-py3-none-any.whl
+python3 -m pip install ./ltx_prompt_director-1.12.34-py3-none-any.whl
 ```
 
 You can also install a locally built wheel from the repository:
@@ -136,7 +136,7 @@ See [install.md](install.md) for platform setup and [usage.md](usage.md) for the
 
 ## Privacy
 
-Media processing happens locally. Magic Build sends compressed 384-pixel reference frames and prompt instructions directly to the selected AI provider. Full WebM files are never sent to the AI. API keys are never included in project or LTX exports.
+Media processing happens locally. Magic Build sends compressed 384-pixel reference frames and prompt instructions directly to the selected AI provider. Full timeline video files are not sent during Magic Build. API keys are never included in project or LTX exports.
 
 ## License
 

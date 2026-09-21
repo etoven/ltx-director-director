@@ -16,6 +16,7 @@ from PIL import Image
 
 APP_CACHE = Path(tempfile.gettempdir()) / "ltx-director-director"
 APP_CACHE.mkdir(parents=True, exist_ok=True)
+TIMELINE_VIDEO_SUFFIXES = {".webm", ".mp4"}
 
 
 def safe_media_filename(value: str, fallback_stem: str = "media") -> str:
@@ -66,7 +67,8 @@ def data_url(path: str, max_edge: int | None = None, quality: int = 82) -> str:
             output = io.BytesIO()
             image.save(output, "WEBP", quality=quality, method=6)
         return "data:image/webp;base64," + base64.b64encode(output.getvalue()).decode()
-    mime = "video/webm" if source.suffix.lower() == ".webm" else _image_mime(source)
+    video_mimes = {".webm": "video/webm", ".mp4": "video/mp4"}
+    mime = video_mimes.get(source.suffix.lower(), _image_mime(source))
     return f"data:{mime};base64," + base64.b64encode(source.read_bytes()).decode()
 
 
@@ -112,7 +114,7 @@ def write_data_url(value: str, destination: Path) -> None:
     destination.write_bytes(base64.b64decode(encoded))
 
 
-def capture_webm_preview(path: str, fps_out: int = 24) -> tuple[str, int, int]:
+def capture_video_preview(path: str, fps_out: int = 24) -> tuple[str, int, int]:
     source = Path(path)
     ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
     duration = probe_video_duration(str(source)) or 1.0
@@ -124,7 +126,7 @@ def capture_webm_preview(path: str, fps_out: int = 24) -> tuple[str, int, int]:
         fallback = [ffmpeg, "-y", "-i", str(source), "-frames:v", "1", "-q:v", "2", str(preview)]
         result = subprocess.run(fallback, capture_output=True, check=False)
     if result.returncode or not preview.is_file():
-        raise ValueError("Could not decode a preview frame from the WebM file.")
+        raise ValueError("Could not decode a preview frame from the video file.")
     duration_frames = max(1, round(duration * fps_out))
     trim_start = max(0, duration_frames - fps_out)
     return str(preview), duration_frames, trim_start
@@ -132,8 +134,8 @@ def capture_webm_preview(path: str, fps_out: int = 24) -> tuple[str, int, int]:
 
 def prepare_media(path: str) -> tuple[str, str, int | None, int | None]:
     source = Path(path)
-    if source.suffix.lower() == ".webm":
-        preview, frames, trim = capture_webm_preview(path)
+    if source.suffix.lower() in TIMELINE_VIDEO_SUFFIXES:
+        preview, frames, trim = capture_video_preview(path)
         return "video", preview, frames, trim
     with Image.open(source) as image:
         image.verify()
