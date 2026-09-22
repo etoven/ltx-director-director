@@ -12,7 +12,15 @@ from .media import data_url, video_storyboard_data_urls
 from .models import Segment
 
 
-GEMINI_MODELS = ["gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite"]
+GEMINI_MODELS = [
+    "gemini-3.7-flash",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
+    "gemini-flash-lite-latest",
+    "gemini-2.5-flash-lite",
+]
 MAX_INLINE_VIDEO_BYTES = 12 * 1024 * 1024
 
 
