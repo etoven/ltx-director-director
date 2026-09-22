@@ -847,3 +847,28 @@ def retryable_connection_error(error: Exception) -> bool:
         status = error.response.status_code if error.response is not None else 0
         return status == 429 or status >= 500
     return isinstance(error, requests.RequestException)
+
+
+def provider_error_message(error: Exception) -> str:
+    """Translate provider HTTP failures into actionable dialog text."""
+    if isinstance(error, requests.HTTPError) and error.response is not None:
+        response = error.response
+        status = response.status_code
+        detail = ""
+        try:
+            payload = response.json()
+            provider_error = payload.get("error") if isinstance(payload, dict) else None
+            if isinstance(provider_error, dict):
+                detail = " ".join(str(provider_error.get("message") or "").split())
+        except (ValueError, requests.JSONDecodeError):
+            detail = ""
+        if status == 503:
+            message = (
+                "Google Gemini is temporarily overloaded for the selected model. This is a provider-capacity issue, "
+                "not a problem with your timeline or prompt. Wait a few minutes and try again, or choose another "
+                "Gemini model in Settings."
+            )
+            return f"{message}\n\nGoogle response: {detail}" if detail else message
+        if detail:
+            return f"Google Gemini returned HTTP {status}.\n\nGoogle response: {detail}"
+    return str(error)

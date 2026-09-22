@@ -9,7 +9,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import QEvent, QSettings, Qt
 from PySide6.QtGui import QColor, QPixmap
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QLabel, QMainWindow
+from PySide6.QtWidgets import QApplication, QLabel, QMainWindow, QMessageBox
 
 from ltx_prompt_director.models import Segment
 from ltx_prompt_director.ui import MainWindow, MiniMaxPromptWindow
@@ -155,6 +155,20 @@ class MiniMaxEditorTests(unittest.TestCase):
             ("User-pasted production prompt", "Preserve the new ending and smooth the final transition."),
         )
         window.current_project_id = None
+        window.close()
+
+    def test_gemini_overload_uses_clear_warning_dialog(self):
+        window = MainWindow()
+        window.ai_activity_title = "Magic Build"
+        message = "Google Gemini is temporarily overloaded for the selected model."
+        with (
+            patch.object(QMessageBox, "warning") as warning,
+            patch.object(QMessageBox, "critical") as critical,
+        ):
+            window.magic_failed(message)
+        warning.assert_called_once_with(window, "Magic Build: Gemini overloaded", message)
+        critical.assert_not_called()
+        self.assertIn("Google Gemini is overloaded", window.statusBar().currentMessage())
         window.close()
 
 

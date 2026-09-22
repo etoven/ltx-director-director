@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (
 )
 
 from . import __version__
-from .ai import GEMINI_MODELS, build_minimax_h3_prompt, build_prompts, minimax_h3_cache_key, refine_minimax_h3_prompt, refine_segment_prompt, refine_timing, retryable_connection_error
+from .ai import GEMINI_MODELS, build_minimax_h3_prompt, build_prompts, minimax_h3_cache_key, provider_error_message, refine_minimax_h3_prompt, refine_segment_prompt, refine_timing, retryable_connection_error
 from .media import APP_CACHE, TIMELINE_VIDEO_SUFFIXES, comfy_input_references, copy_media_for_export, data_url, extract_audio_for_export, prepare_media, safe_media_filename, unique_media_filename, write_data_url
 from .models import Segment, order_segments_by_ids, text_segment_from_ltx
 from .project_data import ARCHIVE_COLOR, load_other_tags, load_project_tags, new_note, normalize_notes, normalize_project_labels
@@ -189,7 +189,7 @@ class MagicWorker(QRunnable):
                 return
             except Exception as error:
                 if attempt >= attempts or not retryable_connection_error(error):
-                    self.signals.failed.emit(str(error))
+                    self.signals.failed.emit(provider_error_message(error))
                     return
                 for remaining in range(self.retry_cooldown, 0, -1):
                     self.signals.progress.emit(attempt + 1, attempts, f"Provider response stumbled—retrying in {remaining}s…")
@@ -5161,10 +5161,15 @@ class MainWindow(QMainWindow):
         self.set_ai_controls_enabled(True)
         self.magic_overlay.hide_overlay()
         title = getattr(self, "ai_activity_title", "AI operation")
+        overloaded = message.startswith("Google Gemini is temporarily overloaded")
         if title.startswith("MiniMax") and self.minimax_prompt_window:
-            self.minimax_prompt_window.set_busy(False, "AI request failed")
-        QMessageBox.critical(self, f"{title} failed", message)
-        self.statusBar().showMessage(f"{title} failed")
+            self.minimax_prompt_window.set_busy(False, "Gemini overloaded • try again" if overloaded else "AI request failed")
+        if overloaded:
+            QMessageBox.warning(self, f"{title}: Gemini overloaded", message)
+            self.statusBar().showMessage("Google Gemini is overloaded; try again shortly or choose another model", 8000)
+        else:
+            QMessageBox.critical(self, f"{title} failed", message)
+            self.statusBar().showMessage(f"{title} failed")
 
     def export_ltx(self) -> None:
         if not self.segments:
