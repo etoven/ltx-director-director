@@ -44,14 +44,20 @@ def refine_minimax_h3_prompt(segments: list[Segment], provider: str, model: str,
         raise ValueError("Add at least one timeline item before refining a MiniMax H3 prompt.")
     if not current_prompt.strip():
         raise ValueError("Write or generate a MiniMax H3 prompt before refining it.")
-    inputs = _minimax_h3_inputs(segments, provider)
+    inputs = _minimax_h3_inputs(segments, provider, refinement=True)
     rules = _minimax_h3_rules(segments, intent, global_prompt, sfx, spoken_dialog, reduce_music)
     rules += f"""
 
-REFINEMENT MODE — THE CURRENT EDITOR TEXT IS AUTHORITATIVE:
-- Refine the current editor prompt below instead of drafting a replacement from scratch.
-- Preserve every deliberate user edit unless the private refinement instructions explicitly request a change.
-- Apply the private refinement instructions naturally while retaining valid timeline facts, prescribed cue times, continuity, physical causality, and the required three-section output structure.
+REFINEMENT MODE — FOLLOW THIS PRIORITY ORDER WHEN ANY INPUTS COMPETE:
+1. PRIVATE REFINEMENT INSTRUCTIONS are the highest-priority edit request. Apply them completely and literally wherever they target the production prompt.
+2. CURRENT EDITOR PROMPT is the authoritative creative content and current sequence state. Refine it; never rebuild it from the references.
+3. Preserve the required timestamps and three-section transport structure.
+4. Timeline frames, videos, segment prompts, global prompt, and Director's Intent are SECONDARY CONTINUITY EVIDENCE only. Use them to verify identity, pose, environment, composition, physical plausibility, and boundary continuity without overriding items 1 or 2.
+
+- Make the smallest complete set of edits needed to satisfy the private refinement instructions. Preserve every deliberate user edit and every untouched passage.
+- Never replace, ignore, or reinterpret the user's current prompt merely because requested motion is not visible in a still frame or differs from reference-frame guidance.
+- Do not introduce a new action, camera path, transformation, setting, or visual fact from secondary evidence unless the refinement instructions request it or it is strictly necessary to repair a physical contradiction.
+- Keep existing cue content attached to the same timestamp unless the private instructions explicitly request timing changes.
 - The refinement instructions are private editing directions. Never quote, summarize, mention, or append them inside the production prompt.
 - Return the same strict transport JSON contract, including a freshly checked private continuityPlan and the refined production prompt.
 
@@ -132,6 +138,17 @@ def _validated_minimax_h3_prompt(raw: str, segments: list[Segment]) -> str:
         raise AIResponseFormatError("The AI added an editorial cut instruction. The operation will retry.")
     if re.search(r"(?im)^\s*(?:subject_definitions|summary|retention_analysis|detailed_description)\s*:", prompt):
         raise AIResponseFormatError("The AI exposed internal reference analysis in the MiniMax production prompt. The operation will retry.")
+    cue_starts = list(re.finditer(r"(?m)^\s*(\d{2,}:\d{2}:\d{3})\s+", detailed))
+    for index, cue_start in enumerate(cue_starts):
+        block_end = cue_starts[index + 1].start() if index + 1 < len(cue_starts) else len(detailed)
+        interval_text = detailed[cue_start.end():block_end]
+        word_count = len(re.findall(r"\b[\w'-]+\b", interval_text))
+        required_words = max(12, min(32, round(float(segments[index].duration) * 6)))
+        if word_count < required_words:
+            raise AIResponseFormatError(
+                f"The AI returned a skimpy MiniMax interval at {cue_start.group(1)} ({word_count} words); "
+                f"at least {required_words} words are required for production-ready motion detail. The operation will retry."
+            )
     return prompt
 
 
@@ -258,7 +275,7 @@ def _minimax_timestamp(seconds: float) -> str:
     return f"{minutes:02d}:{whole_seconds:02d}:{milliseconds:03d}"
 
 
-def _minimax_h3_inputs(segments: list[Segment], provider: str = "gemini") -> list[dict]:
+def _minimax_h3_inputs(segments: list[Segment], provider: str = "gemini", refinement: bool = False) -> list[dict]:
     inputs = []
     cursor = 0.0
     picture_number = 0
@@ -298,6 +315,11 @@ def _minimax_h3_inputs(segments: list[Segment], provider: str = "gemini") -> lis
             "picture_number": picture_number if item.kind == "image" else None,
             "video_number": video_number if item.kind == "video" else None,
         }
+        if refinement:
+            value["guidance_priority"] = (
+                "SECONDARY CONTINUITY EVIDENCE ONLY — do not override the private refinement instructions "
+                "or rebuild the authoritative current editor prompt from this record."
+            )
         source = Path(item.media_path) if item.media_path else None
         if item.kind == "video" and source and source.is_file():
             value["source_duration"] = round((item.media_duration_frames or 0) / 24, 3) or None
@@ -359,7 +381,7 @@ def _minimax_h3_rules(segments: list[Segment], intent: str, global_prompt: str, 
         if reduce_music else
         "Summarize explicitly requested music; otherwise infer only a brief, stylistically compatible music direction when it materially supports the sequence."
     )
-    return f"""You are a sequence prompt editor for MiniMax H3 video generation. Convert the complete ordered LTX Director timeline below into ONE compact, production-ready continuous-flow video prompt. This is synthesis, not concatenation: preserve important actions and continuity while describing one uninterrupted chronological progression whose visual state evolves naturally across every cue boundary.
+    return f"""You are a sequence prompt editor for MiniMax H3 video generation. Convert the complete ordered LTX Director timeline below into ONE detailed, production-ready continuous-flow video prompt. This is synthesis, not concatenation: preserve important actions and continuity while describing one uninterrupted chronological progression whose visual state evolves naturally across every cue boundary.
 
 Derive facts exclusively from the supplied timeline frames, videos, current prompts, global prompt, and Director's Intent. Never invent unsupported identity, anatomy, clothing, setting, dialogue, or transformation facts.
 
@@ -390,7 +412,7 @@ PRIVATE CONTINUITY-PLANNING PASS:
 MINIMAX H3 PRODUCTION-PROMPT PRINCIPLES:
 - treat all supplied images, videos, prompts, and audio context as one unified creative context; references guide identity, motion, framing, atmosphere, and continuity but are not edit points
 - front-load only the subject identity, environment, visual style, lighting, screen direction, camera behavior, and transformation state that truly remain stable across the complete timeline; never promote an opening-only condition into a global claim
-- because visual references already establish appearance and setting, spend the timestamped prose on motion: what changes, how it progresses, its physical cause, and how existing momentum flows through the cue boundary
+- because visual references already establish appearance and setting, spend the timestamped prose on motion: what changes, how it progresses, its physical cause, contact and weight, secondary motion, and how existing momentum flows through the cue boundary
 - describe later intervals as deltas from the carried-forward state; do not reintroduce or re-inventory the subject, outfit, location, composition, or props at every timestamp
 - positively describe continuous state and motion. Avoid editorial vocabulary, transition labels, reference labels, and negative prompting in the production prompt
 - state a stationary or persistent camera baseline once. If source material requires camera movement, describe one coherent evolving camera path rather than resetting framing at each cue
@@ -407,7 +429,7 @@ GLOBAL CONTINUITY PROMPT:
 REQUIRED PRODUCTION-PROMPT SECTIONS — use these three lowercase headings exactly, in order, with no Markdown fences:
 
 continuous_video:
-Start with one compact persistent-anchor sentence. Then write exactly {len(segments)} chronological interval lines. Start each with its exact bare `MM:SS:mmm` timestamp followed immediately by natural motion prose; use exactly these timestamps in order: {cue_list}. The timestamp is the line's only prefix. Use one or two compact sentences per interval. Describe only new action and progressive state change while carrying prior state and momentum forward. A video reference contributes its full temporal behavior, not merely sampled frames.
+Start with one precise persistent-anchor sentence. Then write exactly {len(segments)} chronological interval lines. Start each with its exact bare `MM:SS:mmm` timestamp followed immediately by natural motion prose; use exactly these timestamps in order: {cue_list}. The timestamp is the line's only prefix. Use 2 to 4 detailed sentences per interval, scaled to its duration. Cover the primary action and progression, visible pose or state delta, physical cause/contact/weight and secondary motion, plus camera or environmental response when it changes. Describe only new action and progressive state change while carrying prior state and momentum forward. Avoid padding and repeated inventories, but provide at least enough concrete motion detail to make every interval production-ready. A video reference contributes its full temporal behavior, not merely sampled frames.
 
 soundscape:
 {sound_rule} {dialog_rule}
@@ -418,14 +440,14 @@ music:
 PRODUCTION-PROMPT TEMPLATE FOR THIS {len(segments)}-INTERVAL TIMELINE — the number of cue lines is generated from the input timeline and is never a fixed example count:
 
 continuous_video:
-{{one compact sentence stating only whole-timeline visual anchors and either a truly fixed camera baseline or one coherent evolving camera path}}
+{{one precise sentence stating only whole-timeline visual anchors and either a truly fixed camera baseline or one coherent evolving camera path}}
 {cue_template}
 
 soundscape:
-{{concise timeline-specific soundscape or the required None statement}}
+{{timeline-specific soundscape or the required None statement}}
 
 music:
-{{concise timeline-specific music direction or the required None statement}}
+{{timeline-specific music direction or the required None statement}}
 
 Before returning, verify that the production prompt has exactly {len(segments)} timestamp lines in prescribed order, no structural shot labels, no picture/video labels, no bracketed camera commands, no explicit edit or cut instructions, and no repeated full-scene inventories.
 

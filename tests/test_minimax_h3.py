@@ -23,7 +23,10 @@ class MiniMaxH3PromptTests(unittest.TestCase):
 
     @staticmethod
     def response_prompt(cues, continuous_lines=None):
-        lines = continuous_lines or [f"{cue} The existing motion carries forward through a gradual physical change." for cue in cues]
+        lines = continuous_lines or [
+            f"{cue} The existing motion carries forward through a gradual physical change, preserving weight, direction, contact, and secondary movement across the boundary."
+            for cue in cues
+        ]
         return "\n".join((
             "continuous_video:",
             "The same subject, environment, lighting, and coherent camera path persist throughout.",
@@ -94,6 +97,9 @@ class MiniMaxH3PromptTests(unittest.TestCase):
         self.assertIn("resolve by this interval's end", inputs[3]["continuity_function"])
         rules = ai._minimax_h3_rules(self.segments(4), "", "", True, False, True)
         self.assertIn("video reference contributes its full temporal behavior", rules.casefold())
+        self.assertIn("2 to 4 detailed sentences per interval", rules)
+        self.assertIn("physical cause/contact/weight and secondary motion", rules)
+        self.assertNotIn("ONE compact", rules)
 
     def test_accepts_private_bridge_plan_and_returns_only_prompt(self):
         segments = self.segments(3)
@@ -168,9 +174,52 @@ class MiniMaxH3PromptTests(unittest.TestCase):
         self.assertEqual(result, refined)
         self.assertIn(edited, captured["rules"])
         self.assertIn(instructions, captured["rules"])
-        self.assertIn("CURRENT EDITOR TEXT IS AUTHORITATIVE", captured["rules"])
+        self.assertIn("FOLLOW THIS PRIORITY ORDER", captured["rules"])
         self.assertIn("Never quote, summarize, mention, or append", captured["rules"])
         self.assertNotIn(instructions, result)
+
+    def test_refinement_prioritizes_user_edits_over_reference_guidance(self):
+        segments = self.segments(2)
+        current = self.response_prompt(["00:00:000", "00:02:500"])
+        instructions = "Keep the user's exact action and only slow the final hand movement."
+        response = json.dumps({
+            "continuityPlan": self.continuity_plan(2),
+            "prompt": current,
+        })
+        captured = {}
+
+        def provider(inputs, provider, model, key, rules, timeout):
+            captured["inputs"] = inputs
+            captured["rules"] = rules
+            return response
+
+        with patch.object(ai, "_provider_raw", side_effect=provider):
+            ai.refine_minimax_h3_prompt(
+                segments, "gemini", "gemini-3.5-flash-lite", "unused", "", "",
+                False, False, True, current, instructions,
+            )
+
+        rules = captured["rules"]
+        self.assertLess(rules.index("PRIVATE REFINEMENT INSTRUCTIONS are the highest-priority"), rules.index("CURRENT EDITOR PROMPT is the authoritative"))
+        self.assertIn("SECONDARY CONTINUITY EVIDENCE only", rules)
+        self.assertIn("never rebuild it from the references", rules)
+        self.assertIn("Never replace, ignore, or reinterpret", rules)
+        self.assertTrue(all("SECONDARY CONTINUITY EVIDENCE ONLY" in item["guidance_priority"] for item in captured["inputs"]))
+
+    def test_rejects_skimpy_interval_motion_detail(self):
+        segments = self.segments(1)
+        skimpy = self.response_prompt(["00:00:000"], ["00:00:000 The subject moves slowly."])
+        with self.assertRaisesRegex(ai.AIResponseFormatError, "skimpy MiniMax interval"):
+            self.build_with_prompt(segments, skimpy)
+
+    def test_accepts_production_ready_interval_motion_detail(self):
+        segments = self.segments(1)
+        detailed = self.response_prompt([
+            "00:00:000",
+        ], [
+            "00:00:000 The subject leans forward as weight transfers onto the planted foot. The shoulder follows with visible inertia while the hand settles smoothly and the camera maintains its coherent path."
+        ])
+        self.assertEqual(self.build_with_prompt(segments, detailed), detailed)
 
     def test_cache_key_is_stable_across_paths_and_changes_with_inputs(self):
         with tempfile.TemporaryDirectory() as directory:

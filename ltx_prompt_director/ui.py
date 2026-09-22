@@ -20,7 +20,7 @@ from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
     QColorDialog, QDateTimeEdit, QDockWidget, QFileDialog, QFormLayout, QFrame, QHBoxLayout, QLabel, QLayout, QLineEdit,
-    QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox, QPushButton,
+    QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox, QPushButton, QScrollArea,
     QSizePolicy, QSlider, QSpinBox, QSplitter, QSplitterHandle, QStatusBar, QStyle, QStyledItemDelegate, QStyleOptionSlider, QStyleOptionViewItem, QTextEdit, QToolBar, QVBoxLayout, QWidget,
 )
 
@@ -506,6 +506,13 @@ class ProjectTileDelegate(QStyledItemDelegate):
 class SeekSlider(QSlider):
     """A normal slider that also seeks directly to a clicked groove position."""
 
+    seek_requested = Signal(int)
+
+    def __init__(self, orientation, parent=None):
+        super().__init__(orientation, parent)
+        self.sliderMoved.connect(self.seek_requested.emit)
+        self.sliderReleased.connect(lambda: self.seek_requested.emit(self.value()))
+
     def mousePressEvent(self, event) -> None:
         if event.button() != Qt.MouseButton.LeftButton or self.orientation() != Qt.Orientation.Horizontal:
             super().mousePressEvent(event)
@@ -533,7 +540,7 @@ class SeekSlider(QSlider):
             option.upsideDown,
         )
         self.setValue(value)
-        self.sliderMoved.emit(value)
+        self.seek_requested.emit(value)
         event.accept()
 
 
@@ -717,7 +724,7 @@ class FullscreenVideoDialog(QDialog):
         self.play = QPushButton("▶ Play")
         self.play.clicked.connect(self.toggle_playback)
         self.seek = SeekSlider(Qt.Orientation.Horizontal)
-        self.seek.sliderMoved.connect(self.player.setPosition)
+        self.seek.seek_requested.connect(self.seek_to)
         self.position = QLabel("00:00 / 00:00")
         exit_button = QPushButton("✕ Exit Fullscreen")
         exit_button.clicked.connect(self.reject)
@@ -732,6 +739,9 @@ class FullscreenVideoDialog(QDialog):
             self.player.pause()
         else:
             self.player.play()
+
+    def seek_to(self, position: int) -> None:
+        self.player.setPosition(max(0, min(position, self.player.duration())))
 
     def update_position(self, position: int, duration: int) -> None:
         if not self.seek.isSliderDown():
@@ -753,6 +763,8 @@ class ProjectPreviewPanel(QWidget):
         self.current_frame = None
         self.player = QMediaPlayer(self)
         self.audio = QAudioOutput(self)
+        self.audio.setMuted(False)
+        self.audio.setVolume(1.0)
         self.player.setAudioOutput(self.audio)
         self.video = ProjectVideoWidget(self)
         self.fullscreen_window = FullscreenVideoDialog(self.player, self)
@@ -787,7 +799,7 @@ class ProjectPreviewPanel(QWidget):
         self.position = QLabel("00:00 / 00:00")
         self.seek = SeekSlider(Qt.Orientation.Horizontal)
         self.seek.setRange(0, 0)
-        self.seek.sliderMoved.connect(self.player.setPosition)
+        self.seek.seek_requested.connect(self.seek_to)
         seek_row.addWidget(self.seek, 1)
         seek_row.addWidget(self.position)
         layout.addLayout(seek_row)
@@ -884,11 +896,6 @@ class ProjectPreviewPanel(QWidget):
         return f"{total // 60:02d}:{total % 60:02d}"
 
     def set_project(self, name: str, video_path: str = "") -> None:
-        self._source_generation += 1
-        generation = self._source_generation
-        self.player.stop()
-        self.current_frame = None
-        self.player.setSource(QUrl())
         self.title.setText(name)
         self.choose.setEnabled(True)
         path = Path(video_path)
@@ -896,6 +903,27 @@ class ProjectPreviewPanel(QWidget):
             valid_preview = path.is_file() and path.suffix.casefold() in ProjectVideoWidget.VIDEO_SUFFIXES and path.stat().st_size > 0
         except OSError:
             valid_preview = False
+        current_path = Path(self.player.source().toLocalFile()) if self.player.source().isLocalFile() else None
+        same_preview = False
+        if valid_preview and current_path:
+            try:
+                same_preview = current_path.resolve() == path.resolve()
+            except OSError:
+                same_preview = False
+        if same_preview:
+            self.player.setAudioOutput(self.audio)
+            self.export.setEnabled(True)
+            self.fullscreen.setEnabled(self.duration > 0)
+            if self.duration > 0:
+                self.empty.hide()
+                self.video.show()
+            return
+
+        self._source_generation += 1
+        generation = self._source_generation
+        self.player.stop()
+        self.current_frame = None
+        self.player.setSource(QUrl())
         if valid_preview:
             self.video.hide()
             self.empty.setText("Loading saved video preview…")
@@ -918,6 +946,7 @@ class ProjectPreviewPanel(QWidget):
         if not source.is_file() or source.suffix.casefold() not in ProjectVideoWidget.VIDEO_SUFFIXES:
             self.media_error()
             return
+        self.player.setAudioOutput(self.audio)
         self.player.setSource(QUrl.fromLocalFile(str(source)))
 
     def media_error(self, *_args) -> None:
@@ -950,6 +979,10 @@ class ProjectPreviewPanel(QWidget):
             self.player.pause()
         else:
             self.player.play()
+
+    def seek_to(self, position: int) -> None:
+        if self.duration > 0:
+            self.player.setPosition(max(0, min(position, self.duration)))
 
     def duration_changed(self, duration: int) -> None:
         self.duration = max(0, duration)
@@ -1983,6 +2016,155 @@ class ProjectDetailsDialog(QDialog):
         return normalize_notes(self.notes)
 
 
+def minimax_start_timestamp(seconds: float) -> str:
+    total_milliseconds = max(0, round(float(seconds) * 1000))
+    minutes, remainder = divmod(total_milliseconds, 60_000)
+    whole_seconds, milliseconds = divmod(remainder, 1000)
+    return f"{minutes:02d}:{whole_seconds:02d}:{milliseconds:03d}"
+
+
+class MiniMaxPacingCard(QFrame):
+    """A framed timeline preview used by the MiniMax pacing header."""
+
+    def __init__(self, segment: Segment, index: int, start_time: float):
+        super().__init__()
+        self.segment = segment
+        self.setObjectName("minimaxPacingCard")
+        self.setProperty("kind", segment.kind)
+        self.setFixedWidth(132)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(5, 5, 5, 6)
+        layout.setSpacing(4)
+
+        timestamp = QLabel(f"START  {minimax_start_timestamp(start_time)}")
+        timestamp.setObjectName("minimaxPacingTime")
+        layout.addWidget(timestamp)
+
+        self.preview = QLabel()
+        self.preview.setObjectName("minimaxPacingPreview")
+        self.preview.setFixedSize(120, 68)
+        self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        source_path = segment.preview_path or (segment.media_path if segment.kind == "image" else "")
+        pixmap = timeline_preview_pixmap(source_path)
+        if not pixmap.isNull():
+            scaled = pixmap.scaled(
+                self.preview.size(),
+                Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            x = max(0, (scaled.width() - self.preview.width()) // 2)
+            y = max(0, (scaled.height() - self.preview.height()) // 2)
+            self.preview.setPixmap(scaled.copy(x, y, self.preview.width(), self.preview.height()))
+        elif segment.kind == "text":
+            self.preview.setText("≡\nTEXT SEQUENCE")
+        elif segment.kind == "video":
+            self.preview.setText("▶\nVIDEO PREVIEW")
+        else:
+            self.preview.setText("▧\nFRAME PREVIEW")
+        layout.addWidget(self.preview)
+
+        kind = "TEXT" if segment.kind == "text" else ("VIDEO" if segment.kind == "video" else "IMAGE")
+        media_label = QLabel(f"{kind} {index + 1:02d}")
+        media_label.setObjectName("minimaxPacingMedia")
+        media_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(media_label)
+
+        name = QLabel(segment.name or f"{kind.title()} {index + 1}")
+        name.setObjectName("minimaxPacingName")
+        name.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        name.setToolTip(segment.name)
+        name.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+        layout.addWidget(name)
+
+
+class MiniMaxPacingStrip(QFrame):
+    """Decorative, data-driven frame pacing map for the MiniMax editor."""
+
+    def __init__(self):
+        super().__init__()
+        self.setObjectName("minimaxPacingFrame")
+        self.cards: list[MiniMaxPacingCard] = []
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(11, 9, 11, 8)
+        outer.setSpacing(6)
+
+        header = QHBoxLayout()
+        emblem = QLabel("◇")
+        emblem.setObjectName("minimaxPacingEmblem")
+        emblem.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        header.addWidget(emblem)
+        title_box = QVBoxLayout()
+        title_box.setSpacing(0)
+        title = QLabel("FRAME PACING")
+        title.setObjectName("minimaxPacingTitle")
+        subtitle = QLabel("Timeline frame previews  •  text beats  •  video references")
+        subtitle.setObjectName("minimaxPacingSubtitle")
+        title_box.addWidget(title)
+        title_box.addWidget(subtitle)
+        header.addLayout(title_box)
+        header.addStretch()
+        self.total_time = QLabel("TOTAL  00:00:000")
+        self.total_time.setObjectName("minimaxPacingTotal")
+        header.addWidget(self.total_time)
+        outer.addLayout(header)
+
+        self.scroll = QScrollArea()
+        self.scroll.setObjectName("minimaxPacingScroll")
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.scroll.setFixedHeight(145)
+        self.sequence_widget = QWidget()
+        self.sequence_widget.setObjectName("minimaxPacingSequence")
+        self.sequence_layout = QHBoxLayout(self.sequence_widget)
+        self.sequence_layout.setContentsMargins(2, 1, 2, 1)
+        self.sequence_layout.setSpacing(5)
+        self.sequence_layout.addStretch()
+        self.scroll.setWidget(self.sequence_widget)
+        outer.addWidget(self.scroll)
+        self.set_segments([])
+
+    def set_segments(self, segments: list[Segment]) -> None:
+        while self.sequence_layout.count():
+            item = self.sequence_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self.cards = []
+        cursor = 0.0
+        if not segments:
+            empty = QLabel("Add timeline frames, text, or video to preview pacing here.")
+            empty.setObjectName("minimaxPacingEmpty")
+            empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.sequence_layout.addWidget(empty, 1)
+        for index, segment in enumerate(segments):
+            card = MiniMaxPacingCard(segment, index, cursor)
+            self.cards.append(card)
+            self.sequence_layout.addWidget(card)
+            if index + 1 < len(segments):
+                arrow = QFrame()
+                arrow.setObjectName("minimaxPacingArrowBox")
+                arrow.setFixedWidth(58)
+                arrow_layout = QVBoxLayout(arrow)
+                arrow_layout.setContentsMargins(0, 25, 0, 0)
+                arrow_layout.setSpacing(1)
+                duration = QLabel(f"{segment.duration:.2f}s")
+                duration.setObjectName("minimaxPacingDuration")
+                duration.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                arrow_art = QLabel("━━▶")
+                arrow_art.setObjectName("minimaxPacingArrow")
+                arrow_art.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                arrow_layout.addWidget(duration)
+                arrow_layout.addWidget(arrow_art)
+                arrow_layout.addStretch()
+                self.sequence_layout.addWidget(arrow)
+            cursor += segment.duration
+        self.sequence_layout.addStretch()
+        minimum_width = max(1, len(segments)) * 132 + max(0, len(segments) - 1) * 63 + 8
+        self.sequence_widget.setMinimumWidth(minimum_width)
+        self.total_time.setText(f"TOTAL  {minimax_start_timestamp(cursor)}")
+
+
 class MiniMaxPromptWindow(QDialog):
     """Persistent, modeless editor for a project's MiniMax H3 prompt."""
 
@@ -1993,7 +2175,7 @@ class MiniMaxPromptWindow(QDialog):
         self.setWindowFlag(Qt.WindowType.Window, True)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         self.destroyed.connect(owner.minimax_window_destroyed)
-        self.resize(980, 720)
+        self.resize(1040, 820)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(9)
@@ -2015,6 +2197,9 @@ class MiniMaxPromptWindow(QDialog):
         self.refine_button.clicked.connect(owner.refine_minimax_prompt)
         toolbar_layout.addWidget(self.refine_button)
         layout.addWidget(toolbar)
+
+        self.pacing_strip = MiniMaxPacingStrip()
+        layout.addWidget(self.pacing_strip)
 
         instruction_panel = QFrame()
         instruction_panel.setObjectName("promptPanel")
@@ -2083,6 +2268,7 @@ class MiniMaxPromptWindow(QDialog):
 
     def set_project(self, project_name: str, prompt: str, instructions: str, cache_state: str) -> None:
         self.setWindowTitle(f"MiniMax H3 Prompt — {project_name}")
+        self.pacing_strip.set_segments(list(getattr(self.owner, "segments", [])))
         for editor, value in ((self.editor, prompt), (self.instructions, instructions)):
             editor.blockSignals(True)
             editor.setPlainText(value)
@@ -2935,6 +3121,7 @@ class MainWindow(QMainWindow):
         QToolButton,QPushButton,QComboBox,QSpinBox,QDoubleSpinBox,QLineEdit{background:#303436;border:1px solid #101213;border-radius:3px;padding:3px 7px;min-height:19px}
         #mainToolbar QToolButton{background:transparent;border:1px solid transparent;border-radius:4px;padding:5px 9px;color:#c5cdd1} #mainToolbar QToolButton:hover{background:#2b3438;border-color:#3a464c;color:#f3f7f9} #mainToolbar QToolButton:pressed{background:#17232a;border-color:#477d99;color:#bde6fb} #toolbarButton{background:#23343d;border:1px solid #385667;border-radius:5px;color:#c4e8fb;font-weight:bold}
         #minimaxPromptToolbar{background:#1b2023;border:1px solid #354047;border-radius:6px} #minimaxCacheState{background:#2b3438;color:#aebbc1;border:1px solid #435159;border-radius:9px;padding:2px 8px;font-size:9px} #minimaxCacheState[cached="true"]{background:#244d37;color:#c9f4d6;border-color:#4c9b6a} #minimaxInstructions{background:#1b2023;border:1px solid #37464d;border-radius:4px;color:#d8e1e5;padding:7px}
+        #minimaxPacingFrame{background:#192125;border:1px solid #4b606a;border-radius:9px} #minimaxPacingEmblem{background:#19282f;color:#63cce6;border:1px solid #476571;border-radius:6px;font-size:18px;font-weight:bold;min-width:29px;max-width:29px;min-height:29px;max-height:29px} #minimaxPacingTitle{color:#dcebf1;font-size:9px;font-weight:bold;letter-spacing:2px} #minimaxPacingSubtitle{color:#7f9098;font-size:8px} #minimaxPacingTotal{background:#151c1f;color:#e6f5fa;border:1px solid #3d5058;border-radius:5px;padding:5px 8px;font:10px 'Courier New';font-weight:bold} #minimaxPacingScroll,#minimaxPacingSequence{background:transparent;border:0} #minimaxPacingCard{background:#202a2f;border:1px solid #5a6d76;border-radius:7px} #minimaxPacingCard[kind="text"]{background:#292538;border-color:#74669a} #minimaxPacingCard[kind="video"]{background:#203129;border-color:#567b68} #minimaxPacingPreview{background:#111719;color:#82959e;border:1px solid #3b4b52;border-radius:4px;font-size:9px;font-weight:bold} #minimaxPacingCard[kind="text"] #minimaxPacingPreview{background:#211d31;color:#c2b1e6;border-color:#625682} #minimaxPacingCard[kind="video"] #minimaxPacingPreview{background:#17251e;color:#a6dabc;border-color:#456452} #minimaxPacingTime{color:#eef8fb;font:9px 'Courier New';font-weight:bold} #minimaxPacingMedia{background:#141b1e;color:#bfe9f4;border:1px solid #40525a;border-radius:4px;padding:2px;font-size:8px;font-weight:bold} #minimaxPacingName{color:#9aabb3;font-size:8px} #minimaxPacingArrowBox{background:transparent;border:0} #minimaxPacingDuration{color:#8fa1aa;font:8px 'Courier New'} #minimaxPacingArrow{color:#64cee7;font-size:14px;font-weight:bold} #minimaxPacingEmpty{background:#151c1f;color:#7e8e96;border:1px dashed #405159;border-radius:5px;padding:30px}
         QToolButton:hover,QPushButton:hover{background:#41474a} QToolButton:pressed,QPushButton:pressed{background:#202729;border-color:#79a8c5} QLineEdit{background:#1e2122}
         QSpinBox,QDoubleSpinBox{padding-right:__SPIN_PAD__px} QSpinBox::up-button,QDoubleSpinBox::up-button{subcontrol-origin:border;subcontrol-position:top right;width:__SPIN_BUTTON__px;background:#3b4347;border:0;border-left:1px solid #171a1c;border-bottom:1px solid #202527;border-top-right-radius:3px} QSpinBox::down-button,QDoubleSpinBox::down-button{subcontrol-origin:border;subcontrol-position:bottom right;width:__SPIN_BUTTON__px;background:#343b3f;border:0;border-left:1px solid #171a1c;border-top:1px solid #202527;border-bottom-right-radius:3px}
         QSpinBox::up-button:hover,QDoubleSpinBox::up-button:hover,QSpinBox::down-button:hover,QDoubleSpinBox::down-button:hover{background:#506471} QSpinBox::up-button:pressed,QDoubleSpinBox::up-button:pressed,QSpinBox::down-button:pressed,QDoubleSpinBox::down-button:pressed{background:#274e66} QSpinBox::up-arrow,QDoubleSpinBox::up-arrow,QSpinBox::down-arrow,QDoubleSpinBox::down-arrow{width:__ARROW_SIZE__px;height:__ARROW_SIZE__px}

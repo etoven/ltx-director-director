@@ -7,8 +7,9 @@ from unittest.mock import patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QEvent, QSettings, Qt
+from PySide6.QtGui import QColor, QPixmap
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QMainWindow
+from PySide6.QtWidgets import QApplication, QLabel, QMainWindow
 
 from ltx_prompt_director.models import Segment
 from ltx_prompt_director.ui import MainWindow, MiniMaxPromptWindow
@@ -81,6 +82,33 @@ class MiniMaxEditorTests(unittest.TestCase):
         QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         QApplication.processEvents()
         window.close()
+
+    def test_pacing_header_uses_actual_previews_and_exact_start_times(self):
+        with tempfile.TemporaryDirectory() as directory:
+            preview_path = Path(directory) / "frame.png"
+            pixmap = QPixmap(80, 45)
+            pixmap.fill(QColor("#4f9fbd"))
+            self.assertTrue(pixmap.save(str(preview_path)))
+            owner = _EditorOwner(Path(directory) / "settings.ini")
+            owner.segments = [
+                Segment("Opening", str(preview_path), str(preview_path), kind="image", duration=2.5),
+                Segment("Transformation beat", "", "", kind="text", role="text", duration=3.25),
+                Segment("Motion reference", "clip.webm", str(preview_path), kind="video", duration=1.5),
+            ]
+            window = MiniMaxPromptWindow(owner)
+            owner.window = window
+            window.set_project("Pacing test", "Prompt", "", "Saved prompt")
+
+            self.assertEqual(
+                [card.findChild(QLabel, "minimaxPacingTime").text() for card in window.pacing_strip.cards],
+                ["START  00:00:000", "START  00:02:500", "START  00:05:750"],
+            )
+            self.assertEqual(window.pacing_strip.total_time.text(), "TOTAL  00:07:250")
+            self.assertFalse(window.pacing_strip.cards[0].preview.pixmap().isNull())
+            self.assertFalse(window.pacing_strip.cards[2].preview.pixmap().isNull())
+            self.assertIn("TEXT SEQUENCE", window.pacing_strip.cards[1].preview.text())
+            window.close()
+            owner.close()
 
     def test_refine_snapshots_edited_prompt_and_special_instructions(self):
         window = MainWindow()
