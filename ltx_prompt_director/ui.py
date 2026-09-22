@@ -2100,7 +2100,14 @@ class MiniMaxPromptWindow(QDialog):
         # guards prevent an older response from replacing newer editor text.
         self.editor.setReadOnly(False)
         self.instructions.setReadOnly(False)
+        was_busy = self.busy
         self.busy = busy
+        if busy and status:
+            self.refine_button.setText("⟳ Refining…" if "refin" in status.casefold() else "⟳ Working…")
+        elif busy and not was_busy:
+            self.refine_button.setText("⟳ Working…")
+        elif not busy:
+            self.refine_button.setText("✎ Refine Prompt")
         self.update_actions()
         if status:
             self.set_cache_state(status)
@@ -2138,10 +2145,6 @@ class MainWindow(QMainWindow):
         self.minimax_prompt_cache_key = ""
         self.minimax_prompt_updated_at = ""
         self.minimax_prompt_window: MiniMaxPromptWindow | None = None
-        self._minimax_save_timer = QTimer(self)
-        self._minimax_save_timer.setSingleShot(True)
-        self._minimax_save_timer.setInterval(1200)
-        self._minimax_save_timer.timeout.connect(self.persist_minimax_prompt_edit)
         self.current_collection: str | None = None
         self.autofit_tail_extension = 0
         self.timeline_fit_mode = False
@@ -3846,8 +3849,8 @@ class MainWindow(QMainWindow):
         self.sync_minimax_prompt_window()
 
     def closeEvent(self, event) -> None:
-        if self._minimax_save_timer.isActive():
-            self._minimax_save_timer.stop()
+        if self.minimax_prompt_window:
+            self.minimax_editor_changed()
             self.persist_minimax_prompt_edit()
         if hasattr(self, "project_preview_panel"):
             self.project_preview_panel.player.stop()
@@ -4564,7 +4567,7 @@ class MainWindow(QMainWindow):
         if self.minimax_prompt_window:
             self.minimax_prompt_window.set_busy(not enabled)
 
-    def start_ai_worker(self, operation, args: tuple, activity: str, finished) -> None:
+    def start_ai_worker(self, operation, args: tuple, activity: str, finished, show_main_overlay: bool = True) -> None:
         retries = self.settings.value("api_retries", 2, int)
         retry_cooldown = self.settings.value("api_retry_cooldown", 10, int)
         self.set_ai_controls_enabled(False)
@@ -4575,8 +4578,10 @@ class MainWindow(QMainWindow):
             "Refine Timing" if operation is refine_timing else
             "Refine Prompt"
         )
-        self.magic_overlay.update_attempt(1, retries + 1, activity)
-        self.magic_overlay.show_overlay()
+        self.ai_activity_in_minimax_window = not show_main_overlay
+        if show_main_overlay:
+            self.magic_overlay.update_attempt(1, retries + 1, activity)
+            self.magic_overlay.show_overlay()
         worker = MagicWorker(operation, args, retries, retry_cooldown, activity)
         worker.signals.progress.connect(self.magic_progress)
         worker.signals.finished.connect(finished)
@@ -4682,7 +4687,11 @@ class MainWindow(QMainWindow):
         ), "Analyzing timeline context and directing motion…", self.magic_finished)
 
     def magic_progress(self, attempt: int, total: int, detail: str) -> None:
-        self.magic_overlay.update_attempt(attempt, total, detail)
+        if getattr(self, "ai_activity_in_minimax_window", False) and self.minimax_prompt_window:
+            action = "Refining" if getattr(self, "minimax_operation_kind", "") == "refine" else "Generating"
+            self.minimax_prompt_window.set_cache_state(f"{action}… attempt {attempt}/{total}")
+        else:
+            self.magic_overlay.update_attempt(attempt, total, detail)
 
     def magic_finished(self, result: dict) -> None:
         target_durations = []
@@ -4744,8 +4753,6 @@ class MainWindow(QMainWindow):
         self.minimax_refinement_instructions = self.minimax_prompt_window.instructions.toPlainText()
         self.minimax_prompt_updated_at = datetime.now(timezone.utc).isoformat()
         self.mark_dirty()
-        if self.current_project_id:
-            self._minimax_save_timer.start()
 
     def persist_minimax_prompt_edit(self) -> None:
         if self.current_project_id and self.segments:
@@ -4753,8 +4760,6 @@ class MainWindow(QMainWindow):
 
     def minimax_window_closed(self) -> None:
         self.minimax_editor_changed()
-        if self._minimax_save_timer.isActive():
-            self._minimax_save_timer.stop()
         self.persist_minimax_prompt_edit()
         if self.current_project_id:
             self.statusBar().showMessage("MiniMax H3 prompt edits saved to project", 4000)
@@ -4818,6 +4823,7 @@ class MainWindow(QMainWindow):
             ),
             "Boiling the complete sequence down to one MiniMax H3 prompt…",
             self.minimax_h3_finished,
+            show_main_overlay=False,
         )
 
     def minimax_h3_finished(self, prompt: str) -> None:
@@ -4862,9 +4868,6 @@ class MainWindow(QMainWindow):
         if not credentials:
             return
         provider, model, key = credentials
-        if self._minimax_save_timer.isActive():
-            self._minimax_save_timer.stop()
-        self.persist_minimax_prompt_edit()
         signature = self.current_minimax_cache_key(provider, model)
         self.minimax_operation_signature = signature
         self.minimax_operation_kind = "refine"
@@ -4886,6 +4889,7 @@ class MainWindow(QMainWindow):
             ),
             "Refining the edited MiniMax prompt with timeline continuity context…",
             self.minimax_h3_finished,
+            show_main_overlay=False,
         )
 
     def show_toast(self, message: str, duration: int = 3200) -> None:

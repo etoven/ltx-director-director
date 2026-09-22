@@ -73,20 +73,29 @@ class MiniMaxEditorTests(unittest.TestCase):
         window.segments = [Segment("Beat", "", "", kind="text", prompt="Motion", duration=2.5)]
         captured = {}
 
-        def capture_worker(operation, args, activity, finished):
+        def capture_worker(operation, args, activity, finished, **kwargs):
             captured["operation"] = operation
             captured["args"] = args
+            captured["kwargs"] = kwargs
 
         with (
             patch.object(window, "ai_credentials", return_value=("gemini", "gemini-3.5-flash-lite", "unused")),
             patch.object(window, "current_minimax_cache_key", return_value="source-signature"),
-            patch.object(window, "persist_minimax_prompt_edit"),
+            patch.object(window, "persist_minimax_prompt_edit") as persist,
+            patch.object(window, "save_library_project") as save_project,
             patch.object(window, "start_ai_worker", side_effect=capture_worker),
         ):
             window.refine_minimax_prompt()
 
+            persist.assert_not_called()
+            save_project.assert_not_called()
+            window.minimax_h3_finished("Refined production prompt")
+            save_project.assert_called_once_with(automatic=True)
+
         self.assertEqual(captured["args"][-3], "User-pasted production prompt")
         self.assertEqual(captured["args"][-2], "Preserve the new ending and smooth the final transition.")
+        self.assertFalse(captured["kwargs"]["show_main_overlay"])
+        self.assertFalse(hasattr(window, "_minimax_save_timer"))
         self.assertEqual(
             window.minimax_operation_editor_snapshot,
             ("User-pasted production prompt", "Preserve the new ending and smooth the final transition."),
