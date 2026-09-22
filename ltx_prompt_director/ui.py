@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (
 )
 
 from . import __version__
-from .ai import GEMINI_MODELS, build_minimax_h3_prompt, build_prompts, refine_segment_prompt, refine_timing, retryable_connection_error
+from .ai import GEMINI_MODELS, build_minimax_h3_prompt, build_prompts, minimax_h3_cache_key, refine_minimax_h3_prompt, refine_segment_prompt, refine_timing, retryable_connection_error
 from .media import APP_CACHE, TIMELINE_VIDEO_SUFFIXES, comfy_input_references, copy_media_for_export, data_url, extract_audio_for_export, prepare_media, safe_media_filename, unique_media_filename, write_data_url
 from .models import Segment, order_segments_by_ids, text_segment_from_ltx
 from .project_data import ARCHIVE_COLOR, load_other_tags, load_project_tags, new_note, normalize_notes, normalize_project_labels
@@ -84,6 +84,11 @@ def requested_length_value(value: object) -> float:
 def application_window_title(project_name: str = "") -> str:
     title = f"LTX Director - Director v{__version__}"
     return f"{title} :: {project_name}" if project_name else title
+
+
+def toolbar_icon(name: str) -> QIcon:
+    """Return one of the bundled, theme-independent toolbar icons."""
+    return QIcon(str(files("ltx_prompt_director").joinpath(f"assets/toolbar-{name}.svg")))
 
 
 def segment_media_suffix(segment: Segment) -> str:
@@ -1978,6 +1983,123 @@ class ProjectDetailsDialog(QDialog):
         return normalize_notes(self.notes)
 
 
+class MiniMaxPromptWindow(QDialog):
+    """Persistent, modeless editor for a project's MiniMax H3 prompt."""
+
+    def __init__(self, owner):
+        super().__init__(owner)
+        self.owner = owner
+        self.setModal(False)
+        self.setWindowFlag(Qt.WindowType.Window, True)
+        self.resize(980, 720)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(9)
+
+        toolbar = QFrame()
+        toolbar.setObjectName("minimaxPromptToolbar")
+        toolbar_layout = QHBoxLayout(toolbar)
+        toolbar_layout.setContentsMargins(9, 7, 9, 7)
+        title = QLabel("MINIMAX H3 PROMPT EDITOR")
+        title.setObjectName("sectionLabel")
+        toolbar_layout.addWidget(title)
+        toolbar_layout.addStretch()
+        self.cache_state = QLabel("Not generated")
+        self.cache_state.setObjectName("minimaxCacheState")
+        toolbar_layout.addWidget(self.cache_state)
+        self.refine_button = QPushButton("✎ Refine Prompt")
+        self.refine_button.setObjectName("refineButton")
+        self.refine_button.setToolTip("Refine the edited prompt using the private instructions and complete timeline context")
+        self.refine_button.clicked.connect(owner.refine_minimax_prompt)
+        toolbar_layout.addWidget(self.refine_button)
+        layout.addWidget(toolbar)
+
+        instruction_panel = QFrame()
+        instruction_panel.setObjectName("promptPanel")
+        instruction_layout = QVBoxLayout(instruction_panel)
+        instruction_layout.setContentsMargins(9, 7, 9, 8)
+        instruction_label = QLabel("REFINEMENT INSTRUCTIONS")
+        instruction_label.setObjectName("sectionLabel")
+        instruction_layout.addWidget(instruction_label)
+        self.instructions = QTextEdit()
+        self.instructions.setObjectName("minimaxInstructions")
+        self.instructions.setPlaceholderText(
+            "Private directions for the next refinement, such as: smooth the transition into the final transformation, preserve the edited dialogue exactly, or reduce camera movement."
+        )
+        self.instructions.setMaximumHeight(112)
+        self.instructions.textChanged.connect(owner.minimax_editor_changed)
+        instruction_layout.addWidget(self.instructions)
+        layout.addWidget(instruction_panel)
+
+        prompt_panel = QFrame()
+        prompt_panel.setObjectName("promptPanel")
+        prompt_layout = QVBoxLayout(prompt_panel)
+        prompt_layout.setContentsMargins(9, 7, 9, 5)
+        prompt_header = QHBoxLayout()
+        prompt_label = QLabel("PRODUCTION PROMPT")
+        prompt_label.setObjectName("sectionLabel")
+        self.character_count = QLabel("0 characters")
+        self.character_count.setObjectName("muted")
+        prompt_header.addWidget(prompt_label)
+        prompt_header.addStretch()
+        prompt_header.addWidget(self.character_count)
+        prompt_layout.addLayout(prompt_header)
+        self.editor = QTextEdit()
+        self.editor.setObjectName("promptEditor")
+        self.editor.setPlaceholderText("Generate a MiniMax H3 prompt or begin writing here…")
+        self.editor.textChanged.connect(self._editor_changed)
+        prompt_layout.addWidget(self.editor, 1)
+        prompt_footer = QHBoxLayout()
+        prompt_footer.setContentsMargins(0, 0, 0, 0)
+        prompt_footer.addStretch()
+        self.copy_button = QPushButton("□ Copy")
+        self.copy_button.setObjectName("copyButton")
+        self.copy_button.setFlat(True)
+        self.copy_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.copy_button.clicked.connect(owner.copy_minimax_prompt)
+        prompt_footer.addWidget(self.copy_button, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        prompt_layout.addLayout(prompt_footer)
+        layout.addWidget(prompt_panel, 1)
+
+        geometry = owner.settings.value("minimax_prompt_window/geometry")
+        if geometry:
+            self.restoreGeometry(geometry)
+        self.set_busy(False)
+
+    def _editor_changed(self) -> None:
+        self.character_count.setText(f"{len(self.editor.toPlainText())} characters")
+        self.owner.minimax_editor_changed()
+
+    def set_project(self, project_name: str, prompt: str, instructions: str, cache_state: str) -> None:
+        self.setWindowTitle(f"MiniMax H3 Prompt — {project_name}")
+        for editor, value in ((self.editor, prompt), (self.instructions, instructions)):
+            editor.blockSignals(True)
+            editor.setPlainText(value)
+            editor.blockSignals(False)
+        self.character_count.setText(f"{len(prompt)} characters")
+        self.set_cache_state(cache_state)
+        self.set_busy(False)
+
+    def set_cache_state(self, text: str) -> None:
+        self.cache_state.setText(text)
+        self.cache_state.setProperty("cached", text.casefold().startswith("cached"))
+        self.cache_state.style().unpolish(self.cache_state)
+        self.cache_state.style().polish(self.cache_state)
+
+    def set_busy(self, busy: bool, status: str = "") -> None:
+        self.editor.setReadOnly(busy)
+        self.instructions.setReadOnly(busy)
+        self.refine_button.setEnabled(not busy and bool(self.editor.toPlainText().strip()))
+        self.copy_button.setEnabled(not busy and bool(self.editor.toPlainText().strip()))
+        if status:
+            self.set_cache_state(status)
+
+    def closeEvent(self, event) -> None:
+        self.owner.settings.setValue("minimax_prompt_window/geometry", self.saveGeometry())
+        self.owner.minimax_window_closed()
+        super().closeEvent(event)
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -1995,6 +2117,15 @@ class MainWindow(QMainWindow):
         self.current_project_name = "Untitled"
         self.project_dirty = False
         self.project_sessions: dict[str, dict] = {}
+        self.minimax_prompt_text = ""
+        self.minimax_refinement_instructions = ""
+        self.minimax_prompt_cache_key = ""
+        self.minimax_prompt_updated_at = ""
+        self.minimax_prompt_window: MiniMaxPromptWindow | None = None
+        self._minimax_save_timer = QTimer(self)
+        self._minimax_save_timer.setSingleShot(True)
+        self._minimax_save_timer.setInterval(1200)
+        self._minimax_save_timer.timeout.connect(self.persist_minimax_prompt_edit)
         self.current_collection: str | None = None
         self.autofit_tail_extension = 0
         self.timeline_fit_mode = False
@@ -2035,32 +2166,33 @@ class MainWindow(QMainWindow):
         toolbar = QToolBar("Project")
         toolbar.setObjectName("mainToolbar")
         toolbar.setMovable(False)
+        toolbar.setIconSize(QSize(22, 22))
         self.addToolBar(toolbar)
         projects_action = self.project_dock.toggleViewAction()
         projects_action.setText("Projects")
-        projects_action.setIcon(QIcon.fromTheme("folder", self.style().standardIcon(QStyle.StandardPixmap.SP_DirIcon)))
+        projects_action.setIcon(toolbar_icon("projects"))
         toolbar.addAction(projects_action)
         preview_action = self.project_preview_dock.toggleViewAction()
         preview_action.setText("Preview")
-        preview_action.setIcon(QIcon.fromTheme("video-x-generic", self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay)))
+        preview_action.setIcon(toolbar_icon("preview"))
         toolbar.addAction(preview_action)
         files_action = self.project_files_dock.toggleViewAction()
         files_action.setText("Project Files")
-        files_action.setIcon(QIcon.fromTheme("folder-documents", self.style().standardIcon(QStyle.StandardPixmap.SP_FileIcon)))
+        files_action.setIcon(toolbar_icon("project-files"))
         toolbar.addAction(files_action)
         toolbar.addSeparator()
         action_groups = [
-            (("New Project", "document-new", QStyle.StandardPixmap.SP_FileIcon, self.new_project),
-             ("Open", "document-open", QStyle.StandardPixmap.SP_DialogOpenButton, self.open_project),
-             ("Save Project", "document-save", QStyle.StandardPixmap.SP_DialogSaveButton, self.export_project)),
-            (("Import", "document-import", QStyle.StandardPixmap.SP_ArrowDown, self.import_ltx),
-             ("Export", "document-export", QStyle.StandardPixmap.SP_ArrowUp, self.export_ltx),
-             ("MiniMax H3", "edit-copy", QStyle.StandardPixmap.SP_FileIcon, self.export_minimax_h3)),
-            (("Delete selected", "edit-delete", QStyle.StandardPixmap.SP_TrashIcon, self.delete_selected),),
+            (("New Project", "new", self.new_project),
+             ("Open", "open", self.open_project),
+             ("Save Project", "save", self.export_project)),
+            (("Import", "import", self.import_ltx),
+             ("Export", "export-ltx", self.export_ltx),
+             ("MiniMax H3", "export-minimax", self.export_minimax_h3)),
+            (("Delete selected", "delete", self.delete_selected),),
         ]
         for group_index, group in enumerate(action_groups):
-            for label, theme_icon, fallback_icon, callback in group:
-                action = QAction(QIcon.fromTheme(theme_icon, self.style().standardIcon(fallback_icon)), label, self)
+            for label, icon_name, callback in group:
+                action = QAction(toolbar_icon(icon_name), label, self)
                 action.triggered.connect(callback)
                 if label == "MiniMax H3":
                     self.minimax_export_action = action
@@ -2096,7 +2228,7 @@ class MainWindow(QMainWindow):
         self.ui_scale_spin.valueChanged.connect(self.set_ui_text_scale)
         ui_scale_layout.addWidget(self.ui_scale_spin)
         toolbar.addWidget(self.ui_scale_control)
-        settings_action = QAction(QIcon.fromTheme("preferences-system", self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogDetailedView)), "Settings", self)
+        settings_action = QAction(toolbar_icon("settings"), "Settings", self)
         settings_action.triggered.connect(self.open_settings)
         toolbar.addAction(settings_action)
 
@@ -2774,6 +2906,7 @@ class MainWindow(QMainWindow):
         QMainWindow,QWidget{background:#24292c;color:#d9dcde;font:11px Arial} QMainWindow::separator{width:__DOCK_GRIP_WIDTH__px;height:__DOCK_GRIP_WIDTH__px;background:transparent;background-repeat:no-repeat;background-position:center} QMainWindow::separator:vertical{background-image:url("__DOCK_GRIP_IMAGE__")} QMainWindow::separator:horizontal{background-image:url("__DOCK_GRIP_HORIZONTAL_IMAGE__")} QMainWindow::separator:hover{background-color:rgba(88,118,134,35)} QToolBar{background:#1b2023;border:0;border-bottom:1px solid #111517;spacing:3px;padding:5px} QToolBar::separator{background:#394247;width:1px;margin:7px 5px}
         QToolButton,QPushButton,QComboBox,QSpinBox,QDoubleSpinBox,QLineEdit{background:#303436;border:1px solid #101213;border-radius:3px;padding:3px 7px;min-height:19px}
         #mainToolbar QToolButton{background:transparent;border:1px solid transparent;border-radius:4px;padding:5px 9px;color:#c5cdd1} #mainToolbar QToolButton:hover{background:#2b3438;border-color:#3a464c;color:#f3f7f9} #mainToolbar QToolButton:pressed{background:#17232a;border-color:#477d99;color:#bde6fb} #toolbarButton{background:#23343d;border:1px solid #385667;border-radius:5px;color:#c4e8fb;font-weight:bold}
+        #minimaxPromptToolbar{background:#1b2023;border:1px solid #354047;border-radius:6px} #minimaxCacheState{background:#2b3438;color:#aebbc1;border:1px solid #435159;border-radius:9px;padding:2px 8px;font-size:9px} #minimaxCacheState[cached="true"]{background:#244d37;color:#c9f4d6;border-color:#4c9b6a} #minimaxInstructions{background:#1b2023;border:1px solid #37464d;border-radius:4px;color:#d8e1e5;padding:7px}
         QToolButton:hover,QPushButton:hover{background:#41474a} QToolButton:pressed,QPushButton:pressed{background:#202729;border-color:#79a8c5} QLineEdit{background:#1e2122}
         QSpinBox,QDoubleSpinBox{padding-right:__SPIN_PAD__px} QSpinBox::up-button,QDoubleSpinBox::up-button{subcontrol-origin:border;subcontrol-position:top right;width:__SPIN_BUTTON__px;background:#3b4347;border:0;border-left:1px solid #171a1c;border-bottom:1px solid #202527;border-top-right-radius:3px} QSpinBox::down-button,QDoubleSpinBox::down-button{subcontrol-origin:border;subcontrol-position:bottom right;width:__SPIN_BUTTON__px;background:#343b3f;border:0;border-left:1px solid #171a1c;border-top:1px solid #202527;border-bottom-right-radius:3px}
         QSpinBox::up-button:hover,QDoubleSpinBox::up-button:hover,QSpinBox::down-button:hover,QDoubleSpinBox::down-button:hover{background:#506471} QSpinBox::up-button:pressed,QDoubleSpinBox::up-button:pressed,QSpinBox::down-button:pressed,QDoubleSpinBox::down-button:pressed{background:#274e66} QSpinBox::up-arrow,QDoubleSpinBox::up-arrow,QSpinBox::down-arrow,QDoubleSpinBox::down-arrow{width:__ARROW_SIZE__px;height:__ARROW_SIZE__px}
@@ -3419,6 +3552,10 @@ class MainWindow(QMainWindow):
             "timelineScale": self.pixels_per_second,
             "timelineAutoFit": self.timeline_fit_mode,
             "timelineHeight": self.timeline_height,
+            "minimaxPrompt": self.minimax_prompt_text,
+            "minimaxRefinementInstructions": self.minimax_refinement_instructions,
+            "minimaxPromptCacheKey": self.minimax_prompt_cache_key,
+            "minimaxPromptUpdatedAt": self.minimax_prompt_updated_at,
         }
 
     def cache_current_workspace(self) -> None:
@@ -3445,6 +3582,10 @@ class MainWindow(QMainWindow):
         self.output_width.setValue(int(state.get("outputWidth", 1280)))
         self.output_height.setValue(int(state.get("outputHeight", 704)))
         self.timeline_height = max(184, min(430, int(state.get("timelineHeight", 184))))
+        self.minimax_prompt_text = str(state.get("minimaxPrompt", ""))
+        self.minimax_refinement_instructions = str(state.get("minimaxRefinementInstructions", ""))
+        self.minimax_prompt_cache_key = str(state.get("minimaxPromptCacheKey", ""))
+        self.minimax_prompt_updated_at = str(state.get("minimaxPromptUpdatedAt", ""))
         self.timeline_height_handle.current_height = self.timeline_height
         self.set_timeline_height(self.timeline_height)
         auto_fit = bool(state.get("timelineAutoFit", False))
@@ -3459,6 +3600,7 @@ class MainWindow(QMainWindow):
         self.refresh_timeline()
         if auto_fit:
             self.apply_timeline_fit()
+        self.sync_minimax_prompt_window()
 
     def leave_collection(self) -> None:
         self.current_collection = None
@@ -3685,8 +3827,12 @@ class MainWindow(QMainWindow):
 
     def update_window_title(self) -> None:
         self.setWindowTitle(application_window_title(self.current_project_name))
+        self.sync_minimax_prompt_window()
 
     def closeEvent(self, event) -> None:
+        if self._minimax_save_timer.isActive():
+            self._minimax_save_timer.stop()
+            self.persist_minimax_prompt_edit()
         if hasattr(self, "project_preview_panel"):
             self.project_preview_panel.player.stop()
             if self.project_preview_panel.fullscreen_window.isVisible():
@@ -3743,6 +3889,12 @@ class MainWindow(QMainWindow):
         self.speaker_accent.setCurrentText("(Image/context provided)")
         self.segment_prompt.clear()
         self.global_prompt.clear()
+        self.minimax_prompt_text = ""
+        self.minimax_refinement_instructions = ""
+        self.minimax_prompt_cache_key = ""
+        self.minimax_prompt_updated_at = ""
+        if self.minimax_prompt_window:
+            self.minimax_prompt_window.hide()
         self.sfx.setChecked(False)
         self.spoken_dialog.setChecked(False)
         self.hdr.setChecked(False)
@@ -4393,6 +4545,8 @@ class MainWindow(QMainWindow):
         segment = self.current_segment()
         self.refine_timing_button.setEnabled(enabled and bool(segment))
         self.refine_prompt_button.setEnabled(enabled and bool(segment and segment.prompt.strip()))
+        if self.minimax_prompt_window:
+            self.minimax_prompt_window.set_busy(not enabled)
 
     def start_ai_worker(self, operation, args: tuple, activity: str, finished) -> None:
         retries = self.settings.value("api_retries", 2, int)
@@ -4401,6 +4555,7 @@ class MainWindow(QMainWindow):
         self.ai_activity_title = (
             "Magic Build" if operation is build_prompts else
             "MiniMax H3 Export" if operation is build_minimax_h3_prompt else
+            "MiniMax H3 Refine" if operation is refine_minimax_h3_prompt else
             "Refine Timing" if operation is refine_timing else
             "Refine Prompt"
         )
@@ -4542,16 +4697,99 @@ class MainWindow(QMainWindow):
         self.save_library_project(automatic=True)
         self.statusBar().showMessage("Magic Build complete")
 
+    def ensure_minimax_prompt_window(self) -> MiniMaxPromptWindow:
+        if self.minimax_prompt_window is None:
+            self.minimax_prompt_window = MiniMaxPromptWindow(self)
+        return self.minimax_prompt_window
+
+    def sync_minimax_prompt_window(self, cache_state: str | None = None) -> None:
+        if not self.minimax_prompt_window:
+            return
+        state = cache_state or ("Saved prompt" if self.minimax_prompt_text else "Not generated")
+        self.minimax_prompt_window.set_project(
+            self.current_project_name,
+            self.minimax_prompt_text,
+            self.minimax_refinement_instructions,
+            state,
+        )
+
+    def show_minimax_prompt_window(self, cache_state: str | None = None) -> MiniMaxPromptWindow:
+        window = self.ensure_minimax_prompt_window()
+        self.sync_minimax_prompt_window(cache_state)
+        window.show()
+        window.raise_()
+        window.activateWindow()
+        return window
+
+    def minimax_editor_changed(self) -> None:
+        if self._loading or not self.minimax_prompt_window:
+            return
+        self.minimax_prompt_text = self.minimax_prompt_window.editor.toPlainText()
+        self.minimax_refinement_instructions = self.minimax_prompt_window.instructions.toPlainText()
+        self.minimax_prompt_updated_at = datetime.now(timezone.utc).isoformat()
+        self.minimax_prompt_window.set_busy(False)
+        self.mark_dirty()
+        if self.current_project_id:
+            self._minimax_save_timer.start()
+
+    def persist_minimax_prompt_edit(self) -> None:
+        if self.current_project_id and self.segments:
+            self.save_library_project(automatic=True)
+
+    def minimax_window_closed(self) -> None:
+        self.minimax_editor_changed()
+        if self._minimax_save_timer.isActive():
+            self._minimax_save_timer.stop()
+        self.persist_minimax_prompt_edit()
+        if self.current_project_id:
+            self.statusBar().showMessage("MiniMax H3 prompt edits saved to project", 4000)
+
+    def current_minimax_cache_key(self, provider: str | None = None, model: str | None = None) -> str:
+        provider = provider or str(self.settings.value("provider", "gemini"))
+        model = model or str(self.settings.value("gemini_model", GEMINI_MODELS[0]))
+        return minimax_h3_cache_key(
+            self.segments,
+            provider,
+            model,
+            self.build_director_request(),
+            self.global_prompt.toPlainText(),
+            self.sfx.isChecked(),
+            self.spoken_dialog.isChecked(),
+            self.reduce_music.isChecked(),
+        )
+
+    def copy_minimax_prompt(self) -> None:
+        self.minimax_editor_changed()
+        if not self.minimax_prompt_text.strip():
+            return
+        QApplication.clipboard().setText(self.minimax_prompt_text)
+        message = "MiniMax H3 prompt copied to clipboard"
+        self.statusBar().showMessage(message, 4000)
+        self.show_toast(message)
+
     def export_minimax_h3(self) -> None:
         if not self.segments:
             QMessageBox.information(self, "MiniMax H3 Export", "Add at least one timeline item before exporting a MiniMax H3 prompt.")
             return
+        provider = str(self.settings.value("provider", "gemini"))
+        model = str(self.settings.value("gemini_model", GEMINI_MODELS[0]))
+        signature = self.current_minimax_cache_key(provider, model)
+        if self.minimax_prompt_text.strip() and self.minimax_prompt_cache_key == signature:
+            self.show_minimax_prompt_window("Cached • timeline current")
+            self.statusBar().showMessage("Loaded cached MiniMax H3 prompt; no API call needed", 4000)
+            return
+        window = self.show_minimax_prompt_window("Refreshing changed timeline…" if self.minimax_prompt_text.strip() else "Generating…")
         credentials = self.ai_credentials()
         if not credentials:
+            window.set_busy(False, "Generation cancelled")
             return
         provider, model, key = credentials
+        signature = self.current_minimax_cache_key(provider, model)
+        self.minimax_operation_signature = signature
+        self.minimax_operation_kind = "generate"
         timeout = self.settings.value("api_timeout", 400, int)
         self.statusBar().showMessage("Analyzing the complete sequence for MiniMax H3…")
+        window.set_busy(True, "Generating…")
         self.start_ai_worker(
             build_minimax_h3_prompt,
             (
@@ -4564,12 +4802,53 @@ class MainWindow(QMainWindow):
         )
 
     def minimax_h3_finished(self, prompt: str) -> None:
-        QApplication.clipboard().setText(prompt)
+        signature = str(getattr(self, "minimax_operation_signature", ""))
+        if not signature or signature != self.current_minimax_cache_key():
+            self.set_ai_controls_enabled(True)
+            self.magic_overlay.hide_overlay()
+            if self.minimax_prompt_window:
+                self.minimax_prompt_window.set_busy(False, "Timeline changed • generate again")
+            self.statusBar().showMessage("MiniMax result was not applied because its timeline inputs changed", 5000)
+            return
+        self.minimax_prompt_text = prompt
+        self.minimax_prompt_cache_key = signature
+        self.minimax_prompt_updated_at = datetime.now(timezone.utc).isoformat()
         self.set_ai_controls_enabled(True)
         self.magic_overlay.hide_overlay()
-        message = "MiniMax H3 prompt copied to clipboard"
-        self.statusBar().showMessage(message, 4000)
-        self.show_toast(message)
+        operation = str(getattr(self, "minimax_operation_kind", "generate"))
+        state = "Cached • refined" if operation == "refine" else "Cached • generated"
+        self.show_minimax_prompt_window(state)
+        self.mark_dirty()
+        self.save_library_project(automatic=True)
+        self.statusBar().showMessage("MiniMax H3 prompt refined and saved" if operation == "refine" else "MiniMax H3 prompt generated and saved")
+
+    def refine_minimax_prompt(self) -> None:
+        self.minimax_editor_changed()
+        if not self.minimax_prompt_text.strip():
+            QMessageBox.information(self, "Refine MiniMax H3 Prompt", "Write or generate a MiniMax H3 prompt before refining it.")
+            return
+        credentials = self.ai_credentials()
+        if not credentials:
+            return
+        provider, model, key = credentials
+        signature = self.current_minimax_cache_key(provider, model)
+        self.minimax_operation_signature = signature
+        self.minimax_operation_kind = "refine"
+        timeout = self.settings.value("api_timeout", 400, int)
+        if self.minimax_prompt_window:
+            self.minimax_prompt_window.set_busy(True, "Refining edited prompt…")
+        self.statusBar().showMessage("Refining the edited MiniMax H3 prompt…")
+        self.start_ai_worker(
+            refine_minimax_h3_prompt,
+            (
+                self.segments.copy(), provider, model, key, self.build_director_request(),
+                self.global_prompt.toPlainText(), self.sfx.isChecked(), self.spoken_dialog.isChecked(),
+                self.reduce_music.isChecked(), self.minimax_prompt_text,
+                self.minimax_refinement_instructions, timeout,
+            ),
+            "Refining the edited MiniMax prompt with timeline continuity context…",
+            self.minimax_h3_finished,
+        )
 
     def show_toast(self, message: str, duration: int = 3200) -> None:
         toast = getattr(self, "_toast_label", None)
@@ -4639,6 +4918,8 @@ class MainWindow(QMainWindow):
         self.set_ai_controls_enabled(True)
         self.magic_overlay.hide_overlay()
         title = getattr(self, "ai_activity_title", "AI operation")
+        if title.startswith("MiniMax") and self.minimax_prompt_window:
+            self.minimax_prompt_window.set_busy(False, "AI request failed")
         QMessageBox.critical(self, f"{title} failed", message)
         self.statusBar().showMessage(f"{title} failed")
 
@@ -4798,7 +5079,32 @@ class MainWindow(QMainWindow):
             value["previewData"] = data_url(segment.preview_path) if segment.kind != "text" and segment.preview_path and Path(segment.preview_path).exists() else None
             value["sourceData"] = data_url(segment.media_path) if segment.kind != "text" and segment.media_path and Path(segment.media_path).exists() else None
             frames.append(value)
-        return {"app": "ltx-director-director", "projectVersion": 5, "globalPrompt": self.global_prompt.toPlainText(), "directorIntent": self.intent.toPlainText(), "directionOptions": {"requestedLength": self.requested_length.value(), "speakerLanguage": self.speaker_language.currentText(), "speakerAccent": self.speaker_accent.currentText()}, "magicBuild": {"sfx": self.sfx.isChecked(), "spokenDialog": self.spoken_dialog.isChecked(), "hdr": self.hdr.isChecked(), "reduceMusic": self.reduce_music.isChecked()}, "output": {"width": self.output_width.value(), "height": self.output_height.value()}, "timelineView": {"scale": self.pixels_per_second, "autoFit": self.timeline_fit_mode, "height": self.timeline_height}, "frames": frames}
+        return {
+            "app": "ltx-director-director",
+            "projectVersion": 6,
+            "globalPrompt": self.global_prompt.toPlainText(),
+            "directorIntent": self.intent.toPlainText(),
+            "directionOptions": {
+                "requestedLength": self.requested_length.value(),
+                "speakerLanguage": self.speaker_language.currentText(),
+                "speakerAccent": self.speaker_accent.currentText(),
+            },
+            "magicBuild": {
+                "sfx": self.sfx.isChecked(),
+                "spokenDialog": self.spoken_dialog.isChecked(),
+                "hdr": self.hdr.isChecked(),
+                "reduceMusic": self.reduce_music.isChecked(),
+            },
+            "minimaxH3": {
+                "prompt": self.minimax_prompt_text,
+                "refinementInstructions": self.minimax_refinement_instructions,
+                "sourceHash": self.minimax_prompt_cache_key,
+                "updatedAt": self.minimax_prompt_updated_at,
+            },
+            "output": {"width": self.output_width.value(), "height": self.output_height.value()},
+            "timelineView": {"scale": self.pixels_per_second, "autoFit": self.timeline_fit_mode, "height": self.timeline_height},
+            "frames": frames,
+        }
 
     def load_project_payload(self, payload: dict) -> None:
         if payload.get("app") not in {"ltx-director-director", "ltx-prompt-director-python"}:
@@ -4840,6 +5146,15 @@ class MainWindow(QMainWindow):
         self.spoken_dialog.setChecked(bool(magic.get("spokenDialog", magic.get("vocals", False))))
         self.hdr.setChecked(bool(payload.get("magicBuild", {}).get("hdr")))
         self.reduce_music.setChecked(bool(payload.get("magicBuild", {}).get("reduceMusic")))
+        minimax = payload.get("minimaxH3", {})
+        if isinstance(minimax, str):
+            minimax = {"prompt": minimax}
+        if not isinstance(minimax, dict):
+            minimax = {}
+        self.minimax_prompt_text = str(minimax.get("prompt", ""))
+        self.minimax_refinement_instructions = str(minimax.get("refinementInstructions", ""))
+        self.minimax_prompt_cache_key = str(minimax.get("sourceHash", ""))
+        self.minimax_prompt_updated_at = str(minimax.get("updatedAt", ""))
         output = payload.get("output", {})
         self.output_width.setValue(int(output.get("width", 1280)))
         self.output_height.setValue(int(output.get("height", 704)))

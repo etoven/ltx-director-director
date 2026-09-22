@@ -1,6 +1,8 @@
 import json
 import re
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from ltx_prompt_director import ai
@@ -140,6 +142,57 @@ class MiniMaxH3PromptTests(unittest.TestCase):
         legacy_prompt = self.response_prompt(["00:00:000"]) + "\nretention_analysis:\nPicture is preserved."
         with self.assertRaises(ai.AIResponseFormatError):
             self.build_with_prompt(segments, legacy_prompt)
+
+    def test_refinement_uses_edited_prompt_and_private_instructions(self):
+        segments = self.segments(2)
+        current = self.response_prompt(["00:00:000", "00:02:500"])
+        edited = current.replace("gradual physical change", "slow shoulder growth that preserves the user's revised motion")
+        instructions = "Keep my revised shoulder motion, then make the final settling action less abrupt."
+        refined = current.replace("gradual physical change", "slow shoulder growth flows continuously into a gentle settling action")
+        response = json.dumps({
+            "continuityPlan": self.continuity_plan(2),
+            "prompt": refined,
+        })
+        captured = {}
+
+        def provider(inputs, provider, model, key, rules, timeout):
+            captured["rules"] = rules
+            return response
+
+        with patch.object(ai, "_provider_raw", side_effect=provider):
+            result = ai.refine_minimax_h3_prompt(
+                segments, "gemini", "gemini-3.5-flash-lite", "unused", "", "",
+                False, False, True, edited, instructions,
+            )
+
+        self.assertEqual(result, refined)
+        self.assertIn(edited, captured["rules"])
+        self.assertIn(instructions, captured["rules"])
+        self.assertIn("CURRENT EDITOR TEXT IS AUTHORITATIVE", captured["rules"])
+        self.assertIn("Never quote, summarize, mention, or append", captured["rules"])
+        self.assertNotIn(instructions, result)
+
+    def test_cache_key_is_stable_across_paths_and_changes_with_inputs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            first_path = Path(directory) / "first.png"
+            second_path = Path(directory) / "restored.png"
+            first_path.write_bytes(b"same-media-content")
+            second_path.write_bytes(b"same-media-content")
+            first = Segment("frame.png", str(first_path), str(first_path), prompt="Motion", duration=2.5, id="stable-id")
+            restored = Segment("frame.png", str(second_path), str(second_path), prompt="Motion", duration=2.5, id="stable-id")
+
+            def key(segment):
+                return ai.minimax_h3_cache_key([segment], "gemini", "gemini-3.5-flash-lite", "Intent", "Global", True, False, True)
+
+            self.assertEqual(key(first), key(restored))
+            restored.prompt = "Changed motion"
+            self.assertNotEqual(key(first), key(restored))
+            restored.prompt = first.prompt
+            restored.duration = 3.0
+            self.assertNotEqual(key(first), key(restored))
+            restored.duration = first.duration
+            second_path.write_bytes(b"different-media-content")
+            self.assertNotEqual(key(first), key(restored))
 
 
 if __name__ == "__main__":

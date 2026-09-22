@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
+from functools import lru_cache
 from pathlib import Path
 
 import requests
@@ -33,6 +35,38 @@ def build_minimax_h3_prompt(segments: list[Segment], provider: str, model: str, 
     inputs = _minimax_h3_inputs(segments, provider)
     rules = _minimax_h3_rules(segments, intent, global_prompt, sfx, spoken_dialog, reduce_music)
     raw = _provider_raw(inputs, provider, model, api_key, rules, timeout)
+    return _validated_minimax_h3_prompt(raw, segments)
+
+
+def refine_minimax_h3_prompt(segments: list[Segment], provider: str, model: str, api_key: str, intent: str, global_prompt: str, sfx: bool, spoken_dialog: bool, reduce_music: bool, current_prompt: str, refinement_instructions: str, timeout: int = 400) -> str:
+    """Refine the user's edited MiniMax prompt without exposing private edit directions."""
+    if not segments:
+        raise ValueError("Add at least one timeline item before refining a MiniMax H3 prompt.")
+    if not current_prompt.strip():
+        raise ValueError("Write or generate a MiniMax H3 prompt before refining it.")
+    inputs = _minimax_h3_inputs(segments, provider)
+    rules = _minimax_h3_rules(segments, intent, global_prompt, sfx, spoken_dialog, reduce_music)
+    rules += f"""
+
+REFINEMENT MODE — THE CURRENT EDITOR TEXT IS AUTHORITATIVE:
+- Refine the current editor prompt below instead of drafting a replacement from scratch.
+- Preserve every deliberate user edit unless the private refinement instructions explicitly request a change.
+- Apply the private refinement instructions naturally while retaining valid timeline facts, prescribed cue times, continuity, physical causality, and the required three-section output structure.
+- The refinement instructions are private editing directions. Never quote, summarize, mention, or append them inside the production prompt.
+- Return the same strict transport JSON contract, including a freshly checked private continuityPlan and the refined production prompt.
+
+CURRENT EDITOR PROMPT:
+{current_prompt.strip()}
+
+PRIVATE REFINEMENT INSTRUCTIONS:
+{refinement_instructions.strip() or 'Improve clarity, motion continuity, causal flow, and production readiness without changing the creative intent.'}
+"""
+    raw = _provider_raw(inputs, provider, model, api_key, rules, timeout)
+    return _validated_minimax_h3_prompt(raw, segments)
+
+
+def _validated_minimax_h3_prompt(raw: str, segments: list[Segment]) -> str:
+    """Validate both newly generated and editor-refined MiniMax prompts."""
     result = _parse_json(raw)
     if not isinstance(result, dict):
         raise AIResponseFormatError("The AI returned an invalid MiniMax H3 response. The operation will retry.")
@@ -99,6 +133,55 @@ def build_minimax_h3_prompt(segments: list[Segment], provider: str, model: str, 
     if re.search(r"(?im)^\s*(?:subject_definitions|summary|retention_analysis|detailed_description)\s*:", prompt):
         raise AIResponseFormatError("The AI exposed internal reference analysis in the MiniMax production prompt. The operation will retry.")
     return prompt
+
+
+@lru_cache(maxsize=256)
+def _file_content_digest(path_text: str, size: int, modified_ns: int) -> str:
+    """Return a stable media digest while avoiding repeat reads during one session."""
+    digest = hashlib.sha256()
+    digest.update(str(size).encode("ascii"))
+    with Path(path_text).open("rb") as source:
+        while chunk := source.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _segment_media_digest(segment: Segment) -> str:
+    source = Path(segment.media_path or segment.preview_path) if (segment.media_path or segment.preview_path) else None
+    if not source or not source.is_file():
+        return ""
+    stat = source.stat()
+    return _file_content_digest(str(source.resolve()), stat.st_size, stat.st_mtime_ns)
+
+
+def minimax_h3_cache_key(segments: list[Segment], provider: str, model: str, intent: str, global_prompt: str, sfx: bool, spoken_dialog: bool, reduce_music: bool) -> str:
+    """Fingerprint every input that can materially change a MiniMax prompt."""
+    records = []
+    for segment in segments:
+        records.append({
+            "id": segment.id,
+            "name": segment.name,
+            "kind": segment.kind,
+            "role": segment.role,
+            "prompt": segment.prompt,
+            "imagePrompt": segment.image_prompt,
+            "duration": segment.duration,
+            "mediaDurationFrames": segment.media_duration_frames,
+            "trimStart": segment.trim_start,
+            "mediaDigest": _segment_media_digest(segment),
+        })
+    value = {
+        "schema": 1,
+        "provider": provider,
+        "model": model,
+        "intent": intent,
+        "globalPrompt": global_prompt,
+        "sfx": bool(sfx),
+        "spokenDialog": bool(spoken_dialog),
+        "reduceMusic": bool(reduce_music),
+        "segments": records,
+    }
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
 
 
 def refine_timing(segments: list[Segment], selected_index: int, provider: str, model: str, api_key: str, intent: str, requested_total: float, timeout: int = 400) -> dict:
