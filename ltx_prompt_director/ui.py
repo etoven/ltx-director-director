@@ -1991,6 +1991,8 @@ class MiniMaxPromptWindow(QDialog):
         self.owner = owner
         self.setModal(False)
         self.setWindowFlag(Qt.WindowType.Window, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        self.destroyed.connect(owner.minimax_window_destroyed)
         self.resize(980, 720)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 12, 12, 12)
@@ -2119,7 +2121,7 @@ class MiniMaxPromptWindow(QDialog):
 
     def closeEvent(self, event) -> None:
         self.owner.settings.setValue("minimax_prompt_window/geometry", self.saveGeometry())
-        self.owner.minimax_window_closed()
+        self.owner.minimax_editor_changed()
         super().closeEvent(event)
 
 
@@ -3850,8 +3852,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         if self.minimax_prompt_window:
-            self.minimax_editor_changed()
-            self.persist_minimax_prompt_edit()
+            self.minimax_prompt_window.close()
         if hasattr(self, "project_preview_panel"):
             self.project_preview_panel.player.stop()
             if self.project_preview_panel.fullscreen_window.isVisible():
@@ -4754,13 +4755,14 @@ class MainWindow(QMainWindow):
         self.minimax_prompt_updated_at = datetime.now(timezone.utc).isoformat()
         self.mark_dirty()
 
-    def persist_minimax_prompt_edit(self) -> None:
+    def save_minimax_prompt_on_close(self) -> None:
+        """Write MiniMax editor state only when its window (or the app) closes."""
         if self.current_project_id and self.segments:
             self.save_library_project(automatic=True)
 
-    def minimax_window_closed(self) -> None:
-        self.minimax_editor_changed()
-        self.persist_minimax_prompt_edit()
+    def minimax_window_destroyed(self, _window=None) -> None:
+        self.minimax_prompt_window = None
+        self.save_minimax_prompt_on_close()
         if self.current_project_id:
             self.statusBar().showMessage("MiniMax H3 prompt edits saved to project", 4000)
 
@@ -4844,7 +4846,6 @@ class MainWindow(QMainWindow):
             self.magic_overlay.hide_overlay()
             if self.minimax_prompt_window:
                 self.minimax_prompt_window.set_busy(False, "Editor changed • result not applied")
-            self.persist_minimax_prompt_edit()
             self.statusBar().showMessage("MiniMax result was not applied because the editor text changed", 5000)
             return
         self.minimax_prompt_text = prompt
@@ -4853,11 +4854,16 @@ class MainWindow(QMainWindow):
         self.set_ai_controls_enabled(True)
         self.magic_overlay.hide_overlay()
         operation = str(getattr(self, "minimax_operation_kind", "generate"))
+        if operation == "refine":
+            self.minimax_refinement_instructions = ""
         state = "Cached • refined" if operation == "refine" else "Cached • generated"
         self.show_minimax_prompt_window(state)
         self.mark_dirty()
-        self.save_library_project(automatic=True)
-        self.statusBar().showMessage("MiniMax H3 prompt refined and saved" if operation == "refine" else "MiniMax H3 prompt generated and saved")
+        self.statusBar().showMessage(
+            "MiniMax H3 prompt refined; close the editor to save"
+            if operation == "refine" else
+            "MiniMax H3 prompt generated; close the editor to save"
+        )
 
     def refine_minimax_prompt(self) -> None:
         self.minimax_editor_changed()

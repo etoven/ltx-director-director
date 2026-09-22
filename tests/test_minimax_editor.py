@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QSettings, Qt
+from PySide6.QtCore import QEvent, QSettings, Qt
 from PySide6.QtWidgets import QApplication, QMainWindow
 
 from ltx_prompt_director.models import Segment
@@ -32,7 +32,7 @@ class _EditorOwner(QMainWindow):
     def copy_minimax_prompt(self):
         pass
 
-    def minimax_window_closed(self):
+    def minimax_window_destroyed(self, _window=None):
         pass
 
 
@@ -68,9 +68,8 @@ class MiniMaxEditorTests(unittest.TestCase):
     def test_refine_snapshots_edited_prompt_and_special_instructions(self):
         window = MainWindow()
         dialog = window.ensure_minimax_prompt_window()
-        dialog.editor.setPlainText("User-pasted production prompt")
-        dialog.instructions.setPlainText("Preserve the new ending and smooth the final transition.")
         window.segments = [Segment("Beat", "", "", kind="text", prompt="Motion", duration=2.5)]
+        window.current_project_id = "test-project"
         captured = {}
 
         def capture_worker(operation, args, activity, finished, **kwargs):
@@ -81,15 +80,25 @@ class MiniMaxEditorTests(unittest.TestCase):
         with (
             patch.object(window, "ai_credentials", return_value=("gemini", "gemini-3.5-flash-lite", "unused")),
             patch.object(window, "current_minimax_cache_key", return_value="source-signature"),
-            patch.object(window, "persist_minimax_prompt_edit") as persist,
             patch.object(window, "save_library_project") as save_project,
             patch.object(window, "start_ai_worker", side_effect=capture_worker),
         ):
-            window.refine_minimax_prompt()
+            dialog.editor.setPlainText("User-pasted production prompt")
+            dialog.instructions.setPlainText("Preserve the new ending and smooth the final transition.")
 
-            persist.assert_not_called()
+            self.assertFalse(captured)
+            save_project.assert_not_called()
+
+            dialog.refine_button.click()
+
             save_project.assert_not_called()
             window.minimax_h3_finished("Refined production prompt")
+            save_project.assert_not_called()
+            self.assertEqual(window.minimax_refinement_instructions, "")
+            self.assertEqual(dialog.instructions.toPlainText(), "")
+            dialog.close()
+            QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+            QApplication.processEvents()
             save_project.assert_called_once_with(automatic=True)
 
         self.assertEqual(captured["args"][-3], "User-pasted production prompt")
@@ -100,6 +109,7 @@ class MiniMaxEditorTests(unittest.TestCase):
             window.minimax_operation_editor_snapshot,
             ("User-pasted production prompt", "Preserve the new ending and smooth the final transition."),
         )
+        window.current_project_id = None
         window.close()
 
 
