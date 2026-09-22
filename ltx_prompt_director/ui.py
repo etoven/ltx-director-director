@@ -2023,6 +2023,9 @@ class MiniMaxPromptWindow(QDialog):
         instruction_layout.addWidget(instruction_label)
         self.instructions = QTextEdit()
         self.instructions.setObjectName("minimaxInstructions")
+        self.instructions.setAcceptRichText(False)
+        self.instructions.setTextInteractionFlags(Qt.TextInteractionFlag.TextEditorInteraction)
+        self.instructions.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.instructions.setPlaceholderText(
             "Private directions for the next refinement, such as: smooth the transition into the final transformation, preserve the edited dialogue exactly, or reduce camera movement."
         )
@@ -2046,6 +2049,9 @@ class MiniMaxPromptWindow(QDialog):
         prompt_layout.addLayout(prompt_header)
         self.editor = QTextEdit()
         self.editor.setObjectName("promptEditor")
+        self.editor.setAcceptRichText(False)
+        self.editor.setTextInteractionFlags(Qt.TextInteractionFlag.TextEditorInteraction)
+        self.editor.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.editor.setPlaceholderText("Generate a MiniMax H3 prompt or begin writing here…")
         self.editor.textChanged.connect(self._editor_changed)
         prompt_layout.addWidget(self.editor, 1)
@@ -2064,11 +2070,13 @@ class MiniMaxPromptWindow(QDialog):
         geometry = owner.settings.value("minimax_prompt_window/geometry")
         if geometry:
             self.restoreGeometry(geometry)
+        self.busy = False
         self.set_busy(False)
 
     def _editor_changed(self) -> None:
         self.character_count.setText(f"{len(self.editor.toPlainText())} characters")
         self.owner.minimax_editor_changed()
+        self.update_actions()
 
     def set_project(self, project_name: str, prompt: str, instructions: str, cache_state: str) -> None:
         self.setWindowTitle(f"MiniMax H3 Prompt — {project_name}")
@@ -2087,12 +2095,20 @@ class MiniMaxPromptWindow(QDialog):
         self.cache_state.style().polish(self.cache_state)
 
     def set_busy(self, busy: bool, status: str = "") -> None:
-        self.editor.setReadOnly(busy)
-        self.instructions.setReadOnly(busy)
-        self.refine_button.setEnabled(not busy and bool(self.editor.toPlainText().strip()))
-        self.copy_button.setEnabled(not busy and bool(self.editor.toPlainText().strip()))
+        # Keep both text fields editable while an AI request runs. A user may
+        # paste or revise the production prompt at any time; request-result
+        # guards prevent an older response from replacing newer editor text.
+        self.editor.setReadOnly(False)
+        self.instructions.setReadOnly(False)
+        self.busy = busy
+        self.update_actions()
         if status:
             self.set_cache_state(status)
+
+    def update_actions(self) -> None:
+        has_prompt = bool(self.editor.toPlainText().strip())
+        self.refine_button.setEnabled(not self.busy and has_prompt)
+        self.copy_button.setEnabled(has_prompt)
 
     def closeEvent(self, event) -> None:
         self.owner.settings.setValue("minimax_prompt_window/geometry", self.saveGeometry())
@@ -4727,7 +4743,6 @@ class MainWindow(QMainWindow):
         self.minimax_prompt_text = self.minimax_prompt_window.editor.toPlainText()
         self.minimax_refinement_instructions = self.minimax_prompt_window.instructions.toPlainText()
         self.minimax_prompt_updated_at = datetime.now(timezone.utc).isoformat()
-        self.minimax_prompt_window.set_busy(False)
         self.mark_dirty()
         if self.current_project_id:
             self._minimax_save_timer.start()
@@ -4787,6 +4802,10 @@ class MainWindow(QMainWindow):
         signature = self.current_minimax_cache_key(provider, model)
         self.minimax_operation_signature = signature
         self.minimax_operation_kind = "generate"
+        self.minimax_operation_editor_snapshot = (
+            self.minimax_prompt_text,
+            self.minimax_refinement_instructions,
+        )
         timeout = self.settings.value("api_timeout", 400, int)
         self.statusBar().showMessage("Analyzing the complete sequence for MiniMax H3…")
         window.set_busy(True, "Generating…")
@@ -4810,6 +4829,18 @@ class MainWindow(QMainWindow):
                 self.minimax_prompt_window.set_busy(False, "Timeline changed • generate again")
             self.statusBar().showMessage("MiniMax result was not applied because its timeline inputs changed", 5000)
             return
+        editor_snapshot = (
+            self.minimax_prompt_text,
+            self.minimax_refinement_instructions,
+        )
+        if editor_snapshot != getattr(self, "minimax_operation_editor_snapshot", editor_snapshot):
+            self.set_ai_controls_enabled(True)
+            self.magic_overlay.hide_overlay()
+            if self.minimax_prompt_window:
+                self.minimax_prompt_window.set_busy(False, "Editor changed • result not applied")
+            self.persist_minimax_prompt_edit()
+            self.statusBar().showMessage("MiniMax result was not applied because the editor text changed", 5000)
+            return
         self.minimax_prompt_text = prompt
         self.minimax_prompt_cache_key = signature
         self.minimax_prompt_updated_at = datetime.now(timezone.utc).isoformat()
@@ -4831,9 +4862,16 @@ class MainWindow(QMainWindow):
         if not credentials:
             return
         provider, model, key = credentials
+        if self._minimax_save_timer.isActive():
+            self._minimax_save_timer.stop()
+        self.persist_minimax_prompt_edit()
         signature = self.current_minimax_cache_key(provider, model)
         self.minimax_operation_signature = signature
         self.minimax_operation_kind = "refine"
+        self.minimax_operation_editor_snapshot = (
+            self.minimax_prompt_text,
+            self.minimax_refinement_instructions,
+        )
         timeout = self.settings.value("api_timeout", 400, int)
         if self.minimax_prompt_window:
             self.minimax_prompt_window.set_busy(True, "Refining edited prompt…")
