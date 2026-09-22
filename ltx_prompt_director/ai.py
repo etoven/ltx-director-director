@@ -868,7 +868,9 @@ def provider_error_message(error: Exception) -> str:
                 "not a problem with your timeline or prompt. Wait a few minutes and try again, or choose another "
                 "Gemini model in Settings."
             )
-            return f"{message}\n\nGoogle response: {detail}" if detail else message
+            return f"{message}\n\nGoogle response (HTTP {status}): {detail}" if detail else f"{message}\n\nHTTP {status}"
+        message = f"Google Gemini returned HTTP {status}."
         if detail:
-            return f"Google Gemini returned HTTP {status}.\n\nGoogle response: {detail}"
+            message = f"{message}\n\nGoogle response: {detail}"
+        return message
     return str(error)

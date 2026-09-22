@@ -27,6 +27,7 @@ class AIErrorMessageTests(unittest.TestCase):
         self.assertIn("provider-capacity issue", message)
         self.assertIn("not a problem with your timeline or prompt", message)
         self.assertIn("currently experiencing high demand", message)
+        self.assertIn("Google response (HTTP 503)", message)
 
     def test_other_gemini_http_errors_include_provider_detail(self):
         error = self.http_error(404, {
@@ -38,6 +39,7 @@ class AIErrorMessageTests(unittest.TestCase):
         message = provider_error_message(error)
         self.assertIn("HTTP 404", message)
         self.assertIn("no longer available", message)
+        self.assertNotIn("Full Google response", message)
 
 
 if __name__ == "__main__":
