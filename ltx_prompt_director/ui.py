@@ -14,7 +14,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from PySide6.QtCore import QDateTime, QEasingCurve, QObject, QRunnable, QRectF, QSettings, QSize, QStandardPaths, Qt, QThreadPool, QTimer, QUrl, QVariantAnimation, Signal
-from PySide6.QtGui import QAction, QActionGroup, QBrush, QColor, QIcon, QImageReader, QPainter, QPen, QPixmap
+from PySide6.QtGui import QAction, QActionGroup, QBrush, QColor, QIcon, QImageReader, QPainter, QPen, QPixmap, QTextCursor
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
@@ -2054,6 +2054,7 @@ class MiniMaxPromptWindow(QDialog):
         self.editor.setAcceptRichText(False)
         self.editor.setTextInteractionFlags(Qt.TextInteractionFlag.TextEditorInteraction)
         self.editor.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setFocusProxy(self.editor)
         self.editor.setPlaceholderText("Generate a MiniMax H3 prompt or begin writing here…")
         self.editor.textChanged.connect(self._editor_changed)
         prompt_layout.addWidget(self.editor, 1)
@@ -2118,6 +2119,12 @@ class MiniMaxPromptWindow(QDialog):
         has_prompt = bool(self.editor.toPlainText().strip())
         self.refine_button.setEnabled(not self.busy and has_prompt)
         self.copy_button.setEnabled(has_prompt)
+
+    def focus_prompt_editor(self) -> None:
+        self.editor.setFocus(Qt.FocusReason.ActiveWindowFocusReason)
+        cursor = self.editor.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        self.editor.setTextCursor(cursor)
 
     def closeEvent(self, event) -> None:
         self.owner.settings.setValue("minimax_prompt_window/geometry", self.saveGeometry())
@@ -4745,6 +4752,7 @@ class MainWindow(QMainWindow):
         window.show()
         window.raise_()
         window.activateWindow()
+        window.focus_prompt_editor()
         return window
 
     def minimax_editor_changed(self) -> None:

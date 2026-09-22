@@ -7,6 +7,7 @@ from unittest.mock import patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QEvent, QSettings, Qt
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QMainWindow
 
 from ltx_prompt_director.models import Segment
@@ -64,6 +65,22 @@ class MiniMaxEditorTests(unittest.TestCase):
             self.assertTrue(window.refine_button.isEnabled())
             window.close()
             owner.close()
+
+    def test_show_focuses_existing_prompt_so_space_edits_instead_of_reopening_cache(self):
+        window = MainWindow()
+        window.minimax_prompt_text = "Existing cached prompt"
+        dialog = window.show_minimax_prompt_window("Cached • timeline current")
+        QApplication.processEvents()
+
+        self.assertIs(QApplication.focusWidget(), dialog.editor)
+        QTest.keyClick(QApplication.focusWidget(), Qt.Key.Key_Space)
+        self.assertEqual(dialog.editor.toPlainText(), "Existing cached prompt ")
+        self.assertEqual(window.minimax_prompt_text, "Existing cached prompt ")
+
+        dialog.close()
+        QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        QApplication.processEvents()
+        window.close()
 
     def test_refine_snapshots_edited_prompt_and_special_instructions(self):
         window = MainWindow()
