@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (
 )
 
 from . import __version__
-from .ai import GEMINI_MODELS, build_minimax_h3_prompt, build_prompts, minimax_h3_cache_key, provider_error_message, refine_minimax_h3_prompt, refine_segment_prompt, refine_timing, retryable_connection_error
+from .ai import AIResponseFormatError, GEMINI_MODELS, build_minimax_h3_prompt, build_prompts, minimax_h3_cache_key, provider_error_message, refine_minimax_h3_prompt, refine_segment_prompt, refine_timing, retryable_connection_error
 from .media import APP_CACHE, TIMELINE_VIDEO_SUFFIXES, comfy_input_references, copy_media_for_export, data_url, extract_audio_for_export, prepare_media, safe_media_filename, unique_media_filename, write_data_url
 from .models import Segment, order_segments_by_ids, text_segment_from_ltx
 from .project_data import ARCHIVE_COLOR, load_other_tags, load_project_tags, new_note, normalize_notes, normalize_project_labels
@@ -181,7 +181,7 @@ class MagicWorker(QRunnable):
         self.signals = WorkerSignals()
 
     def run(self) -> None:
-        attempts = self.retries + 1
+        attempts = max(0, int(self.retries)) + 1
         for attempt in range(1, attempts + 1):
             try:
                 self.signals.progress.emit(attempt, attempts, self.activity)
@@ -189,13 +189,17 @@ class MagicWorker(QRunnable):
                 return
             except Exception as error:
                 if attempt >= attempts or not retryable_connection_error(error):
-                    self.signals.failed.emit(provider_error_message(error))
+                    message = provider_error_message(error)
+                    if retryable_connection_error(error) and attempts > 1:
+                        message = f"{message}\n\nStopped after {attempt} attempts."
+                    self.signals.failed.emit(message)
                     return
+                retry_subject = "AI response failed validation" if isinstance(error, AIResponseFormatError) else "Provider response stumbled"
                 for remaining in range(self.retry_cooldown, 0, -1):
-                    self.signals.progress.emit(attempt + 1, attempts, f"Provider response stumbled—retrying in {remaining}s…")
+                    self.signals.progress.emit(attempt + 1, attempts, f"{retry_subject}—retrying in {remaining}s…")
                     time.sleep(1)
                 if self.retry_cooldown == 0:
-                    self.signals.progress.emit(attempt + 1, attempts, "Provider response stumbled—retrying now…")
+                    self.signals.progress.emit(attempt + 1, attempts, f"{retry_subject}—retrying now…")
 
 
 class TimelineListWidget(QListWidget):
@@ -2165,6 +2169,63 @@ class MiniMaxPacingStrip(QFrame):
         self.total_time.setText(f"TOTAL  {minimax_start_timestamp(cursor)}")
 
 
+class MiniMaxBusyVeil(QWidget):
+    """Mouse-transparent animated scan veil shown over the MiniMax editors."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("minimaxBusyVeil")
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self._line_offset = 0.0
+        self._animation = QVariantAnimation(self)
+        self._animation.setStartValue(0.0)
+        self._animation.setEndValue(18.0)
+        self._animation.setDuration(700)
+        self._animation.setLoopCount(-1)
+        self._animation.valueChanged.connect(self._advance_pattern)
+
+        layout = QVBoxLayout(self)
+        layout.addStretch()
+        card = QFrame()
+        card.setObjectName("minimaxBusyCard")
+        card.setFixedWidth(460)
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(20, 14, 20, 14)
+        self.status = QLabel("Working…")
+        self.status.setObjectName("minimaxBusyStatus")
+        self.status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.status.setWordWrap(True)
+        card_layout.addWidget(self.status)
+        layout.addWidget(card, 0, Qt.AlignmentFlag.AlignHCenter)
+        layout.addStretch()
+
+    def _advance_pattern(self, value) -> None:
+        self._line_offset = float(value)
+        self.update()
+
+    def set_status(self, text: str) -> None:
+        self.status.setText(text or "Working…")
+
+    def set_running(self, running: bool) -> None:
+        if running:
+            self.show()
+            self.raise_()
+            self._animation.start()
+        else:
+            self._animation.stop()
+            self.hide()
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), QColor(10, 16, 19, 188))
+        painter.setPen(QPen(QColor(88, 177, 208, 62), 2))
+        spacing = 18
+        offset = round(self._line_offset)
+        for x in range(-self.height() - spacing, self.width() + spacing, spacing):
+            painter.drawLine(x - offset, self.height(), x + self.height() - offset, 0)
+
+
 class MiniMaxPromptWindow(QDialog):
     """Persistent, modeless editor for a project's MiniMax H3 prompt."""
 
@@ -2198,8 +2259,20 @@ class MiniMaxPromptWindow(QDialog):
         toolbar_layout.addWidget(self.refine_button)
         layout.addWidget(toolbar)
 
+        self.message_banner = QLabel()
+        self.message_banner.setObjectName("minimaxMessageBanner")
+        self.message_banner.setWordWrap(True)
+        self.message_banner.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.message_banner.hide()
+        layout.addWidget(self.message_banner)
+
         self.pacing_strip = MiniMaxPacingStrip()
         layout.addWidget(self.pacing_strip)
+
+        self.editing_area = QWidget()
+        editing_layout = QVBoxLayout(self.editing_area)
+        editing_layout.setContentsMargins(0, 0, 0, 0)
+        editing_layout.setSpacing(9)
 
         instruction_panel = QFrame()
         instruction_panel.setObjectName("promptPanel")
@@ -2219,7 +2292,7 @@ class MiniMaxPromptWindow(QDialog):
         self.instructions.setMaximumHeight(112)
         self.instructions.textChanged.connect(owner.minimax_editor_changed)
         instruction_layout.addWidget(self.instructions)
-        layout.addWidget(instruction_panel)
+        editing_layout.addWidget(instruction_panel)
 
         prompt_panel = QFrame()
         prompt_panel.setObjectName("promptPanel")
@@ -2253,7 +2326,10 @@ class MiniMaxPromptWindow(QDialog):
         self.copy_button.clicked.connect(owner.copy_minimax_prompt)
         prompt_footer.addWidget(self.copy_button, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         prompt_layout.addLayout(prompt_footer)
-        layout.addWidget(prompt_panel, 1)
+        editing_layout.addWidget(prompt_panel, 1)
+        layout.addWidget(self.editing_area, 1)
+        self.busy_veil = MiniMaxBusyVeil(self.editing_area)
+        self.busy_veil.hide()
 
         geometry = owner.settings.value("minimax_prompt_window/geometry")
         if geometry:
@@ -2274,6 +2350,7 @@ class MiniMaxPromptWindow(QDialog):
             editor.setPlainText(value)
             editor.blockSignals(False)
         self.character_count.setText(f"{len(prompt)} characters")
+        self.clear_message()
         self.set_cache_state(cache_state)
         self.set_busy(False)
 
@@ -2283,6 +2360,17 @@ class MiniMaxPromptWindow(QDialog):
         self.cache_state.style().unpolish(self.cache_state)
         self.cache_state.style().polish(self.cache_state)
 
+    def show_message(self, text: str, level: str = "info") -> None:
+        self.message_banner.setText(text)
+        self.message_banner.setProperty("level", level)
+        self.message_banner.style().unpolish(self.message_banner)
+        self.message_banner.style().polish(self.message_banner)
+        self.message_banner.show()
+
+    def clear_message(self) -> None:
+        self.message_banner.clear()
+        self.message_banner.hide()
+
     def set_busy(self, busy: bool, status: str = "") -> None:
         # Keep both text fields editable while an AI request runs. A user may
         # paste or revise the production prompt at any time; request-result
@@ -2291,6 +2379,13 @@ class MiniMaxPromptWindow(QDialog):
         self.instructions.setReadOnly(False)
         was_busy = self.busy
         self.busy = busy
+        self.busy_veil.setGeometry(self.editing_area.rect())
+        if busy:
+            self.clear_message()
+            self.busy_veil.set_status(status)
+            self.busy_veil.set_running(True)
+        else:
+            self.busy_veil.set_running(False)
         if busy and status:
             self.refine_button.setText("⟳ Refining…" if "refin" in status.casefold() else "⟳ Working…")
         elif busy and not was_busy:
@@ -2300,6 +2395,10 @@ class MiniMaxPromptWindow(QDialog):
         self.update_actions()
         if status:
             self.set_cache_state(status)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self.busy_veil.setGeometry(self.editing_area.rect())
 
     def update_actions(self) -> None:
         has_prompt = bool(self.editor.toPlainText().strip())
@@ -3120,7 +3219,7 @@ class MainWindow(QMainWindow):
         QMainWindow,QWidget{background:#24292c;color:#d9dcde;font:11px Arial} QMainWindow::separator{width:__DOCK_GRIP_WIDTH__px;height:__DOCK_GRIP_WIDTH__px;background:transparent;background-repeat:no-repeat;background-position:center} QMainWindow::separator:vertical{background-image:url("__DOCK_GRIP_IMAGE__")} QMainWindow::separator:horizontal{background-image:url("__DOCK_GRIP_HORIZONTAL_IMAGE__")} QMainWindow::separator:hover{background-color:rgba(88,118,134,35)} QToolBar{background:#1b2023;border:0;border-bottom:1px solid #111517;spacing:3px;padding:5px} QToolBar::separator{background:#394247;width:1px;margin:7px 5px}
         QToolButton,QPushButton,QComboBox,QSpinBox,QDoubleSpinBox,QLineEdit{background:#303436;border:1px solid #101213;border-radius:3px;padding:3px 7px;min-height:19px}
         #mainToolbar QToolButton{background:transparent;border:1px solid transparent;border-radius:4px;padding:5px 9px;color:#c5cdd1} #mainToolbar QToolButton:hover{background:#2b3438;border-color:#3a464c;color:#f3f7f9} #mainToolbar QToolButton:pressed{background:#17232a;border-color:#477d99;color:#bde6fb} #toolbarButton{background:#23343d;border:1px solid #385667;border-radius:5px;color:#c4e8fb;font-weight:bold}
-        #minimaxPromptToolbar{background:#1b2023;border:1px solid #354047;border-radius:6px} #minimaxCacheState{background:#2b3438;color:#aebbc1;border:1px solid #435159;border-radius:9px;padding:2px 8px;font-size:9px} #minimaxCacheState[cached="true"]{background:#244d37;color:#c9f4d6;border-color:#4c9b6a} #minimaxInstructions{background:#1b2023;border:1px solid #37464d;border-radius:4px;color:#d8e1e5;padding:7px}
+        #minimaxPromptToolbar{background:#1b2023;border:1px solid #354047;border-radius:6px} #minimaxCacheState{background:#2b3438;color:#aebbc1;border:1px solid #435159;border-radius:9px;padding:2px 8px;font-size:9px} #minimaxCacheState[cached="true"]{background:#244d37;color:#c9f4d6;border-color:#4c9b6a} #minimaxInstructions{background:#1b2023;border:1px solid #37464d;border-radius:4px;color:#d8e1e5;padding:7px} #minimaxMessageBanner{background:#20313a;color:#ccecf8;border:1px solid #49758a;border-radius:6px;padding:8px 11px} #minimaxMessageBanner[level="success"]{background:#20392c;color:#cef2d9;border-color:#4b8962} #minimaxMessageBanner[level="warning"]{background:#3a321f;color:#f2dfb0;border-color:#8a7340} #minimaxMessageBanner[level="error"]{background:#3a2325;color:#f2c5c8;border-color:#94555a} #minimaxBusyCard{background:#17262d;border:1px solid #65a7c7;border-radius:8px} #minimaxBusyStatus{background:transparent;color:#d9f2ff;font-weight:bold;padding:2px}
         #minimaxPacingFrame{background:#192125;border:1px solid #4b606a;border-radius:9px} #minimaxPacingEmblem{background:#19282f;color:#63cce6;border:1px solid #476571;border-radius:6px;font-size:18px;font-weight:bold;min-width:29px;max-width:29px;min-height:29px;max-height:29px} #minimaxPacingTitle{color:#dcebf1;font-size:9px;font-weight:bold;letter-spacing:2px} #minimaxPacingSubtitle{color:#7f9098;font-size:8px} #minimaxPacingTotal{background:#151c1f;color:#e6f5fa;border:1px solid #3d5058;border-radius:5px;padding:5px 8px;font:10px 'Courier New';font-weight:bold} #minimaxPacingScroll,#minimaxPacingSequence{background:transparent;border:0} #minimaxPacingCard{background:#202a2f;border:1px solid #5a6d76;border-radius:7px} #minimaxPacingCard[kind="text"]{background:#292538;border-color:#74669a} #minimaxPacingCard[kind="video"]{background:#203129;border-color:#567b68} #minimaxPacingPreview{background:#111719;color:#82959e;border:1px solid #3b4b52;border-radius:4px;font-size:9px;font-weight:bold} #minimaxPacingCard[kind="text"] #minimaxPacingPreview{background:#211d31;color:#c2b1e6;border-color:#625682} #minimaxPacingCard[kind="video"] #minimaxPacingPreview{background:#17251e;color:#a6dabc;border-color:#456452} #minimaxPacingTime{color:#eef8fb;font:9px 'Courier New';font-weight:bold} #minimaxPacingMedia{background:#141b1e;color:#bfe9f4;border:1px solid #40525a;border-radius:4px;padding:2px;font-size:8px;font-weight:bold} #minimaxPacingName{color:#9aabb3;font-size:8px} #minimaxPacingArrowBox{background:transparent;border:0} #minimaxPacingDuration{color:#8fa1aa;font:8px 'Courier New'} #minimaxPacingArrow{color:#64cee7;font-size:14px;font-weight:bold} #minimaxPacingEmpty{background:#151c1f;color:#7e8e96;border:1px dashed #405159;border-radius:5px;padding:30px}
         QToolButton:hover,QPushButton:hover{background:#41474a} QToolButton:pressed,QPushButton:pressed{background:#202729;border-color:#79a8c5} QLineEdit{background:#1e2122}
         QSpinBox,QDoubleSpinBox{padding-right:__SPIN_PAD__px} QSpinBox::up-button,QDoubleSpinBox::up-button{subcontrol-origin:border;subcontrol-position:top right;width:__SPIN_BUTTON__px;background:#3b4347;border:0;border-left:1px solid #171a1c;border-bottom:1px solid #202527;border-top-right-radius:3px} QSpinBox::down-button,QDoubleSpinBox::down-button{subcontrol-origin:border;subcontrol-position:bottom right;width:__SPIN_BUTTON__px;background:#343b3f;border:0;border-left:1px solid #171a1c;border-top:1px solid #202527;border-bottom-right-radius:3px}
@@ -4884,6 +4983,7 @@ class MainWindow(QMainWindow):
     def magic_progress(self, attempt: int, total: int, detail: str) -> None:
         if getattr(self, "ai_activity_in_minimax_window", False) and self.minimax_prompt_window:
             action = "Refining" if getattr(self, "minimax_operation_kind", "") == "refine" else "Generating"
+            self.minimax_prompt_window.set_busy(True, f"{detail}  •  attempt {attempt}/{total}")
             self.minimax_prompt_window.set_cache_state(f"{action}… attempt {attempt}/{total}")
         else:
             self.magic_overlay.update_attempt(attempt, total, detail)
@@ -4958,8 +5058,6 @@ class MainWindow(QMainWindow):
     def minimax_window_destroyed(self, _window=None) -> None:
         self.minimax_prompt_window = None
         self.save_minimax_prompt_on_close()
-        if self.current_project_id:
-            self.statusBar().showMessage("MiniMax H3 prompt edits saved to project", 4000)
 
     def current_minimax_cache_key(self, provider: str | None = None, model: str | None = None) -> str:
         provider = provider or str(self.settings.value("provider", "gemini"))
@@ -4981,24 +5079,25 @@ class MainWindow(QMainWindow):
             return
         QApplication.clipboard().setText(self.minimax_prompt_text)
         message = "MiniMax H3 prompt copied to clipboard"
-        self.statusBar().showMessage(message, 4000)
-        self.show_toast(message)
+        self.minimax_prompt_window.show_message(message, "success")
 
     def export_minimax_h3(self) -> None:
         if not self.segments:
-            QMessageBox.information(self, "MiniMax H3 Export", "Add at least one timeline item before exporting a MiniMax H3 prompt.")
+            window = self.show_minimax_prompt_window("Not generated")
+            window.show_message("Add at least one timeline item before exporting a MiniMax H3 prompt.", "warning")
             return
         provider = str(self.settings.value("provider", "gemini"))
         model = str(self.settings.value("gemini_model", GEMINI_MODELS[0]))
         signature = self.current_minimax_cache_key(provider, model)
         if self.minimax_prompt_text.strip() and self.minimax_prompt_cache_key == signature:
-            self.show_minimax_prompt_window("Cached • timeline current")
-            self.statusBar().showMessage("Loaded cached MiniMax H3 prompt; no API call needed", 4000)
+            window = self.show_minimax_prompt_window("Cached • timeline current")
+            window.show_message("The cached MiniMax H3 prompt already matches the current timeline; no API call was made.", "info")
             return
         window = self.show_minimax_prompt_window("Refreshing changed timeline…" if self.minimax_prompt_text.strip() else "Generating…")
         credentials = self.ai_credentials()
         if not credentials:
             window.set_busy(False, "Generation cancelled")
+            window.show_message("Generation cancelled because no API credentials are configured.", "warning")
             return
         provider, model, key = credentials
         signature = self.current_minimax_cache_key(provider, model)
@@ -5009,7 +5108,6 @@ class MainWindow(QMainWindow):
             self.minimax_refinement_instructions,
         )
         timeout = self.settings.value("api_timeout", 400, int)
-        self.statusBar().showMessage("Analyzing the complete sequence for MiniMax H3…")
         window.set_busy(True, "Generating…")
         self.start_ai_worker(
             build_minimax_h3_prompt,
@@ -5030,7 +5128,7 @@ class MainWindow(QMainWindow):
             self.magic_overlay.hide_overlay()
             if self.minimax_prompt_window:
                 self.minimax_prompt_window.set_busy(False, "Timeline changed • generate again")
-            self.statusBar().showMessage("MiniMax result was not applied because its timeline inputs changed", 5000)
+                self.minimax_prompt_window.show_message("The MiniMax result was not applied because the timeline changed while it was running. Generate again.", "warning")
             return
         editor_snapshot = (
             self.minimax_prompt_text,
@@ -5041,7 +5139,7 @@ class MainWindow(QMainWindow):
             self.magic_overlay.hide_overlay()
             if self.minimax_prompt_window:
                 self.minimax_prompt_window.set_busy(False, "Editor changed • result not applied")
-            self.statusBar().showMessage("MiniMax result was not applied because the editor text changed", 5000)
+                self.minimax_prompt_window.show_message("The MiniMax result was not applied because you edited the prompt while it was running. Refine again when ready.", "warning")
             return
         self.minimax_prompt_text = prompt
         self.minimax_prompt_cache_key = signature
@@ -5052,21 +5150,25 @@ class MainWindow(QMainWindow):
         if operation == "refine":
             self.minimax_refinement_instructions = ""
         state = "Cached • refined" if operation == "refine" else "Cached • generated"
-        self.show_minimax_prompt_window(state)
+        window = self.show_minimax_prompt_window(state)
         self.mark_dirty()
-        self.statusBar().showMessage(
-            "MiniMax H3 prompt refined; close the editor to save"
+        window.show_message(
+            "MiniMax H3 prompt refined. Close the editor to save it to the project."
             if operation == "refine" else
-            "MiniMax H3 prompt generated; close the editor to save"
+            "MiniMax H3 prompt generated. Close the editor to save it to the project.",
+            "success",
         )
 
     def refine_minimax_prompt(self) -> None:
         self.minimax_editor_changed()
         if not self.minimax_prompt_text.strip():
-            QMessageBox.information(self, "Refine MiniMax H3 Prompt", "Write or generate a MiniMax H3 prompt before refining it.")
+            if self.minimax_prompt_window:
+                self.minimax_prompt_window.show_message("Write or generate a MiniMax H3 prompt before refining it.", "warning")
             return
         credentials = self.ai_credentials()
         if not credentials:
+            if self.minimax_prompt_window:
+                self.minimax_prompt_window.show_message("Refinement cancelled because no API credentials are configured.", "warning")
             return
         provider, model, key = credentials
         signature = self.current_minimax_cache_key(provider, model)
@@ -5079,7 +5181,6 @@ class MainWindow(QMainWindow):
         timeout = self.settings.value("api_timeout", 400, int)
         if self.minimax_prompt_window:
             self.minimax_prompt_window.set_busy(True, "Refining edited prompt…")
-        self.statusBar().showMessage("Refining the edited MiniMax H3 prompt…")
         self.start_ai_worker(
             refine_minimax_h3_prompt,
             (
@@ -5162,8 +5263,11 @@ class MainWindow(QMainWindow):
         self.magic_overlay.hide_overlay()
         title = getattr(self, "ai_activity_title", "AI operation")
         overloaded = message.startswith("Google Gemini is temporarily overloaded")
-        if title.startswith("MiniMax") and self.minimax_prompt_window:
-            self.minimax_prompt_window.set_busy(False, "Gemini overloaded • try again" if overloaded else "AI request failed")
+        if title.startswith("MiniMax"):
+            window = self.minimax_prompt_window or self.show_minimax_prompt_window("AI request failed")
+            window.set_busy(False, "Gemini overloaded • try again" if overloaded else "AI request failed")
+            window.show_message(message, "warning" if overloaded else "error")
+            return
         if overloaded:
             QMessageBox.warning(self, f"{title}: Gemini overloaded", message)
             self.statusBar().showMessage("Google Gemini is overloaded; try again shortly or choose another model", 8000)

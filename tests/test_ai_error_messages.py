@@ -2,7 +2,8 @@ import unittest
 
 import requests
 
-from ltx_prompt_director.ai import provider_error_message
+from ltx_prompt_director.ai import AIResponseFormatError, provider_error_message
+from ltx_prompt_director.ui import MagicWorker
 
 
 class AIErrorMessageTests(unittest.TestCase):
@@ -40,6 +41,43 @@ class AIErrorMessageTests(unittest.TestCase):
         self.assertIn("HTTP 404", message)
         self.assertIn("no longer available", message)
         self.assertNotIn("Full Google response", message)
+
+    def test_validation_errors_are_actually_retried_until_success(self):
+        calls = []
+        finished = []
+        failed = []
+
+        def operation():
+            calls.append(len(calls) + 1)
+            if len(calls) < 3:
+                raise AIResponseFormatError("The prompt was too short. The operation will retry.")
+            return "detailed prompt"
+
+        worker = MagicWorker(operation, (), retries=2, retry_cooldown=0)
+        worker.signals.finished.connect(finished.append)
+        worker.signals.failed.connect(failed.append)
+        worker.run()
+
+        self.assertEqual(calls, [1, 2, 3])
+        self.assertEqual(finished, ["detailed prompt"])
+        self.assertEqual(failed, [])
+
+    def test_exhausted_validation_error_reports_attempts_without_false_retry_claim(self):
+        calls = []
+        failed = []
+
+        def operation():
+            calls.append(len(calls) + 1)
+            raise AIResponseFormatError("The prompt was too short. The operation will retry.")
+
+        worker = MagicWorker(operation, (), retries=1, retry_cooldown=0)
+        worker.signals.failed.connect(failed.append)
+        worker.run()
+
+        self.assertEqual(calls, [1, 2])
+        self.assertEqual(len(failed), 1)
+        self.assertNotIn("will retry", failed[0])
+        self.assertIn("Stopped after 2 attempts", failed[0])
 
 
 if __name__ == "__main__":

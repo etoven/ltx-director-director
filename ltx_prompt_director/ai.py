@@ -151,7 +151,13 @@ def _validated_minimax_h3_prompt(raw: str, segments: list[Segment]) -> str:
         block_end = cue_starts[index + 1].start() if index + 1 < len(cue_starts) else len(detailed)
         interval_text = detailed[cue_start.end():block_end]
         word_count = len(re.findall(r"\b[\w'-]+\b", interval_text))
-        required_words = max(12, min(32, round(float(segments[index].duration) * 6)))
+        sentence_count = len(re.findall(r"[.!?](?:[\"')\]]+)?(?=\s|$)", interval_text))
+        if sentence_count < 2:
+            raise AIResponseFormatError(
+                f"The AI returned only {sentence_count} complete MiniMax sentence(s) at {cue_start.group(1)}; "
+                "every timeline interval requires at least 2 production-ready sentences. The operation will retry."
+            )
+        required_words = max(24, min(50, round(float(segments[index].duration) * 10)))
         if word_count < required_words:
             raise AIResponseFormatError(
                 f"The AI returned a skimpy MiniMax interval at {cue_start.group(1)} ({word_count} words); "
@@ -419,6 +425,8 @@ PRIVATE CONTINUITY-PLANNING PASS:
 
 MINIMAX H3 PRODUCTION-PROMPT PRINCIPLES:
 - treat all supplied images, videos, prompts, and audio context as one unified creative context; references guide identity, motion, framing, atmosphere, and continuity but are not edit points
+- mirror the LTX segment-prompt standard: each interval must be a complete production instruction describing visible subject action, expression, pose or anatomy change, physical progression, secondary motion, environment response, and camera behavior when supported
+- treat each segment's current LTX prompt as the authoritative action specification for its matching interval; expand its useful motion detail into MiniMax continuous-flow prose instead of reducing it to a summary
 - front-load only the subject identity, environment, visual style, lighting, screen direction, camera behavior, and transformation state that truly remain stable across the complete timeline; never promote an opening-only condition into a global claim
 - because visual references already establish appearance and setting, spend the timestamped prose on motion: what changes, how it progresses, its physical cause, contact and weight, secondary motion, and how existing momentum flows through the cue boundary
 - describe later intervals as deltas from the carried-forward state; do not reintroduce or re-inventory the subject, outfit, location, composition, or props at every timestamp
@@ -437,7 +445,16 @@ GLOBAL CONTINUITY PROMPT:
 REQUIRED PRODUCTION-PROMPT SECTIONS — use these three lowercase headings exactly, in order, with no Markdown fences:
 
 continuous_video:
-Start with one precise persistent-anchor sentence. Then write exactly {len(segments)} chronological interval lines. Start each with its exact bare `MM:SS:mmm` timestamp followed immediately by natural motion prose; use exactly these timestamps in order: {cue_list}. The timestamp is the line's only prefix. Use 2 to 4 detailed sentences per interval, scaled to its duration. Cover the primary action and progression, visible pose or state delta, physical cause/contact/weight and secondary motion, plus camera or environmental response when it changes. Describe only new action and progressive state change while carrying prior state and momentum forward. Avoid padding and repeated inventories, but provide at least enough concrete motion detail to make every interval production-ready. A video reference contributes its full temporal behavior, not merely sampled frames.
+Start with one precise persistent-anchor sentence. Then write exactly {len(segments)} chronological interval lines. Start each with its exact bare `MM:SS:mmm` timestamp followed immediately by natural motion prose; use exactly these timestamps in order: {cue_list}. The timestamp is the line's only prefix.
+
+HARD INTERVAL-DETAIL CONTRACT:
+- Every timestamped interval must contain at least 2 complete, punctuated sentences on that same line; use 3 or 4 when the duration or action supports more progression. Never compress an interval into one long sentence joined by commas or semicolons.
+- Sentence 1 establishes the carried-forward state and describes the primary action evolving through the interval, including concrete pose, expression, anatomy, transformation, or object-motion changes supplied by the matching LTX prompt.
+- Sentence 2 describes physical causality and execution: contact, force, balance, weight transfer, inertia, material response, secondary motion, and the visible intermediate state reached before the boundary.
+- A third or fourth sentence should describe supported camera/framing evolution, environmental or lighting response, synchronized performance detail, and the exact motion or momentum handed into the next cue.
+- Preserve all useful specificity from the matching LTX prompt. Do not replace detailed source action with generic phrases such as `continues moving`, `gradually changes`, `the transformation progresses`, or `the motion carries forward`.
+
+Describe only new action and progressive state change while carrying prior state and momentum forward. Avoid padding and repeated inventories, but provide enough concrete motion detail to make every interval independently production-ready. A video reference contributes its full temporal behavior, not merely sampled frames.
 
 soundscape:
 {sound_rule} {dialog_rule}
@@ -457,7 +474,7 @@ soundscape:
 music:
 {{timeline-specific music direction or the required None statement}}
 
-Before returning, verify that the production prompt has exactly {len(segments)} timestamp lines in prescribed order, no structural shot labels, no picture/video labels, no bracketed camera commands, no explicit edit or cut instructions, and no repeated full-scene inventories.
+Before returning, verify that the production prompt has exactly {len(segments)} timestamp lines in prescribed order, at least 2 complete sentences and substantial concrete motion detail on every timestamp line, no structural shot labels, no picture/video labels, no bracketed camera commands, no explicit edit or cut instructions, and no repeated full-scene inventories.
 
 Return strict transport JSON with exactly these two top-level fields. `continuityPlan` is private validation data and must not be copied into `prompt`:
 {{
@@ -851,6 +868,8 @@ def retryable_connection_error(error: Exception) -> bool:
 
 def provider_error_message(error: Exception) -> str:
     """Translate provider HTTP failures into actionable dialog text."""
+    if isinstance(error, AIResponseFormatError):
+        return re.sub(r"\s+(?:The operation|Magic Build) will retry\.$", "", str(error)).strip()
     if isinstance(error, requests.HTTPError) and error.response is not None:
         response = error.response
         status = response.status_code

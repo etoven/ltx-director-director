@@ -49,10 +49,12 @@ class MiniMaxEditorTests(unittest.TestCase):
             window = MiniMaxPromptWindow(owner)
             owner.window = window
 
-            window.set_busy(True)
+            window.set_busy(True, "Refining prompt • attempt 1/3")
             self.assertFalse(window.editor.isReadOnly())
             self.assertFalse(window.instructions.isReadOnly())
             self.assertTrue(window.editor.textInteractionFlags() & Qt.TextInteractionFlag.TextEditable)
+            self.assertFalse(window.busy_veil.isHidden())
+            self.assertEqual(window.busy_veil.status.text(), "Refining prompt • attempt 1/3")
 
             QApplication.clipboard().setText("Pasted production prompt")
             window.editor.paste()
@@ -63,6 +65,7 @@ class MiniMaxEditorTests(unittest.TestCase):
             self.assertEqual(owner.instructions_text, "Private refinement direction")
             self.assertFalse(window.refine_button.isEnabled())
             window.set_busy(False)
+            self.assertTrue(window.busy_veil.isHidden())
             self.assertTrue(window.refine_button.isEnabled())
             window.close()
             owner.close()
@@ -169,6 +172,26 @@ class MiniMaxEditorTests(unittest.TestCase):
         warning.assert_called_once_with(window, "Magic Build: Gemini overloaded", message)
         critical.assert_not_called()
         self.assertIn("Google Gemini is overloaded", window.statusBar().currentMessage())
+        window.close()
+
+    def test_minimax_failures_stay_in_the_minimax_dialog(self):
+        window = MainWindow()
+        dialog = window.ensure_minimax_prompt_window()
+        window.ai_activity_title = "MiniMax H3 Refine"
+        message = "The AI returned a skimpy MiniMax interval.\n\nStopped after 3 attempts."
+        with (
+            patch.object(QMessageBox, "warning") as warning,
+            patch.object(QMessageBox, "critical") as critical,
+        ):
+            window.magic_failed(message)
+
+        warning.assert_not_called()
+        critical.assert_not_called()
+        self.assertEqual(dialog.message_banner.text(), message)
+        self.assertEqual(dialog.message_banner.property("level"), "error")
+        self.assertFalse(dialog.message_banner.isHidden())
+        self.assertTrue(dialog.busy_veil.isHidden())
+        dialog.close()
         window.close()
 
 

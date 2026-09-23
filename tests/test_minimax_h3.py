@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from ltx_prompt_director import ai
 from ltx_prompt_director.models import Segment
+from ltx_prompt_director.ui import MagicWorker
 
 
 class MiniMaxH3PromptTests(unittest.TestCase):
@@ -24,7 +25,7 @@ class MiniMaxH3PromptTests(unittest.TestCase):
     @staticmethod
     def response_prompt(cues, continuous_lines=None):
         lines = continuous_lines or [
-            f"{cue} The existing motion carries forward through a gradual physical change, preserving weight, direction, contact, and secondary movement across the boundary."
+            f"{cue} The subject drives the existing action forward through a clearly staged physical change, with the pose and expression evolving continuously from the incoming state. Weight, contact, inertia, and secondary movement remain visible as the body reaches a concrete intermediate state and carries momentum across the boundary."
             for cue in cues
         ]
         return "\n".join((
@@ -97,9 +98,14 @@ class MiniMaxH3PromptTests(unittest.TestCase):
         self.assertIn("resolve by this interval's end", inputs[3]["continuity_function"])
         rules = ai._minimax_h3_rules(self.segments(4), "", "", True, False, True)
         self.assertIn("video reference contributes its full temporal behavior", rules.casefold())
-        self.assertIn("2 to 4 detailed sentences per interval", rules)
-        self.assertIn("physical cause/contact/weight and secondary motion", rules)
+        self.assertIn("use 3 or 4 when the duration or action supports more progression", rules)
+        self.assertIn("physical causality and execution", rules)
+        self.assertIn("weight transfer", rules)
+        self.assertIn("secondary motion", rules)
         self.assertNotIn("ONE compact", rules)
+        self.assertIn("HARD INTERVAL-DETAIL CONTRACT", rules)
+        self.assertIn("at least 2 complete, punctuated sentences", rules)
+        self.assertIn("current LTX prompt as the authoritative action specification", rules)
 
     def test_accepts_private_bridge_plan_and_returns_only_prompt(self):
         segments = self.segments(3)
@@ -208,9 +214,17 @@ class MiniMaxH3PromptTests(unittest.TestCase):
 
     def test_rejects_skimpy_interval_motion_detail(self):
         segments = self.segments(1)
-        skimpy = self.response_prompt(["00:00:000"], ["00:00:000 The subject moves slowly."])
+        skimpy = self.response_prompt(["00:00:000"], ["00:00:000 The subject moves. It stops."])
         with self.assertRaisesRegex(ai.AIResponseFormatError, "skimpy MiniMax interval"):
             self.build_with_prompt(segments, skimpy)
+
+    def test_rejects_long_but_single_sentence_interval(self):
+        segments = self.segments(1)
+        single_sentence = self.response_prompt(["00:00:000"], [
+            "00:00:000 The subject leans forward with careful weight transfer, visible shoulder rotation, grounded foot contact, trailing fabric motion, coherent screen direction, environmental response, and continuous camera framing while the transformation advances toward the boundary."
+        ])
+        with self.assertRaisesRegex(ai.AIResponseFormatError, "only 1 complete MiniMax sentence"):
+            self.build_with_prompt(segments, single_sentence)
 
     def test_accepts_production_ready_interval_motion_detail(self):
         segments = self.segments(1)
@@ -220,6 +234,28 @@ class MiniMaxH3PromptTests(unittest.TestCase):
             "00:00:000 The subject leans forward as weight transfers onto the planted foot. The shoulder follows with visible inertia while the hand settles smoothly and the camera maintains its coherent path."
         ])
         self.assertEqual(self.build_with_prompt(segments, detailed), detailed)
+
+    def test_validation_retry_reissues_the_minimax_provider_request(self):
+        segments = self.segments(1)
+        skimpy = self.response_prompt(["00:00:000"], ["00:00:000 The subject moves. It stops."])
+        detailed = self.response_prompt(["00:00:000"])
+        responses = [
+            json.dumps({"continuityPlan": self.continuity_plan(1), "prompt": skimpy}),
+            json.dumps({"continuityPlan": self.continuity_plan(1), "prompt": detailed}),
+        ]
+        finished = []
+        failed = []
+        args = (segments, "gemini", "gemini-3.5-flash-lite", "unused", "", "", False, False, True, 400)
+
+        with patch.object(ai, "_provider_raw", side_effect=responses) as provider:
+            worker = MagicWorker(ai.build_minimax_h3_prompt, args, retries=1, retry_cooldown=0)
+            worker.signals.finished.connect(finished.append)
+            worker.signals.failed.connect(failed.append)
+            worker.run()
+
+        self.assertEqual(provider.call_count, 2)
+        self.assertEqual(finished, [detailed])
+        self.assertEqual(failed, [])
 
     def test_cache_key_is_stable_across_paths_and_changes_with_inputs(self):
         with tempfile.TemporaryDirectory() as directory:
