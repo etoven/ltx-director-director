@@ -73,6 +73,11 @@ class MiniMaxH3PromptTests(unittest.TestCase):
         self.assertEqual(ai._minimax_timestamp(12.5), "00:12:500")
         self.assertEqual(ai._minimax_timestamp(65.125), "01:05:125")
 
+    def test_detail_standard_scales_with_interval_duration(self):
+        self.assertEqual(ai.minimax_interval_detail_standard(2.5), (2, 25))
+        self.assertEqual(ai.minimax_interval_detail_standard(5.0), (3, 50))
+        self.assertEqual(ai.minimax_interval_detail_standard(8.0), (4, 50))
+
     def test_template_has_exact_dynamic_cue_and_bridge_counts(self):
         for count in (1, 3, 7):
             with self.subTest(count=count):
@@ -98,13 +103,14 @@ class MiniMaxH3PromptTests(unittest.TestCase):
         self.assertIn("resolve by this interval's end", inputs[3]["continuity_function"])
         rules = ai._minimax_h3_rules(self.segments(4), "", "", True, False, True)
         self.assertIn("video reference contributes its full temporal behavior", rules.casefold())
-        self.assertIn("use 3 or 4 when the duration or action supports more progression", rules)
+        self.assertIn("per-interval MiniMax targets", rules)
+        self.assertIn("00:00:000 → 2 sentence(s), 25+ words", rules)
         self.assertIn("physical causality and execution", rules)
         self.assertIn("weight transfer", rules)
         self.assertIn("secondary motion", rules)
         self.assertNotIn("ONE compact", rules)
         self.assertIn("HARD INTERVAL-DETAIL CONTRACT", rules)
-        self.assertIn("at least 2 complete, punctuated sentences", rules)
+        self.assertIn("complete, punctuated sentences", rules)
         self.assertIn("current LTX prompt as the authoritative action specification", rules)
 
     def test_accepts_private_bridge_plan_and_returns_only_prompt(self):
@@ -215,15 +221,17 @@ class MiniMaxH3PromptTests(unittest.TestCase):
     def test_rejects_skimpy_interval_motion_detail(self):
         segments = self.segments(1)
         skimpy = self.response_prompt(["00:00:000"], ["00:00:000 The subject moves. It stops."])
-        with self.assertRaisesRegex(ai.AIResponseFormatError, "skimpy MiniMax interval"):
+        with self.assertRaisesRegex(ai.AIResponseFormatError, "under-detailed MiniMax interval") as raised:
             self.build_with_prompt(segments, skimpy)
+        self.assertEqual(raised.exception.warning_indices, (0,))
+        self.assertEqual(raised.exception.candidate_prompt, skimpy)
 
     def test_rejects_long_but_single_sentence_interval(self):
         segments = self.segments(1)
         single_sentence = self.response_prompt(["00:00:000"], [
             "00:00:000 The subject leans forward with careful weight transfer, visible shoulder rotation, grounded foot contact, trailing fabric motion, coherent screen direction, environmental response, and continuous camera framing while the transformation advances toward the boundary."
         ])
-        with self.assertRaisesRegex(ai.AIResponseFormatError, "only 1 complete MiniMax sentence"):
+        with self.assertRaisesRegex(ai.AIResponseFormatError, "under-detailed MiniMax interval"):
             self.build_with_prompt(segments, single_sentence)
 
     def test_accepts_production_ready_interval_motion_detail(self):

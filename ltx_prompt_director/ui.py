@@ -166,7 +166,7 @@ def choose_directory(parent: QWidget, title: str, initial: str) -> str:
 
 class WorkerSignals(QObject):
     finished = Signal(object)
-    failed = Signal(str)
+    failed = Signal(object)
     progress = Signal(int, int, str)
 
 
@@ -192,7 +192,15 @@ class MagicWorker(QRunnable):
                     message = provider_error_message(error)
                     if retryable_connection_error(error) and attempts > 1:
                         message = f"{message}\n\nStopped after {attempt} attempts."
-                    self.signals.failed.emit(message)
+                    candidate_prompt = getattr(error, "candidate_prompt", "")
+                    if candidate_prompt:
+                        self.signals.failed.emit({
+                            "message": message,
+                            "candidate_prompt": candidate_prompt,
+                            "warning_indices": list(getattr(error, "warning_indices", ())),
+                        })
+                    else:
+                        self.signals.failed.emit(message)
                     return
                 retry_subject = "AI response failed validation" if isinstance(error, AIResponseFormatError) else "Provider response stumbled"
                 for remaining in range(self.retry_cooldown, 0, -1):
@@ -2035,14 +2043,24 @@ class MiniMaxPacingCard(QFrame):
         self.segment = segment
         self.setObjectName("minimaxPacingCard")
         self.setProperty("kind", segment.kind)
+        self.setProperty("warning", False)
         self.setFixedWidth(132)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(5, 5, 5, 6)
         layout.setSpacing(4)
 
+        time_row = QHBoxLayout()
+        time_row.setContentsMargins(0, 0, 0, 0)
         timestamp = QLabel(f"START  {minimax_start_timestamp(start_time)}")
         timestamp.setObjectName("minimaxPacingTime")
-        layout.addWidget(timestamp)
+        time_row.addWidget(timestamp)
+        time_row.addStretch()
+        self.warning_icon = QLabel("⚠")
+        self.warning_icon.setObjectName("minimaxPacingWarning")
+        self.warning_icon.setToolTip("This interval is shorter than the recommended MiniMax detail target.")
+        self.warning_icon.hide()
+        time_row.addWidget(self.warning_icon)
+        layout.addLayout(time_row)
 
         self.preview = QLabel()
         self.preview.setObjectName("minimaxPacingPreview")
@@ -2079,6 +2097,12 @@ class MiniMaxPacingCard(QFrame):
         name.setToolTip(segment.name)
         name.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
         layout.addWidget(name)
+
+    def set_detail_warning(self, warning: bool) -> None:
+        self.setProperty("warning", warning)
+        self.warning_icon.setVisible(warning)
+        self.style().unpolish(self)
+        self.style().polish(self)
 
 
 class MiniMaxPacingStrip(QFrame):
@@ -2167,6 +2191,11 @@ class MiniMaxPacingStrip(QFrame):
         minimum_width = max(1, len(segments)) * 132 + max(0, len(segments) - 1) * 63 + 8
         self.sequence_widget.setMinimumWidth(minimum_width)
         self.total_time.setText(f"TOTAL  {minimax_start_timestamp(cursor)}")
+
+    def set_warning_indices(self, warning_indices) -> None:
+        warned = {int(index) for index in warning_indices}
+        for index, card in enumerate(self.cards):
+            card.set_detail_warning(index in warned)
 
 
 class MiniMaxBusyVeil(QWidget):
@@ -2259,13 +2288,25 @@ class MiniMaxPromptWindow(QDialog):
         toolbar_layout.addWidget(self.refine_button)
         layout.addWidget(toolbar)
 
+        self.message_panel = QFrame()
+        self.message_panel.setObjectName("minimaxMessagePanel")
+        message_layout = QHBoxLayout(self.message_panel)
+        message_layout.setContentsMargins(10, 7, 8, 7)
+        message_layout.setSpacing(9)
         self.message_banner = QLabel()
         self.message_banner.setObjectName("minimaxMessageBanner")
         self.message_banner.setWordWrap(True)
         self.message_banner.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        self.message_banner.hide()
-        layout.addWidget(self.message_banner)
+        message_layout.addWidget(self.message_banner, 1)
+        self.retry_button = QPushButton("↻ Retry")
+        self.retry_button.setObjectName("minimaxRetryButton")
+        self.retry_button.clicked.connect(owner.retry_minimax_operation)
+        self.retry_button.hide()
+        message_layout.addWidget(self.retry_button)
+        self.message_panel.hide()
+        layout.addWidget(self.message_panel)
 
+        self.detail_warning_indices = set()
         self.pacing_strip = MiniMaxPacingStrip()
         layout.addWidget(self.pacing_strip)
 
@@ -2345,6 +2386,7 @@ class MiniMaxPromptWindow(QDialog):
     def set_project(self, project_name: str, prompt: str, instructions: str, cache_state: str) -> None:
         self.setWindowTitle(f"MiniMax H3 Prompt — {project_name}")
         self.pacing_strip.set_segments(list(getattr(self.owner, "segments", [])))
+        self.pacing_strip.set_warning_indices(self.detail_warning_indices)
         for editor, value in ((self.editor, prompt), (self.instructions, instructions)):
             editor.blockSignals(True)
             editor.setPlainText(value)
@@ -2360,16 +2402,22 @@ class MiniMaxPromptWindow(QDialog):
         self.cache_state.style().unpolish(self.cache_state)
         self.cache_state.style().polish(self.cache_state)
 
-    def show_message(self, text: str, level: str = "info") -> None:
+    def show_message(self, text: str, level: str = "info", retry: bool = False) -> None:
         self.message_banner.setText(text)
-        self.message_banner.setProperty("level", level)
-        self.message_banner.style().unpolish(self.message_banner)
-        self.message_banner.style().polish(self.message_banner)
-        self.message_banner.show()
+        self.message_panel.setProperty("level", level)
+        self.message_panel.style().unpolish(self.message_panel)
+        self.message_panel.style().polish(self.message_panel)
+        self.retry_button.setVisible(retry)
+        self.message_panel.show()
 
     def clear_message(self) -> None:
         self.message_banner.clear()
-        self.message_banner.hide()
+        self.retry_button.hide()
+        self.message_panel.hide()
+
+    def set_detail_warnings(self, warning_indices) -> None:
+        self.detail_warning_indices = {int(index) for index in warning_indices}
+        self.pacing_strip.set_warning_indices(self.detail_warning_indices)
 
     def set_busy(self, busy: bool, status: str = "") -> None:
         # Keep both text fields editable while an AI request runs. A user may
@@ -2438,6 +2486,7 @@ class MainWindow(QMainWindow):
         self.minimax_refinement_instructions = ""
         self.minimax_prompt_cache_key = ""
         self.minimax_prompt_updated_at = ""
+        self.minimax_warning_indices: list[int] = []
         self.minimax_prompt_window: MiniMaxPromptWindow | None = None
         self.current_collection: str | None = None
         self.autofit_tail_extension = 0
@@ -3219,8 +3268,8 @@ class MainWindow(QMainWindow):
         QMainWindow,QWidget{background:#24292c;color:#d9dcde;font:11px Arial} QMainWindow::separator{width:__DOCK_GRIP_WIDTH__px;height:__DOCK_GRIP_WIDTH__px;background:transparent;background-repeat:no-repeat;background-position:center} QMainWindow::separator:vertical{background-image:url("__DOCK_GRIP_IMAGE__")} QMainWindow::separator:horizontal{background-image:url("__DOCK_GRIP_HORIZONTAL_IMAGE__")} QMainWindow::separator:hover{background-color:rgba(88,118,134,35)} QToolBar{background:#1b2023;border:0;border-bottom:1px solid #111517;spacing:3px;padding:5px} QToolBar::separator{background:#394247;width:1px;margin:7px 5px}
         QToolButton,QPushButton,QComboBox,QSpinBox,QDoubleSpinBox,QLineEdit{background:#303436;border:1px solid #101213;border-radius:3px;padding:3px 7px;min-height:19px}
         #mainToolbar QToolButton{background:transparent;border:1px solid transparent;border-radius:4px;padding:5px 9px;color:#c5cdd1} #mainToolbar QToolButton:hover{background:#2b3438;border-color:#3a464c;color:#f3f7f9} #mainToolbar QToolButton:pressed{background:#17232a;border-color:#477d99;color:#bde6fb} #toolbarButton{background:#23343d;border:1px solid #385667;border-radius:5px;color:#c4e8fb;font-weight:bold}
-        #minimaxPromptToolbar{background:#1b2023;border:1px solid #354047;border-radius:6px} #minimaxCacheState{background:#2b3438;color:#aebbc1;border:1px solid #435159;border-radius:9px;padding:2px 8px;font-size:9px} #minimaxCacheState[cached="true"]{background:#244d37;color:#c9f4d6;border-color:#4c9b6a} #minimaxInstructions{background:#1b2023;border:1px solid #37464d;border-radius:4px;color:#d8e1e5;padding:7px} #minimaxMessageBanner{background:#20313a;color:#ccecf8;border:1px solid #49758a;border-radius:6px;padding:8px 11px} #minimaxMessageBanner[level="success"]{background:#20392c;color:#cef2d9;border-color:#4b8962} #minimaxMessageBanner[level="warning"]{background:#3a321f;color:#f2dfb0;border-color:#8a7340} #minimaxMessageBanner[level="error"]{background:#3a2325;color:#f2c5c8;border-color:#94555a} #minimaxBusyCard{background:#17262d;border:1px solid #65a7c7;border-radius:8px} #minimaxBusyStatus{background:transparent;color:#d9f2ff;font-weight:bold;padding:2px}
-        #minimaxPacingFrame{background:#192125;border:1px solid #4b606a;border-radius:9px} #minimaxPacingEmblem{background:#19282f;color:#63cce6;border:1px solid #476571;border-radius:6px;font-size:18px;font-weight:bold;min-width:29px;max-width:29px;min-height:29px;max-height:29px} #minimaxPacingTitle{color:#dcebf1;font-size:9px;font-weight:bold;letter-spacing:2px} #minimaxPacingSubtitle{color:#7f9098;font-size:8px} #minimaxPacingTotal{background:#151c1f;color:#e6f5fa;border:1px solid #3d5058;border-radius:5px;padding:5px 8px;font:10px 'Courier New';font-weight:bold} #minimaxPacingScroll,#minimaxPacingSequence{background:transparent;border:0} #minimaxPacingCard{background:#202a2f;border:1px solid #5a6d76;border-radius:7px} #minimaxPacingCard[kind="text"]{background:#292538;border-color:#74669a} #minimaxPacingCard[kind="video"]{background:#203129;border-color:#567b68} #minimaxPacingPreview{background:#111719;color:#82959e;border:1px solid #3b4b52;border-radius:4px;font-size:9px;font-weight:bold} #minimaxPacingCard[kind="text"] #minimaxPacingPreview{background:#211d31;color:#c2b1e6;border-color:#625682} #minimaxPacingCard[kind="video"] #minimaxPacingPreview{background:#17251e;color:#a6dabc;border-color:#456452} #minimaxPacingTime{color:#eef8fb;font:9px 'Courier New';font-weight:bold} #minimaxPacingMedia{background:#141b1e;color:#bfe9f4;border:1px solid #40525a;border-radius:4px;padding:2px;font-size:8px;font-weight:bold} #minimaxPacingName{color:#9aabb3;font-size:8px} #minimaxPacingArrowBox{background:transparent;border:0} #minimaxPacingDuration{color:#8fa1aa;font:8px 'Courier New'} #minimaxPacingArrow{color:#64cee7;font-size:14px;font-weight:bold} #minimaxPacingEmpty{background:#151c1f;color:#7e8e96;border:1px dashed #405159;border-radius:5px;padding:30px}
+        #minimaxPromptToolbar{background:#1b2023;border:1px solid #354047;border-radius:6px} #minimaxCacheState{background:#2b3438;color:#aebbc1;border:1px solid #435159;border-radius:9px;padding:2px 8px;font-size:9px} #minimaxCacheState[cached="true"]{background:#244d37;color:#c9f4d6;border-color:#4c9b6a} #minimaxInstructions{background:#1b2023;border:1px solid #37464d;border-radius:4px;color:#d8e1e5;padding:7px} #minimaxMessagePanel{background:#20313a;border:1px solid #49758a;border-radius:6px} #minimaxMessagePanel[level="success"]{background:#20392c;border-color:#4b8962} #minimaxMessagePanel[level="warning"]{background:#3a321f;border-color:#8a7340} #minimaxMessagePanel[level="error"]{background:#3a2325;border-color:#94555a} #minimaxMessageBanner{background:transparent;color:#ccecf8;border:0;padding:1px} #minimaxMessagePanel[level="success"] #minimaxMessageBanner{color:#cef2d9} #minimaxMessagePanel[level="warning"] #minimaxMessageBanner{color:#f2dfb0} #minimaxMessagePanel[level="error"] #minimaxMessageBanner{color:#f2c5c8} #minimaxRetryButton{background:#5b451b;color:#ffe7a1;border:1px solid #c79a39;border-radius:4px;font-weight:bold;padding:4px 10px} #minimaxRetryButton:hover{background:#755b25;border-color:#e2bc5a;color:#fff5cf} #minimaxBusyCard{background:#17262d;border:1px solid #65a7c7;border-radius:8px} #minimaxBusyStatus{background:transparent;color:#d9f2ff;font-weight:bold;padding:2px}
+        #minimaxPacingFrame{background:#192125;border:1px solid #4b606a;border-radius:9px} #minimaxPacingEmblem{background:#19282f;color:#63cce6;border:1px solid #476571;border-radius:6px;font-size:18px;font-weight:bold;min-width:29px;max-width:29px;min-height:29px;max-height:29px} #minimaxPacingTitle{color:#dcebf1;font-size:9px;font-weight:bold;letter-spacing:2px} #minimaxPacingSubtitle{color:#7f9098;font-size:8px} #minimaxPacingTotal{background:#151c1f;color:#e6f5fa;border:1px solid #3d5058;border-radius:5px;padding:5px 8px;font:10px 'Courier New';font-weight:bold} #minimaxPacingScroll,#minimaxPacingSequence{background:transparent;border:0} #minimaxPacingCard{background:#202a2f;border:1px solid #5a6d76;border-radius:7px} #minimaxPacingCard[kind="text"]{background:#292538;border-color:#74669a} #minimaxPacingCard[kind="video"]{background:#203129;border-color:#567b68} #minimaxPacingCard[warning="true"]{background:#302b1f;border:2px solid #d5a93f} #minimaxPacingWarning{background:#4a3918;color:#ffd86a;border:1px solid #c59a37;border-radius:6px;padding:0 3px;font-weight:bold} #minimaxPacingPreview{background:#111719;color:#82959e;border:1px solid #3b4b52;border-radius:4px;font-size:9px;font-weight:bold} #minimaxPacingCard[kind="text"] #minimaxPacingPreview{background:#211d31;color:#c2b1e6;border-color:#625682} #minimaxPacingCard[kind="video"] #minimaxPacingPreview{background:#17251e;color:#a6dabc;border-color:#456452} #minimaxPacingTime{color:#eef8fb;font:9px 'Courier New';font-weight:bold} #minimaxPacingMedia{background:#141b1e;color:#bfe9f4;border:1px solid #40525a;border-radius:4px;padding:2px;font-size:8px;font-weight:bold} #minimaxPacingName{color:#9aabb3;font-size:8px} #minimaxPacingArrowBox{background:transparent;border:0} #minimaxPacingDuration{color:#8fa1aa;font:8px 'Courier New'} #minimaxPacingArrow{color:#64cee7;font-size:14px;font-weight:bold} #minimaxPacingEmpty{background:#151c1f;color:#7e8e96;border:1px dashed #405159;border-radius:5px;padding:30px}
         QToolButton:hover,QPushButton:hover{background:#41474a} QToolButton:pressed,QPushButton:pressed{background:#202729;border-color:#79a8c5} QLineEdit{background:#1e2122}
         QSpinBox,QDoubleSpinBox{padding-right:__SPIN_PAD__px} QSpinBox::up-button,QDoubleSpinBox::up-button{subcontrol-origin:border;subcontrol-position:top right;width:__SPIN_BUTTON__px;background:#3b4347;border:0;border-left:1px solid #171a1c;border-bottom:1px solid #202527;border-top-right-radius:3px} QSpinBox::down-button,QDoubleSpinBox::down-button{subcontrol-origin:border;subcontrol-position:bottom right;width:__SPIN_BUTTON__px;background:#343b3f;border:0;border-left:1px solid #171a1c;border-top:1px solid #202527;border-bottom-right-radius:3px}
         QSpinBox::up-button:hover,QDoubleSpinBox::up-button:hover,QSpinBox::down-button:hover,QDoubleSpinBox::down-button:hover{background:#506471} QSpinBox::up-button:pressed,QDoubleSpinBox::up-button:pressed,QSpinBox::down-button:pressed,QDoubleSpinBox::down-button:pressed{background:#274e66} QSpinBox::up-arrow,QDoubleSpinBox::up-arrow,QSpinBox::down-arrow,QDoubleSpinBox::down-arrow{width:__ARROW_SIZE__px;height:__ARROW_SIZE__px}
@@ -3870,6 +3919,7 @@ class MainWindow(QMainWindow):
             "minimaxRefinementInstructions": self.minimax_refinement_instructions,
             "minimaxPromptCacheKey": self.minimax_prompt_cache_key,
             "minimaxPromptUpdatedAt": self.minimax_prompt_updated_at,
+            "minimaxWarningIndices": self.minimax_warning_indices,
         }
 
     def cache_current_workspace(self) -> None:
@@ -3900,6 +3950,7 @@ class MainWindow(QMainWindow):
         self.minimax_refinement_instructions = str(state.get("minimaxRefinementInstructions", ""))
         self.minimax_prompt_cache_key = str(state.get("minimaxPromptCacheKey", ""))
         self.minimax_prompt_updated_at = str(state.get("minimaxPromptUpdatedAt", ""))
+        self.minimax_warning_indices = [int(index) for index in state.get("minimaxWarningIndices", [])]
         self.timeline_height_handle.current_height = self.timeline_height
         self.set_timeline_height(self.timeline_height)
         auto_fit = bool(state.get("timelineAutoFit", False))
@@ -4206,6 +4257,7 @@ class MainWindow(QMainWindow):
         self.minimax_refinement_instructions = ""
         self.minimax_prompt_cache_key = ""
         self.minimax_prompt_updated_at = ""
+        self.minimax_warning_indices = []
         if self.minimax_prompt_window:
             self.minimax_prompt_window.hide()
         self.sfx.setChecked(False)
@@ -5032,6 +5084,7 @@ class MainWindow(QMainWindow):
             self.minimax_refinement_instructions,
             state,
         )
+        self.minimax_prompt_window.set_detail_warnings(self.minimax_warning_indices)
 
     def show_minimax_prompt_window(self, cache_state: str | None = None) -> MiniMaxPromptWindow:
         window = self.ensure_minimax_prompt_window()
@@ -5151,6 +5204,8 @@ class MainWindow(QMainWindow):
             self.minimax_refinement_instructions = ""
         state = "Cached • refined" if operation == "refine" else "Cached • generated"
         window = self.show_minimax_prompt_window(state)
+        self.minimax_warning_indices = []
+        window.set_detail_warnings([])
         self.mark_dirty()
         window.show_message(
             "MiniMax H3 prompt refined. Close the editor to save it to the project."
@@ -5193,6 +5248,18 @@ class MainWindow(QMainWindow):
             self.minimax_h3_finished,
             show_main_overlay=False,
         )
+
+    def retry_minimax_operation(self) -> None:
+        """Repeat the failed MiniMax operation using the current dialog contents."""
+        if self.minimax_prompt_window:
+            self.minimax_prompt_window.clear_message()
+            self.minimax_prompt_window.set_detail_warnings([])
+        self.minimax_warning_indices = []
+        self.minimax_prompt_cache_key = ""
+        if getattr(self, "minimax_operation_kind", "generate") == "refine":
+            self.refine_minimax_prompt()
+        else:
+            self.export_minimax_h3()
 
     def show_toast(self, message: str, duration: int = 3200) -> None:
         toast = getattr(self, "_toast_label", None)
@@ -5258,15 +5325,29 @@ class MainWindow(QMainWindow):
         self.duration_animation = animation
         animation.start()
 
-    def magic_failed(self, message: str) -> None:
+    def magic_failed(self, failure) -> None:
         self.set_ai_controls_enabled(True)
         self.magic_overlay.hide_overlay()
+        payload = failure if isinstance(failure, dict) else {}
+        message = str(payload.get("message", failure))
         title = getattr(self, "ai_activity_title", "AI operation")
         overloaded = message.startswith("Google Gemini is temporarily overloaded")
         if title.startswith("MiniMax"):
-            window = self.minimax_prompt_window or self.show_minimax_prompt_window("AI request failed")
-            window.set_busy(False, "Gemini overloaded • try again" if overloaded else "AI request failed")
-            window.show_message(message, "warning" if overloaded else "error")
+            candidate_prompt = str(payload.get("candidate_prompt", "")).strip()
+            warning_indices = payload.get("warning_indices", [])
+            if candidate_prompt:
+                self.minimax_prompt_text = candidate_prompt
+                self.minimax_prompt_cache_key = ""
+                self.minimax_prompt_updated_at = datetime.now(timezone.utc).isoformat()
+                self.mark_dirty()
+            self.minimax_warning_indices = [int(index) for index in warning_indices]
+            state = "Kept last response • needs review" if candidate_prompt else "AI request failed"
+            window = self.show_minimax_prompt_window(state)
+            window.set_busy(False, "Gemini overloaded • try again" if overloaded else state)
+            window.set_detail_warnings(self.minimax_warning_indices)
+            if candidate_prompt:
+                message += "\n\nThe final generated prompt was kept. Review the highlighted interval tiles or retry."
+            window.show_message(message, "warning" if overloaded or candidate_prompt else "error", retry=True)
             return
         if overloaded:
             QMessageBox.warning(self, f"{title}: Gemini overloaded", message)
@@ -5452,6 +5533,7 @@ class MainWindow(QMainWindow):
                 "refinementInstructions": self.minimax_refinement_instructions,
                 "sourceHash": self.minimax_prompt_cache_key,
                 "updatedAt": self.minimax_prompt_updated_at,
+                "warningIndices": self.minimax_warning_indices,
             },
             "output": {"width": self.output_width.value(), "height": self.output_height.value()},
             "timelineView": {"scale": self.pixels_per_second, "autoFit": self.timeline_fit_mode, "height": self.timeline_height},
@@ -5507,6 +5589,7 @@ class MainWindow(QMainWindow):
         self.minimax_refinement_instructions = str(minimax.get("refinementInstructions", ""))
         self.minimax_prompt_cache_key = str(minimax.get("sourceHash", ""))
         self.minimax_prompt_updated_at = str(minimax.get("updatedAt", ""))
+        self.minimax_warning_indices = [int(index) for index in minimax.get("warningIndices", [])]
         output = payload.get("output", {})
         self.output_width.setValue(int(output.get("width", 1280)))
         self.output_height.setValue(int(output.get("height", 704)))

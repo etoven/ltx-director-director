@@ -34,6 +34,9 @@ class _EditorOwner(QMainWindow):
     def copy_minimax_prompt(self):
         pass
 
+    def retry_minimax_operation(self):
+        pass
+
     def minimax_window_destroyed(self, _window=None):
         pass
 
@@ -188,9 +191,53 @@ class MiniMaxEditorTests(unittest.TestCase):
         warning.assert_not_called()
         critical.assert_not_called()
         self.assertEqual(dialog.message_banner.text(), message)
-        self.assertEqual(dialog.message_banner.property("level"), "error")
-        self.assertFalse(dialog.message_banner.isHidden())
+        self.assertEqual(dialog.message_panel.property("level"), "error")
+        self.assertFalse(dialog.message_panel.isHidden())
+        self.assertFalse(dialog.retry_button.isHidden())
         self.assertTrue(dialog.busy_veil.isHidden())
+        dialog.close()
+        window.close()
+
+    def test_exhausted_minimax_validation_keeps_prompt_and_marks_short_tile(self):
+        window = MainWindow()
+        window.segments = [
+            Segment("Detailed beat", "", "", kind="text", role="text", duration=2.5),
+            Segment("Short beat", "", "", kind="text", role="text", duration=2.5),
+        ]
+        window.ai_activity_title = "MiniMax H3 Export"
+        window.minimax_operation_kind = "generate"
+        dialog = window.show_minimax_prompt_window("Generating…")
+        candidate = "continuous_video:\n00:00:000 Detailed action. Physical response.\n00:02:500 Too short.\nsoundscape:\nNone.\nmusic:\nNone."
+
+        window.magic_failed({
+            "message": "The final interval remained under-detailed.\n\nStopped after 3 attempts.",
+            "candidate_prompt": candidate,
+            "warning_indices": [1],
+        })
+
+        self.assertEqual(window.minimax_prompt_text, candidate)
+        self.assertEqual(dialog.editor.toPlainText(), candidate)
+        self.assertFalse(dialog.retry_button.isHidden())
+        self.assertTrue(dialog.pacing_strip.cards[0].warning_icon.isHidden())
+        self.assertFalse(dialog.pacing_strip.cards[1].warning_icon.isHidden())
+        self.assertTrue(dialog.pacing_strip.cards[1].property("warning"))
+        dialog.close()
+        window.close()
+
+    def test_retry_button_restarts_the_failed_minimax_operation(self):
+        window = MainWindow()
+        dialog = window.ensure_minimax_prompt_window()
+        window.minimax_operation_kind = "generate"
+        window.minimax_prompt_cache_key = "stale-cache"
+        window.minimax_warning_indices = [0]
+        dialog.show_message("Generation failed.", "error", retry=True)
+
+        with patch.object(window, "export_minimax_h3") as retry_generation:
+            dialog.retry_button.click()
+
+        retry_generation.assert_called_once_with()
+        self.assertEqual(window.minimax_prompt_cache_key, "")
+        self.assertEqual(window.minimax_warning_indices, [])
         dialog.close()
         window.close()
 

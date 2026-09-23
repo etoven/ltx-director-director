@@ -27,6 +27,19 @@ MAX_INLINE_VIDEO_BYTES = 12 * 1024 * 1024
 class AIResponseFormatError(ValueError):
     """The provider returned text that does not satisfy the response contract."""
 
+    def __init__(self, message: str, candidate_prompt: str = "", warning_indices: tuple[int, ...] = ()):
+        super().__init__(message)
+        self.candidate_prompt = candidate_prompt.strip()
+        self.warning_indices = tuple(warning_indices)
+
+
+def minimax_interval_detail_standard(duration: float) -> tuple[int, int]:
+    """Return duration-scaled sentence and word guidance for one MiniMax interval."""
+    duration = max(0.0, float(duration))
+    sentences = 2 if duration < 4.0 else (3 if duration < 7.0 else 4)
+    words = max(24, min(50, round(duration * 10)))
+    return sentences, words
+
 
 def build_prompts(segments: list[Segment], provider: str, model: str, api_key: str, intent: str, sfx: bool, spoken_dialog: bool, hdr: bool, reduce_music: bool, timeout: int = 400) -> dict:
     images = [_segment_input(item) for item in segments]
@@ -87,38 +100,39 @@ def _validated_minimax_h3_prompt(raw: str, segments: list[Segment]) -> str:
     prompt = result.get("prompt") or result.get("minimaxPrompt") or result.get("minimax_prompt")
     if not isinstance(prompt, str) or not prompt.strip():
         raise AIResponseFormatError("The AI returned no MiniMax H3 prompt. The operation will retry.")
+    candidate_prompt = prompt.strip()
     continuity_plan = result.get("continuityPlan") or result.get("continuity_plan")
     if not isinstance(continuity_plan, dict):
-        raise AIResponseFormatError("The AI returned no MiniMax continuity plan. The operation will retry.")
+        raise AIResponseFormatError("The AI returned no MiniMax continuity plan. The operation will retry.", candidate_prompt)
     persistent_anchors = continuity_plan.get("persistentAnchors") or continuity_plan.get("persistent_anchors")
     if not isinstance(persistent_anchors, list) or not any(str(anchor).strip() for anchor in persistent_anchors):
-        raise AIResponseFormatError("The AI returned no persistent MiniMax continuity anchors. The operation will retry.")
+        raise AIResponseFormatError("The AI returned no persistent MiniMax continuity anchors. The operation will retry.", candidate_prompt)
     bridges = continuity_plan.get("bridges")
     expected_bridge_count = max(0, len(segments) - 1)
     if not isinstance(bridges, list) or len(bridges) != expected_bridge_count:
         raise AIResponseFormatError(
             f"The AI returned an invalid MiniMax bridge plan; expected {expected_bridge_count} adjacent transition bridge(s). "
-            "The operation will retry."
+            "The operation will retry.", candidate_prompt,
         )
     for index, bridge in enumerate(bridges, 1):
         if not isinstance(bridge, dict) or bridge.get("fromSegment") != index or bridge.get("toSegment") != index + 1:
-            raise AIResponseFormatError("The AI returned an out-of-order MiniMax bridge plan. The operation will retry.")
+            raise AIResponseFormatError("The AI returned an out-of-order MiniMax bridge plan. The operation will retry.", candidate_prompt)
         if bridge.get("divergence") not in {"low", "medium", "high"}:
-            raise AIResponseFormatError("The AI omitted a valid MiniMax bridge divergence level. The operation will retry.")
+            raise AIResponseFormatError("The AI omitted a valid MiniMax bridge divergence level. The operation will retry.", candidate_prompt)
         if bridge.get("resolution") not in {"reach", "carry_forward"}:
-            raise AIResponseFormatError("The AI omitted a valid MiniMax bridge resolution strategy. The operation will retry.")
+            raise AIResponseFormatError("The AI omitted a valid MiniMax bridge resolution strategy. The operation will retry.", candidate_prompt)
         if not str(bridge.get("progressiveChange") or "").strip():
-            raise AIResponseFormatError("The AI omitted a progressive MiniMax bridge action. The operation will retry.")
+            raise AIResponseFormatError("The AI omitted a progressive MiniMax bridge action. The operation will retry.", candidate_prompt)
         if not str(bridge.get("boundaryState") or "").strip():
-            raise AIResponseFormatError("The AI omitted the plausible state at a MiniMax cue boundary. The operation will retry.")
+            raise AIResponseFormatError("The AI omitted the plausible state at a MiniMax cue boundary. The operation will retry.", candidate_prompt)
         if not str(bridge.get("carriedMotion") or "").strip():
-            raise AIResponseFormatError("The AI omitted the motion carried through a MiniMax cue boundary. The operation will retry.")
-    prompt = prompt.strip()
+            raise AIResponseFormatError("The AI omitted the motion carried through a MiniMax cue boundary. The operation will retry.", candidate_prompt)
+    prompt = candidate_prompt
     required_sections = ("continuous_video", "soundscape", "music")
     missing = [section for section in required_sections if not re.search(rf"(?im)^\s*{section}\s*:", prompt)]
     if missing:
         raise AIResponseFormatError(
-            f"The AI omitted required MiniMax H3 section(s): {', '.join(missing)}. The operation will retry."
+            f"The AI omitted required MiniMax H3 section(s): {', '.join(missing)}. The operation will retry.", prompt,
         )
     detailed_match = re.search(
         r"(?ims)^\s*continuous_video\s*:\s*(.*?)(?=^\s*soundscape\s*:)",
@@ -134,35 +148,38 @@ def _validated_minimax_h3_prompt(raw: str, segments: list[Segment]) -> str:
     if cue_timestamps != expected_timestamps:
         raise AIResponseFormatError(
             f"The AI returned {len(cue_timestamps)} valid MiniMax timeline cue(s), but the timeline requires "
-            f"exactly {len(segments)} at the prescribed start times. The operation will retry."
+            f"exactly {len(segments)} at the prescribed start times. The operation will retry.", prompt,
         )
     if re.search(r"(?im)^\s*\[Shot\s+\d+\]", detailed):
-        raise AIResponseFormatError("The AI added structural shot headers that can force hard cuts. The operation will retry.")
+        raise AIResponseFormatError("The AI added structural shot headers that can force hard cuts. The operation will retry.", prompt)
     if re.search(r"(?i)<(?:Picture|Video)\s+\d+>", detailed):
-        raise AIResponseFormatError("The AI exposed reference labels in the motion description. The operation will retry.")
+        raise AIResponseFormatError("The AI exposed reference labels in the motion description. The operation will retry.", prompt)
     if re.search(r"(?m)^\s*\d{2,}:\d{2}:\d{3}\s+\[[^\]\n]+\]", detailed):
-        raise AIResponseFormatError("The AI added a bracketed camera or shot command after a timeline cue. The operation will retry.")
+        raise AIResponseFormatError("The AI added a bracketed camera or shot command after a timeline cue. The operation will retry.", prompt)
     if re.search(r"(?i)\b(?:hard|jump)\s+cut\b|\bcuts?\s+to\b", detailed):
-        raise AIResponseFormatError("The AI added an editorial cut instruction. The operation will retry.")
+        raise AIResponseFormatError("The AI added an editorial cut instruction. The operation will retry.", prompt)
     if re.search(r"(?im)^\s*(?:subject_definitions|summary|retention_analysis|detailed_description)\s*:", prompt):
-        raise AIResponseFormatError("The AI exposed internal reference analysis in the MiniMax production prompt. The operation will retry.")
+        raise AIResponseFormatError("The AI exposed internal reference analysis in the MiniMax production prompt. The operation will retry.", prompt)
     cue_starts = list(re.finditer(r"(?m)^\s*(\d{2,}:\d{2}:\d{3})\s+", detailed))
+    short_intervals = []
+    short_details = []
     for index, cue_start in enumerate(cue_starts):
         block_end = cue_starts[index + 1].start() if index + 1 < len(cue_starts) else len(detailed)
         interval_text = detailed[cue_start.end():block_end]
         word_count = len(re.findall(r"\b[\w'-]+\b", interval_text))
         sentence_count = len(re.findall(r"[.!?](?:[\"')\]]+)?(?=\s|$)", interval_text))
-        if sentence_count < 2:
-            raise AIResponseFormatError(
-                f"The AI returned only {sentence_count} complete MiniMax sentence(s) at {cue_start.group(1)}; "
-                "every timeline interval requires at least 2 production-ready sentences. The operation will retry."
+        required_sentences, required_words = minimax_interval_detail_standard(segments[index].duration)
+        if sentence_count < required_sentences or word_count < required_words:
+            short_intervals.append(index)
+            short_details.append(
+                f"{cue_start.group(1)} has {sentence_count}/{required_sentences} sentences and {word_count}/{required_words} words"
             )
-        required_words = max(24, min(50, round(float(segments[index].duration) * 10)))
-        if word_count < required_words:
-            raise AIResponseFormatError(
-                f"The AI returned a skimpy MiniMax interval at {cue_start.group(1)} ({word_count} words); "
-                f"at least {required_words} words are required for production-ready motion detail. The operation will retry."
-            )
+    if short_intervals:
+        raise AIResponseFormatError(
+            "The AI returned under-detailed MiniMax interval(s): " + "; ".join(short_details) + ". The operation will retry.",
+            prompt,
+            tuple(short_intervals),
+        )
     return prompt
 
 
@@ -320,6 +337,11 @@ def _minimax_h3_inputs(segments: list[Segment], provider: str = "gemini", refine
             "start_time": start,
             "end_time": end,
             "duration": item.duration,
+            "recommended_detail": {
+                "minimum_complete_sentences": minimax_interval_detail_standard(item.duration)[0],
+                "minimum_words": minimax_interval_detail_standard(item.duration)[1],
+                "purpose": "duration-scaled MiniMax motion specificity; do not print these counts in the production prompt",
+            },
             "cue_timestamp": _minimax_timestamp(start),
             "next_cue_timestamp": _minimax_timestamp(end) if index + 1 < len(segments) else None,
             "continuity_function": continuity_function,
@@ -364,9 +386,15 @@ def _minimax_h3_rules(segments: list[Segment], intent: str, global_prompt: str, 
         cue_timestamps.append(_minimax_timestamp(cursor))
         cursor += item.duration
     cue_list = ", ".join(cue_timestamps)
+    detail_targets = [minimax_interval_detail_standard(segment.duration) for segment in segments]
     cue_template = "\n".join(
-        f"{timestamp} {{what changes continuously during interval {index}; preserve the carried-forward state and describe only the new motion delta}}"
-        for index, timestamp in enumerate(cue_timestamps, 1)
+        f"{timestamp} {{interval {index}: write at least {sentences} complete sentences and {words} words of natural production prose; "
+        "preserve the carried-forward state and describe only the new motion delta}"
+        for index, (timestamp, (sentences, words)) in enumerate(zip(cue_timestamps, detail_targets), 1)
+    )
+    detail_summary = "; ".join(
+        f"{timestamp} → {sentences} sentence(s), {words}+ words"
+        for timestamp, (sentences, words) in zip(cue_timestamps, detail_targets)
     )
     bridge_template = [
         {
@@ -448,7 +476,8 @@ continuous_video:
 Start with one precise persistent-anchor sentence. Then write exactly {len(segments)} chronological interval lines. Start each with its exact bare `MM:SS:mmm` timestamp followed immediately by natural motion prose; use exactly these timestamps in order: {cue_list}. The timestamp is the line's only prefix.
 
 HARD INTERVAL-DETAIL CONTRACT:
-- Every timestamped interval must contain at least 2 complete, punctuated sentences on that same line; use 3 or 4 when the duration or action supports more progression. Never compress an interval into one long sentence joined by commas or semicolons.
+- Scale detail to the time available using these per-interval MiniMax targets: {detail_summary}. These counts guide depth only and must never appear in the production prompt.
+- Every timestamped interval must meet its listed count of complete, punctuated sentences on that same line. Never compress an interval into one long sentence joined by commas or semicolons.
 - Sentence 1 establishes the carried-forward state and describes the primary action evolving through the interval, including concrete pose, expression, anatomy, transformation, or object-motion changes supplied by the matching LTX prompt.
 - Sentence 2 describes physical causality and execution: contact, force, balance, weight transfer, inertia, material response, secondary motion, and the visible intermediate state reached before the boundary.
 - A third or fourth sentence should describe supported camera/framing evolution, environmental or lighting response, synchronized performance detail, and the exact motion or momentum handed into the next cue.
@@ -474,7 +503,7 @@ soundscape:
 music:
 {{timeline-specific music direction or the required None statement}}
 
-Before returning, verify that the production prompt has exactly {len(segments)} timestamp lines in prescribed order, at least 2 complete sentences and substantial concrete motion detail on every timestamp line, no structural shot labels, no picture/video labels, no bracketed camera commands, no explicit edit or cut instructions, and no repeated full-scene inventories.
+Before returning, verify that the production prompt has exactly {len(segments)} timestamp lines in prescribed order, meets every timestamp's duration-scaled sentence and word target, has substantial concrete motion detail on every timestamp line, no structural shot labels, no picture/video labels, no bracketed camera commands, no explicit edit or cut instructions, and no repeated full-scene inventories.
 
 Return strict transport JSON with exactly these two top-level fields. `continuityPlan` is private validation data and must not be copied into `prompt`:
 {{
