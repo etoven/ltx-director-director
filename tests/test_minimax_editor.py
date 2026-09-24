@@ -31,6 +31,9 @@ class _EditorOwner(QMainWindow):
     def refine_minimax_prompt(self):
         pass
 
+    def generate_minimax_prompt(self):
+        pass
+
     def copy_minimax_prompt(self):
         pass
 
@@ -66,9 +69,11 @@ class MiniMaxEditorTests(unittest.TestCase):
 
             self.assertEqual(owner.prompt, "Pasted production prompt")
             self.assertEqual(owner.instructions_text, "Private refinement direction")
+            self.assertFalse(window.generate_button.isEnabled())
             self.assertFalse(window.refine_button.isEnabled())
             window.set_busy(False)
             self.assertTrue(window.busy_veil.isHidden())
+            self.assertTrue(window.generate_button.isEnabled())
             self.assertTrue(window.refine_button.isEnabled())
             window.close()
             owner.close()
@@ -87,6 +92,44 @@ class MiniMaxEditorTests(unittest.TestCase):
         dialog.close()
         QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         QApplication.processEvents()
+        window.close()
+
+    def test_toolbar_only_opens_editor_and_never_generates(self):
+        window = MainWindow()
+        window.segments = [Segment("Beat", "", "", kind="text", prompt="Motion", duration=2.5)]
+        with patch.object(window, "start_ai_worker") as start_worker:
+            window.minimax_editor_action.trigger()
+            QApplication.processEvents()
+
+        start_worker.assert_not_called()
+        self.assertIsNotNone(window.minimax_prompt_window)
+        self.assertFalse(window.minimax_prompt_window.isHidden())
+        window.minimax_prompt_window.close()
+        QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        QApplication.processEvents()
+        window.close()
+
+    def test_generate_button_is_the_manual_generation_trigger(self):
+        window = MainWindow()
+        window.segments = [Segment("Beat", "", "", kind="text", prompt="Motion", duration=2.5)]
+        dialog = window.ensure_minimax_prompt_window()
+        captured = {}
+
+        def capture_worker(operation, args, activity, finished, **kwargs):
+            captured["operation"] = operation
+            captured["kwargs"] = kwargs
+
+        with (
+            patch.object(window, "ai_credentials", return_value=("gemini", "gemini-3.5-flash-lite", "unused")),
+            patch.object(window, "current_minimax_cache_key", return_value="manual-signature"),
+            patch.object(window, "start_ai_worker", side_effect=capture_worker),
+        ):
+            dialog.generate_button.click()
+
+        self.assertEqual(captured["operation"].__name__, "build_minimax_h3_prompt")
+        self.assertFalse(captured["kwargs"]["show_main_overlay"])
+        self.assertEqual(window.minimax_operation_kind, "generate")
+        dialog.close()
         window.close()
 
     def test_pacing_header_uses_actual_previews_and_exact_start_times(self):
@@ -205,7 +248,7 @@ class MiniMaxEditorTests(unittest.TestCase):
         window.minimax_prompt_cache_key = "stale-cache"
         dialog.show_message("Generation failed.", "error", retry=True)
 
-        with patch.object(window, "export_minimax_h3") as retry_generation:
+        with patch.object(window, "generate_minimax_prompt") as retry_generation:
             dialog.retry_button.click()
 
         retry_generation.assert_called_once_with()

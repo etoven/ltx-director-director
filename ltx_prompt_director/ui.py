@@ -2254,6 +2254,11 @@ class MiniMaxPromptWindow(QDialog):
         self.cache_state = QLabel("Not generated")
         self.cache_state.setObjectName("minimaxCacheState")
         toolbar_layout.addWidget(self.cache_state)
+        self.generate_button = QPushButton("◆ Generate Prompt")
+        self.generate_button.setObjectName("magicButton")
+        self.generate_button.setToolTip("Manually generate a new MiniMax H3 prompt from the complete timeline")
+        self.generate_button.clicked.connect(owner.generate_minimax_prompt)
+        toolbar_layout.addWidget(self.generate_button)
         self.refine_button = QPushButton("✎ Refine Prompt")
         self.refine_button.setObjectName("refineButton")
         self.refine_button.setToolTip("Refine the edited prompt using the private instructions and complete timeline context")
@@ -2402,10 +2407,13 @@ class MiniMaxPromptWindow(QDialog):
         else:
             self.busy_veil.set_running(False)
         if busy and status:
+            self.generate_button.setText("⟳ Generating…" if "generat" in status.casefold() else "⟳ Working…")
             self.refine_button.setText("⟳ Refining…" if "refin" in status.casefold() else "⟳ Working…")
         elif busy and not was_busy:
+            self.generate_button.setText("⟳ Working…")
             self.refine_button.setText("⟳ Working…")
         elif not busy:
+            self.generate_button.setText("◆ Generate Prompt")
             self.refine_button.setText("✎ Refine Prompt")
         self.update_actions()
         if status:
@@ -2417,6 +2425,7 @@ class MiniMaxPromptWindow(QDialog):
 
     def update_actions(self) -> None:
         has_prompt = bool(self.editor.toPlainText().strip())
+        self.generate_button.setEnabled(not self.busy)
         self.refine_button.setEnabled(not self.busy and has_prompt)
         self.copy_button.setEnabled(has_prompt)
 
@@ -2515,7 +2524,7 @@ class MainWindow(QMainWindow):
              ("Save Project", "save", self.export_project)),
             (("Import", "import", self.import_ltx),
              ("Export", "export-ltx", self.export_ltx),
-             ("MiniMax H3", "export-minimax", self.export_minimax_h3)),
+             ("MiniMax H3", "export-minimax", self.open_minimax_prompt_editor)),
             (("Delete selected", "delete", self.delete_selected),),
         ]
         for group_index, group in enumerate(action_groups):
@@ -2523,8 +2532,8 @@ class MainWindow(QMainWindow):
                 action = QAction(toolbar_icon(icon_name), label, self)
                 action.triggered.connect(callback)
                 if label == "MiniMax H3":
-                    self.minimax_export_action = action
-                    action.setToolTip("Analyze the complete sequence, create one MiniMax H3 prompt, and copy it to the clipboard")
+                    self.minimax_editor_action = action
+                    action.setToolTip("Open the MiniMax H3 prompt editor; generation starts only from its Generate Prompt button")
                 toolbar.addAction(action)
             if group_index < len(action_groups) - 1:
                 toolbar.addSeparator()
@@ -4869,7 +4878,7 @@ class MainWindow(QMainWindow):
 
     def set_ai_controls_enabled(self, enabled: bool) -> None:
         self.magic_button.setEnabled(enabled)
-        self.minimax_export_action.setEnabled(enabled)
+        self.minimax_editor_action.setEnabled(enabled)
         segment = self.current_segment()
         self.refine_timing_button.setEnabled(enabled and bool(segment))
         self.refine_prompt_button.setEnabled(enabled and bool(segment and segment.prompt.strip()))
@@ -5096,19 +5105,18 @@ class MainWindow(QMainWindow):
         message = "MiniMax H3 prompt copied to clipboard"
         self.minimax_prompt_window.show_message(message, "success")
 
-    def export_minimax_h3(self) -> None:
+    def open_minimax_prompt_editor(self) -> None:
+        """Open the editor without generating, refreshing, or analyzing anything."""
+        self.show_minimax_prompt_window()
+
+    def generate_minimax_prompt(self) -> None:
+        """Generate only after the user explicitly presses the dialog button."""
+        self.minimax_editor_changed()
         if not self.segments:
             window = self.show_minimax_prompt_window("Not generated")
-            window.show_message("Add at least one timeline item before exporting a MiniMax H3 prompt.", "warning")
+            window.show_message("Add at least one timeline item before generating a MiniMax H3 prompt.", "warning")
             return
-        provider = str(self.settings.value("provider", "gemini"))
-        model = str(self.settings.value("gemini_model", GEMINI_MODELS[0]))
-        signature = self.current_minimax_cache_key(provider, model)
-        if self.minimax_prompt_text.strip() and self.minimax_prompt_cache_key == signature:
-            window = self.show_minimax_prompt_window("Cached • timeline current")
-            window.show_message("The cached MiniMax H3 prompt already matches the current timeline; no API call was made.", "info")
-            return
-        window = self.show_minimax_prompt_window("Refreshing changed timeline…" if self.minimax_prompt_text.strip() else "Generating…")
+        window = self.show_minimax_prompt_window("Generating manually…")
         credentials = self.ai_credentials()
         if not credentials:
             window.set_busy(False, "Generation cancelled")
@@ -5123,7 +5131,7 @@ class MainWindow(QMainWindow):
             self.minimax_refinement_instructions,
         )
         timeout = self.settings.value("api_timeout", 400, int)
-        window.set_busy(True, "Generating…")
+        window.set_busy(True, "Generating prompt…")
         self.start_ai_worker(
             build_minimax_h3_prompt,
             (
@@ -5217,7 +5225,7 @@ class MainWindow(QMainWindow):
         if getattr(self, "minimax_operation_kind", "generate") == "refine":
             self.refine_minimax_prompt()
         else:
-            self.export_minimax_h3()
+            self.generate_minimax_prompt()
 
     def show_toast(self, message: str, duration: int = 3200) -> None:
         toast = getattr(self, "_toast_label", None)
