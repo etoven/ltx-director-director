@@ -260,6 +260,11 @@ def _minimax_h3_inputs(segments: list[Segment], provider: str = "gemini", refine
                 "dollies backward-left, orbits clockwise, or holds the same locked position), then state its carried position, direction and speed, "
                 "framing or lens evolution, subject screen position, and background parallax; a cue is never permission to reset the view."
             ),
+            "action_trajectory_requirement": (
+                "Use this frame in context with every earlier and later frame to direct the complete action path through this interval. Describe the "
+                "observable intermediate stages that connect adjacent frame states, including onset, progressive change, physical cause, material or "
+                "anatomical response, momentum carried across the cue, and the exact state reached at the next frame; never jump directly between states."
+            ),
             "cue_timestamp": _minimax_timestamp(start),
             "next_cue_timestamp": _minimax_timestamp(end) if index + 1 < len(segments) else None,
             "continuity_function": continuity_function,
@@ -346,6 +351,17 @@ TIMELINE FACTS:
 - VIDEO records are temporal references: inspect their complete ordered motion, action progression, camera behavior, transformations, ending state, and clearly audible content when accessible instead of treating their preview or sampled frames as unrelated still pictures
 - when a VIDEO is represented by timestamped samples, interpret them as ordered observations from one continuous source clip; never invent motion that is unsupported by their progression or the authoritative current prompt
 
+PRIVATE WHOLE-SEQUENCE ACTION-TRAJECTORY PASS:
+- examine every supplied frame, video, and segment prompt across the complete timeline before writing any production prose; never plan an interval in isolation
+- establish the exact initial state, every visible intermediate checkpoint, and the final state, then build one complete chronological action trajectory connecting all of them
+- for every adjacent pair of frames, identify every supported change in pose, expression, anatomy, hair length or coverage, clothing tension or damage, prop position, environment, lighting, and subject-camera relationship
+- translate each visible difference into continuous on-screen action with a beginning, progressive intermediate stages, physical cause, material response, and a precise boundary state; never merely restate the two frames
+- when clothing changes, describe the full material progression where supported: fabric pulls taut, wrinkles gather, seams strain, individual threads snap, a tear opens and widens, loose edges recoil or flap, and the damaged cloth settles or continues tearing
+- when hair or fur changes, describe where growth begins, how strands emerge or lengthen, the direction and rate of spread, density and coverage changes, interaction with skin or clothing, and secondary motion as the new length moves
+- apply the same trajectory logic to anatomical transformations, facial changes, limb movement, body repositioning, object interaction, environmental reactions, and effects: specify what initiates the change, what moves first, what follows, and what remains in motion at the next cue
+- distribute long changes across all relevant intervals instead of completing them early or restarting them at each frame; preserve accumulated progress so the final cue completes the same action trajectory established at the beginning
+- keep this planning pass private; the production prompt should contain only natural chronological action direction, not frame comparisons or analysis labels
+
 PRIVATE CONTINUITY-PLANNING PASS:
 - distinguish the opening state from a persistent anchor. Before listing persistent anchors, compare each candidate against the entire timeline and exclude any pose, anatomy, clothing, prop state, lighting state, framing, camera position, or environment that a later source intentionally changes
 - when camera behavior evolves, preserve one coherent camera path and spatial geography rather than incorrectly declaring the opening framing or camera position fixed throughout
@@ -369,6 +385,8 @@ PRIVATE CAMERA-TRAJECTORY PASS:
 MINIMAX H3 PRODUCTION-PROMPT PRINCIPLES:
 - treat all supplied images, videos, prompts, and audio context as one unified creative context; references guide identity, motion, framing, atmosphere, and continuity but are not edit points
 - mirror the LTX segment-prompt standard: each frame directs its matching interval, and each interval must be a complete, detailed MiniMax production instruction describing visible subject action, expression, pose or anatomy change, physical progression, secondary motion, environment response, and camera behavior
+- use the entire ordered frame sequence to direct the action, not just the current and next frame. Each interval must advance its assigned portion of the complete initial-to-final action trajectory while preserving every change already achieved
+- explicitly narrate supported between-frame developments such as cloth stretching and ripping, hair or fur growing and spreading, anatomy reshaping, weight shifting, limbs following through, objects reacting, and environmental motion; describe intermediate stages and material physics rather than jumping to the next frame's appearance
 - treat each segment's current LTX prompt as the authoritative action specification for its matching interval; expand its useful motion detail into MiniMax continuous-flow prose instead of reducing it to a summary
 - front-load only the subject identity, environment, visual style, lighting, screen direction, camera behavior, and transformation state that truly remain stable across the complete timeline; never promote an opening-only condition into a global claim
 - because visual references already establish appearance and setting, spend the timestamped prose on motion: what changes, how it progresses, its physical cause, contact and weight, secondary motion, and how existing momentum flows through the cue boundary
@@ -396,7 +414,7 @@ HARD INTERVAL-DETAIL CONTRACT:
 - Scale detail to the time available using these per-interval MiniMax targets: {detail_summary}. These counts guide depth only and must never appear in the production prompt.
 - Every timestamped interval must meet its listed count of complete, punctuated sentences on that same line. Never compress an interval into one long sentence joined by commas or semicolons.
 - Sentence 1 establishes the carried-forward state and describes the primary action evolving through the interval, including concrete pose, expression, anatomy, transformation, or object-motion changes supplied by the matching LTX prompt.
-- Sentence 2 describes physical causality and execution: contact, force, balance, weight transfer, inertia, material response, secondary motion, and the visible intermediate state reached before the boundary.
+- Sentence 2 describes physical causality and execution: contact, force, balance, weight transfer, inertia, material response, secondary motion, and the visible intermediate state reached before the boundary. For progressive changes, name the actual stages—for example fabric tightening before seams strain and rip, or hair emerging before strands lengthen and spread—instead of saying only that the change continues.
 - A third or fourth sentence should describe supported camera/framing evolution, environmental or lighting response, synchronized performance detail, and the exact motion or momentum handed into the next cue.
 - Every interval must contain a concrete camera-continuity clause, even for a static camera. Name the directional motion path (`zooms out`, `pans down`, `dollies backward-left`, `orbits clockwise`, etc.) or explicitly state that the camera holds the same locked position. Carry speed or held stillness, lens/framing, subject screen placement, and parallax forward from the prior interval; never substitute a newly composed view.
 - Preserve all useful specificity from the matching LTX prompt. Do not replace detailed source action with generic phrases such as `continues moving`, `gradually changes`, `the transformation progresses`, or `the motion carries forward`.
@@ -421,7 +439,7 @@ soundscape:
 music:
 {{timeline-specific music direction or the required None statement}}
 
-Before returning, verify that the production prompt has exactly {len(segments)} timestamp lines in prescribed order, meets every timestamp's duration-scaled sentence and word target, names a concrete directional camera motion path or locked-position hold in every interval, carries spatial geography through every interval, begins all reframing before its target cue, has no camera teleportation or instant recomposition, no structural shot labels, no picture/video labels, no bracketed camera commands, no explicit edit or cut instructions, no reset-style transition wording, and no repeated full-scene inventories.
+Before returning, verify privately that you examined the complete frame sequence first; the production prompt covers the full initial-to-final action trajectory; every supported between-frame change has concrete intermediate stages, causality, material or anatomical response, and a precise boundary state; it has exactly {len(segments)} timestamp lines in prescribed order; it meets every timestamp's duration-scaled sentence and word target; it names a concrete directional camera motion path or locked-position hold in every interval; it carries spatial geography through every interval; it begins all reframing before its target cue; and it has no camera teleportation, instant recomposition, structural shot labels, picture/video labels, bracketed camera commands, explicit edit or cut instructions, reset-style transition wording, or repeated full-scene inventories.
 
 Return strict transport JSON with exactly one top-level field. Do not return analysis, plans, scores, or validation metadata:
 {{"prompt": "the complete three-section MiniMax H3 production prompt"}}"""

@@ -57,6 +57,14 @@ class MiniMaxH3PromptTests(unittest.TestCase):
                 self.assertIn("weight transfer", rules)
                 self.assertIn("secondary motion", rules)
                 self.assertIn("PRIVATE CAMERA-TRAJECTORY PASS", rules)
+                self.assertIn("PRIVATE WHOLE-SEQUENCE ACTION-TRAJECTORY PASS", rules)
+                self.assertIn("examine every supplied frame", rules)
+                self.assertIn("complete initial-to-final action trajectory", rules)
+                self.assertIn("fabric pulls taut", rules)
+                self.assertIn("individual threads snap", rules)
+                self.assertIn("hair or fur changes", rules)
+                self.assertIn("strands emerge or lengthen", rules)
+                self.assertIn("never plan an interval in isolation", rules)
                 self.assertIn("exactly one top-level field", rules)
 
     def test_mixed_media_inputs_have_interval_roles_and_video_awareness(self):
@@ -69,6 +77,7 @@ class MiniMaxH3PromptTests(unittest.TestCase):
         self.assertIn("temporal motion evidence", inputs[1]["continuity_function"])
         self.assertIn("action instruction", inputs[2]["continuity_function"])
         self.assertIn("resolve by this interval's end", inputs[3]["continuity_function"])
+        self.assertTrue(all("complete action path" in item["action_trajectory_requirement"] for item in inputs))
 
     def test_returns_prompt_without_semantic_validation(self):
         segments = self.segments(3)
