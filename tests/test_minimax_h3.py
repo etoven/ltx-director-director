@@ -38,7 +38,7 @@ class MiniMaxH3PromptTests(unittest.TestCase):
         self.assertEqual(ai.minimax_interval_detail_standard(5.0), (3, 50))
         self.assertEqual(ai.minimax_interval_detail_standard(8.0), (4, 50))
 
-    def test_master_prompt_has_dynamic_action_cues_and_conditional_timed_camera_bridges(self):
+    def test_master_prompt_has_dynamic_action_cues_and_conditional_timed_bridges(self):
         for count in (1, 3, 7):
             with self.subTest(count=count):
                 rules = ai._minimax_h3_rules(self.segments(count), "", "", True, False, True)
@@ -49,11 +49,14 @@ class MiniMaxH3PromptTests(unittest.TestCase):
                 self.assertNotIn('"continuityPlan"', rules)
                 self.assertIn("each frame directs its matching interval", rules)
                 self.assertIn("compare every pair of adjacent visual checkpoints", rules)
-                self.assertIn("only for a significant camera shift", rules)
+                self.assertIn("for any significant visual difference between adjacent frames", rules)
                 self.assertIn("strictly between the two fixed frame-action timestamps", rules)
-                self.assertIn("MM:SS:mmm Camera bridge:", rules)
+                self.assertIn("MM:SS:mmm Frame bridge:", rules)
                 self.assertIn("subject's action progressing during camera travel", rules)
-                self.assertIn("no significant camera shift, omit the bridge", rules)
+                self.assertIn("no visual state changes significantly, omit the bridge", rules)
+                self.assertIn("a fall, collapse, substantial head tilt", rules)
+                self.assertIn("Combine simultaneous camera, subject, and environmental motion in that same bridge", rules)
+                self.assertIn("objects, clothing, environment, lighting", rules)
                 self.assertIn("do not force a camera path", rules)
                 self.assertIn("zooms out", rules)
                 self.assertIn("pans down", rules)
@@ -63,7 +66,7 @@ class MiniMaxH3PromptTests(unittest.TestCase):
                 self.assertIn("physical causality and execution", rules)
                 self.assertIn("weight transfer", rules)
                 self.assertIn("secondary motion", rules)
-                self.assertIn("PRIVATE CAMERA-TRAJECTORY PASS", rules)
+                self.assertIn("PRIVATE FRAME-TRANSITION PASS", rules)
                 self.assertIn("PRIVATE WHOLE-SEQUENCE ACTION-TRAJECTORY PASS", rules)
                 self.assertIn("examine every supplied frame", rules)
                 self.assertIn("complete initial-to-final action trajectory", rules)
@@ -85,7 +88,14 @@ class MiniMaxH3PromptTests(unittest.TestCase):
         self.assertIn("action instruction", inputs[2]["continuity_function"])
         self.assertIn("resolve by this interval's end", inputs[3]["continuity_function"])
         self.assertTrue(all("complete action path" in item["action_trajectory_requirement"] for item in inputs))
-        self.assertTrue(all("view changes significantly" in item["camera_continuity_requirement"] for item in inputs))
+        self.assertTrue(all("any visual state changes significantly" in item["camera_continuity_requirement"] for item in inputs))
+
+    def test_subject_pose_change_gets_timed_action_bridge_without_camera_motion(self):
+        rules = ai._minimax_h3_rules(self.segments(2), "", "", True, False, True)
+        self.assertIn("substantial head tilt", rules)
+        self.assertIn("intermediate pose before the next checkpoint", rules)
+        self.assertIn("Keep the camera steady when the frames show only subject movement", rules)
+        self.assertIn("stable views remain stable when only the subject or environment changes", rules)
 
     def test_frontal_to_profile_example_directs_a_separate_timed_bridge(self):
         segments = self.segments(3)
@@ -94,7 +104,7 @@ class MiniMaxH3PromptTests(unittest.TestCase):
         rules = ai._minimax_h3_rules(segments, "", "", True, False, True)
         self.assertIn("00:01:000", rules)
         self.assertIn("00:08:000", rules)
-        self.assertIn("00:04:000 Camera bridge:", rules)
+        self.assertIn("00:04:000 Frame bridge:", rules)
         self.assertIn("00:00:500", rules)
         self.assertIn("complete continuous zoom in", rules)
         self.assertIn("two distinct timed bridges", rules)
