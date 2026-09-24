@@ -298,7 +298,8 @@ def _minimax_h3_inputs(segments: list[Segment], provider: str = "gemini", refine
             },
             "camera_continuity_requirement": (
                 "Compare this frame's camera angle, position, subject scale, screen placement, background, pose, and action with adjacent frames. "
-                "If any visual state changes significantly, plan one timed Frame bridge inside the preceding interval; otherwise carry motion through the cue without an extra bridge."
+                "For each pair of successive visual checkpoints, plan exactly one timed Frame bridge before the next visual checkpoint; "
+                "keep the bridge concise for near-identical states and describe observed video motion instead of inventing another movement."
             ),
             "action_trajectory_requirement": (
                 "Use this frame in context with every earlier and later frame to direct the complete action path through this interval. Describe the "
@@ -349,11 +350,15 @@ def _minimax_h3_rules(segments: list[Segment], intent: str, global_prompt: str, 
         cue_timestamps.append(_minimax_timestamp(cursor))
         cursor += item.duration
     cue_list = ", ".join(cue_timestamps)
+    visual_cues = [(index, cue_timestamps[index]) for index, item in enumerate(segments) if item.kind in ("image", "video")]
+    bridge_pairs = [f"{start} → {end}" for (_, start), (_, end) in zip(visual_cues, visual_cues[1:])]
+    bridge_list = "; ".join(bridge_pairs) or "none (fewer than two visual checkpoints)"
+    bridge_count = len(bridge_pairs)
     detail_targets = [minimax_interval_detail_standard(segment.duration) for segment in segments]
     cue_template = "\n".join(
         f"{timestamp} {{interval {index}: write at least {sentences} complete sentences and {words} words of natural production prose; "
-        "preserve the carried-forward state and describe the complete new action progression; if the next frame significantly changes any visual state, "
-        "add one separately timestamped bridge strictly before the next frame cue, within this interval's time budget}"
+        "preserve the carried-forward state and describe the complete new action progression; include one separately timestamped Frame bridge "
+        "before the next visual checkpoint when this interval spans a visual-checkpoint pair, even if their visible states are similar}"
         for index, (timestamp, (sentences, words)) in enumerate(zip(cue_timestamps, detail_targets), 1)
     )
     detail_summary = "; ".join(
@@ -381,7 +386,8 @@ Derive facts exclusively from the supplied timeline frames, videos, current prom
 
 TIMELINE FACTS:
 - {len(segments)} ordered timeline items, including {image_count} still-image reference(s) and {video_count} video reference(s)
-- preserve exactly {len(segments)} frame-action cues at their prescribed timestamps; add one intermediate timestamped Frame bridge inside the preceding interval for each significant visual difference from frame A to frame B, within the original total duration
+- preserve exactly {len(segments)} frame-action cues at their prescribed timestamps; add exactly {bridge_count} intermediate timestamped Frame bridge cue(s), one for every pair of successive visual checkpoints, within the original total duration
+- required visual-checkpoint bridge windows: {bridge_list}
 - required cue timestamps, in order: {cue_list}
 - exact total duration: {total:.2f} seconds
 - each record supplies exact start/end time, duration, media kind, current video prompt, and when available an audio-free still-image prompt
@@ -416,14 +422,16 @@ PRIVATE CONTINUITY-PLANNING PASS:
 
 PRIVATE FRAME-TRANSITION PASS:
 - compare every pair of adjacent visual checkpoints, frame A to frame B, for any significant change in camera angle, height, distance, lens/framing, subject scale or placement, pose, expression, anatomy, action, objects, clothing, environment, lighting, horizon, or background geography. Distinguish camera movement from subject movement and from environmental changes in a steady frame
-- for any significant visual difference between adjacent frames, insert one additional `MM:SS:mmm Frame bridge: ...` line strictly between the two fixed frame-action timestamps, inside the preceding interval's existing duration. Describe the actual intermediate stages that cause or connect the changed visual state. Combine simultaneous camera, subject, and environmental motion in that same bridge; do not insert a separate bridge for each type of change. The bridge is not a new project frame, edit, or extension of total length
+- for EVERY pair of successive visual checkpoints, insert exactly one additional `MM:SS:mmm Frame bridge: ...` line at a timestamp strictly between their fixed cue timestamps, within the existing time span. Describe the actual intermediate stages that connect frame A to frame B. Combine simultaneous camera, subject, and environmental motion in that same bridge; do not insert a separate bridge for each type of change. The bridge is not a new project frame, edit, or extension of total length
+- scale the bridge to the visible difference: a substantial change needs concrete movement stages, while near-identical images need only a brief, grounded account of continuous motion or stable state. Never invent a zoom, pose change, or event merely to fill a required bridge
+- when a video source already shows the transition to the next checkpoint, use the bridge to describe that observed motion at the intermediate time rather than repeat it or invent a second move. A video-to-image boundary still gets one bridge
 - a fall, collapse, substantial head tilt, or comparable change of pose requires a Frame bridge. Describe what initiates the movement, how head and torso/weight respond, and the intermediate pose before the next checkpoint. Keep the camera steady when the frames show only subject movement; never invent a camera move to explain a pose change
 - a transition from a frontal view to a side/profile view, or the reverse, is a significant camera/subject-viewpoint change: make the move explicit in a separately timed Frame bridge inside the preceding interval, even when the subject's face or transformation is the main action. Determine whether the camera arcs around the subject or the subject turns; describe the actual supported movement instead of silently replacing the view
-- a wide or medium video opening followed by a close still-image checkpoint is also a significant framing change unless the source video's motion already completes that move before the checkpoint. When it does not, place a timed Frame bridge strictly inside even a short preceding interval, using an available millisecond timestamp such as `00:00:500` between `00:00:000` and `00:01:000`; describe the complete continuous zoom in, including how the subject grows in frame and what remains visible while the action proceeds. Do not mistake the video preview for the video's complete motion
+- a wide or medium video opening followed by a close still-image checkpoint is a framing change. Place the required timed Frame bridge strictly inside even a short preceding interval, using an available millisecond timestamp such as `00:00:500` between `00:00:000` and `00:01:000`; describe the complete continuous zoom in if supported by the source, including how the subject grows in frame and what remains visible while the action proceeds. Do not mistake the video preview for the video's complete motion
 - distinguish a push toward the subject from an orbit toward their profile. A push alone cannot explain a frontal-to-profile checkpoint. Begin the necessary arc or turn before the next fixed timestamp, and reach that checkpoint through visible motion
 - describe a physically plausible path to the next viewpoint, such as `pans down`, `dollies backward-left`, `cranes up`, `orbits clockwise`, or `zooms out`, with direction, pace, subject placement, and background parallax
 - keep the subject's action progressing during camera travel: cloth continues pulling and tearing, hair keeps growing, or the body carries its motion as appropriate. The bridge must not pause, restart, or replace the adjacent action progression
-- if no visual state changes significantly, omit the bridge; a steady camera with a significant subject or scene change can still require a Frame bridge
+- if the visual states are similar, keep the required bridge short and maintain the established camera and action without forcing a new change
 - begin a longer move early enough inside the preceding interval to reach the next checkpoint plausibly, without snapping to a new composition at its timestamp
 - for example, if the timeline starts at `00:01:000` with a frontal face and the next image at `00:08:000` shows a profile, place `00:04:000 Frame bridge: ...` between their existing action cues, describe the arc or turn toward profile while the facial action continues, and arrive at profile by `00:08:000`. This example is conditional; do not add its timestamps or movement to any other timeline
 - if both a wide-to-close `00:00:000`–`00:01:000` boundary and a front-to-profile `00:01:000`–`00:08:000` boundary shift significantly, insert two distinct timed bridges, one inside each preceding interval. Never let the later bridge stand in for the earlier transition
@@ -441,7 +449,7 @@ MINIMAX H3 PRODUCTION-PROMPT PRINCIPLES:
 - describe later intervals as deltas from the carried-forward state; do not reintroduce or re-inventory the subject, outfit, location, composition, or props at every timestamp
 - positively describe continuous state and motion. Avoid editorial vocabulary, transition labels, reference labels, and negative prompting in the production prompt
 - state a stationary or persistent camera baseline once. If source material requires camera movement, describe one coherent evolving camera path rather than resetting framing at each cue
-- keep each frame's timed prose focused on its detailed action progression. Any significant visual shift warrants a distinct intermediate timed bridge; do not force a camera path or static-camera declaration into every action cue
+- keep each frame's timed prose focused on its detailed action progression. Every adjacent visual pair gets one distinct intermediate timed bridge; do not force a camera path or static-camera declaration into every action cue
 - start any necessary reframing during the preceding interval and complete or carry its velocity through the target cue. Never use a frame timestamp to introduce a new angle, close-up, wide view, or camera placement instantaneously
 - begin every interval from the exact subject, camera, and environment state reached by the preceding line. Do not re-establish the scene, re-describe a fresh composition, or use phrases such as `new shot`, `different angle`, `view switches`, `scene changes`, `transition to`, or `we now see`
 - use short causal sentences and overlapping motion. Start preparatory movement before a substantially different checkpoint, preserve velocity across its timestamp, and settle only after the new state has been physically reached
@@ -456,15 +464,15 @@ GLOBAL CONTINUITY PROMPT:
 REQUIRED PRODUCTION-PROMPT SECTIONS — use these three lowercase headings exactly, in order, with no Markdown fences:
 
 continuous_video:
-Start with one precise persistent-anchor sentence that includes the opening camera position, lens/framing, subject-relative placement, and spatial geography. Write exactly {len(segments)} frame-action cues at these exact `MM:SS:mmm` timestamps in order: {cue_list}. Each begins with its bare timestamp followed by natural action prose. For any significant visual difference between adjacent frames, insert one additional `MM:SS:mmm Frame bridge: ...` cue strictly between its two neighboring frame cues, describing the supported motion or physical progression from A toward B. Choose a start time inside the preceding interval; never reuse or shift a frame timestamp, add to the total duration, or place a bridge after the final cue. The subject's ongoing action continues through that bridge.
+Start with one precise persistent-anchor sentence that includes the opening camera position, lens/framing, subject-relative placement, and spatial geography. Write exactly {len(segments)} frame-action cues at these exact `MM:SS:mmm` timestamps in order: {cue_list}. Each begins with its bare timestamp followed by natural action prose. Also write exactly {bridge_count} additional `MM:SS:mmm Frame bridge: ...` cues, one strictly inside each of these visual-checkpoint windows: {bridge_list}. When text-only cues occur between visual checkpoints, keep them at their prescribed times and place the bridge in the same visual window in chronological order. Describe the supported motion or stable progression from A toward B. Never reuse or shift a cue timestamp, add to the total duration, or place a bridge after the final visual cue. The subject's ongoing action continues through each bridge.
 
 HARD INTERVAL-DETAIL CONTRACT:
 - Scale detail to the time available using these per-interval MiniMax targets: {detail_summary}. These counts guide depth only and must never appear in the production prompt.
 - Every timestamped interval must meet its listed count of complete, punctuated sentences on that same line. Never compress an interval into one long sentence joined by commas or semicolons.
 - Sentence 1 establishes the carried-forward state and describes the primary action evolving through the interval, including concrete pose, expression, anatomy, transformation, or object-motion changes supplied by the matching LTX prompt.
 - Sentence 2 describes physical causality and execution: contact, force, balance, weight transfer, inertia, material response, secondary motion, and the visible intermediate state reached before the boundary. For progressive changes, name the actual stages—for example fabric tightening before seams strain and rip, or hair emerging before strands lengthen and spread—instead of saying only that the change continues.
-- A third or fourth sentence should describe supported environmental or lighting response, synchronized performance detail, and the exact action or momentum handed into the next cue. Leave substantial camera repositioning to its optional timed bridge.
-- For a significant visual shift, the `MM:SS:mmm Frame bridge:` cue describes the intermediate camera path and parallax when the camera moves, the body's intermediate motion and pose when the subject moves, and the physical progression of changed objects or environment when they change. Include all significant concurrent changes in one bridge inside the preceding interval, without a new scene or cut.
+- A third or fourth sentence should describe supported environmental or lighting response, synchronized performance detail, and the exact action or momentum handed into the next cue. Leave substantial camera repositioning to its required timed Frame bridge.
+- Each `MM:SS:mmm Frame bridge:` cue describes the intermediate camera path and parallax when the camera moves, the body's intermediate motion and pose when the subject moves, and the physical progression of changed objects or environment when they change. For similar views, make it brief and grounded in continued action or stable motion. Include all concurrent changes in one bridge inside the visual-checkpoint window, without a new scene or cut.
 - The bridge belongs on its own line between the adjacent frame-action cues. Do not hide the change inside the earlier action cue as a push-in or begin a side/profile view abruptly at the next image's timestamp.
 - Preserve all useful specificity from the matching LTX prompt. Do not replace detailed source action with generic phrases such as `continues moving`, `gradually changes`, `the transformation progresses`, or `the motion carries forward`.
 
@@ -482,7 +490,7 @@ continuous_video:
 {{one precise sentence stating whole-timeline visual anchors plus the opening camera position, lens/framing, subject-relative placement, and spatial geography}}
 {cue_template}
 
-{{for each significant visual change from one frame to the next, insert one `MM:SS:mmm Frame bridge: ...` line between the corresponding frame cues, within the earlier interval; preserve ongoing action}}
+{{insert exactly {bridge_count} `MM:SS:mmm Frame bridge: ...` lines, one strictly within each required visual-checkpoint window: {bridge_list}; preserve ongoing action}}
 
 soundscape:
 {{timeline-specific soundscape or the required None statement}}
@@ -490,7 +498,7 @@ soundscape:
 music:
 {{timeline-specific music direction or the required None statement}}
 
-Before returning, verify privately that the complete frame sequence's action trajectory retains its concrete intermediate stages, causality, and boundary states; all {len(segments)} prescribed frame timestamps remain unchanged and ordered; each significant visual difference between adjacent frames has one intermediate timestamped Frame bridge inside the preceding interval; subject action continues through each bridge; stable views remain stable when only the subject or environment changes; and there are no camera teleports, instant pose jumps, instant recompositions, structural shot labels, picture/video labels, edit or cut instructions, reset-style transitions, or repeated full-scene inventories.
+Before returning, verify privately that the complete frame sequence's action trajectory retains its concrete intermediate stages, causality, and boundary states; all {len(segments)} prescribed frame timestamps remain unchanged and ordered; exactly {bridge_count} intermediate timestamped Frame bridges appear, one in every required visual-checkpoint window even when the two views are similar; subject action continues through each bridge; stable views remain stable when only the subject or environment changes; and there are no camera teleports, instant pose jumps, instant recompositions, structural shot labels, picture/video labels, edit or cut instructions, reset-style transitions, or repeated full-scene inventories.
 
 Return strict transport JSON with exactly one top-level field. Do not return analysis, plans, scores, or validation metadata:
 {{"prompt": "the complete three-section MiniMax H3 production prompt"}}"""

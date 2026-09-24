@@ -38,7 +38,7 @@ class MiniMaxH3PromptTests(unittest.TestCase):
         self.assertEqual(ai.minimax_interval_detail_standard(5.0), (3, 50))
         self.assertEqual(ai.minimax_interval_detail_standard(8.0), (4, 50))
 
-    def test_master_prompt_has_dynamic_action_cues_and_conditional_timed_bridges(self):
+    def test_master_prompt_has_dynamic_action_cues_and_required_timed_bridges(self):
         for count in (1, 3, 7):
             with self.subTest(count=count):
                 rules = ai._minimax_h3_rules(self.segments(count), "", "", True, False, True)
@@ -49,11 +49,12 @@ class MiniMaxH3PromptTests(unittest.TestCase):
                 self.assertNotIn('"continuityPlan"', rules)
                 self.assertIn("each frame directs its matching interval", rules)
                 self.assertIn("compare every pair of adjacent visual checkpoints", rules)
-                self.assertIn("for any significant visual difference between adjacent frames", rules)
-                self.assertIn("strictly between the two fixed frame-action timestamps", rules)
+                visual_count = sum(item.kind in ("image", "video") for item in self.segments(count))
+                self.assertIn(f"add exactly {max(visual_count - 1, 0)} intermediate timestamped Frame bridge", rules)
+                self.assertIn("for EVERY pair of successive visual checkpoints", rules)
                 self.assertIn("MM:SS:mmm Frame bridge:", rules)
                 self.assertIn("subject's action progressing during camera travel", rules)
-                self.assertIn("no visual state changes significantly, omit the bridge", rules)
+                self.assertIn("near-identical images need only a brief, grounded account", rules)
                 self.assertIn("a fall, collapse, substantial head tilt", rules)
                 self.assertIn("Combine simultaneous camera, subject, and environmental motion in that same bridge", rules)
                 self.assertIn("objects, clothing, environment, lighting", rules)
@@ -88,7 +89,21 @@ class MiniMaxH3PromptTests(unittest.TestCase):
         self.assertIn("action instruction", inputs[2]["continuity_function"])
         self.assertIn("resolve by this interval's end", inputs[3]["continuity_function"])
         self.assertTrue(all("complete action path" in item["action_trajectory_requirement"] for item in inputs))
-        self.assertTrue(all("any visual state changes significantly" in item["camera_continuity_requirement"] for item in inputs))
+        self.assertTrue(all("exactly one timed Frame bridge" in item["camera_continuity_requirement"] for item in inputs))
+
+    def test_bridge_windows_include_video_to_image_and_skip_text_only_cues(self):
+        items = self.segments(4)  # image, video, text, image
+        rules = ai._minimax_h3_rules(items, "", "", False, False, True)
+        self.assertIn("required visual-checkpoint bridge windows: 00:00:000 → 00:02:500; 00:02:500 → 00:07:500", rules)
+        self.assertIn("add exactly 2 intermediate timestamped Frame bridge", rules)
+        self.assertIn("When text-only cues occur between visual checkpoints", rules)
+        self.assertIn("A video-to-image boundary still gets one bridge", rules)
+
+    def test_nearly_identical_images_still_have_a_grounded_bridge(self):
+        images = [self.segments(1)[0], self.segments(1)[0]]
+        rules = ai._minimax_h3_rules(images, "", "", False, False, True)
+        self.assertIn("add exactly 1 intermediate timestamped Frame bridge", rules)
+        self.assertIn("Never invent a zoom, pose change, or event merely to fill a required bridge", rules)
 
     def test_subject_pose_change_gets_timed_action_bridge_without_camera_motion(self):
         rules = ai._minimax_h3_rules(self.segments(2), "", "", True, False, True)
