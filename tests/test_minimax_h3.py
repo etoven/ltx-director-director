@@ -87,6 +87,21 @@ class MiniMaxH3PromptTests(unittest.TestCase):
         self.assertTrue(all("complete action path" in item["action_trajectory_requirement"] for item in inputs))
         self.assertTrue(all("view changes significantly" in item["camera_continuity_requirement"] for item in inputs))
 
+    def test_frontal_to_profile_example_directs_a_separate_timed_bridge(self):
+        segments = self.segments(3)
+        segments[0].duration = 1.0
+        segments[1].duration = 7.0
+        rules = ai._minimax_h3_rules(segments, "", "", True, False, True)
+        self.assertIn("00:01:000", rules)
+        self.assertIn("00:08:000", rules)
+        self.assertIn("00:04:000 Camera bridge:", rules)
+        self.assertIn("00:00:500", rules)
+        self.assertIn("complete continuous zoom in", rules)
+        self.assertIn("two distinct timed bridges", rules)
+        self.assertIn("A push alone cannot explain a frontal-to-profile checkpoint", rules)
+        self.assertIn("bridge belongs on its own line", rules)
+        self.assertIn("facial action continues", rules)
+
     def test_reference_master_uses_official_six_section_contract(self):
         rules = ai._minimax_h3_reference_rules(self.segments(4), "", "", True, True, False)
         headings = (
