@@ -38,7 +38,7 @@ class MiniMaxH3PromptTests(unittest.TestCase):
         self.assertEqual(ai.minimax_interval_detail_standard(5.0), (3, 50))
         self.assertEqual(ai.minimax_interval_detail_standard(8.0), (4, 50))
 
-    def test_master_prompt_has_dynamic_detailed_cues_and_camera_paths(self):
+    def test_master_prompt_has_dynamic_action_cues_and_conditional_timed_camera_bridges(self):
         for count in (1, 3, 7):
             with self.subTest(count=count):
                 rules = ai._minimax_h3_rules(self.segments(count), "", "", True, False, True)
@@ -48,7 +48,13 @@ class MiniMaxH3PromptTests(unittest.TestCase):
                 self.assertEqual(len(cues), count)
                 self.assertNotIn('"continuityPlan"', rules)
                 self.assertIn("each frame directs its matching interval", rules)
-                self.assertIn("each timeline frame explicitly direct the camera movement", rules)
+                self.assertIn("compare every pair of adjacent visual checkpoints", rules)
+                self.assertIn("only for a significant camera shift", rules)
+                self.assertIn("strictly between the two fixed frame-action timestamps", rules)
+                self.assertIn("MM:SS:mmm Camera bridge:", rules)
+                self.assertIn("subject's action progressing during camera travel", rules)
+                self.assertIn("no significant camera shift, omit the bridge", rules)
+                self.assertIn("do not force a camera path", rules)
                 self.assertIn("zooms out", rules)
                 self.assertIn("pans down", rules)
                 self.assertIn("dollies backward-left", rules)
@@ -79,6 +85,7 @@ class MiniMaxH3PromptTests(unittest.TestCase):
         self.assertIn("action instruction", inputs[2]["continuity_function"])
         self.assertIn("resolve by this interval's end", inputs[3]["continuity_function"])
         self.assertTrue(all("complete action path" in item["action_trajectory_requirement"] for item in inputs))
+        self.assertTrue(all("view changes significantly" in item["camera_continuity_requirement"] for item in inputs))
 
     def test_reference_master_uses_official_six_section_contract(self):
         rules = ai._minimax_h3_reference_rules(self.segments(4), "", "", True, True, False)
