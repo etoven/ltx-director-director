@@ -22,7 +22,10 @@ class MiniMaxH3PromptTests(unittest.TestCase):
         ]
 
     def build_with_prompt(self, segments, prompt_text):
-        with patch.object(ai, "_provider_raw", return_value=json.dumps({"prompt": prompt_text})):
+        _, slots = ai._minimax_frame_slots(segments)
+        fields = {"opening": "Opening view.", "soundscape": "Water sounds.", "music": "None."}
+        fields.update({key: prompt_text for key, _, _ in slots})
+        with patch.object(ai, "_provider_raw", return_value=json.dumps(fields)):
             return ai.build_minimax_h3_prompt(
                 segments, "gemini", "gemini-3.5-flash-lite", "unused", "", "", False, False, True,
             )
@@ -50,7 +53,7 @@ class MiniMaxH3PromptTests(unittest.TestCase):
                 visual_count = sum(item.kind in ("image", "video") for item in items)
                 self.assertEqual(len(re.findall(r"^\d{2,}:\d{2}:\d{3} Frame bridge:", rules, re.MULTILINE)), max(visual_count - 1, 0))
                 self.assertIn("Fill ALL of them", rules)
-                self.assertIn("Do not merge, remove, or add timestamped lines", rules)
+                self.assertIn("Do not omit or merge slots", rules)
                 self.assertIn("exactly one top-level field", rules)
 
     def test_mixed_media_inputs_have_interval_roles_and_video_awareness(self):
@@ -139,9 +142,12 @@ class MiniMaxH3PromptTests(unittest.TestCase):
     def test_returns_prompt_without_semantic_validation(self):
         segments = self.segments(3)
         unconventional = "A short prompt with no sections, timestamps, camera terms, or continuity metadata."
-        self.assertEqual(self.build_with_prompt(segments, unconventional), unconventional)
+        result = self.build_with_prompt(segments, unconventional)
+        self.assertIn("00:00:000 " + unconventional, result)
+        self.assertIn("00:01:250 Frame bridge: " + unconventional, result)
+        self.assertIn("00:02:500 " + unconventional, result)
 
-    def test_only_rejects_unreadable_transport_or_missing_prompt(self):
+    def test_only_rejects_unreadable_transport_or_missing_structural_fields(self):
         segments = self.segments(1)
         for response in ("not json", "{}", '{"prompt": ""}'):
             with self.subTest(response=response), patch.object(ai, "_provider_raw", return_value=response):
@@ -149,6 +155,50 @@ class MiniMaxH3PromptTests(unittest.TestCase):
                     ai.build_minimax_h3_prompt(
                         segments, "gemini", "gemini-3.5-flash-lite", "unused", "", "", False, False, True,
                     )
+
+    def test_project_shape_assembles_both_bridges_and_reached_image_states(self):
+        segments = self.segments(3)
+        segments[0].kind = "video"
+        segments[0].duration = 1.0
+        segments[1].kind = "image"
+        segments[1].role = "end"
+        segments[1].duration = 7.0
+        segments[2].kind = "image"
+        segments[2].role = "end"
+        segments[2].duration = 7.0
+        fields = {
+            "opening": "Woman under shower water.",
+            "cue_1": "Her hand falls away as the zoom starts and forehead tenses.",
+            "bridge_after_1": "The camera closes in as the fissure starts and eyes change.",
+            "cue_2": "The fissure and lion eyes are already visible as her temples swell.",
+            "bridge_after_2": "The bulges rise and ears emerge while her eyes close.",
+            "cue_3": "The lion ears are fully protruding and water runs over them.",
+            "soundscape": "Shower and strained breathing.",
+            "music": "None.",
+        }
+        with patch.object(ai, "_provider_raw", return_value=json.dumps(fields)) as provider:
+            prompt = ai.build_minimax_h3_prompt(
+                segments, "gemini", "gemini-3.5-flash-lite", "unused", "", "", True, False, True,
+            )
+        lines = [line for line in prompt.splitlines() if line[:2].isdigit()]
+        self.assertEqual([line[:9] for line in lines], ["00:00:000", "00:00:500", "00:01:000", "00:04:500", "00:08:000"])
+        self.assertEqual(sum("Frame bridge:" in line for line in lines), 2)
+        self.assertIn("lion eyes are already visible", prompt)
+        self.assertIn("lion ears are fully protruding", prompt)
+        self.assertIn("bridge_after_2", provider.call_args.args[4])
+        self.assertIn("already shows its reached state", provider.call_args.args[4])
+        inputs = provider.call_args.args[0]
+        self.assertIn("already reached at its cue timestamp", inputs[1]["continuity_function"])
+        self.assertIn("already reached at its cue timestamp", inputs[2]["continuity_function"])
+        self.assertTrue(inputs[1]["frame_mode_checkpoint"])
+        self.assertTrue(inputs[2]["frame_mode_checkpoint"])
+
+    def test_missing_bridge_field_retries_instead_of_silently_omitting_it(self):
+        items = self.segments(2)
+        response = json.dumps({"opening": "Scene.", "cue_1": "Action.", "cue_2": "Action.", "soundscape": "Water.", "music": "None."})
+        with patch.object(ai, "_provider_raw", return_value=response):
+            with self.assertRaisesRegex(ai.AIResponseFormatError, "bridge_after_1"):
+                ai.build_minimax_h3_prompt(items, "gemini", "gemini-3.5-flash-lite", "unused", "", "", False, False, True)
 
     def test_refinement_uses_edited_prompt_and_private_instructions(self):
         segments = self.segments(2)
