@@ -31,7 +31,10 @@ class _EditorOwner(QMainWindow):
     def refine_minimax_prompt(self):
         pass
 
-    def generate_minimax_prompt(self):
+    def generate_minimax_prompt_frames(self):
+        pass
+
+    def generate_minimax_prompt_references(self):
         pass
 
     def copy_minimax_prompt(self):
@@ -69,11 +72,13 @@ class MiniMaxEditorTests(unittest.TestCase):
 
             self.assertEqual(owner.prompt, "Pasted production prompt")
             self.assertEqual(owner.instructions_text, "Private refinement direction")
-            self.assertFalse(window.generate_button.isEnabled())
+            self.assertFalse(window.generate_frames_button.isEnabled())
+            self.assertFalse(window.generate_references_button.isEnabled())
             self.assertFalse(window.refine_button.isEnabled())
             window.set_busy(False)
             self.assertTrue(window.busy_veil.isHidden())
-            self.assertTrue(window.generate_button.isEnabled())
+            self.assertTrue(window.generate_frames_button.isEnabled())
+            self.assertTrue(window.generate_references_button.isEnabled())
             self.assertTrue(window.refine_button.isEnabled())
             window.close()
             owner.close()
@@ -109,7 +114,7 @@ class MiniMaxEditorTests(unittest.TestCase):
         QApplication.processEvents()
         window.close()
 
-    def test_generate_button_is_the_manual_generation_trigger(self):
+    def test_frame_and_reference_buttons_are_distinct_manual_generation_triggers(self):
         window = MainWindow()
         window.segments = [Segment("Beat", "", "", kind="text", prompt="Motion", duration=2.5)]
         dialog = window.ensure_minimax_prompt_window()
@@ -124,11 +129,24 @@ class MiniMaxEditorTests(unittest.TestCase):
             patch.object(window, "current_minimax_cache_key", return_value="manual-signature"),
             patch.object(window, "start_ai_worker", side_effect=capture_worker),
         ):
-            dialog.generate_button.click()
+            dialog.generate_frames_button.click()
 
         self.assertEqual(captured["operation"].__name__, "build_minimax_h3_prompt")
         self.assertFalse(captured["kwargs"]["show_main_overlay"])
-        self.assertEqual(window.minimax_operation_kind, "generate")
+        self.assertEqual(window.minimax_operation_kind, "generate_frames")
+
+        captured.clear()
+        with (
+            patch.object(window, "ai_credentials", return_value=("gemini", "gemini-3.5-flash-lite", "unused")),
+            patch.object(window, "current_minimax_cache_key", return_value="manual-signature"),
+            patch.object(window, "start_ai_worker", side_effect=capture_worker),
+        ):
+            dialog.set_busy(False)
+            dialog.generate_references_button.click()
+
+        self.assertEqual(captured["operation"].__name__, "build_minimax_h3_reference_prompt")
+        self.assertFalse(captured["kwargs"]["show_main_overlay"])
+        self.assertEqual(window.minimax_operation_kind, "generate_references")
         dialog.close()
         window.close()
 
@@ -197,6 +215,7 @@ class MiniMaxEditorTests(unittest.TestCase):
 
         self.assertEqual(captured["args"][-3], "User-pasted production prompt")
         self.assertEqual(captured["args"][-2], "Preserve the new ending and smooth the final transition.")
+        self.assertEqual(captured["operation"].__name__, "refine_minimax_h3_prompt")
         self.assertFalse(captured["kwargs"]["show_main_overlay"])
         self.assertFalse(hasattr(window, "_minimax_save_timer"))
         self.assertEqual(
@@ -204,6 +223,29 @@ class MiniMaxEditorTests(unittest.TestCase):
             ("User-pasted production prompt", "Preserve the new ending and smooth the final transition."),
         )
         window.current_project_id = None
+        window.close()
+
+    def test_reference_prompt_refines_with_reference_master(self):
+        window = MainWindow()
+        dialog = window.ensure_minimax_prompt_window()
+        window.segments = [Segment("Reference", "", "", kind="text", prompt="Motion", duration=2.5)]
+        window.minimax_prompt_mode = "references"
+        captured = {}
+
+        def capture_worker(operation, args, activity, finished, **kwargs):
+            captured["operation"] = operation
+
+        with (
+            patch.object(window, "ai_credentials", return_value=("gemini", "gemini-3.5-flash-lite", "unused")),
+            patch.object(window, "current_minimax_cache_key", return_value="reference-signature"),
+            patch.object(window, "start_ai_worker", side_effect=capture_worker),
+        ):
+            dialog.editor.setPlainText("subject_definitions:\n<Subject 1> is the subject.")
+            dialog.refine_button.click()
+
+        self.assertEqual(captured["operation"].__name__, "refine_minimax_h3_reference_prompt")
+        self.assertEqual(window.minimax_operation_kind, "refine_references")
+        dialog.close()
         window.close()
 
     def test_gemini_overload_uses_clear_warning_dialog(self):
@@ -244,11 +286,11 @@ class MiniMaxEditorTests(unittest.TestCase):
     def test_retry_button_restarts_the_failed_minimax_operation(self):
         window = MainWindow()
         dialog = window.ensure_minimax_prompt_window()
-        window.minimax_operation_kind = "generate"
+        window.minimax_operation_kind = "generate_references"
         window.minimax_prompt_cache_key = "stale-cache"
         dialog.show_message("Generation failed.", "error", retry=True)
 
-        with patch.object(window, "generate_minimax_prompt") as retry_generation:
+        with patch.object(window, "generate_minimax_prompt_references") as retry_generation:
             dialog.retry_button.click()
 
         retry_generation.assert_called_once_with()

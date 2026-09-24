@@ -52,6 +52,16 @@ def build_minimax_h3_prompt(segments: list[Segment], provider: str, model: str, 
     return _extract_minimax_h3_prompt(raw)
 
 
+def build_minimax_h3_reference_prompt(segments: list[Segment], provider: str, model: str, api_key: str, intent: str, global_prompt: str, sfx: bool, spoken_dialog: bool, reduce_music: bool, timeout: int = 400) -> str:
+    """Synthesize the timeline using MiniMax H3 full-reference mode."""
+    if not segments:
+        raise ValueError("Add at least one timeline item before generating a MiniMax H3 reference prompt.")
+    inputs = _minimax_h3_inputs(segments, provider)
+    rules = _minimax_h3_reference_rules(segments, intent, global_prompt, sfx, spoken_dialog, reduce_music)
+    raw = _provider_raw(inputs, provider, model, api_key, rules, timeout)
+    return _extract_minimax_h3_prompt(raw)
+
+
 def refine_minimax_h3_prompt(segments: list[Segment], provider: str, model: str, api_key: str, intent: str, global_prompt: str, sfx: bool, spoken_dialog: bool, reduce_music: bool, current_prompt: str, refinement_instructions: str, timeout: int = 400) -> str:
     """Refine the user's edited MiniMax prompt without exposing private edit directions."""
     if not segments:
@@ -80,6 +90,37 @@ CURRENT EDITOR PROMPT:
 
 PRIVATE REFINEMENT INSTRUCTIONS:
 {refinement_instructions.strip() or 'Improve clarity, motion continuity, causal flow, and production readiness without changing the creative intent.'}
+"""
+    raw = _provider_raw(inputs, provider, model, api_key, rules, timeout)
+    return _extract_minimax_h3_prompt(raw)
+
+
+def refine_minimax_h3_reference_prompt(segments: list[Segment], provider: str, model: str, api_key: str, intent: str, global_prompt: str, sfx: bool, spoken_dialog: bool, reduce_music: bool, current_prompt: str, refinement_instructions: str, timeout: int = 400) -> str:
+    """Refine an edited full-reference prompt while preserving its six-section format."""
+    if not segments:
+        raise ValueError("Add at least one timeline item before refining a MiniMax H3 reference prompt.")
+    if not current_prompt.strip():
+        raise ValueError("Write or generate a MiniMax H3 reference prompt before refining it.")
+    inputs = _minimax_h3_inputs(segments, provider, refinement=True)
+    rules = _minimax_h3_reference_rules(segments, intent, global_prompt, sfx, spoken_dialog, reduce_music)
+    rules += f"""
+
+REFERENCE-MODE REFINEMENT — FOLLOW THIS PRIORITY ORDER:
+1. PRIVATE REFINEMENT INSTRUCTIONS are the highest-priority edit request.
+2. CURRENT EDITOR PROMPT is authoritative. Refine it instead of rebuilding it from the reference assets.
+3. Preserve its six ordered full-reference sections, stable reference-label meanings, shot numbering, speaker IDs, dialogue, and intentional user edits.
+4. Timeline assets and prompts are secondary continuity evidence only and must not override items 1 or 2.
+
+- Make the smallest complete edits required by the private instructions.
+- Never renumber or redefine an existing `<Subject N>`, `<Picture N>`, `<Video N>`, `<Audio N>`, or `(Sx)` unless the private instructions explicitly require it.
+- Never quote or expose the private refinement instructions in the production prompt.
+- Return strict transport JSON containing only the refined prompt.
+
+CURRENT EDITOR PROMPT:
+{current_prompt.strip()}
+
+PRIVATE REFINEMENT INSTRUCTIONS:
+{refinement_instructions.strip() or 'Improve reference clarity, action continuity, camera direction, and production detail without changing creative intent.'}
 """
     raw = _provider_raw(inputs, provider, model, api_key, rules, timeout)
     return _extract_minimax_h3_prompt(raw)
@@ -443,6 +484,114 @@ Before returning, verify privately that you examined the complete frame sequence
 
 Return strict transport JSON with exactly one top-level field. Do not return analysis, plans, scores, or validation metadata:
 {{"prompt": "the complete three-section MiniMax H3 production prompt"}}"""
+
+
+def _minimax_h3_reference_rules(segments: list[Segment], intent: str, global_prompt: str, sfx: bool, spoken_dialog: bool, reduce_music: bool) -> str:
+    """Return MiniMax's official six-section full-reference rewrite contract."""
+    total = sum(item.duration for item in segments)
+    cursor = 0.0
+    picture_number = 0
+    video_number = 0
+    inventory = []
+    for index, item in enumerate(segments, 1):
+        start = _minimax_reference_timestamp(cursor)
+        end = _minimax_reference_timestamp(cursor + item.duration)
+        if item.kind == "image":
+            picture_number += 1
+            label = f"<Picture {picture_number}>"
+        elif item.kind == "video":
+            video_number += 1
+            label = f"<Video {video_number}>"
+        else:
+            label = "no reference label; text-only direction"
+        inventory.append(
+            f"- timeline item {index}, {start}–{end}: {label}; role={item.role}; name={item.name}; "
+            f"authoritative action prompt={item.prompt.strip() or '[none supplied]'}"
+        )
+        cursor += item.duration
+    sound_rule = (
+        "Describe supported ambience and physical sounds, keeping shot-synchronized events in detailed_description."
+        if sfx else
+        "Do not invent Foley or ambience. Write `N/A` when no supplied source or prompt requires an overall soundscape."
+    )
+    dialog_rule = (
+        "Preserve supplied dialogue exactly in its original language inside `<d>[Language] ...</d>` and assign stable `(S1)`, `(S2)` speaker IDs by first vocal event."
+        if spoken_dialog else
+        "Do not invent dialogue or speakers; retain dialogue only when explicitly supplied by the timeline or Director's Intent."
+    )
+    music_rule = (
+        "Write `N/A` for non_diegetic_music unless a supplied source explicitly requires audience-only music."
+        if reduce_music else
+        "Describe audience-only music only when explicitly supplied or clearly required, including instrumentation, tempo, and dynamic development; otherwise write `N/A`."
+    )
+    return f"""You are a MiniMax H3 full-reference prompt editor. Rewrite the complete ordered timeline as one production-ready full-reference prompt using MiniMax's official reference-mode structure. First inspect every supplied asset and prompt across the entire timeline; then assign stable reference labels, reference relationships, action continuity, shot structure, camera direction, and sound roles.
+
+Write all six sections in English. Preserve the original language only for dialogue or lyrics inside `<d>` and for text visibly present in the scene. Derive facts exclusively from supplied assets, prompts, the global prompt, and Director's Intent. Do not invent unsupported identities, clothing, anatomy, settings, dialogue, audio reuse, or reference relationships.
+
+TIMELINE REFERENCE INVENTORY — preserve these asset-label numbers exactly:
+{chr(10).join(inventory)}
+- exact target duration: {total:.3f} seconds
+- still images are concrete frame or composition anchors when their timeline role requires it; reference videos may supply visible subjects, action, camera movement, editing structure, continuation state, or temporal guidance
+- the mere presence of audio in a reference video does not create an `<Audio N>` label. Define `<Audio N>` only when an actual supplied audio signal is explicitly copied or referenced
+
+REQUIRED SIX-SECTION OUTPUT — use these lowercase headings exactly and in this order:
+
+subject_definitions:
+- define each reusable visible content unit on its own line with a stable `<Subject N>` label: people, animals, objects, environments, clothing, props, styles, actions, expressions, poses, or effects actually used in the target video
+- `<Subject N>` identifies reusable visible content, not the source file. Cite the source `<Picture N>` or `<Video N>` inside its definition and combine multiple sources when they jointly define appearance, motion, or another attribute
+- create a standalone `<Picture N>` entry only when that image is used as a first frame, keyframe, last frame, edited keyframe, storyboard, composition anchor, or other concrete frame target; state its exact role naturally
+- reserve standalone `<Video N>` entries for whole-video roles such as editing, continuation, camera movement, cut rhythm, pacing, or temporal structure. Visible people, objects, scenes, actions, and effects taken from a video still receive `<Subject N>` labels
+- define `<Audio N>` only for an explicitly supplied reusable or reference audio signal. Picture, video, and audio numbering are independent. Once assigned, every label keeps exactly the same meaning in every later section
+
+summary:
+- write one concise English paragraph beginning with one square-bracketed task prefix assembled only from applicable types: `keyframe completion`, `reference generation`, `video editing`, `video continuation`, `audio reuse`, and `audio reference`
+- use `keyframe completion` for concrete image anchors; use `reference generation` for character, scene, style, action, camera, or storyboard guidance; use `video editing` or `video continuation` only when the source video is actually edited or continued
+- mention the primary subjects, target action and shot flow, and the role of each important reference using only labels already defined above
+
+retention_analysis:
+- write one line for every defined reference label and state where it appears or applies
+- for `<Subject N>`, `<Picture N>`, and `<Video N>`, use exactly one applicable marker: `fully_preserved`, `partially_preserved`, `attribute_transfer`, or `weak_reference`, followed by a concrete explanation
+- for `<Audio N>`, use exactly one applicable marker: `fully_copy`, `partially_copy`, `reference`, or `weak_reference`
+- evaluate preservation against the label's defined role. Newly requested action or plot development is not automatically a loss of reference fidelity
+
+detailed_description:
+- make this the main production body and normally write 350–500 detailed English words for a generation task; do not reduce it to a plot summary or a list of reference relationships
+- begin with one or two English sentences establishing the target video's overall visual style, then write the video in playback order
+- `[Shot 1]` opens the first shot with no timestamp. Only later shots use `[Shot N] At MM:SS.mmm, ...`, where the timestamp is the actual cut time
+- do not turn every timeline frame into a cut. Keep one continuous shot when the references describe continuous action; add a new shot only when the supplied sequence, source video, or Director's Intent genuinely requires a cut
+- cite concrete anchors naturally: `the shot begins from <Picture N>`, `the shot's keyframe corresponds to <Picture N>`, or `the shot ends on <Picture N>`
+- at each important subject's first clear appearance, include its stable `<Subject N>` label, referenced appearance, frame position, and current action. Reuse the label later without redefining it
+- describe composition, subject appearance and position, environment and lighting, complete action and state changes, camera movement type/amplitude/speed, sound, and exactly where each reference takes effect
+- examine all frames before writing and provide the complete action trajectory between anchors: onset, physical cause, progressive intermediate stages, material or anatomical response, secondary motion, boundary state, and carried momentum. Spell out supported changes such as fabric tightening, seams straining, threads snapping, tears widening, or hair/fur emerging, lengthening, spreading, and moving
+- preserve one physically coherent camera trajectory within each continuous shot. State paths such as zooming out, panning down, dollying backward-left, tracking forward, orbiting clockwise, or holding a locked position, including speed, framing evolution, subject placement, and parallax
+- {dialog_rule}
+- use `<scenetrans>` and `<cutoff>` only where required for dialogue or audio that crosses a cut or is truncated by the video ending
+
+overall_soundscape:
+- {sound_rule}
+- summarize full-video ambience and physical sounds here; keep dialogue, singing, and precisely synchronized sound events in detailed_description
+- when reference audio supplies ambience or effects, state its copy/reference relationship here using its stable `<Audio N>` label
+
+non_diegetic_music:
+- {music_rule}
+- this section is only for music audible to the audience but not the characters. Never repeat dialogue or lyrics here
+
+AUTHORITATIVE DIRECTOR'S INTENT:
+{intent.strip() or 'No additional director intent supplied.'}
+
+GLOBAL CONTINUITY PROMPT:
+{global_prompt.strip() or 'No global prompt supplied.'}
+
+Before returning, privately confirm that all six headings are present in order, every used label was defined once and retains one meaning, each retention marker matches its label type, shot timestamps use `MM:SS.mmm`, the opening shot has no timestamp, reference frames have explicit roles, and detailed_description contains the complete visual/action/camera/sound trajectory rather than a summary.
+
+Return strict transport JSON with exactly one top-level field. Do not return analysis, scores, or validation metadata:
+{{"prompt": "the complete six-section MiniMax H3 full-reference prompt"}}"""
+
+
+def _minimax_reference_timestamp(seconds: float) -> str:
+    timestamp = _minimax_timestamp(seconds)
+    head, milliseconds = timestamp.rsplit(":", 1)
+    return f"{head}.{milliseconds}"
 
 
 def _refinement_images(segments: list[Segment], selected_index: int) -> list[dict]:

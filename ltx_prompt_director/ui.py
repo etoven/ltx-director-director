@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (
 )
 
 from . import __version__
-from .ai import AIResponseFormatError, GEMINI_MODELS, build_minimax_h3_prompt, build_prompts, minimax_h3_cache_key, provider_error_message, refine_minimax_h3_prompt, refine_segment_prompt, refine_timing, retryable_connection_error
+from .ai import AIResponseFormatError, GEMINI_MODELS, build_minimax_h3_prompt, build_minimax_h3_reference_prompt, build_prompts, minimax_h3_cache_key, provider_error_message, refine_minimax_h3_prompt, refine_minimax_h3_reference_prompt, refine_segment_prompt, refine_timing, retryable_connection_error
 from .media import APP_CACHE, TIMELINE_VIDEO_SUFFIXES, comfy_input_references, copy_media_for_export, data_url, extract_audio_for_export, prepare_media, safe_media_filename, unique_media_filename, write_data_url
 from .models import Segment, order_segments_by_ids, text_segment_from_ltx
 from .project_data import ARCHIVE_COLOR, load_other_tags, load_project_tags, new_note, normalize_notes, normalize_project_labels
@@ -2254,11 +2254,16 @@ class MiniMaxPromptWindow(QDialog):
         self.cache_state = QLabel("Not generated")
         self.cache_state.setObjectName("minimaxCacheState")
         toolbar_layout.addWidget(self.cache_state)
-        self.generate_button = QPushButton("◆ Generate Prompt")
-        self.generate_button.setObjectName("magicButton")
-        self.generate_button.setToolTip("Manually generate a new MiniMax H3 prompt from the complete timeline")
-        self.generate_button.clicked.connect(owner.generate_minimax_prompt)
-        toolbar_layout.addWidget(self.generate_button)
+        self.generate_frames_button = QPushButton("◆ Generate Prompt (Frames)")
+        self.generate_frames_button.setObjectName("magicButton")
+        self.generate_frames_button.setToolTip("Generate the continuous frame-timeline prompt manually")
+        self.generate_frames_button.clicked.connect(owner.generate_minimax_prompt_frames)
+        toolbar_layout.addWidget(self.generate_frames_button)
+        self.generate_references_button = QPushButton("◇ Generate Prompt (References)")
+        self.generate_references_button.setObjectName("refineButton")
+        self.generate_references_button.setToolTip("Generate MiniMax H3's six-section full-reference prompt manually")
+        self.generate_references_button.clicked.connect(owner.generate_minimax_prompt_references)
+        toolbar_layout.addWidget(self.generate_references_button)
         self.refine_button = QPushButton("✎ Refine Prompt")
         self.refine_button.setObjectName("refineButton")
         self.refine_button.setToolTip("Refine the edited prompt using the private instructions and complete timeline context")
@@ -2407,13 +2412,16 @@ class MiniMaxPromptWindow(QDialog):
         else:
             self.busy_veil.set_running(False)
         if busy and status:
-            self.generate_button.setText("⟳ Generating…" if "generat" in status.casefold() else "⟳ Working…")
+            self.generate_frames_button.setText("⟳ Working…")
+            self.generate_references_button.setText("⟳ Working…")
             self.refine_button.setText("⟳ Refining…" if "refin" in status.casefold() else "⟳ Working…")
         elif busy and not was_busy:
-            self.generate_button.setText("⟳ Working…")
+            self.generate_frames_button.setText("⟳ Working…")
+            self.generate_references_button.setText("⟳ Working…")
             self.refine_button.setText("⟳ Working…")
         elif not busy:
-            self.generate_button.setText("◆ Generate Prompt")
+            self.generate_frames_button.setText("◆ Generate Prompt (Frames)")
+            self.generate_references_button.setText("◇ Generate Prompt (References)")
             self.refine_button.setText("✎ Refine Prompt")
         self.update_actions()
         if status:
@@ -2425,7 +2433,8 @@ class MiniMaxPromptWindow(QDialog):
 
     def update_actions(self) -> None:
         has_prompt = bool(self.editor.toPlainText().strip())
-        self.generate_button.setEnabled(not self.busy)
+        self.generate_frames_button.setEnabled(not self.busy)
+        self.generate_references_button.setEnabled(not self.busy)
         self.refine_button.setEnabled(not self.busy and has_prompt)
         self.copy_button.setEnabled(has_prompt)
 
@@ -2462,6 +2471,7 @@ class MainWindow(QMainWindow):
         self.minimax_refinement_instructions = ""
         self.minimax_prompt_cache_key = ""
         self.minimax_prompt_updated_at = ""
+        self.minimax_prompt_mode = "frames"
         self.minimax_prompt_window: MiniMaxPromptWindow | None = None
         self.current_collection: str | None = None
         self.autofit_tail_extension = 0
@@ -3894,6 +3904,7 @@ class MainWindow(QMainWindow):
             "minimaxRefinementInstructions": self.minimax_refinement_instructions,
             "minimaxPromptCacheKey": self.minimax_prompt_cache_key,
             "minimaxPromptUpdatedAt": self.minimax_prompt_updated_at,
+            "minimaxPromptMode": self.minimax_prompt_mode,
         }
 
     def cache_current_workspace(self) -> None:
@@ -3924,6 +3935,7 @@ class MainWindow(QMainWindow):
         self.minimax_refinement_instructions = str(state.get("minimaxRefinementInstructions", ""))
         self.minimax_prompt_cache_key = str(state.get("minimaxPromptCacheKey", ""))
         self.minimax_prompt_updated_at = str(state.get("minimaxPromptUpdatedAt", ""))
+        self.minimax_prompt_mode = "references" if state.get("minimaxPromptMode") == "references" else "frames"
         self.timeline_height_handle.current_height = self.timeline_height
         self.set_timeline_height(self.timeline_height)
         auto_fit = bool(state.get("timelineAutoFit", False))
@@ -4230,6 +4242,7 @@ class MainWindow(QMainWindow):
         self.minimax_refinement_instructions = ""
         self.minimax_prompt_cache_key = ""
         self.minimax_prompt_updated_at = ""
+        self.minimax_prompt_mode = "frames"
         if self.minimax_prompt_window:
             self.minimax_prompt_window.hide()
         self.sfx.setChecked(False)
@@ -4891,8 +4904,10 @@ class MainWindow(QMainWindow):
         self.set_ai_controls_enabled(False)
         self.ai_activity_title = (
             "Magic Build" if operation is build_prompts else
-            "MiniMax H3 Export" if operation is build_minimax_h3_prompt else
-            "MiniMax H3 Refine" if operation is refine_minimax_h3_prompt else
+            "MiniMax H3 Reference Generate" if operation is build_minimax_h3_reference_prompt else
+            "MiniMax H3 Frame Generate" if operation is build_minimax_h3_prompt else
+            "MiniMax H3 Reference Refine" if operation is refine_minimax_h3_reference_prompt else
+            "MiniMax H3 Frame Refine" if operation is refine_minimax_h3_prompt else
             "Refine Timing" if operation is refine_timing else
             "Refine Prompt"
         )
@@ -5006,7 +5021,7 @@ class MainWindow(QMainWindow):
 
     def magic_progress(self, attempt: int, total: int, detail: str) -> None:
         if getattr(self, "ai_activity_in_minimax_window", False) and self.minimax_prompt_window:
-            action = "Refining" if getattr(self, "minimax_operation_kind", "") == "refine" else "Generating"
+            action = "Refining" if str(getattr(self, "minimax_operation_kind", "")).startswith("refine_") else "Generating"
             self.minimax_prompt_window.set_busy(True, f"{detail}  •  attempt {attempt}/{total}")
             self.minimax_prompt_window.set_cache_state(f"{action}… attempt {attempt}/{total}")
         else:
@@ -5049,7 +5064,8 @@ class MainWindow(QMainWindow):
     def sync_minimax_prompt_window(self, cache_state: str | None = None) -> None:
         if not self.minimax_prompt_window:
             return
-        state = cache_state or ("Saved prompt" if self.minimax_prompt_text else "Not generated")
+        mode_name = "reference" if self.minimax_prompt_mode == "references" else "frame"
+        state = cache_state or (f"Saved {mode_name} prompt" if self.minimax_prompt_text else "Not generated")
         self.minimax_prompt_window.set_project(
             self.current_project_name,
             self.minimax_prompt_text,
@@ -5109,14 +5125,23 @@ class MainWindow(QMainWindow):
         """Open the editor without generating, refreshing, or analyzing anything."""
         self.show_minimax_prompt_window()
 
-    def generate_minimax_prompt(self) -> None:
-        """Generate only after the user explicitly presses the dialog button."""
+    def generate_minimax_prompt_frames(self) -> None:
+        """Manually generate the continuous frame-timeline prompt."""
+        self._generate_minimax_prompt("frames")
+
+    def generate_minimax_prompt_references(self) -> None:
+        """Manually generate MiniMax H3's six-section full-reference prompt."""
+        self._generate_minimax_prompt("references")
+
+    def _generate_minimax_prompt(self, mode: str) -> None:
         self.minimax_editor_changed()
         if not self.segments:
             window = self.show_minimax_prompt_window("Not generated")
             window.show_message("Add at least one timeline item before generating a MiniMax H3 prompt.", "warning")
             return
-        window = self.show_minimax_prompt_window("Generating manually…")
+        reference_mode = mode == "references"
+        mode_label = "reference" if reference_mode else "frame"
+        window = self.show_minimax_prompt_window(f"Generating {mode_label} prompt manually…")
         credentials = self.ai_credentials()
         if not credentials:
             window.set_busy(False, "Generation cancelled")
@@ -5125,21 +5150,24 @@ class MainWindow(QMainWindow):
         provider, model, key = credentials
         signature = self.current_minimax_cache_key(provider, model)
         self.minimax_operation_signature = signature
-        self.minimax_operation_kind = "generate"
+        self.minimax_operation_kind = f"generate_{mode}"
         self.minimax_operation_editor_snapshot = (
             self.minimax_prompt_text,
             self.minimax_refinement_instructions,
         )
         timeout = self.settings.value("api_timeout", 400, int)
-        window.set_busy(True, "Generating prompt…")
+        window.set_busy(True, f"Generating {mode_label} prompt…")
+        operation = build_minimax_h3_reference_prompt if reference_mode else build_minimax_h3_prompt
         self.start_ai_worker(
-            build_minimax_h3_prompt,
+            operation,
             (
                 self.segments.copy(), provider, model, key, self.build_director_request(),
                 self.global_prompt.toPlainText(), self.sfx.isChecked(), self.spoken_dialog.isChecked(),
                 self.reduce_music.isChecked(), timeout,
             ),
-            "Boiling the complete sequence down to one MiniMax H3 prompt…",
+            "Writing the official six-section MiniMax H3 full-reference prompt…"
+            if reference_mode else
+            "Boiling the complete sequence down to one MiniMax H3 frame prompt…",
             self.minimax_h3_finished,
             show_main_overlay=False,
         )
@@ -5169,16 +5197,21 @@ class MainWindow(QMainWindow):
         self.minimax_prompt_updated_at = datetime.now(timezone.utc).isoformat()
         self.set_ai_controls_enabled(True)
         self.magic_overlay.hide_overlay()
-        operation = str(getattr(self, "minimax_operation_kind", "generate"))
-        if operation == "refine":
+        operation = str(getattr(self, "minimax_operation_kind", "generate_frames"))
+        if operation.startswith("refine_"):
             self.minimax_refinement_instructions = ""
-        state = "Cached • refined" if operation == "refine" else "Cached • generated"
+        if operation.endswith("references"):
+            self.minimax_prompt_mode = "references"
+        elif operation.endswith("frames"):
+            self.minimax_prompt_mode = "frames"
+        mode_label = "reference" if self.minimax_prompt_mode == "references" else "frame"
+        state = f"Cached • {mode_label} {'refined' if operation.startswith('refine_') else 'generated'}"
         window = self.show_minimax_prompt_window(state)
         self.mark_dirty()
         window.show_message(
-            "MiniMax H3 prompt refined. Close the editor to save it to the project."
-            if operation == "refine" else
-            "MiniMax H3 prompt generated. Close the editor to save it to the project.",
+            f"MiniMax H3 {self.minimax_prompt_mode} prompt refined. Close the editor to save it to the project."
+            if operation.startswith("refine_") else
+            f"MiniMax H3 {self.minimax_prompt_mode} prompt generated. Close the editor to save it to the project.",
             "success",
         )
 
@@ -5196,7 +5229,8 @@ class MainWindow(QMainWindow):
         provider, model, key = credentials
         signature = self.current_minimax_cache_key(provider, model)
         self.minimax_operation_signature = signature
-        self.minimax_operation_kind = "refine"
+        reference_mode = self.minimax_prompt_mode == "references"
+        self.minimax_operation_kind = "refine_references" if reference_mode else "refine_frames"
         self.minimax_operation_editor_snapshot = (
             self.minimax_prompt_text,
             self.minimax_refinement_instructions,
@@ -5204,8 +5238,9 @@ class MainWindow(QMainWindow):
         timeout = self.settings.value("api_timeout", 400, int)
         if self.minimax_prompt_window:
             self.minimax_prompt_window.set_busy(True, "Refining edited prompt…")
+        operation = refine_minimax_h3_reference_prompt if reference_mode else refine_minimax_h3_prompt
         self.start_ai_worker(
-            refine_minimax_h3_prompt,
+            operation,
             (
                 self.segments.copy(), provider, model, key, self.build_director_request(),
                 self.global_prompt.toPlainText(), self.sfx.isChecked(), self.spoken_dialog.isChecked(),
@@ -5222,10 +5257,13 @@ class MainWindow(QMainWindow):
         if self.minimax_prompt_window:
             self.minimax_prompt_window.clear_message()
         self.minimax_prompt_cache_key = ""
-        if getattr(self, "minimax_operation_kind", "generate") == "refine":
+        operation = str(getattr(self, "minimax_operation_kind", "generate_frames"))
+        if operation.startswith("refine_"):
             self.refine_minimax_prompt()
+        elif operation.endswith("references"):
+            self.generate_minimax_prompt_references()
         else:
-            self.generate_minimax_prompt()
+            self.generate_minimax_prompt_frames()
 
     def show_toast(self, message: str, duration: int = 3200) -> None:
         toast = getattr(self, "_toast_label", None)
@@ -5485,6 +5523,7 @@ class MainWindow(QMainWindow):
                 "refinementInstructions": self.minimax_refinement_instructions,
                 "sourceHash": self.minimax_prompt_cache_key,
                 "updatedAt": self.minimax_prompt_updated_at,
+                "mode": self.minimax_prompt_mode,
             },
             "output": {"width": self.output_width.value(), "height": self.output_height.value()},
             "timelineView": {"scale": self.pixels_per_second, "autoFit": self.timeline_fit_mode, "height": self.timeline_height},
@@ -5540,6 +5579,7 @@ class MainWindow(QMainWindow):
         self.minimax_refinement_instructions = str(minimax.get("refinementInstructions", ""))
         self.minimax_prompt_cache_key = str(minimax.get("sourceHash", ""))
         self.minimax_prompt_updated_at = str(minimax.get("updatedAt", ""))
+        self.minimax_prompt_mode = "references" if minimax.get("mode") == "references" else "frames"
         output = payload.get("output", {})
         self.output_width.setValue(int(output.get("width", 1280)))
         self.output_height.setValue(int(output.get("height", 704)))

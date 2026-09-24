@@ -31,6 +31,7 @@ class MiniMaxH3PromptTests(unittest.TestCase):
         self.assertEqual(ai._minimax_timestamp(0), "00:00:000")
         self.assertEqual(ai._minimax_timestamp(12.5), "00:12:500")
         self.assertEqual(ai._minimax_timestamp(65.125), "01:05:125")
+        self.assertEqual(ai._minimax_reference_timestamp(65.125), "01:05.125")
 
     def test_detail_standard_scales_with_interval_duration(self):
         self.assertEqual(ai.minimax_interval_detail_standard(2.5), (2, 25))
@@ -78,6 +79,40 @@ class MiniMaxH3PromptTests(unittest.TestCase):
         self.assertIn("action instruction", inputs[2]["continuity_function"])
         self.assertIn("resolve by this interval's end", inputs[3]["continuity_function"])
         self.assertTrue(all("complete action path" in item["action_trajectory_requirement"] for item in inputs))
+
+    def test_reference_master_uses_official_six_section_contract(self):
+        rules = ai._minimax_h3_reference_rules(self.segments(4), "", "", True, True, False)
+        headings = (
+            "subject_definitions:",
+            "summary:",
+            "retention_analysis:",
+            "detailed_description:",
+            "overall_soundscape:",
+            "non_diegetic_music:",
+        )
+        positions = [rules.index(heading) for heading in headings]
+        self.assertEqual(positions, sorted(positions))
+        self.assertIn("<Picture 1>", rules)
+        self.assertIn("<Video 1>", rules)
+        self.assertIn("[Shot 1]", rules)
+        self.assertIn("MM:SS.mmm", rules)
+        self.assertIn("350–500 detailed English words", rules)
+        self.assertIn("do not turn every timeline frame into a cut", rules)
+        self.assertIn("fully_preserved", rules)
+        self.assertIn("attribute_transfer", rules)
+        self.assertIn("keyframe completion", rules)
+        self.assertIn("reference generation", rules)
+        self.assertIn("exactly one top-level field", rules)
+
+    def test_reference_builder_returns_prompt_without_semantic_validation(self):
+        segments = self.segments(2)
+        response = json.dumps({"prompt": "User-controlled full-reference output"})
+        with patch.object(ai, "_provider_raw", return_value=response) as provider:
+            result = ai.build_minimax_h3_reference_prompt(
+                segments, "gemini", "gemini-3.5-flash-lite", "unused", "", "", False, False, True,
+            )
+        self.assertEqual(result, "User-controlled full-reference output")
+        self.assertIn("REQUIRED SIX-SECTION OUTPUT", provider.call_args.args[4])
 
     def test_returns_prompt_without_semantic_validation(self):
         segments = self.segments(3)
