@@ -79,27 +79,5 @@ class AIErrorMessageTests(unittest.TestCase):
         self.assertNotIn("will retry", failed[0])
         self.assertIn("Stopped after 2 attempts", failed[0])
 
-    def test_exhausted_validation_keeps_the_last_generated_candidate(self):
-        calls = []
-        failed = []
-
-        def operation():
-            calls.append(len(calls) + 1)
-            raise AIResponseFormatError(
-                "The interval is short. The operation will retry.",
-                candidate_prompt=f"candidate {len(calls)}",
-                warning_indices=(1,),
-            )
-
-        worker = MagicWorker(operation, (), retries=1, retry_cooldown=0)
-        worker.signals.failed.connect(failed.append)
-        worker.run()
-
-        self.assertEqual(calls, [1, 2])
-        self.assertEqual(failed[0]["candidate_prompt"], "candidate 2")
-        self.assertEqual(failed[0]["warning_indices"], [1])
-        self.assertIn("Stopped after 2 attempts", failed[0]["message"])
-
-
 if __name__ == "__main__":
     unittest.main()

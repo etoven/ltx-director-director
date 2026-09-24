@@ -22,15 +22,8 @@ GEMINI_MODELS = [
     "gemini-2.5-flash-lite",
 ]
 MAX_INLINE_VIDEO_BYTES = 12 * 1024 * 1024
-
-
 class AIResponseFormatError(ValueError):
     """The provider returned text that does not satisfy the response contract."""
-
-    def __init__(self, message: str, candidate_prompt: str = "", warning_indices: tuple[int, ...] = ()):
-        super().__init__(message)
-        self.candidate_prompt = candidate_prompt.strip()
-        self.warning_indices = tuple(warning_indices)
 
 
 def minimax_interval_detail_standard(duration: float) -> tuple[int, int]:
@@ -56,7 +49,7 @@ def build_minimax_h3_prompt(segments: list[Segment], provider: str, model: str, 
     inputs = _minimax_h3_inputs(segments, provider)
     rules = _minimax_h3_rules(segments, intent, global_prompt, sfx, spoken_dialog, reduce_music)
     raw = _provider_raw(inputs, provider, model, api_key, rules, timeout)
-    return _validated_minimax_h3_prompt(raw, segments)
+    return _extract_minimax_h3_prompt(raw)
 
 
 def refine_minimax_h3_prompt(segments: list[Segment], provider: str, model: str, api_key: str, intent: str, global_prompt: str, sfx: bool, spoken_dialog: bool, reduce_music: bool, current_prompt: str, refinement_instructions: str, timeout: int = 400) -> str:
@@ -72,7 +65,7 @@ def refine_minimax_h3_prompt(segments: list[Segment], provider: str, model: str,
 REFINEMENT MODE — FOLLOW THIS PRIORITY ORDER WHEN ANY INPUTS COMPETE:
 1. PRIVATE REFINEMENT INSTRUCTIONS are the highest-priority edit request. Apply them completely and literally wherever they target the production prompt.
 2. CURRENT EDITOR PROMPT is the authoritative creative content and current sequence state. Refine it; never rebuild it from the references.
-3. Preserve the required timestamps and three-section transport structure.
+3. Preserve the required timestamps and three-section production-prompt structure.
 4. Timeline frames, videos, segment prompts, global prompt, and Director's Intent are SECONDARY CONTINUITY EVIDENCE only. Use them to verify identity, pose, environment, composition, physical plausibility, and boundary continuity without overriding items 1 or 2.
 
 - Make the smallest complete set of edits needed to satisfy the private refinement instructions. Preserve every deliberate user edit and every untouched passage.
@@ -80,7 +73,7 @@ REFINEMENT MODE — FOLLOW THIS PRIORITY ORDER WHEN ANY INPUTS COMPETE:
 - Do not introduce a new action, camera path, transformation, setting, or visual fact from secondary evidence unless the refinement instructions request it or it is strictly necessary to repair a physical contradiction.
 - Keep existing cue content attached to the same timestamp unless the private instructions explicitly request timing changes.
 - The refinement instructions are private editing directions. Never quote, summarize, mention, or append them inside the production prompt.
-- Return the same strict transport JSON contract, including a freshly checked private continuityPlan and the refined production prompt.
+- Return the same strict transport JSON contract containing only the refined production prompt.
 
 CURRENT EDITOR PROMPT:
 {current_prompt.strip()}
@@ -89,98 +82,18 @@ PRIVATE REFINEMENT INSTRUCTIONS:
 {refinement_instructions.strip() or 'Improve clarity, motion continuity, causal flow, and production readiness without changing the creative intent.'}
 """
     raw = _provider_raw(inputs, provider, model, api_key, rules, timeout)
-    return _validated_minimax_h3_prompt(raw, segments)
+    return _extract_minimax_h3_prompt(raw)
 
 
-def _validated_minimax_h3_prompt(raw: str, segments: list[Segment]) -> str:
-    """Validate both newly generated and editor-refined MiniMax prompts."""
+def _extract_minimax_h3_prompt(raw: str) -> str:
+    """Extract the MiniMax prompt without second-guessing its creative content."""
     result = _parse_json(raw)
     if not isinstance(result, dict):
         raise AIResponseFormatError("The AI returned an invalid MiniMax H3 response. The operation will retry.")
     prompt = result.get("prompt") or result.get("minimaxPrompt") or result.get("minimax_prompt")
     if not isinstance(prompt, str) or not prompt.strip():
         raise AIResponseFormatError("The AI returned no MiniMax H3 prompt. The operation will retry.")
-    candidate_prompt = prompt.strip()
-    continuity_plan = result.get("continuityPlan") or result.get("continuity_plan")
-    if not isinstance(continuity_plan, dict):
-        raise AIResponseFormatError("The AI returned no MiniMax continuity plan. The operation will retry.", candidate_prompt)
-    persistent_anchors = continuity_plan.get("persistentAnchors") or continuity_plan.get("persistent_anchors")
-    if not isinstance(persistent_anchors, list) or not any(str(anchor).strip() for anchor in persistent_anchors):
-        raise AIResponseFormatError("The AI returned no persistent MiniMax continuity anchors. The operation will retry.", candidate_prompt)
-    bridges = continuity_plan.get("bridges")
-    expected_bridge_count = max(0, len(segments) - 1)
-    if not isinstance(bridges, list) or len(bridges) != expected_bridge_count:
-        raise AIResponseFormatError(
-            f"The AI returned an invalid MiniMax bridge plan; expected {expected_bridge_count} adjacent transition bridge(s). "
-            "The operation will retry.", candidate_prompt,
-        )
-    for index, bridge in enumerate(bridges, 1):
-        if not isinstance(bridge, dict) or bridge.get("fromSegment") != index or bridge.get("toSegment") != index + 1:
-            raise AIResponseFormatError("The AI returned an out-of-order MiniMax bridge plan. The operation will retry.", candidate_prompt)
-        if bridge.get("divergence") not in {"low", "medium", "high"}:
-            raise AIResponseFormatError("The AI omitted a valid MiniMax bridge divergence level. The operation will retry.", candidate_prompt)
-        if bridge.get("resolution") not in {"reach", "carry_forward"}:
-            raise AIResponseFormatError("The AI omitted a valid MiniMax bridge resolution strategy. The operation will retry.", candidate_prompt)
-        if not str(bridge.get("progressiveChange") or "").strip():
-            raise AIResponseFormatError("The AI omitted a progressive MiniMax bridge action. The operation will retry.", candidate_prompt)
-        if not str(bridge.get("boundaryState") or "").strip():
-            raise AIResponseFormatError("The AI omitted the plausible state at a MiniMax cue boundary. The operation will retry.", candidate_prompt)
-        if not str(bridge.get("carriedMotion") or "").strip():
-            raise AIResponseFormatError("The AI omitted the motion carried through a MiniMax cue boundary. The operation will retry.", candidate_prompt)
-    prompt = candidate_prompt
-    required_sections = ("continuous_video", "soundscape", "music")
-    missing = [section for section in required_sections if not re.search(rf"(?im)^\s*{section}\s*:", prompt)]
-    if missing:
-        raise AIResponseFormatError(
-            f"The AI omitted required MiniMax H3 section(s): {', '.join(missing)}. The operation will retry.", prompt,
-        )
-    detailed_match = re.search(
-        r"(?ims)^\s*continuous_video\s*:\s*(.*?)(?=^\s*soundscape\s*:)",
-        prompt,
-    )
-    detailed = detailed_match.group(1) if detailed_match else ""
-    cue_timestamps = re.findall(r"(?m)^\s*(\d{2,}:\d{2}:\d{3})\b", detailed)
-    expected_timestamps = []
-    cursor = 0.0
-    for segment in segments:
-        expected_timestamps.append(_minimax_timestamp(cursor))
-        cursor += segment.duration
-    if cue_timestamps != expected_timestamps:
-        raise AIResponseFormatError(
-            f"The AI returned {len(cue_timestamps)} valid MiniMax timeline cue(s), but the timeline requires "
-            f"exactly {len(segments)} at the prescribed start times. The operation will retry.", prompt,
-        )
-    if re.search(r"(?im)^\s*\[Shot\s+\d+\]", detailed):
-        raise AIResponseFormatError("The AI added structural shot headers that can force hard cuts. The operation will retry.", prompt)
-    if re.search(r"(?i)<(?:Picture|Video)\s+\d+>", detailed):
-        raise AIResponseFormatError("The AI exposed reference labels in the motion description. The operation will retry.", prompt)
-    if re.search(r"(?m)^\s*\d{2,}:\d{2}:\d{3}\s+\[[^\]\n]+\]", detailed):
-        raise AIResponseFormatError("The AI added a bracketed camera or shot command after a timeline cue. The operation will retry.", prompt)
-    if re.search(r"(?i)\b(?:hard|jump)\s+cut\b|\bcuts?\s+to\b", detailed):
-        raise AIResponseFormatError("The AI added an editorial cut instruction. The operation will retry.", prompt)
-    if re.search(r"(?im)^\s*(?:subject_definitions|summary|retention_analysis|detailed_description)\s*:", prompt):
-        raise AIResponseFormatError("The AI exposed internal reference analysis in the MiniMax production prompt. The operation will retry.", prompt)
-    cue_starts = list(re.finditer(r"(?m)^\s*(\d{2,}:\d{2}:\d{3})\s+", detailed))
-    short_intervals = []
-    short_details = []
-    for index, cue_start in enumerate(cue_starts):
-        block_end = cue_starts[index + 1].start() if index + 1 < len(cue_starts) else len(detailed)
-        interval_text = detailed[cue_start.end():block_end]
-        word_count = len(re.findall(r"\b[\w'-]+\b", interval_text))
-        sentence_count = len(re.findall(r"[.!?](?:[\"')\]]+)?(?=\s|$)", interval_text))
-        required_sentences, required_words = minimax_interval_detail_standard(segments[index].duration)
-        if sentence_count < required_sentences or word_count < required_words:
-            short_intervals.append(index)
-            short_details.append(
-                f"{cue_start.group(1)} has {sentence_count}/{required_sentences} sentences and {word_count}/{required_words} words"
-            )
-    if short_intervals:
-        raise AIResponseFormatError(
-            "The AI returned under-detailed MiniMax interval(s): " + "; ".join(short_details) + ". The operation will retry.",
-            prompt,
-            tuple(short_intervals),
-        )
-    return prompt
+    return prompt.strip()
 
 
 @lru_cache(maxsize=256)
@@ -342,6 +255,11 @@ def _minimax_h3_inputs(segments: list[Segment], provider: str = "gemini", refine
                 "minimum_words": minimax_interval_detail_standard(item.duration)[1],
                 "purpose": "duration-scaled MiniMax motion specificity; do not print these counts in the production prompt",
             },
+            "camera_continuity_requirement": (
+                "Continue the same physical camera through this interval. Name its concrete motion path (for example zooms out, pans down, "
+                "dollies backward-left, orbits clockwise, or holds the same locked position), then state its carried position, direction and speed, "
+                "framing or lens evolution, subject screen position, and background parallax; a cue is never permission to reset the view."
+            ),
             "cue_timestamp": _minimax_timestamp(start),
             "next_cue_timestamp": _minimax_timestamp(end) if index + 1 < len(segments) else None,
             "continuity_function": continuity_function,
@@ -389,25 +307,14 @@ def _minimax_h3_rules(segments: list[Segment], intent: str, global_prompt: str, 
     detail_targets = [minimax_interval_detail_standard(segment.duration) for segment in segments]
     cue_template = "\n".join(
         f"{timestamp} {{interval {index}: write at least {sentences} complete sentences and {words} words of natural production prose; "
-        "preserve the carried-forward state and describe only the new motion delta}"
+        "preserve the carried-forward state, describe only the new motion delta, name the same camera's directional motion path or locked hold, "
+        "and state how framing, subject screen placement, and parallax continue through the interval}"
         for index, (timestamp, (sentences, words)) in enumerate(zip(cue_timestamps, detail_targets), 1)
     )
     detail_summary = "; ".join(
         f"{timestamp} → {sentences} sentence(s), {words}+ words"
         for timestamp, (sentences, words) in zip(cue_timestamps, detail_targets)
     )
-    bridge_template = [
-        {
-            "fromSegment": index,
-            "toSegment": index + 1,
-            "divergence": "low|medium|high",
-            "progressiveChange": "specific physically continuous motion that links the adjacent states",
-            "boundaryState": "plausible visible state reached exactly at the next cue without a reset",
-            "carriedMotion": "direction, velocity, action, or settled stillness that continues through the cue",
-            "resolution": "reach|carry_forward",
-        }
-        for index in range(1, len(segments))
-    ]
     sound_rule = (
         "Write a concise soundscape grounded in visible actions, materials, environments, clearly audible video-reference content, and existing SFX instructions."
         if sfx else
@@ -451,16 +358,26 @@ PRIVATE CONTINUITY-PLANNING PASS:
 - prioritize temporal continuity over literal instantaneous reconstruction of a divergent still; references are state evidence, never edit commands
 - keep this plan private. Never expose segment numbers, picture/video labels, divergence ratings, bridge strategies, reference inventories, or analysis headings in the production prompt
 
+PRIVATE CAMERA-TRAJECTORY PASS:
+- construct one physical camera trajectory across the entire sequence before writing the production prompt: opening camera position and height, lens/framing baseline, explicit movement verbs and directional path, speed of travel, rotations, subject-relative distance, screen direction, foreground/background parallax, and ending composition
+- at every timestamp, calculate the camera state immediately before, exactly at, and immediately after the cue. Position, velocity, viewing direction, lens/framing, and parallax must carry through without teleporting, snapping, or silently re-establishing the view
+- when source framing changes substantially, begin a motivated pan, tilt, dolly, orbit, crane, subject-follow, occlusion, or foreground pass during the preceding interval and continue it through the timestamp; never wait until the cue to announce a new angle
+- if the camera remains still, explicitly preserve the same position, lens, framing, and subject screen placement through each boundary. Static continuity is still a trajectory and must not become a sequence of unrelated static shots
+- preserve stable scene geography: subject travel direction, eyeline, left/right screen position, distance to landmarks, foreground/background ordering, lighting direction, and horizon orientation
+- treat every reference image as evidence observed along this one camera path, not as a request to reconstruct a separate composition at its timestamp
+
 MINIMAX H3 PRODUCTION-PROMPT PRINCIPLES:
 - treat all supplied images, videos, prompts, and audio context as one unified creative context; references guide identity, motion, framing, atmosphere, and continuity but are not edit points
-- mirror the LTX segment-prompt standard: each interval must be a complete production instruction describing visible subject action, expression, pose or anatomy change, physical progression, secondary motion, environment response, and camera behavior when supported
+- mirror the LTX segment-prompt standard: each frame directs its matching interval, and each interval must be a complete, detailed MiniMax production instruction describing visible subject action, expression, pose or anatomy change, physical progression, secondary motion, environment response, and camera behavior
 - treat each segment's current LTX prompt as the authoritative action specification for its matching interval; expand its useful motion detail into MiniMax continuous-flow prose instead of reducing it to a summary
 - front-load only the subject identity, environment, visual style, lighting, screen direction, camera behavior, and transformation state that truly remain stable across the complete timeline; never promote an opening-only condition into a global claim
 - because visual references already establish appearance and setting, spend the timestamped prose on motion: what changes, how it progresses, its physical cause, contact and weight, secondary motion, and how existing momentum flows through the cue boundary
 - describe later intervals as deltas from the carried-forward state; do not reintroduce or re-inventory the subject, outfit, location, composition, or props at every timestamp
 - positively describe continuous state and motion. Avoid editorial vocabulary, transition labels, reference labels, and negative prompting in the production prompt
 - state a stationary or persistent camera baseline once. If source material requires camera movement, describe one coherent evolving camera path rather than resetting framing at each cue
-- express essential camera movement as ordinary prose within the motion interval. The bare timestamp is the only structural prefix
+- let each timeline frame explicitly direct the camera movement needed to enter, traverse, and leave its matching interval. Express that camera motion as ordinary causal prose within every motion interval. Each timestamp line must name a concrete directional motion path such as `zooms out`, `pans down`, `dollies backward-left`, `tracks forward`, `orbits clockwise`, or `cranes upward`; if static, say that it `holds the same locked position and framing`. Also carry position, speed, lens/framing evolution, subject-relative distance, and visible parallax without turning the cue into a shot boundary
+- start any necessary reframing before the target cue and carry its velocity through the cue. Never use a timestamp to introduce a new angle, new composition, close-up, wide view, or camera placement instantaneously
+- begin every interval from the exact subject, camera, and environment state reached by the preceding line. Do not re-establish the scene, re-describe a fresh composition, or use phrases such as `new shot`, `different angle`, `view switches`, `scene changes`, `transition to`, or `we now see`
 - use short causal sentences and overlapping motion. Start preparatory movement before a substantially different checkpoint, preserve velocity across its timestamp, and settle only after the new state has been physically reached
 - qualify any opening-only condition with `initially` when it later changes. Never call the camera fixed or stationary in the same interval where it starts moving; instead describe it as initially still, then beginning one smooth path
 
@@ -473,7 +390,7 @@ GLOBAL CONTINUITY PROMPT:
 REQUIRED PRODUCTION-PROMPT SECTIONS — use these three lowercase headings exactly, in order, with no Markdown fences:
 
 continuous_video:
-Start with one precise persistent-anchor sentence. Then write exactly {len(segments)} chronological interval lines. Start each with its exact bare `MM:SS:mmm` timestamp followed immediately by natural motion prose; use exactly these timestamps in order: {cue_list}. The timestamp is the line's only prefix.
+Start with one precise persistent-anchor sentence that includes the opening camera position, lens/framing, subject-relative placement, spatial geography, and whether the camera holds or begins one continuous path. Then write exactly {len(segments)} chronological interval lines. Start each with its exact bare `MM:SS:mmm` timestamp followed immediately by natural motion prose; use exactly these timestamps in order: {cue_list}. The timestamp is the line's only prefix.
 
 HARD INTERVAL-DETAIL CONTRACT:
 - Scale detail to the time available using these per-interval MiniMax targets: {detail_summary}. These counts guide depth only and must never appear in the production prompt.
@@ -481,6 +398,7 @@ HARD INTERVAL-DETAIL CONTRACT:
 - Sentence 1 establishes the carried-forward state and describes the primary action evolving through the interval, including concrete pose, expression, anatomy, transformation, or object-motion changes supplied by the matching LTX prompt.
 - Sentence 2 describes physical causality and execution: contact, force, balance, weight transfer, inertia, material response, secondary motion, and the visible intermediate state reached before the boundary.
 - A third or fourth sentence should describe supported camera/framing evolution, environmental or lighting response, synchronized performance detail, and the exact motion or momentum handed into the next cue.
+- Every interval must contain a concrete camera-continuity clause, even for a static camera. Name the directional motion path (`zooms out`, `pans down`, `dollies backward-left`, `orbits clockwise`, etc.) or explicitly state that the camera holds the same locked position. Carry speed or held stillness, lens/framing, subject screen placement, and parallax forward from the prior interval; never substitute a newly composed view.
 - Preserve all useful specificity from the matching LTX prompt. Do not replace detailed source action with generic phrases such as `continues moving`, `gradually changes`, `the transformation progresses`, or `the motion carries forward`.
 
 Describe only new action and progressive state change while carrying prior state and momentum forward. Avoid padding and repeated inventories, but provide enough concrete motion detail to make every interval independently production-ready. A video reference contributes its full temporal behavior, not merely sampled frames.
@@ -494,7 +412,7 @@ music:
 PRODUCTION-PROMPT TEMPLATE FOR THIS {len(segments)}-INTERVAL TIMELINE — the number of cue lines is generated from the input timeline and is never a fixed example count:
 
 continuous_video:
-{{one precise sentence stating only whole-timeline visual anchors and either a truly fixed camera baseline or one coherent evolving camera path}}
+{{one precise sentence stating whole-timeline visual anchors plus the opening camera position, lens/framing, subject-relative placement, spatial geography, and one continuous trajectory}}
 {cue_template}
 
 soundscape:
@@ -503,16 +421,10 @@ soundscape:
 music:
 {{timeline-specific music direction or the required None statement}}
 
-Before returning, verify that the production prompt has exactly {len(segments)} timestamp lines in prescribed order, meets every timestamp's duration-scaled sentence and word target, has substantial concrete motion detail on every timestamp line, no structural shot labels, no picture/video labels, no bracketed camera commands, no explicit edit or cut instructions, and no repeated full-scene inventories.
+Before returning, verify that the production prompt has exactly {len(segments)} timestamp lines in prescribed order, meets every timestamp's duration-scaled sentence and word target, names a concrete directional camera motion path or locked-position hold in every interval, carries spatial geography through every interval, begins all reframing before its target cue, has no camera teleportation or instant recomposition, no structural shot labels, no picture/video labels, no bracketed camera commands, no explicit edit or cut instructions, no reset-style transition wording, and no repeated full-scene inventories.
 
-Return strict transport JSON with exactly these two top-level fields. `continuityPlan` is private validation data and must not be copied into `prompt`:
-{{
-  "continuityPlan": {{
-    "persistentAnchors": ["specific visual/camera anchor that truly persists"],
-    "bridges": {json.dumps(bridge_template)}
-  }},
-  "prompt": "the complete three-section MiniMax H3 production prompt"
-}}"""
+Return strict transport JSON with exactly one top-level field. Do not return analysis, plans, scores, or validation metadata:
+{{"prompt": "the complete three-section MiniMax H3 production prompt"}}"""
 
 
 def _refinement_images(segments: list[Segment], selected_index: int) -> list[dict]:
