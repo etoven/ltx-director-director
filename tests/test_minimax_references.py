@@ -31,11 +31,12 @@ class MiniMaxReferenceTests(unittest.TestCase):
     def make_window(self):
         window = MainWindow()
         window.segments = [segment("text")]
+        window.set_project_type("minimax_references")
         self.addCleanup(window.close)
         return window
 
     def add_reference(self, window, slot=0):
-        dialog = window.ensure_minimax_prompt_window()
+        dialog = window.ensure_minimax_panel()
         image = QImage(64, 48, QImage.Format.Format_RGB32)
         image.fill(QColor("#3d89aa"))
         dialog.reference_targets[slot].load_image(image, "identity.png")
@@ -67,7 +68,7 @@ class MiniMaxReferenceTests(unittest.TestCase):
 
     def test_drop_persists_full_image_and_never_changes_timeline_or_calls_ai(self):
         window = self.make_window()
-        dialog = window.ensure_minimax_prompt_window()
+        dialog = window.ensure_minimax_panel()
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "reference.png"
             image = QImage(320, 180, QImage.Format.Format_RGB32)
@@ -92,14 +93,14 @@ class MiniMaxReferenceTests(unittest.TestCase):
         self.assertEqual(restored.minimax_reference_images, window.minimax_reference_images)
         self.assertIsNone(restored.minimax_reference_images[0])
         self.assertEqual(restored.minimax_reference_images[1]["role"], "scene")
-        restored.show_minimax_prompt_window()
-        self.assertFalse(restored.minimax_prompt_window.reference_targets[1].preview.pixmap().isNull())
+        restored.show_minimax_panel()
+        self.assertFalse(restored.minimax_panel.reference_targets[1].preview.pixmap().isNull())
 
     def test_sessions_clear_and_old_projects_do_not_leak_references(self):
         window = self.make_window()
         self.add_reference(window)
         state = window.capture_workspace_state()
-        window.minimax_prompt_window.reference_targets[0].clear()
+        window.minimax_panel.reference_targets[0].clear()
         self.assertEqual(window.minimax_reference_images, [None, None])
         window.restore_workspace_state(state)
         self.assertIsNotNone(window.minimax_reference_images[0])
@@ -110,7 +111,7 @@ class MiniMaxReferenceTests(unittest.TestCase):
 
     def test_large_image_is_preserved_in_project_and_resized_only_for_provider(self):
         window = self.make_window()
-        target = window.ensure_minimax_prompt_window().reference_targets[0]
+        target = window.ensure_minimax_panel().reference_targets[0]
         image = QImage(2048, 1400, QImage.Format.Format_RGB32)
         image.fill(QColor("#a091e8"))
         target.load_image(image)
@@ -170,7 +171,7 @@ class MiniMaxReferenceTests(unittest.TestCase):
         window = self.make_window()
         self.add_reference(window)
         window.minimax_prompt_mode = "references"
-        window.minimax_prompt_window.editor.setPlainText("My edited brief")
+        window.minimax_panel.editor.setPlainText("My edited brief")
         with patch.object(window, "ai_credentials", return_value=("gemini", "test", "unused")), patch.object(window, "start_ai_worker") as worker:
             window.generate_minimax_prompt_references()
             self.assertEqual(worker.call_args.args[1][-1], window.minimax_reference_images)
@@ -188,7 +189,7 @@ class MiniMaxReferenceTests(unittest.TestCase):
         self.assertNotEqual(before, window.current_minimax_cache_key())
         window.minimax_h3_finished("Outdated response")
         self.assertEqual(window.minimax_prompt_text, "Keep this")
-        self.assertIn("references changed", window.minimax_prompt_window.message_banner.text())
+        self.assertIn("references changed", window.minimax_panel.message_banner.text())
 
 
 if __name__ == "__main__":

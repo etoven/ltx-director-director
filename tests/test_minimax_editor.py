@@ -1,303 +1,238 @@
 import os
-import tempfile
 import unittest
-from pathlib import Path
 from unittest.mock import patch
 
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+from PySide6.QtCore import QEventLoop, QThread, QTimer, Qt
+from PySide6.QtWidgets import QApplication, QDialog, QMessageBox
 
-from PySide6.QtCore import QEvent, QSettings, Qt
-from PySide6.QtGui import QColor, QPixmap
-from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QLabel, QMainWindow, QMessageBox
-
+from ltx_prompt_director import ai
 from ltx_prompt_director.models import Segment
-from ltx_prompt_director.ui import MainWindow, MiniMaxPromptWindow
+from ltx_prompt_director.ui import MainWindow
 
 
-class _EditorOwner(QMainWindow):
-    def __init__(self, settings_path: Path):
-        super().__init__()
-        self.settings = QSettings(str(settings_path), QSettings.Format.IniFormat)
-        self.prompt = ""
-        self.instructions_text = ""
-        self.window = None
-
-    def minimax_editor_changed(self):
-        if self.window:
-            self.prompt = self.window.editor.toPlainText()
-            self.instructions_text = self.window.instructions.toPlainText()
-
-    def refine_minimax_prompt(self):
-        pass
-
-    def generate_minimax_prompt_frames(self):
-        pass
-
-    def generate_minimax_prompt_references(self):
-        pass
-
-    def copy_minimax_prompt(self):
-        pass
-
-    def retry_minimax_operation(self):
-        pass
-
-    def minimax_window_destroyed(self, _window=None):
-        pass
-
-
-class MiniMaxEditorTests(unittest.TestCase):
+class UnifiedEditorTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.app = QApplication.instance() or QApplication([])
 
-    def test_prompt_and_instructions_accept_plain_text_paste_even_while_busy(self):
-        with tempfile.TemporaryDirectory() as directory:
-            owner = _EditorOwner(Path(directory) / "settings.ini")
-            window = MiniMaxPromptWindow(owner)
-            owner.window = window
+    def make_window(self, project_type='ltx'):
+        with patch.object(MainWindow, 'restore_startup_workspace'):
+            window = MainWindow()
+        window.segments = [Segment('First', '', '', kind='text', prompt='First action', duration=2),
+                           Segment('Second', '', '', kind='text', prompt='Second action', duration=3)]
+        window.refresh_timeline(0)
+        window.set_project_type(project_type)
+        self.addCleanup(window.close)
+        return window
 
-            window.set_busy(True, "Refining prompt • attempt 1/3")
-            self.assertFalse(window.editor.isReadOnly())
-            self.assertFalse(window.instructions.isReadOnly())
-            self.assertTrue(window.editor.textInteractionFlags() & Qt.TextInteractionFlag.TextEditable)
-            self.assertFalse(window.busy_veil.isHidden())
-            self.assertEqual(window.busy_veil.status.text(), "Refining prompt • attempt 1/3")
+    def test_same_editor_follows_ltx_selection_but_keeps_minimax_production_prompt(self):
+        w = self.make_window()
+        editor = w.segment_prompt
+        self.assertEqual(editor.toPlainText(), 'First action')
+        editor.setPlainText('Edited first action')
+        w.timeline.setCurrentRow(1)
+        self.assertEqual(editor.toPlainText(), 'Second action')
+        w.set_project_type('minimax_frames')
+        self.assertIs(w.minimax_panel.editor, editor)
+        self.assertNotIsInstance(w.minimax_panel, QDialog)
+        self.assertFalse(w.minimax_panel.isWindow())
+        editor.setPlainText('The full production prompt')
+        w.timeline.setCurrentRow(0)
+        w.reload_clicked_segment(w.timeline.item(0))
+        self.assertEqual(editor.toPlainText(), 'The full production prompt')
+        self.assertEqual(w.segments[0].prompt, 'Edited first action')
+        w.set_project_type('ltx')
+        self.assertEqual(editor.toPlainText(), 'Edited first action')
+        w.set_project_type('minimax_frames')
+        self.assertEqual(editor.toPlainText(), 'The full production prompt')
 
-            QApplication.clipboard().setText("Pasted production prompt")
-            window.editor.paste()
-            QApplication.clipboard().setText("Private refinement direction")
-            window.instructions.paste()
+    def test_global_prompt_uses_same_editor_and_cannot_overwrite_a_segment(self):
+        w = self.make_window()
+        w.prompt_scope.setCurrentIndex(1)
+        w.segment_prompt.setPlainText('Global continuity')
+        w.timeline.setCurrentRow(1)
+        self.assertEqual(w.segment_prompt.toPlainText(), 'Global continuity')
+        self.assertEqual(w.global_prompt.toPlainText(), 'Global continuity')
+        self.assertEqual(w.segments[0].prompt, 'First action')
+        self.assertFalse(w.refine_prompt_button.isEnabled())
+        w.prompt_scope.setCurrentIndex(0)
+        self.assertEqual(w.segment_prompt.toPlainText(), 'Second action')
+        self.assertTrue(w.global_prompt.isHidden())
 
-            self.assertEqual(owner.prompt, "Pasted production prompt")
-            self.assertEqual(owner.instructions_text, "Private refinement direction")
-            self.assertFalse(window.generate_frames_button.isEnabled())
-            self.assertFalse(window.generate_references_button.isEnabled())
-            self.assertFalse(window.refine_button.isEnabled())
-            window.set_busy(False)
-            self.assertTrue(window.busy_veil.isHidden())
-            self.assertTrue(window.generate_frames_button.isEnabled())
-            self.assertTrue(window.generate_references_button.isEnabled())
-            self.assertTrue(window.refine_button.isEnabled())
-            window.close()
-            owner.close()
+    def test_switches_only_show_relevant_controls_and_never_generate(self):
+        w = self.make_window()
+        with patch.object(w, 'start_ai_worker') as worker:
+            w.project_type_combo.setCurrentIndex(2)
+            self.assertEqual(w.project_type, 'minimax_references')
+            self.assertTrue(w.hdr.isHidden())
+            self.assertTrue(w.refine_timing_button.isHidden())
+            self.assertTrue(w.requested_length.isHidden())
+            self.assertTrue(w.prompt_scope.isHidden())
+            self.assertTrue(w.copy_image_prompt.isHidden())
+            self.assertFalse(w.references_button.isHidden())
+            self.assertFalse(w.minimax_panel.reference_dock.isHidden())
+            w.project_type_combo.setCurrentIndex(1)
+            self.assertTrue(w.minimax_panel.reference_dock.isHidden())
+            self.assertTrue(w.references_button.isHidden())
+            w.project_type_combo.setCurrentIndex(0)
+            self.assertFalse(w.hdr.isHidden())
+            self.assertFalse(w.refine_timing_button.isHidden())
+            self.assertFalse(w.prompt_scope.isHidden())
+            self.assertTrue(w.minimax_panel.isHidden())
+            worker.assert_not_called()
 
-    def test_show_focuses_existing_prompt_so_space_edits_instead_of_reopening_cache(self):
-        window = MainWindow()
-        window.minimax_prompt_text = "Existing cached prompt"
-        dialog = window.show_minimax_prompt_window("Cached • timeline current")
-        QApplication.processEvents()
+    def test_one_generate_button_routes_all_three_project_types(self):
+        w = self.make_window()
+        for kind, operation in [('ltx', ai.build_prompts), ('minimax_frames', ai.build_minimax_h3_prompt),
+                                ('minimax_references', ai.build_minimax_h3_reference_prompt)]:
+            w.set_project_type(kind)
+            with patch.object(w, 'ai_credentials', return_value=(w.settings.value('provider', 'gemini'), w.settings.value('gemini_model', ai.GEMINI_MODELS[0]), 'unused')), patch.object(w, 'start_ai_worker') as worker:
+                w.magic_button.click()
+            self.assertIs(worker.call_args.args[0], operation)
+            w.minimax_panel.set_busy(False)
 
-        self.assertIs(QApplication.focusWidget(), dialog.editor)
-        QTest.keyClick(QApplication.focusWidget(), Qt.Key.Key_Space)
-        self.assertEqual(dialog.editor.toPlainText(), "Existing cached prompt ")
-        self.assertEqual(window.minimax_prompt_text, "Existing cached prompt ")
+    def test_prompt_and_instructions_remain_editable_while_busy_and_stale_result_is_rejected(self):
+        w = self.make_window('minimax_frames')
+        w.segment_prompt.setPlainText('Original prompt')
+        w.minimax_operation_signature = w.current_minimax_cache_key()
+        w.minimax_operation_editor_snapshot = ('Original prompt', '')
+        w.set_ai_controls_enabled(False)
+        self.assertFalse(w.segment_prompt.isReadOnly())
+        self.assertFalse(w.minimax_panel.instructions.isReadOnly())
+        self.assertFalse(w.refine_prompt_button.isEnabled())
+        w.segment_prompt.setPlainText('New pasted prompt')
+        w.minimax_panel.instructions.setPlainText('Keep the new ending')
+        self.assertFalse(w.refine_prompt_button.isEnabled())
+        w.minimax_h3_finished('Old provider result')
+        self.assertEqual(w.segment_prompt.toPlainText(), 'New pasted prompt')
+        self.assertIn('not applied', w.minimax_panel.message_banner.text())
 
-        dialog.close()
-        QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
-        QApplication.processEvents()
-        window.close()
+    def test_refine_uses_edited_prompt_and_notes_for_selected_mode(self):
+        for kind, expected in [('minimax_frames', ai.refine_minimax_h3_prompt), ('minimax_references', ai.refine_minimax_h3_reference_prompt)]:
+            w = self.make_window(kind)
+            w.segment_prompt.setPlainText('User-edited production prompt')
+            w.minimax_panel.instructions.setPlainText('Preserve my ending')
+            with patch.object(w, 'ai_credentials', return_value=(w.settings.value('provider', 'gemini'), w.settings.value('gemini_model', ai.GEMINI_MODELS[0]), 'unused')), patch.object(w, 'start_ai_worker') as worker:
+                w.refine_prompt_button.click()
+            self.assertIs(worker.call_args.args[0], expected)
+            self.assertIn('User-edited production prompt', worker.call_args.args[1])
+            self.assertIn('Preserve my ending', worker.call_args.args[1])
+            self.assertEqual(w.minimax_operation_editor_snapshot, ('User-edited production prompt', 'Preserve my ending'))
+            w.minimax_h3_finished('Refined production prompt')
+            self.assertEqual(w.segment_prompt.toPlainText(), 'Refined production prompt')
+            self.assertEqual(w.minimax_panel.instructions.toPlainText(), '')
 
-    def test_toolbar_only_opens_editor_and_never_generates(self):
-        window = MainWindow()
-        window.segments = [Segment("Beat", "", "", kind="text", prompt="Motion", duration=2.5)]
-        with patch.object(window, "start_ai_worker") as start_worker:
-            window.minimax_editor_action.trigger()
-            QApplication.processEvents()
+    def test_both_minimax_drafts_and_type_survive_export_and_workspace_switch(self):
+        w = self.make_window('minimax_frames')
+        w.segment_prompt.setPlainText('Frame draft')
+        w.minimax_panel.instructions.setPlainText('Frame notes')
+        w.set_project_type('minimax_references')
+        w.segment_prompt.setPlainText('Reference draft')
+        w.minimax_panel.instructions.setPlainText('Reference notes')
+        payload = w.project_payload()
+        state = w.capture_workspace_state()
+        w.set_project_type('ltx')
+        w.restore_workspace_state(state)
+        self.assertEqual(w.project_type, 'minimax_references')
+        self.assertEqual(w.segment_prompt.toPlainText(), 'Reference draft')
+        restored = self.make_window()
+        restored.load_project_payload(payload)
+        self.assertEqual(restored.project_type, 'minimax_references')
+        self.assertEqual(restored.segment_prompt.toPlainText(), 'Reference draft')
+        restored.set_project_type('minimax_frames')
+        self.assertEqual(restored.segment_prompt.toPlainText(), 'Frame draft')
+        self.assertEqual(restored.minimax_panel.instructions.toPlainText(), 'Frame notes')
+        restored.set_project_type('ltx')
+        self.assertEqual(restored.segment_prompt.toPlainText(), 'First action')
 
-        start_worker.assert_not_called()
-        self.assertIsNotNone(window.minimax_prompt_window)
-        self.assertFalse(window.minimax_prompt_window.isHidden())
-        window.minimax_prompt_window.close()
-        QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
-        QApplication.processEvents()
-        window.close()
+    def test_legacy_project_migrates_without_losing_prompts(self):
+        w = self.make_window()
+        payload = w.project_payload()
+        payload.pop('projectType')
+        payload['projectVersion'] = 7
+        payload['minimaxH3'] = {'prompt': 'Legacy production prompt', 'mode': 'references'}
+        w.load_project_payload(payload)
+        self.assertEqual(w.project_type, 'minimax_references')
+        self.assertEqual(w.segment_prompt.toPlainText(), 'Legacy production prompt')
+        payload.pop('minimaxH3')
+        w.load_project_payload(payload)
+        self.assertEqual(w.project_type, 'ltx')
+        self.assertEqual(w.minimax_prompt_text, '')
+        self.assertEqual(w.segment_prompt.toPlainText(), 'First action')
 
-    def test_frame_and_reference_buttons_are_distinct_manual_generation_triggers(self):
-        window = MainWindow()
-        window.segments = [Segment("Beat", "", "", kind="text", prompt="Motion", duration=2.5)]
-        dialog = window.ensure_minimax_prompt_window()
-        captured = {}
+    def test_switch_away_and_back_rejects_old_worker_response(self):
+        w = self.make_window('minimax_frames')
+        w.segment_prompt.setPlainText('Keep me')
+        w.minimax_operation_signature = w.current_minimax_cache_key()
+        w.set_project_type('ltx')
+        w.set_project_type('minimax_frames')
+        w.minimax_h3_finished('Stale')
+        self.assertEqual(w.segment_prompt.toPlainText(), 'Keep me')
 
-        def capture_worker(operation, args, activity, finished, **kwargs):
-            captured["operation"] = operation
-            captured["kwargs"] = kwargs
+    def test_actual_worker_callback_does_not_apply_after_project_switch(self):
+        w = self.make_window('ltx')
+        with patch.object(w.thread_pool, 'start') as start:
+            w.start_ai_worker(ai.build_prompts, (), 'Testing', w.magic_finished)
+        worker = start.call_args.args[0]
+        w.set_project_type('minimax_frames')
+        w.segment_prompt.setPlainText('Current production prompt')
+        worker.signals.finished.emit({'segments': [{'prompt': 'Wrong project', 'duration': 7}]})
+        self.assertEqual(w.segments[0].prompt, 'First action')
+        self.assertEqual(w.segment_prompt.toPlainText(), 'Current production prompt')
+        self.assertFalse(w.ai_busy)
 
-        with (
-            patch.object(window, "ai_credentials", return_value=("gemini", "gemini-3.5-flash-lite", "unused")),
-            patch.object(window, "current_minimax_cache_key", return_value="manual-signature"),
-            patch.object(window, "start_ai_worker", side_effect=capture_worker),
-        ):
-            dialog.generate_frames_button.click()
+    def test_background_completion_is_delivered_on_gui_thread(self):
+        w = self.make_window('minimax_frames')
+        loop = QEventLoop()
+        threads = []
+        def operation():
+            return 'Background draft'
+        def finished(result):
+            threads.append(QThread.currentThread())
+            w.segment_prompt.setPlainText(result)
+            w.set_ai_controls_enabled(True)
+            loop.quit()
+        deadline = QTimer()
+        deadline.setSingleShot(True)
+        deadline.timeout.connect(loop.quit)
+        deadline.start(2000)
+        w.start_ai_worker(operation, (), 'Testing', finished, show_main_overlay=False)
+        loop.exec()
+        deadline.stop()
+        self.assertEqual(threads, [self.app.thread()])
+        self.assertEqual(w.segment_prompt.toPlainText(), 'Background draft')
 
-        self.assertEqual(captured["operation"].__name__, "build_minimax_h3_prompt")
-        self.assertFalse(captured["kwargs"]["show_main_overlay"])
-        self.assertEqual(window.minimax_operation_kind, "generate_frames")
+    def test_save_on_main_window_close_preserves_manual_edits(self):
+        w = self.make_window('minimax_frames')
+        w.current_project_id = 'test-project'
+        w.segment_prompt.setPlainText('Manual draft without generation')
+        with patch.object(w, 'save_library_project') as save:
+            w.close()
+            save.assert_called_once_with(automatic=True)
+            self.assertEqual(w.project_payload()['minimaxH3']['prompt'], 'Manual draft without generation')
+        w.current_project_id = None
 
-        captured.clear()
-        with (
-            patch.object(window, "ai_credentials", return_value=("gemini", "gemini-3.5-flash-lite", "unused")),
-            patch.object(window, "current_minimax_cache_key", return_value="manual-signature"),
-            patch.object(window, "start_ai_worker", side_effect=capture_worker),
-        ):
-            dialog.set_busy(False)
-            dialog.generate_references_button.click()
-
-        self.assertEqual(captured["operation"].__name__, "build_minimax_h3_reference_prompt")
-        self.assertFalse(captured["kwargs"]["show_main_overlay"])
-        self.assertEqual(window.minimax_operation_kind, "generate_references")
-        dialog.close()
-        window.close()
-
-    def test_pacing_header_uses_actual_previews_and_exact_start_times(self):
-        with tempfile.TemporaryDirectory() as directory:
-            preview_path = Path(directory) / "frame.png"
-            pixmap = QPixmap(80, 45)
-            pixmap.fill(QColor("#4f9fbd"))
-            self.assertTrue(pixmap.save(str(preview_path)))
-            owner = _EditorOwner(Path(directory) / "settings.ini")
-            owner.segments = [
-                Segment("Opening", str(preview_path), str(preview_path), kind="image", duration=2.5),
-                Segment("Transformation beat", "", "", kind="text", role="text", duration=3.25),
-                Segment("Motion reference", "clip.webm", str(preview_path), kind="video", duration=1.5),
-            ]
-            window = MiniMaxPromptWindow(owner)
-            owner.window = window
-            window.set_project("Pacing test", "Prompt", "", "Saved prompt")
-
-            self.assertEqual(
-                [card.findChild(QLabel, "minimaxPacingTime").text() for card in window.pacing_strip.cards],
-                ["START  00:00:000", "START  00:02:500", "START  00:05:750"],
-            )
-            self.assertEqual(window.pacing_strip.total_time.text(), "TOTAL  00:07:250")
-            self.assertFalse(window.pacing_strip.cards[0].preview.pixmap().isNull())
-            self.assertFalse(window.pacing_strip.cards[2].preview.pixmap().isNull())
-            self.assertIn("TEXT SEQUENCE", window.pacing_strip.cards[1].preview.text())
-            window.close()
-            owner.close()
-
-    def test_refine_snapshots_edited_prompt_and_special_instructions(self):
-        window = MainWindow()
-        dialog = window.ensure_minimax_prompt_window()
-        window.segments = [Segment("Beat", "", "", kind="text", prompt="Motion", duration=2.5)]
-        window.current_project_id = "test-project"
-        captured = {}
-
-        def capture_worker(operation, args, activity, finished, **kwargs):
-            captured["operation"] = operation
-            captured["args"] = args
-            captured["kwargs"] = kwargs
-
-        with (
-            patch.object(window, "ai_credentials", return_value=("gemini", "gemini-3.5-flash-lite", "unused")),
-            patch.object(window, "current_minimax_cache_key", return_value="source-signature"),
-            patch.object(window, "save_library_project") as save_project,
-            patch.object(window, "start_ai_worker", side_effect=capture_worker),
-        ):
-            dialog.editor.setPlainText("User-pasted production prompt")
-            dialog.instructions.setPlainText("Preserve the new ending and smooth the final transition.")
-
-            self.assertFalse(captured)
-            save_project.assert_not_called()
-
-            dialog.refine_button.click()
-
-            save_project.assert_not_called()
-            window.minimax_h3_finished("Refined production prompt")
-            save_project.assert_not_called()
-            self.assertEqual(window.minimax_refinement_instructions, "")
-            self.assertEqual(dialog.instructions.toPlainText(), "")
-            dialog.close()
-            QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
-            QApplication.processEvents()
-            save_project.assert_called_once_with(automatic=True)
-
-        self.assertEqual(captured["args"][-3], "User-pasted production prompt")
-        self.assertEqual(captured["args"][-2], "Preserve the new ending and smooth the final transition.")
-        self.assertEqual(captured["operation"].__name__, "refine_minimax_h3_prompt")
-        self.assertFalse(captured["kwargs"]["show_main_overlay"])
-        self.assertFalse(hasattr(window, "_minimax_save_timer"))
-        self.assertEqual(
-            window.minimax_operation_editor_snapshot,
-            ("User-pasted production prompt", "Preserve the new ending and smooth the final transition."),
-        )
-        window.current_project_id = None
-        window.close()
-
-    def test_reference_prompt_refines_with_reference_master(self):
-        window = MainWindow()
-        dialog = window.ensure_minimax_prompt_window()
-        window.segments = [Segment("Reference", "", "", kind="text", prompt="Motion", duration=2.5)]
-        window.minimax_prompt_mode = "references"
-        captured = {}
-
-        def capture_worker(operation, args, activity, finished, **kwargs):
-            captured["operation"] = operation
-
-        with (
-            patch.object(window, "ai_credentials", return_value=("gemini", "gemini-3.5-flash-lite", "unused")),
-            patch.object(window, "current_minimax_cache_key", return_value="reference-signature"),
-            patch.object(window, "start_ai_worker", side_effect=capture_worker),
-        ):
-            dialog.editor.setPlainText("subject_definitions:\n<Subject 1> is the subject.")
-            dialog.refine_button.click()
-
-        self.assertEqual(captured["operation"].__name__, "refine_minimax_h3_reference_prompt")
-        self.assertEqual(window.minimax_operation_kind, "refine_references")
-        dialog.close()
-        window.close()
-
-    def test_gemini_overload_uses_clear_warning_dialog(self):
-        window = MainWindow()
-        window.ai_activity_title = "Magic Build"
-        message = "Google Gemini is temporarily overloaded for the selected model."
-        with (
-            patch.object(QMessageBox, "warning") as warning,
-            patch.object(QMessageBox, "critical") as critical,
-        ):
-            window.magic_failed(message)
-        warning.assert_called_once_with(window, "Magic Build: Gemini overloaded", message)
-        critical.assert_not_called()
-        self.assertIn("Google Gemini is overloaded", window.statusBar().currentMessage())
-        window.close()
-
-    def test_minimax_failures_stay_in_the_minimax_dialog(self):
-        window = MainWindow()
-        dialog = window.ensure_minimax_prompt_window()
-        window.ai_activity_title = "MiniMax H3 Refine"
-        message = "The AI returned a skimpy MiniMax interval.\n\nStopped after 3 attempts."
-        with (
-            patch.object(QMessageBox, "warning") as warning,
-            patch.object(QMessageBox, "critical") as critical,
-        ):
-            window.magic_failed(message)
-
+    def test_minimax_error_and_retry_stay_inline(self):
+        w = self.make_window('minimax_references')
+        w.ai_activity_title = 'MiniMax H3 Reference Generate'
+        w.minimax_operation_kind = 'generate_references'
+        with patch.object(QMessageBox, 'warning') as warning, patch.object(QMessageBox, 'critical') as critical:
+            w.magic_failed('Provider temporarily overloaded')
         warning.assert_not_called()
         critical.assert_not_called()
-        self.assertEqual(dialog.message_banner.text(), message)
-        self.assertEqual(dialog.message_panel.property("level"), "error")
-        self.assertFalse(dialog.message_panel.isHidden())
-        self.assertFalse(dialog.retry_button.isHidden())
-        self.assertTrue(dialog.busy_veil.isHidden())
-        dialog.close()
-        window.close()
+        self.assertEqual(w.minimax_panel.message_banner.text(), 'Provider temporarily overloaded')
+        self.assertFalse(w.minimax_panel.retry_button.isHidden())
+        with patch.object(w, 'generate_minimax_prompt_references') as retry:
+            w.minimax_panel.retry_button.click()
+        retry.assert_called_once_with()
 
-    def test_retry_button_restarts_the_failed_minimax_operation(self):
-        window = MainWindow()
-        dialog = window.ensure_minimax_prompt_window()
-        window.minimax_operation_kind = "generate_references"
-        window.minimax_prompt_cache_key = "stale-cache"
-        dialog.show_message("Generation failed.", "error", retry=True)
-
-        with patch.object(window, "generate_minimax_prompt_references") as retry_generation:
-            dialog.retry_button.click()
-
-        retry_generation.assert_called_once_with()
-        self.assertEqual(window.minimax_prompt_cache_key, "")
-        dialog.close()
-        window.close()
+    def test_minimax_uses_timeline_duration_not_hidden_ltx_length(self):
+        w = self.make_window('minimax_references')
+        w.requested_length.setValue(99)
+        self.assertNotIn('99', w.build_director_request())
+        self.assertEqual(w.total_duration(), 5)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     unittest.main()

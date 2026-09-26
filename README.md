@@ -1,5 +1,7 @@
 # LTX Director - Director
 
+**Experimental 1.13.0a1 — unified project workflows.** This branch uses one shared prompt editor for LTX and MiniMax. See [workflow behavior and experimental installation](docs/unified-workflows.md). Stable `main` remains on 1.12.57.
+
 **LTX Director - Director** is a native companion app for the [LTXDirector custom node for ComfyUI](https://github.com/WhatDreamsCost/WhatDreamsCost-ComfyUI). Its primary purpose is to prepare image, WebM, and MP4 timelines outside ComfyUI, use Gemini or OpenAI to build LTX Video 2.3 prompts, and export the finished sequence directly into LTXDirector.
 
 ![LTX Director - Director application overview](docs/images/ltx-director-director-overview.png)
@@ -12,7 +14,7 @@ LTX Director - Director turns a folder of reference frames into a structured LTX
 2. Mark each segment as a start frame or end frame, then drag its edge to set the duration.
 3. Describe the overall scene in the multiline **Director's Intent**, optionally set an exact total sequence length, and enable SFX or Spoken Dialog with speaker context when needed.
 4. Run **Magic Build** to refine timing and generate a focused prompt for every segment.
-5. Fine-tune a selected segment with **Refine Timing** or **Refine Prompt**, export the sequence as JSON for the ComfyUI LTXDirector node, or develop a continuous MiniMax H3 prompt in its dedicated editor.
+5. Fine-tune a selected segment with **Refine Timing** or **Refine Prompt**, export the sequence as JSON for the ComfyUI LTXDirector node, or develop a continuous MiniMax H3 prompt in the same main-window editor.
 
 ![Timeline, frame roles, duration controls, and Magic Build](docs/images/timeline-and-magic-build.png)
 
@@ -44,7 +46,7 @@ In short: use **Project Export** for lossless editing and safekeeping; use **LTX
 ## Highlights
 
 - Native PySide6 interface for Linux, Windows, and macOS
-- Web-app-matched dark editor layout with compact toolbar and stacked prompt panels
+- Web-app-matched dark editor layout with a compact toolbar and one workflow-aware prompt editor
 - DPI-aware control spacing with modern sliders, dropdowns, number steppers, rounded scrollbars, and consistent button states
 - Numbered timeline ruler with duration-proportional segment widths
 - Adjustable timeline scale, one-click auto fit, and vertically resizable previews
@@ -52,10 +54,10 @@ In short: use **Project Export** for lossless editing and safekeeping; use **LTX
 - Animated in-timeline loading indicator while segment tiles are prepared
 - Drag-to-reorder horizontal timeline and smoothly animated AI timing recommendations
 - Selected-segment **Refine Timing** and **Refine Prompt** passes with adjacent-frame continuity context
-- Dedicated MiniMax H3 editor with persistent prompts, private refinement instructions, manual editing, one-click copy, and source-aware generation caching
+- Shared LTX/MiniMax editor with independent persistent MiniMax drafts, inline refinement instructions, manual editing, one-click copy, and source-aware generation caching
 - MiniMax References generation detects T2V, I2V, first/last-frame, multiple-keyframe, V2V, or mixed-reference workflows locally
 - Two untimed reference-image drop targets with attribute roles, notes, previews, paste support, and portable project storage
-- Bundled flat SVG toolbar icon family with distinct LTX and MiniMax export branding
+- Bundled flat SVG toolbar icons with workflow-specific controls
 - One-second minimum segment duration in 0.5-second increments
 - Right-click replace, one-click segment export, role assignment, and deletion
 - Direct KDE `kdialog`, GNOME `zenity`, macOS, and Windows native media-picker integration

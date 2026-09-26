@@ -1,6 +1,6 @@
 # MiniMax References — 1.12.57
 
-The References button now uses a compact production brief adapted from the
+The MiniMax References project type uses a compact production brief adapted from the
 [PromptSama MiniMax H3 guide](https://www.promptsama.ai/models/minimax-h3.html#overview).
 References receive explicit roles, followed by scene direction, timed action and sound.
 The previous reference generator, refiner and master instructions are preserved verbatim
@@ -29,6 +29,8 @@ and checkpoint times. This is distinct from the existing Frames mode cue convent
 Video source ranges respect the timeline trim. Text-only segments supply action and duration.
 
 ## Two reference images
+
+In the experimental unified UI, select **MiniMax · References** and use the **Reference images** dock inside the main window.
 
 Drop a local still image into either slot, use Browse, or paste image pixels or a local file
 from the clipboard. Choose Identity, Wardrobe, Setting, Visual style, Object / prop, or

@@ -14,14 +14,14 @@ from pathlib import Path
 from uuid import uuid4
 
 from PySide6.QtCore import QDateTime, QEasingCurve, QObject, QRunnable, QRectF, QSettings, QSize, QStandardPaths, Qt, QThreadPool, QTimer, QUrl, QVariantAnimation, Signal
-from PySide6.QtGui import QAction, QActionGroup, QBrush, QColor, QIcon, QImageReader, QPainter, QPen, QPixmap, QTextCursor
+from PySide6.QtGui import QAction, QActionGroup, QBrush, QColor, QIcon, QImageReader, QPainter, QPen, QPixmap
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
     QColorDialog, QDateTimeEdit, QDockWidget, QFileDialog, QFormLayout, QFrame, QHBoxLayout, QLabel, QLayout, QLineEdit,
     QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox, QPushButton, QScrollArea,
-    QSizePolicy, QSlider, QSpinBox, QSplitter, QSplitterHandle, QStatusBar, QStyle, QStyledItemDelegate, QStyleOptionSlider, QStyleOptionViewItem, QTextEdit, QToolBar, QVBoxLayout, QWidget,
+    QSizePolicy, QSlider, QSpinBox, QStatusBar, QStyle, QStyledItemDelegate, QStyleOptionSlider, QStyleOptionViewItem, QTextEdit, QToolBar, QVBoxLayout, QWidget,
 )
 
 from . import __version__
@@ -1374,49 +1374,6 @@ class TimelineHeightHandle(QFrame):
             event.accept()
 
 
-class DottedPromptSplitterHandle(QSplitterHandle):
-    def paintEvent(self, event) -> None:
-        super().paintEvent(event)
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        scale = getattr(self.splitter(), "scale_factor", 1.0)
-        color = QColor("#71838d") if self.underMouse() else QColor("#4f5c63")
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(color)
-        diameter = max(3.0, 3.2 * scale)
-        spacing = 8 * scale
-        center_x = self.width() / 2
-        center_y = self.height() / 2
-        for index in range(-3, 4):
-            painter.drawEllipse(QRectF(center_x + index * spacing - diameter / 2, center_y - diameter / 2, diameter, diameter))
-
-    def enterEvent(self, event) -> None:
-        self.update()
-        super().enterEvent(event)
-
-    def leaveEvent(self, event) -> None:
-        self.update()
-        super().leaveEvent(event)
-
-
-class DottedPromptSplitter(QSplitter):
-    def __init__(self, parent=None):
-        super().__init__(Qt.Orientation.Vertical, parent)
-        self.scale_factor = 1.0
-        self.setObjectName("promptSplitter")
-        self.setChildrenCollapsible(False)
-        self.set_scale(1.0)
-
-    def createHandle(self) -> QSplitterHandle:
-        return DottedPromptSplitterHandle(self.orientation(), self)
-
-    def set_scale(self, scale: float) -> None:
-        self.scale_factor = max(.75, min(2.0, scale))
-        self.setHandleWidth(round(14 * self.scale_factor))
-        for index in range(1, self.count()):
-            self.handle(index).update()
-
-
 class SegmentCard(QFrame):
     duration_changed = Signal(float)
     delete_requested = Signal()
@@ -2022,384 +1979,89 @@ class ProjectDetailsDialog(QDialog):
         return normalize_notes(self.notes)
 
 
-def minimax_start_timestamp(seconds: float) -> str:
-    total_milliseconds = max(0, round(float(seconds) * 1000))
-    minutes, remainder = divmod(total_milliseconds, 60_000)
-    whole_seconds, milliseconds = divmod(remainder, 1000)
-    return f"{minutes:02d}:{whole_seconds:02d}:{milliseconds:03d}"
-
-
-class MiniMaxPacingCard(QFrame):
-    """A framed timeline preview used by the MiniMax pacing header."""
-
-    def __init__(self, segment: Segment, index: int, start_time: float):
-        super().__init__()
-        self.segment = segment
-        self.setObjectName("minimaxPacingCard")
-        self.setProperty("kind", segment.kind)
-        self.setFixedWidth(132)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(5, 5, 5, 6)
-        layout.setSpacing(4)
-
-        time_row = QHBoxLayout()
-        time_row.setContentsMargins(0, 0, 0, 0)
-        timestamp = QLabel(f"START  {minimax_start_timestamp(start_time)}")
-        timestamp.setObjectName("minimaxPacingTime")
-        time_row.addWidget(timestamp)
-        time_row.addStretch()
-        layout.addLayout(time_row)
-
-        self.preview = QLabel()
-        self.preview.setObjectName("minimaxPacingPreview")
-        self.preview.setFixedSize(120, 68)
-        self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        source_path = segment.preview_path or (segment.media_path if segment.kind == "image" else "")
-        pixmap = timeline_preview_pixmap(source_path)
-        if not pixmap.isNull():
-            scaled = pixmap.scaled(
-                self.preview.size(),
-                Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-                Qt.TransformationMode.SmoothTransformation,
-            )
-            x = max(0, (scaled.width() - self.preview.width()) // 2)
-            y = max(0, (scaled.height() - self.preview.height()) // 2)
-            self.preview.setPixmap(scaled.copy(x, y, self.preview.width(), self.preview.height()))
-        elif segment.kind == "text":
-            self.preview.setText("≡\nTEXT SEQUENCE")
-        elif segment.kind == "video":
-            self.preview.setText("▶\nVIDEO PREVIEW")
-        else:
-            self.preview.setText("▧\nFRAME PREVIEW")
-        layout.addWidget(self.preview)
-
-        kind = "TEXT" if segment.kind == "text" else ("VIDEO" if segment.kind == "video" else "IMAGE")
-        media_label = QLabel(f"{kind} {index + 1:02d}")
-        media_label.setObjectName("minimaxPacingMedia")
-        media_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(media_label)
-
-        name = QLabel(segment.name or f"{kind.title()} {index + 1}")
-        name.setObjectName("minimaxPacingName")
-        name.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        name.setToolTip(segment.name)
-        name.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
-        layout.addWidget(name)
-
-class MiniMaxPacingStrip(QFrame):
-    """Decorative, data-driven frame pacing map for the MiniMax editor."""
-
-    def __init__(self):
-        super().__init__()
-        self.setObjectName("minimaxPacingFrame")
-        self.cards: list[MiniMaxPacingCard] = []
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(11, 9, 11, 8)
-        outer.setSpacing(6)
-
-        header = QHBoxLayout()
-        emblem = QLabel("◇")
-        emblem.setObjectName("minimaxPacingEmblem")
-        emblem.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        header.addWidget(emblem)
-        title_box = QVBoxLayout()
-        title_box.setSpacing(0)
-        title = QLabel("FRAME PACING")
-        title.setObjectName("minimaxPacingTitle")
-        subtitle = QLabel("Timeline frame previews  •  text beats  •  video references")
-        subtitle.setObjectName("minimaxPacingSubtitle")
-        title_box.addWidget(title)
-        title_box.addWidget(subtitle)
-        header.addLayout(title_box)
-        header.addStretch()
-        self.total_time = QLabel("TOTAL  00:00:000")
-        self.total_time.setObjectName("minimaxPacingTotal")
-        header.addWidget(self.total_time)
-        outer.addLayout(header)
-
-        self.scroll = QScrollArea()
-        self.scroll.setObjectName("minimaxPacingScroll")
-        self.scroll.setWidgetResizable(True)
-        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.scroll.setFrameShape(QFrame.Shape.NoFrame)
-        self.scroll.setFixedHeight(145)
-        self.sequence_widget = QWidget()
-        self.sequence_widget.setObjectName("minimaxPacingSequence")
-        self.sequence_layout = QHBoxLayout(self.sequence_widget)
-        self.sequence_layout.setContentsMargins(2, 1, 2, 1)
-        self.sequence_layout.setSpacing(5)
-        self.sequence_layout.addStretch()
-        self.scroll.setWidget(self.sequence_widget)
-        outer.addWidget(self.scroll)
-        self.set_segments([])
-
-    def set_segments(self, segments: list[Segment]) -> None:
-        while self.sequence_layout.count():
-            item = self.sequence_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
-        self.cards = []
-        cursor = 0.0
-        if not segments:
-            empty = QLabel("Add timeline frames, text, or video to preview pacing here.")
-            empty.setObjectName("minimaxPacingEmpty")
-            empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.sequence_layout.addWidget(empty, 1)
-        for index, segment in enumerate(segments):
-            card = MiniMaxPacingCard(segment, index, cursor)
-            self.cards.append(card)
-            self.sequence_layout.addWidget(card)
-            if index + 1 < len(segments):
-                arrow = QFrame()
-                arrow.setObjectName("minimaxPacingArrowBox")
-                arrow.setFixedWidth(58)
-                arrow_layout = QVBoxLayout(arrow)
-                arrow_layout.setContentsMargins(0, 25, 0, 0)
-                arrow_layout.setSpacing(1)
-                duration = QLabel(f"{segment.duration:.2f}s")
-                duration.setObjectName("minimaxPacingDuration")
-                duration.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                arrow_art = QLabel("━━▶")
-                arrow_art.setObjectName("minimaxPacingArrow")
-                arrow_art.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                arrow_layout.addWidget(duration)
-                arrow_layout.addWidget(arrow_art)
-                arrow_layout.addStretch()
-                self.sequence_layout.addWidget(arrow)
-            cursor += segment.duration
-        self.sequence_layout.addStretch()
-        minimum_width = max(1, len(segments)) * 132 + max(0, len(segments) - 1) * 63 + 8
-        self.sequence_widget.setMinimumWidth(minimum_width)
-        self.total_time.setText(f"TOTAL  {minimax_start_timestamp(cursor)}")
-
-class MiniMaxBusyVeil(QWidget):
-    """Mouse-transparent animated scan veil shown over the MiniMax editors."""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setObjectName("minimaxBusyVeil")
-        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        self._line_offset = 0.0
-        self._animation = QVariantAnimation(self)
-        self._animation.setStartValue(0.0)
-        self._animation.setEndValue(18.0)
-        self._animation.setDuration(700)
-        self._animation.setLoopCount(-1)
-        self._animation.valueChanged.connect(self._advance_pattern)
-
-        layout = QVBoxLayout(self)
-        layout.addStretch()
-        card = QFrame()
-        card.setObjectName("minimaxBusyCard")
-        card.setFixedWidth(460)
-        card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(20, 14, 20, 14)
-        self.status = QLabel("Working…")
-        self.status.setObjectName("minimaxBusyStatus")
-        self.status.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.status.setWordWrap(True)
-        card_layout.addWidget(self.status)
-        layout.addWidget(card, 0, Qt.AlignmentFlag.AlignHCenter)
-        layout.addStretch()
-
-    def _advance_pattern(self, value) -> None:
-        self._line_offset = float(value)
-        self.update()
-
-    def set_status(self, text: str) -> None:
-        self.status.setText(text or "Working…")
-
-    def set_running(self, running: bool) -> None:
-        if running:
-            self.show()
-            self.raise_()
-            self._animation.start()
-        else:
-            self._animation.stop()
-            self.hide()
-
-    def paintEvent(self, event) -> None:
-        super().paintEvent(event)
-        painter = QPainter(self)
-        painter.fillRect(self.rect(), QColor(10, 16, 19, 188))
-        painter.setPen(QPen(QColor(88, 177, 208, 62), 2))
-        spacing = 18
-        offset = round(self._line_offset)
-        for x in range(-self.height() - spacing, self.width() + spacing, spacing):
-            painter.drawLine(x - offset, self.height(), x + self.height() - offset, 0)
-
-
-class MiniMaxPromptWindow(QDialog):
-    """Persistent, modeless editor for a project's MiniMax H3 prompt."""
+class MiniMaxPromptPanel(QFrame):
+    """Inline MiniMax controls. The production editor belongs to MainWindow."""
 
     def __init__(self, owner):
         super().__init__(owner)
         self.owner = owner
-        self.setModal(False)
-        self.setWindowFlag(Qt.WindowType.Window, True)
-        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
-        self.destroyed.connect(owner.minimax_window_destroyed)
-        self.resize(1040, 820)
+        self.editor = owner.segment_prompt
+        self.refine_button = owner.refine_prompt_button
+        self.copy_button = owner.copy_segment
+        self.busy = False
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(9)
-
-        toolbar = QFrame()
-        toolbar.setObjectName("minimaxPromptToolbar")
-        toolbar_layout = QHBoxLayout(toolbar)
-        toolbar_layout.setContentsMargins(9, 7, 9, 7)
-        title = QLabel("MINIMAX H3 PROMPT EDITOR")
-        title.setObjectName("sectionLabel")
-        toolbar_layout.addWidget(title)
-        toolbar_layout.addStretch()
+        layout.setContentsMargins(0, 0, 0, 0)
+        header = QHBoxLayout()
         self.cache_state = QLabel("Not generated")
         self.cache_state.setObjectName("minimaxCacheState")
-        toolbar_layout.addWidget(self.cache_state)
-        self.generate_frames_button = QPushButton("◆ Generate Prompt (Frames)")
-        self.generate_frames_button.setObjectName("magicButton")
-        self.generate_frames_button.setToolTip("Generate the continuous frame-timeline prompt manually")
-        self.generate_frames_button.clicked.connect(owner.generate_minimax_prompt_frames)
-        toolbar_layout.addWidget(self.generate_frames_button)
-        self.generate_references_button = QPushButton("◇ Generate Prompt (References)")
-        self.generate_references_button.setObjectName("refineButton")
-        self.generate_references_button.setToolTip("Generate a reference prompt for the detected workflow")
-        self.generate_references_button.clicked.connect(owner.generate_minimax_prompt_references)
-        toolbar_layout.addWidget(self.generate_references_button)
-        self.refine_button = QPushButton("✎ Refine Prompt")
-        self.refine_button.setObjectName("refineButton")
-        self.refine_button.setToolTip("Refine the edited prompt using the private instructions and complete timeline context")
-        self.refine_button.clicked.connect(owner.refine_minimax_prompt)
-        toolbar_layout.addWidget(self.refine_button)
-        layout.addWidget(toolbar)
-
+        header.addWidget(self.cache_state)
+        header.addStretch()
+        self.notes_toggle = QCheckBox("Refinement notes")
+        header.addWidget(self.notes_toggle)
+        layout.addLayout(header)
+        self.instructions = QTextEdit()
+        self.instructions.setAcceptRichText(False)
+        self.instructions.setObjectName("minimaxInstructions")
+        self.instructions.setPlaceholderText("Private instructions for the next refinement; excluded from the production prompt.")
+        self.instructions.setMaximumHeight(72)
+        self.instructions.hide()
+        self.notes_toggle.toggled.connect(self.instructions.setVisible)
+        self.instructions.textChanged.connect(owner.minimax_editor_changed)
+        layout.addWidget(self.instructions)
         self.message_panel = QFrame()
         self.message_panel.setObjectName("minimaxMessagePanel")
         message_layout = QHBoxLayout(self.message_panel)
-        message_layout.setContentsMargins(10, 7, 8, 7)
-        message_layout.setSpacing(9)
+        message_layout.setContentsMargins(8, 4, 8, 4)
         self.message_banner = QLabel()
         self.message_banner.setObjectName("minimaxMessageBanner")
         self.message_banner.setWordWrap(True)
         self.message_banner.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         message_layout.addWidget(self.message_banner, 1)
         self.retry_button = QPushButton("↻ Retry")
-        self.retry_button.setObjectName("minimaxRetryButton")
         self.retry_button.clicked.connect(owner.retry_minimax_operation)
-        self.retry_button.hide()
         message_layout.addWidget(self.retry_button)
-        self.message_panel.hide()
         layout.addWidget(self.message_panel)
+        self.clear_message()
 
-        self.pacing_strip = MiniMaxPacingStrip()
-        layout.addWidget(self.pacing_strip)
-        self.workflow_label = QLabel()
-        self.workflow_label.setObjectName("sectionLabel")
-        layout.addWidget(self.workflow_label)
-        references_layout = QHBoxLayout()
+        # References are untimed project assets in the main window, not timeline frames.
+        self.reference_dock = QDockWidget("REFERENCE IMAGES", owner)
+        self.reference_dock.setObjectName("minimaxReferenceDock")
+        self.reference_dock.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea)
+        self.reference_dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetClosable | QDockWidget.DockWidgetFeature.DockWidgetMovable)
+        content = QWidget()
+        refs_layout = QVBoxLayout(content)
         self.reference_targets = []
         for index in range(2):
             target = MiniMaxReferenceSlot(index + 1)
             target.changed.connect(lambda value, slot=index: owner.set_minimax_reference_image(slot, value))
             target.error.connect(lambda message: self.show_message(message, "warning"))
-            references_layout.addWidget(target, 1)
+            refs_layout.addWidget(target)
             self.reference_targets.append(target)
-        layout.addLayout(references_layout)
-        self.refresh_references()
-
-        self.editing_area = QWidget()
-        editing_layout = QVBoxLayout(self.editing_area)
-        editing_layout.setContentsMargins(0, 0, 0, 0)
-        editing_layout.setSpacing(9)
-
-        instruction_panel = QFrame()
-        instruction_panel.setObjectName("promptPanel")
-        instruction_layout = QVBoxLayout(instruction_panel)
-        instruction_layout.setContentsMargins(9, 7, 9, 8)
-        instruction_label = QLabel("REFINEMENT INSTRUCTIONS")
-        instruction_label.setObjectName("sectionLabel")
-        instruction_layout.addWidget(instruction_label)
-        self.instructions = QTextEdit()
-        self.instructions.setObjectName("minimaxInstructions")
-        self.instructions.setAcceptRichText(False)
-        self.instructions.setTextInteractionFlags(Qt.TextInteractionFlag.TextEditorInteraction)
-        self.instructions.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.instructions.setPlaceholderText(
-            "Private directions for the next refinement, such as: smooth the transition into the final transformation, preserve the edited dialogue exactly, or reduce camera movement."
-        )
-        self.instructions.setMaximumHeight(112)
-        self.instructions.textChanged.connect(owner.minimax_editor_changed)
-        instruction_layout.addWidget(self.instructions)
-        editing_layout.addWidget(instruction_panel)
-
-        prompt_panel = QFrame()
-        prompt_panel.setObjectName("promptPanel")
-        prompt_layout = QVBoxLayout(prompt_panel)
-        prompt_layout.setContentsMargins(9, 7, 9, 5)
-        prompt_header = QHBoxLayout()
-        prompt_label = QLabel("PRODUCTION PROMPT")
-        prompt_label.setObjectName("sectionLabel")
-        self.character_count = QLabel("0 characters")
-        self.character_count.setObjectName("muted")
-        prompt_header.addWidget(prompt_label)
-        prompt_header.addStretch()
-        prompt_header.addWidget(self.character_count)
-        prompt_layout.addLayout(prompt_header)
-        self.editor = QTextEdit()
-        self.editor.setObjectName("promptEditor")
-        self.editor.setAcceptRichText(False)
-        self.editor.setTextInteractionFlags(Qt.TextInteractionFlag.TextEditorInteraction)
-        self.editor.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.setFocusProxy(self.editor)
-        self.editor.setPlaceholderText("Generate a MiniMax H3 prompt or begin writing here…")
-        self.editor.textChanged.connect(self._editor_changed)
-        prompt_layout.addWidget(self.editor, 1)
-        prompt_footer = QHBoxLayout()
-        prompt_footer.setContentsMargins(0, 0, 0, 0)
-        prompt_footer.addStretch()
-        self.copy_button = QPushButton("□ Copy")
-        self.copy_button.setObjectName("copyButton")
-        self.copy_button.setFlat(True)
-        self.copy_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        self.copy_button.clicked.connect(owner.copy_minimax_prompt)
-        prompt_footer.addWidget(self.copy_button, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        prompt_layout.addLayout(prompt_footer)
-        editing_layout.addWidget(prompt_panel, 1)
-        layout.addWidget(self.editing_area, 1)
-        self.busy_veil = MiniMaxBusyVeil(self.editing_area)
-        self.busy_veil.hide()
-
-        geometry = owner.settings.value("minimax_prompt_window/geometry")
-        if geometry:
-            self.restoreGeometry(geometry)
-        self.busy = False
-        self.set_busy(False)
-
-    def _editor_changed(self) -> None:
-        self.character_count.setText(f"{len(self.editor.toPlainText())} characters")
-        self.owner.minimax_editor_changed()
-        self.update_actions()
+        refs_layout.addStretch()
+        self.reference_dock.setWidget(content)
+        owner.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.reference_dock)
+        self.reference_dock.hide()
+        self.workflow_label = owner.workflow_label
 
     def set_project(self, project_name: str, prompt: str, instructions: str, cache_state: str) -> None:
-        self.setWindowTitle(f"MiniMax H3 Prompt — {project_name}")
-        self.pacing_strip.set_segments(list(getattr(self.owner, "segments", [])))
         self.refresh_references()
-        for editor, value in ((self.editor, prompt), (self.instructions, instructions)):
-            editor.blockSignals(True)
-            editor.setPlainText(value)
-            editor.blockSignals(False)
-        self.character_count.setText(f"{len(prompt)} characters")
-        self.clear_message()
+        self.instructions.blockSignals(True)
+        self.instructions.setPlainText(instructions)
+        self.instructions.blockSignals(False)
+        self.notes_toggle.setChecked(bool(instructions))
         self.set_cache_state(cache_state)
-        self.set_busy(False)
+        self.owner.refresh_shared_editor()
 
     def refresh_references(self, update_images: bool = True) -> None:
-        segments = list(getattr(self.owner, "segments", []))
-        refs = reference_slots(getattr(self.owner, "minimax_reference_images", []))
-        workflow = detect_workflow(segments, refs)
-        self.workflow_label.setText(f"REFERENCES WORKFLOW: {WORKFLOW_NAMES[workflow]} · detected automatically")
-        inventory = reference_inventory(segments, refs)
-        self.workflow_label.setToolTip("\n".join(
+        segments = self.owner.segments
+        refs = reference_slots(self.owner.minimax_reference_images)
+        active_refs = refs if self.owner.project_type == "minimax_references" else []
+        workflow = detect_workflow(segments, active_refs)
+        if self.owner.project_type == "minimax_frames" and workflow == "fl2v":
+            workflow = "keyframes"
+        self.workflow_label.setText(WORKFLOW_NAMES[workflow])
+        inventory = reference_inventory(segments, active_refs)
+        self.workflow_label.setToolTip("Detected from timeline and active reference images.\n" + "\n".join(
             f"{item['label']}: {item['name']}"
             + (f" · {item['role']} at {item['checkpoint_time']:.3f}s" if "checkpoint_time" in item else "")
             for item in inventory if item["label"]
@@ -2411,9 +2073,6 @@ class MiniMaxPromptWindow(QDialog):
 
     def set_cache_state(self, text: str) -> None:
         self.cache_state.setText(text)
-        self.cache_state.setProperty("cached", text.casefold().startswith("cached"))
-        self.cache_state.style().unpolish(self.cache_state)
-        self.cache_state.style().polish(self.cache_state)
 
     def show_message(self, text: str, level: str = "info", retry: bool = False) -> None:
         self.message_banner.setText(text)
@@ -2429,57 +2088,18 @@ class MiniMaxPromptWindow(QDialog):
         self.message_panel.hide()
 
     def set_busy(self, busy: bool, status: str = "") -> None:
-        # Keep both text fields editable while an AI request runs. A user may
-        # paste or revise the production prompt at any time; request-result
-        # guards prevent an older response from replacing newer editor text.
-        self.editor.setReadOnly(False)
-        self.instructions.setReadOnly(False)
-        was_busy = self.busy
         self.busy = busy
-        self.busy_veil.setGeometry(self.editing_area.rect())
-        if busy:
-            self.clear_message()
-            self.busy_veil.set_status(status)
-            self.busy_veil.set_running(True)
-        else:
-            self.busy_veil.set_running(False)
-        if busy and status:
-            self.generate_frames_button.setText("⟳ Working…")
-            self.generate_references_button.setText("⟳ Working…")
-            self.refine_button.setText("⟳ Refining…" if "refin" in status.casefold() else "⟳ Working…")
-        elif busy and not was_busy:
-            self.generate_frames_button.setText("⟳ Working…")
-            self.generate_references_button.setText("⟳ Working…")
-            self.refine_button.setText("⟳ Working…")
-        elif not busy:
-            self.generate_frames_button.setText("◆ Generate Prompt (Frames)")
-            self.generate_references_button.setText("◇ Generate Prompt (References)")
-            self.refine_button.setText("✎ Refine Prompt")
-        self.update_actions()
         if status:
             self.set_cache_state(status)
-
-    def resizeEvent(self, event) -> None:
-        super().resizeEvent(event)
-        self.busy_veil.setGeometry(self.editing_area.rect())
+        self.update_actions()
 
     def update_actions(self) -> None:
-        has_prompt = bool(self.editor.toPlainText().strip())
-        self.generate_frames_button.setEnabled(not self.busy)
-        self.generate_references_button.setEnabled(not self.busy)
-        self.refine_button.setEnabled(not self.busy and has_prompt)
-        self.copy_button.setEnabled(has_prompt)
+        if self.owner.project_type != "ltx":
+            self.refine_button.setEnabled(not self.busy and bool(self.editor.toPlainText().strip()))
+        self.retry_button.setEnabled(not self.busy)
 
     def focus_prompt_editor(self) -> None:
-        self.editor.setFocus(Qt.FocusReason.ActiveWindowFocusReason)
-        cursor = self.editor.textCursor()
-        cursor.movePosition(QTextCursor.MoveOperation.End)
-        self.editor.setTextCursor(cursor)
-
-    def closeEvent(self, event) -> None:
-        self.owner.settings.setValue("minimax_prompt_window/geometry", self.saveGeometry())
-        self.owner.minimax_editor_changed()
-        super().closeEvent(event)
+        self.editor.setFocus(Qt.FocusReason.OtherFocusReason)
 
 
 class MainWindow(QMainWindow):
@@ -2505,7 +2125,11 @@ class MainWindow(QMainWindow):
         self.minimax_prompt_updated_at = ""
         self.minimax_prompt_mode = "frames"
         self.minimax_reference_images = [None, None]
-        self.minimax_prompt_window: MiniMaxPromptWindow | None = None
+        self.minimax_panel: MiniMaxPromptPanel | None = None
+        self.project_type = "ltx"
+        self.minimax_drafts: dict[str, dict] = {}
+        self.workspace_revision = 0
+        self.ai_busy = False
         self.current_collection: str | None = None
         self.autofit_tail_extension = 0
         self.timeline_fit_mode = False
@@ -2566,17 +2190,15 @@ class MainWindow(QMainWindow):
              ("Open", "open", self.open_project),
              ("Save Project", "save", self.export_project)),
             (("Import", "import", self.import_ltx),
-             ("Export", "export-ltx", self.export_ltx),
-             ("MiniMax H3", "export-minimax", self.open_minimax_prompt_editor)),
+             ("Export", "export-ltx", self.export_workflow)),
             (("Delete selected", "delete", self.delete_selected),),
         ]
         for group_index, group in enumerate(action_groups):
             for label, icon_name, callback in group:
                 action = QAction(toolbar_icon(icon_name), label, self)
                 action.triggered.connect(callback)
-                if label == "MiniMax H3":
-                    self.minimax_editor_action = action
-                    action.setToolTip("Open the MiniMax H3 prompt editor; generation starts only from its Generate Prompt button")
+                if label == "Export":
+                    self.workflow_export_action = action
                 toolbar.addAction(action)
             if group_index < len(action_groups) - 1:
                 toolbar.addSeparator()
@@ -2616,6 +2238,27 @@ class MainWindow(QMainWindow):
         outer = QVBoxLayout(root)
         outer.setContentsMargins(10, 5, 10, 8)
         outer.setSpacing(8)
+        workflow_row = QHBoxLayout()
+        workflow_row.addWidget(QLabel("PROJECT TYPE"))
+        self.project_type_combo = QComboBox()
+        self.project_type_combo.addItem("LTX Video", "ltx")
+        self.project_type_combo.addItem("MiniMax · Frames", "minimax_frames")
+        self.project_type_combo.addItem("MiniMax · References", "minimax_references")
+        self.project_type_combo.currentIndexChanged.connect(self.project_type_changed)
+        workflow_row.addWidget(self.project_type_combo)
+        self.workflow_label = QLabel()
+        self.workflow_label.setObjectName("muted")
+        workflow_row.addWidget(self.workflow_label)
+        workflow_row.addStretch()
+        self.direction_toggle = QPushButton("Direction && audio")
+        self.direction_toggle.setCheckable(True)
+        self.direction_toggle.setChecked(True)
+        self.direction_toggle.setToolTip("Show Director's Intent and the options used for generation")
+        workflow_row.addWidget(self.direction_toggle)
+        self.references_button = QPushButton("Reference images")
+        self.references_button.clicked.connect(self.show_reference_images)
+        workflow_row.addWidget(self.references_button)
+        outer.addLayout(workflow_row)
         timeline_shell = QFrame()
         timeline_shell.setObjectName("timelineShell")
         timeline_layout = QVBoxLayout(timeline_shell)
@@ -2629,6 +2272,7 @@ class MainWindow(QMainWindow):
         self.timeline_controls.addWidget(timeline_title)
         self.timeline_controls.addStretch()
         output_label = QLabel("OUTPUT")
+        self.output_label = output_label
         output_label.setObjectName("timelineControlLabel")
         self.timeline_controls.addWidget(output_label)
         self.output_size_control = QFrame()
@@ -2743,9 +2387,14 @@ class MainWindow(QMainWindow):
 
         self.sequence_bar = QLabel()
         self.sequence_bar.setObjectName("sequenceBar")
-        outer.addWidget(self.sequence_bar)
+        self.sequence_controls = QHBoxLayout()
+        self.sequence_controls.setContentsMargins(0, 0, 0, 0)
+        self.sequence_controls.addWidget(self.sequence_bar, 1)
+        outer.addLayout(self.sequence_controls)
 
         director_panel = QFrame()
+        self.director_panel = director_panel
+        self.direction_toggle.toggled.connect(director_panel.setVisible)
         director_panel.setObjectName("directorPanel")
         self.director_controls = QVBoxLayout(director_panel)
         self.director_controls.setContentsMargins(10, 8, 10, 8)
@@ -2758,6 +2407,7 @@ class MainWindow(QMainWindow):
         intent_row.addWidget(intent_label)
         self.intent = QTextEdit()
         self.intent.setAcceptRichText(False)
+        self.intent.setMaximumHeight(82)
         intent_example = (
             "Example: A lost courier discovers a glowing map, crosses the storm, and reaches the beacon at sunrise. "
             "Describe the narrative, action, pacing, camera, dialogue wording, and ending you want."
@@ -2787,19 +2437,21 @@ class MainWindow(QMainWindow):
         self.reduce_music.toggled.connect(self.mark_dirty)
         self.magic_button = QPushButton("✦ Magic Build")
         self.magic_button.setObjectName("magicButton")
-        self.magic_button.clicked.connect(self.magic_build)
+        self.magic_button.clicked.connect(self.generate_project_prompt)
         for button in (self.sfx, self.spoken_dialog, self.hdr, self.reduce_music, self.magic_button):
             button.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         intent_row.addWidget(self.intent, 1)
-        intent_row.addWidget(self.magic_button, 0, Qt.AlignmentFlag.AlignTop)
+        workflow_row.addWidget(self.magic_button)
         self.director_controls.addLayout(intent_row)
         planning_row = QHBoxLayout()
         planning_row.setContentsMargins(0, 0, 0, 0)
         planning_row.setSpacing(6)
         planning_label = QLabel("DIRECTION SETTINGS")
+        self.planning_label = planning_label
         planning_label.setObjectName("groupLabel")
         planning_row.addWidget(planning_label)
         length_label = QLabel("TOTAL LENGTH")
+        self.length_label = length_label
         length_label.setObjectName("groupLabel")
         self.requested_length = QDoubleSpinBox()
         self.requested_length.setObjectName("timelineSpin")
@@ -2837,6 +2489,8 @@ class MainWindow(QMainWindow):
         self.speaker_accent.setEnabled(False)
         planning_row.addWidget(length_label)
         planning_row.addWidget(self.requested_length)
+        self.language_label = language_label
+        self.accent_label = accent_label
         planning_row.addWidget(language_label)
         planning_row.addWidget(self.speaker_language)
         planning_row.addWidget(accent_label)
@@ -2863,9 +2517,15 @@ class MainWindow(QMainWindow):
         segment_layout.setContentsMargins(9, 6, 9, 5)
         self.segment_header = QHBoxLayout()
         self.segment_header.setSpacing(8)
-        segment_label = QLabel("SEGMENT PROMPT")
+        self.prompt_label = QLabel("SEGMENT PROMPT")
+        segment_label = self.prompt_label
         segment_label.setObjectName("sectionLabel")
         self.segment_header.addWidget(segment_label)
+        self.prompt_scope = QComboBox()
+        self.prompt_scope.addItem("Selected segment", "segment")
+        self.prompt_scope.addItem("Global prompt", "global")
+        self.prompt_scope.currentIndexChanged.connect(self.prompt_scope_changed)
+        self.segment_header.addWidget(self.prompt_scope)
         self.refine_timing_button = QPushButton("⏱ Refine Timing")
         self.refine_timing_button.setObjectName("refineButton")
         self.refine_timing_button.setToolTip("Analyze the existing sequence and retime only the selected segment; prompt wording is never changed")
@@ -2874,7 +2534,7 @@ class MainWindow(QMainWindow):
         self.refine_prompt_button = QPushButton("✎ Refine Prompt")
         self.refine_prompt_button.setObjectName("refineButton")
         self.refine_prompt_button.setToolTip("Refine only the selected segment prompt using adjacent frames for continuity; may also adjust its duration")
-        self.refine_prompt_button.clicked.connect(self.refine_selected_prompt)
+        self.refine_prompt_button.clicked.connect(self.refine_project_prompt)
         self.refine_prompt_button.setEnabled(False)
         self.segment_header.addWidget(self.refine_timing_button)
         self.segment_header.addWidget(self.refine_prompt_button)
@@ -2903,6 +2563,7 @@ class MainWindow(QMainWindow):
         self.end_button.clicked.connect(lambda: self.set_role("end"))
         self.segment_header.addStretch()
         segment_meta = QFrame()
+        self.segment_meta = segment_meta
         segment_meta.setObjectName("segmentMetaBar")
         segment_meta_layout = QHBoxLayout(segment_meta)
         segment_meta_layout.setContentsMargins(5, 3, 5, 3)
@@ -2914,10 +2575,11 @@ class MainWindow(QMainWindow):
         duration_label.setObjectName("timelineControlLabel")
         segment_meta_layout.addWidget(duration_label)
         segment_meta_layout.addWidget(self.duration_control)
-        self.segment_header.addWidget(segment_meta)
+        self.sequence_controls.addWidget(segment_meta)
         segment_layout.addLayout(self.segment_header)
         self.segment_prompt = QTextEdit()
         self.segment_prompt.setObjectName("promptEditor")
+        self.segment_prompt.setAcceptRichText(False)
         self.segment_prompt.textChanged.connect(self.save_prompt)
         segment_layout.addWidget(self.segment_prompt)
         segment_footer = QHBoxLayout()
@@ -2942,50 +2604,21 @@ class MainWindow(QMainWindow):
         segment_footer.addWidget(self.copy_segment, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         segment_footer.addWidget(self.copy_image_prompt, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         segment_layout.addLayout(segment_footer)
-        global_panel = QFrame()
-        global_panel.setObjectName("promptPanel")
-        global_layout = QVBoxLayout(global_panel)
-        global_layout.setContentsMargins(9, 6, 9, 5)
-        global_header = QHBoxLayout()
-        global_label = QLabel("GLOBAL PROMPT")
-        global_label.setObjectName("sectionLabel")
-        self.applied_label = QLabel("Applied across all 0 segments")
-        self.applied_label.setObjectName("muted")
-        global_header.addWidget(global_label)
-        global_header.addStretch()
-        global_header.addWidget(self.applied_label)
-        global_layout.addLayout(global_header)
-        self.global_prompt = QTextEdit()
-        self.global_prompt.setObjectName("promptEditor")
-        self.global_prompt.textChanged.connect(self.update_counts)
-        self.global_prompt.textChanged.connect(self.mark_dirty)
-        global_layout.addWidget(self.global_prompt)
-        global_footer = QHBoxLayout()
-        global_footer.setContentsMargins(0, 0, 0, 0)
-        global_footer.setSpacing(0)
-        self.global_count = QLabel("0 characters")
-        self.global_count.setObjectName("muted")
-        self.copy_global = QPushButton("□ Copy")
-        self.copy_global.setObjectName("copyButton")
-        self.copy_global.setFlat(True)
-        self.copy_global.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        self.copy_global.clicked.connect(lambda: QApplication.clipboard().setText(self.global_prompt.toPlainText()))
-        global_footer.addWidget(self.global_count)
-        global_footer.addStretch()
-        global_footer.addWidget(self.copy_global, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        global_layout.addLayout(global_footer)
-        segment_panel.setMinimumHeight(90)
-        global_panel.setMinimumHeight(90)
-        self.prompt_splitter = DottedPromptSplitter()
-        self.prompt_splitter.addWidget(segment_panel)
-        self.prompt_splitter.addWidget(global_panel)
-        self.prompt_splitter.setStretchFactor(0, 3)
-        self.prompt_splitter.setStretchFactor(1, 2)
-        self.prompt_splitter.splitterMoved.connect(self.save_prompt_splitter_sizes)
-        outer.addWidget(self.prompt_splitter, 1)
-        QTimer.singleShot(0, self.restore_prompt_splitter_sizes)
+        # The global prompt is stored here for compatibility with generation/export;
+        # it is edited through the same visible text box using the scope selector.
+        self.global_prompt = QTextEdit(self)
+        self.global_prompt.hide()
+        self.global_prompt.textChanged.connect(self.global_prompt_changed)
+        self.applied_label = QLabel(self)
+        self.applied_label.hide()
+        self.global_count = QLabel(self)
+        self.global_count.hide()
+        self.minimax_panel = MiniMaxPromptPanel(self)
+        segment_layout.insertWidget(1, self.minimax_panel)
+        outer.addWidget(segment_panel, 1)
         self.setCentralWidget(root)
         self.setStatusBar(QStatusBar())
+        self.apply_project_type_ui()
         self.update_summary()
 
     def _build_project_preview_dock(self) -> None:
@@ -3252,18 +2885,6 @@ class MainWindow(QMainWindow):
         self.update_project_icon_controls()
         self.refresh_project_library(preserve_scroll=False)
 
-    def restore_prompt_splitter_sizes(self) -> None:
-        try:
-            sizes = json.loads(str(self.settings.value("prompt_splitter_sizes", "[]")))
-        except (ValueError, TypeError):
-            sizes = []
-        if isinstance(sizes, list) and len(sizes) == 2 and all(int(value) > 0 for value in sizes):
-            self.prompt_splitter.setSizes([int(value) for value in sizes])
-
-    def save_prompt_splitter_sizes(self, *_args) -> None:
-        self.settings.setValue("prompt_splitter_sizes", json.dumps(self.prompt_splitter.sizes()))
-        self.queue_settings_sync()
-
     def queue_settings_sync(self) -> None:
         self._settings_sync_timer.start()
 
@@ -3287,7 +2908,6 @@ class MainWindow(QMainWindow):
         QToolButton,QPushButton,QComboBox,QSpinBox,QDoubleSpinBox,QLineEdit{background:#303436;border:1px solid #101213;border-radius:3px;padding:3px 7px;min-height:19px}
         #mainToolbar QToolButton{background:transparent;border:1px solid transparent;border-radius:4px;padding:5px 9px;color:#c5cdd1} #mainToolbar QToolButton:hover{background:#2b3438;border-color:#3a464c;color:#f3f7f9} #mainToolbar QToolButton:pressed{background:#17232a;border-color:#477d99;color:#bde6fb} #toolbarButton{background:#23343d;border:1px solid #385667;border-radius:5px;color:#c4e8fb;font-weight:bold}
         #minimaxPromptToolbar{background:#1b2023;border:1px solid #354047;border-radius:6px} #minimaxCacheState{background:#2b3438;color:#aebbc1;border:1px solid #435159;border-radius:9px;padding:2px 8px;font-size:9px} #minimaxCacheState[cached="true"]{background:#244d37;color:#c9f4d6;border-color:#4c9b6a} #minimaxInstructions{background:#1b2023;border:1px solid #37464d;border-radius:4px;color:#d8e1e5;padding:7px} #minimaxMessagePanel{background:#20313a;border:1px solid #49758a;border-radius:6px} #minimaxMessagePanel[level="success"]{background:#20392c;border-color:#4b8962} #minimaxMessagePanel[level="warning"]{background:#3a321f;border-color:#8a7340} #minimaxMessagePanel[level="error"]{background:#3a2325;border-color:#94555a} #minimaxMessageBanner{background:transparent;color:#ccecf8;border:0;padding:1px} #minimaxMessagePanel[level="success"] #minimaxMessageBanner{color:#cef2d9} #minimaxMessagePanel[level="warning"] #minimaxMessageBanner{color:#f2dfb0} #minimaxMessagePanel[level="error"] #minimaxMessageBanner{color:#f2c5c8} #minimaxRetryButton{background:#5b451b;color:#ffe7a1;border:1px solid #c79a39;border-radius:4px;font-weight:bold;padding:4px 10px} #minimaxRetryButton:hover{background:#755b25;border-color:#e2bc5a;color:#fff5cf} #minimaxBusyCard{background:#17262d;border:1px solid #65a7c7;border-radius:8px} #minimaxBusyStatus{background:transparent;color:#d9f2ff;font-weight:bold;padding:2px}
-        #minimaxPacingFrame{background:#192125;border:1px solid #4b606a;border-radius:9px} #minimaxPacingEmblem{background:#19282f;color:#63cce6;border:1px solid #476571;border-radius:6px;font-size:18px;font-weight:bold;min-width:29px;max-width:29px;min-height:29px;max-height:29px} #minimaxPacingTitle{color:#dcebf1;font-size:9px;font-weight:bold;letter-spacing:2px} #minimaxPacingSubtitle{color:#7f9098;font-size:8px} #minimaxPacingTotal{background:#151c1f;color:#e6f5fa;border:1px solid #3d5058;border-radius:5px;padding:5px 8px;font:10px 'Courier New';font-weight:bold} #minimaxPacingScroll,#minimaxPacingSequence{background:transparent;border:0} #minimaxPacingCard{background:#202a2f;border:1px solid #5a6d76;border-radius:7px} #minimaxPacingCard[kind="text"]{background:#292538;border-color:#74669a} #minimaxPacingCard[kind="video"]{background:#203129;border-color:#567b68} #minimaxPacingPreview{background:#111719;color:#82959e;border:1px solid #3b4b52;border-radius:4px;font-size:9px;font-weight:bold} #minimaxPacingCard[kind="text"] #minimaxPacingPreview{background:#211d31;color:#c2b1e6;border-color:#625682} #minimaxPacingCard[kind="video"] #minimaxPacingPreview{background:#17251e;color:#a6dabc;border-color:#456452} #minimaxPacingTime{color:#eef8fb;font:9px 'Courier New';font-weight:bold} #minimaxPacingMedia{background:#141b1e;color:#bfe9f4;border:1px solid #40525a;border-radius:4px;padding:2px;font-size:8px;font-weight:bold} #minimaxPacingName{color:#9aabb3;font-size:8px} #minimaxPacingArrowBox{background:transparent;border:0} #minimaxPacingDuration{color:#8fa1aa;font:8px 'Courier New'} #minimaxPacingArrow{color:#64cee7;font-size:14px;font-weight:bold} #minimaxPacingEmpty{background:#151c1f;color:#7e8e96;border:1px dashed #405159;border-radius:5px;padding:30px}
         QToolButton:hover,QPushButton:hover{background:#41474a} QToolButton:pressed,QPushButton:pressed{background:#202729;border-color:#79a8c5} QLineEdit{background:#1e2122}
         QSpinBox,QDoubleSpinBox{padding-right:__SPIN_PAD__px} QSpinBox::up-button,QDoubleSpinBox::up-button{subcontrol-origin:border;subcontrol-position:top right;width:__SPIN_BUTTON__px;background:#3b4347;border:0;border-left:1px solid #171a1c;border-bottom:1px solid #202527;border-top-right-radius:3px} QSpinBox::down-button,QDoubleSpinBox::down-button{subcontrol-origin:border;subcontrol-position:bottom right;width:__SPIN_BUTTON__px;background:#343b3f;border:0;border-left:1px solid #171a1c;border-top:1px solid #202527;border-bottom-right-radius:3px}
         QSpinBox::up-button:hover,QDoubleSpinBox::up-button:hover,QSpinBox::down-button:hover,QDoubleSpinBox::down-button:hover{background:#506471} QSpinBox::up-button:pressed,QDoubleSpinBox::up-button:pressed,QSpinBox::down-button:pressed,QDoubleSpinBox::down-button:pressed{background:#274e66} QSpinBox::up-arrow,QDoubleSpinBox::up-arrow,QSpinBox::down-arrow,QDoubleSpinBox::down-arrow{width:__ARROW_SIZE__px;height:__ARROW_SIZE__px}
@@ -3357,7 +2977,6 @@ class MainWindow(QMainWindow):
         self.segment_header.setSpacing(metric(8))
         self.ruler.setFixedHeight(metric(28))
         self.timeline_height_handle.set_scale(scale)
-        self.prompt_splitter.set_scale(scale)
         self.project_list.setSpacing(metric(4))
         for button in (self.provider_button, self.sfx, self.spoken_dialog, self.hdr, self.reduce_music, self.magic_button, self.refine_timing_button, self.refine_prompt_button, self.start_button, self.end_button):
             button.setMinimumWidth(button.fontMetrics().horizontalAdvance(button.text()) + metric(18))
@@ -3366,7 +2985,7 @@ class MainWindow(QMainWindow):
         self.duration_spin.setFixedWidth(metric(82))
         self.add_tile_wrap.setFixedWidth(metric(128))
         self.add_tile_layout.setContentsMargins(metric(8), 0, metric(8), 0)
-        for button in (self.copy_segment, self.copy_image_prompt, self.copy_global):
+        for button in (self.copy_segment, self.copy_image_prompt):
             button.setFixedHeight(button.fontMetrics().height() + metric(4))
             button.setMinimumWidth(button.fontMetrics().horizontalAdvance(button.text()) + metric(10))
         if hasattr(self, "timeline_loading"):
@@ -3917,7 +3536,10 @@ class MainWindow(QMainWindow):
         return bool(self.project_sessions.get(project_id, {}).get("dirty"))
 
     def capture_workspace_state(self) -> dict:
+        self.store_minimax_draft()
         return {
+            "projectType": self.project_type,
+            "minimaxDrafts": {key: dict(value) for key, value in self.minimax_drafts.items()},
             "segments": self.segments,
             "globalPrompt": self.global_prompt.toPlainText(),
             "directorIntent": self.intent.toPlainText(),
@@ -3952,6 +3574,7 @@ class MainWindow(QMainWindow):
 
     def restore_workspace_state(self, state: dict) -> None:
         self._loading = True
+        self.workspace_revision += 1
         self.segments = state.get("segments", [])
         self.global_prompt.setPlainText(str(state.get("globalPrompt", "")))
         self.intent.setPlainText(str(state.get("directorIntent", "")))
@@ -3971,6 +3594,7 @@ class MainWindow(QMainWindow):
         self.minimax_prompt_updated_at = str(state.get("minimaxPromptUpdatedAt", ""))
         self.minimax_prompt_mode = "references" if state.get("minimaxPromptMode") == "references" else "frames"
         self.minimax_reference_images = reference_slots(state.get("minimaxReferenceImages"))
+        self.restore_project_type(state.get("projectType"), state.get("minimaxDrafts"))
         self.timeline_height_handle.current_height = self.timeline_height
         self.set_timeline_height(self.timeline_height)
         auto_fit = bool(state.get("timelineAutoFit", False))
@@ -3982,10 +3606,10 @@ class MainWindow(QMainWindow):
         self.timeline_fit_mode = auto_fit
         self.ruler.set_scale(scale)
         self._loading = False
+        self.sync_minimax_panel()
         self.refresh_timeline()
         if auto_fit:
             self.apply_timeline_fit()
-        self.sync_minimax_prompt_window()
 
     def leave_collection(self) -> None:
         self.current_collection = None
@@ -4212,11 +3836,10 @@ class MainWindow(QMainWindow):
 
     def update_window_title(self) -> None:
         self.setWindowTitle(application_window_title(self.current_project_name))
-        self.sync_minimax_prompt_window()
+        self.sync_minimax_panel()
 
     def closeEvent(self, event) -> None:
-        if self.minimax_prompt_window:
-            self.minimax_prompt_window.close()
+        self.save_minimax_prompt_on_close()
         if hasattr(self, "project_preview_panel"):
             self.project_preview_panel.player.stop()
             if self.project_preview_panel.fullscreen_window.isVisible():
@@ -4279,8 +3902,11 @@ class MainWindow(QMainWindow):
         self.minimax_prompt_updated_at = ""
         self.minimax_prompt_mode = "frames"
         self.minimax_reference_images = [None, None]
-        if self.minimax_prompt_window:
-            self.minimax_prompt_window.hide()
+        self.minimax_drafts = {}
+        self.project_type = "ltx"
+        self.workspace_revision += 1
+        self.direction_toggle.setChecked(True)
+        self.apply_project_type_ui()
         self.sfx.setChecked(False)
         self.spoken_dialog.setChecked(False)
         self.hdr.setChecked(False)
@@ -4550,12 +4176,14 @@ class MainWindow(QMainWindow):
         segment = self.current_segment()
         self.duration_spin.setMaximum(sys.float_info.max)
         self.duration_spin.setToolTip("Segment duration in seconds")
-        self.segment_prompt.setPlainText(segment.prompt if segment else "")
+        self.refresh_shared_editor()
         visual = bool(segment and segment.kind != "text")
         self.start_button.setEnabled(visual)
         self.end_button.setEnabled(visual)
-        self.refine_timing_button.setEnabled(bool(segment))
-        self.refine_prompt_button.setEnabled(bool(segment and segment.prompt.strip()))
+        self.start_button.setVisible(visual and self.project_type != "minimax_frames")
+        self.end_button.setVisible(visual and self.project_type != "minimax_frames")
+        self.refine_timing_button.setEnabled(not self.ai_busy and bool(segment))
+        self.refine_prompt_button.setEnabled(not self.ai_busy and bool(self.segment_prompt.toPlainText().strip()) and (self.project_type != "ltx" or self.prompt_scope.currentData() == "segment"))
         self.copy_image_prompt.setEnabled(bool(segment and segment.image_prompt.strip()))
         if segment:
             self.start_button.setChecked(segment.role == "start" if visual else False)
@@ -4578,7 +4206,7 @@ class MainWindow(QMainWindow):
         previous_loading = self._loading
         self._loading = True
         try:
-            self.segment_prompt.setPlainText(self.segments[row].prompt)
+            self.refresh_shared_editor()
             self.copy_image_prompt.setEnabled(bool(self.segments[row].image_prompt.strip()))
         finally:
             self._loading = previous_loading
@@ -4596,7 +4224,20 @@ class MainWindow(QMainWindow):
         self.duration_spin.blockSignals(False)
 
     def save_prompt(self) -> None:
-        if not self._loading and self.current_segment():
+        if self._loading:
+            return
+        if self.project_type != "ltx":
+            self.minimax_editor_changed()
+            self.update_counts()
+            return
+        if self.prompt_scope.currentData() == "global":
+            self.global_prompt.blockSignals(True)
+            self.global_prompt.setPlainText(self.segment_prompt.toPlainText())
+            self.global_prompt.blockSignals(False)
+            self.mark_dirty()
+            self.update_counts()
+            return
+        if self.current_segment():
             self.current_segment().prompt = self.segment_prompt.toPlainText()
             self.refine_prompt_button.setEnabled(bool(self.current_segment().prompt.strip()))
             if self.current_segment().kind == "text":
@@ -4673,9 +4314,8 @@ class MainWindow(QMainWindow):
         self.update_timeline_layout()
 
     def update_summary(self) -> None:
-        if self.minimax_prompt_window:
-            self.minimax_prompt_window.pacing_strip.set_segments(self.segments)
-            self.minimax_prompt_window.refresh_references()
+        if self.minimax_panel:
+            self.minimax_panel.refresh_references()
         total = self.total_duration()
         self.sequence_bar.setText(f"Sequence     Start: 0.00s  |  End: {total:.2f}s  |  Length: {total:.2f}s")
         self.add_tile.setText("＋\nAdd media")
@@ -4703,7 +4343,8 @@ class MainWindow(QMainWindow):
         segment = self.current_segment()
         menu = QMenu(self)
         if segment and segment.kind == "text":
-            menu.addAction("Edit text prompt", self.segment_prompt.setFocus)
+            if self.project_type == "ltx":
+                menu.addAction("Edit text prompt", self.focus_segment_prompt)
             menu.addAction("Convert to image segment…", self.convert_text_segment_to_image)
         else:
             menu.addAction("Replace media", self.replace_selected)
@@ -4717,6 +4358,10 @@ class MainWindow(QMainWindow):
         menu.addSeparator()
         menu.addAction("Delete segment", self.delete_selected)
         menu.exec(self.timeline.mapToGlobal(point))
+
+    def focus_segment_prompt(self) -> None:
+        self.prompt_scope.setCurrentIndex(0)
+        self.segment_prompt.setFocus()
 
     def copy_selected_image(self) -> None:
         segment = self.current_segment()
@@ -4863,6 +4508,7 @@ class MainWindow(QMainWindow):
         self._apply_theme()
 
     def update_spoken_dialog_controls(self, checked: bool) -> None:
+        self.update_spoken_dialog_visibility()
         self.speaker_language.setEnabled(checked)
         self.speaker_accent.setEnabled(checked)
         self.mark_dirty()
@@ -4874,7 +4520,7 @@ class MainWindow(QMainWindow):
         if creative_intent:
             lines.append(creative_intent)
         requested_length = self.requested_length.value()
-        if requested_length > 0:
+        if requested_length > 0 and self.project_type == "ltx":
             if len(self.segments) == 1:
                 item_label = "single text-only segment" if self.segments[0].kind == "text" else "single-frame sequence"
                 lines.append(
@@ -4900,7 +4546,7 @@ class MainWindow(QMainWindow):
                     "Determine the accent only from reliable explicit context, never from physical appearance alone; when context is insufficient, use a neutral natural accent for the selected language."
                 )
             lines.append(
-                "In every Spoken Dialog clause, state the selected or context-supported language and accent directly beside the quoted words. Do not leave language or accent inference to LTX Video, and avoid stereotypes or caricature."
+                "In every Spoken Dialog clause, state the selected or context-supported language and accent directly beside the quoted words. Do not leave language or accent inference to the video model, and avoid stereotypes or caricature."
             )
         return "\n\n".join(lines)
 
@@ -4930,14 +4576,16 @@ class MainWindow(QMainWindow):
 
     def set_ai_controls_enabled(self, enabled: bool) -> None:
         self.magic_button.setEnabled(enabled)
-        self.minimax_editor_action.setEnabled(enabled)
+        self.ai_busy = not enabled
         segment = self.current_segment()
         self.refine_timing_button.setEnabled(enabled and bool(segment))
-        self.refine_prompt_button.setEnabled(enabled and bool(segment and segment.prompt.strip()))
-        if self.minimax_prompt_window:
-            self.minimax_prompt_window.set_busy(not enabled)
+        self.refine_prompt_button.setEnabled(enabled and bool(self.segment_prompt.toPlainText().strip()) and (self.project_type != "ltx" or self.prompt_scope.currentData() == "segment"))
+        if self.minimax_panel:
+            self.minimax_panel.set_busy(not enabled)
 
     def start_ai_worker(self, operation, args: tuple, activity: str, finished, show_main_overlay: bool = True) -> None:
+        if self.ai_busy:
+            return
         retries = self.settings.value("api_retries", 2, int)
         retry_cooldown = self.settings.value("api_retry_cooldown", 10, int)
         self.set_ai_controls_enabled(False)
@@ -4950,15 +4598,38 @@ class MainWindow(QMainWindow):
             "Refine Timing" if operation is refine_timing else
             "Refine Prompt"
         )
-        self.ai_activity_in_minimax_window = not show_main_overlay
+        self.ai_activity_in_minimax = not show_main_overlay
         if show_main_overlay:
             self.magic_overlay.update_attempt(1, retries + 1, activity)
             self.magic_overlay.show_overlay()
         worker = MagicWorker(operation, args, retries, retry_cooldown, activity)
         worker.signals.progress.connect(self.magic_progress)
-        worker.signals.finished.connect(finished)
-        worker.signals.failed.connect(self.magic_failed)
+        self.ai_request_workspace = (self.workspace_revision, self.current_project_id, self.project_type)
+        self.ai_finished_callback = finished
+        # Bound QObject receivers keep all UI updates on the main Qt thread.
+        worker.signals.finished.connect(self.ai_result_received)
+        worker.signals.failed.connect(self.ai_failure_received)
         self.thread_pool.start(worker)
+
+    def ai_request_is_current(self) -> bool:
+        return getattr(self, "ai_request_workspace", None) == (self.workspace_revision, self.current_project_id, self.project_type)
+
+    def discard_obsolete_ai_result(self) -> None:
+        self.set_ai_controls_enabled(True)
+        self.magic_overlay.hide_overlay()
+        self.statusBar().showMessage("AI result discarded because the project or workflow changed.")
+
+    def ai_result_received(self, result) -> None:
+        if not self.ai_request_is_current():
+            self.discard_obsolete_ai_result()
+            return
+        self.ai_finished_callback(result)
+
+    def ai_failure_received(self, error: str) -> None:
+        if not self.ai_request_is_current():
+            self.discard_obsolete_ai_result()
+            return
+        self.magic_failed(error)
 
     def refine_selected_timing(self) -> None:
         segment = self.current_segment()
@@ -5059,10 +4730,12 @@ class MainWindow(QMainWindow):
         ), "Analyzing timeline context and directing motion…", self.magic_finished)
 
     def magic_progress(self, attempt: int, total: int, detail: str) -> None:
-        if getattr(self, "ai_activity_in_minimax_window", False) and self.minimax_prompt_window:
+        if not self.ai_request_is_current():
+            return
+        if getattr(self, "ai_activity_in_minimax", False) and self.minimax_panel:
             action = "Refining" if str(getattr(self, "minimax_operation_kind", "")).startswith("refine_") else "Generating"
-            self.minimax_prompt_window.set_busy(True, f"{detail}  •  attempt {attempt}/{total}")
-            self.minimax_prompt_window.set_cache_state(f"{action}… attempt {attempt}/{total}")
+            self.minimax_panel.set_busy(True, f"{detail}  •  attempt {attempt}/{total}")
+            self.minimax_panel.set_cache_state(f"{action}… attempt {attempt}/{total}")
         else:
             self.magic_overlay.update_attempt(attempt, total, detail)
 
@@ -5095,38 +4768,173 @@ class MainWindow(QMainWindow):
         self.save_library_project(automatic=True)
         self.statusBar().showMessage("Magic Build complete")
 
-    def ensure_minimax_prompt_window(self) -> MiniMaxPromptWindow:
-        if self.minimax_prompt_window is None:
-            self.minimax_prompt_window = MiniMaxPromptWindow(self)
-        return self.minimax_prompt_window
+    def store_minimax_draft(self) -> None:
+        self.minimax_drafts[self.minimax_prompt_mode] = {
+            "prompt": self.minimax_prompt_text,
+            "instructions": self.minimax_refinement_instructions,
+            "sourceHash": self.minimax_prompt_cache_key,
+            "updatedAt": self.minimax_prompt_updated_at,
+        }
 
-    def sync_minimax_prompt_window(self, cache_state: str | None = None) -> None:
-        if not self.minimax_prompt_window:
+    def restore_project_type(self, value, drafts) -> None:
+        self.minimax_drafts = {
+            key: {field: str(item.get(field, "")) for field in ("prompt", "instructions", "sourceHash", "updatedAt")}
+            for key, item in (drafts.items() if isinstance(drafts, dict) else [])
+            if key in {"frames", "references"} and isinstance(item, dict)
+        }
+        self.store_minimax_draft()
+        legacy = "minimax_" + self.minimax_prompt_mode if self.minimax_prompt_text else "ltx"
+        self.project_type = value if value in {"ltx", "minimax_frames", "minimax_references"} else legacy
+        if self.project_type != "ltx":
+            self.load_minimax_draft(self.project_type.removeprefix("minimax_"))
+        self.prompt_scope.setCurrentIndex(0)
+        self.direction_toggle.setChecked(self.project_type == "ltx")
+        self.minimax_panel.reference_dock.setVisible(self.project_type == "minimax_references")
+
+    def load_minimax_draft(self, mode: str) -> None:
+        draft = self.minimax_drafts.get(mode, {})
+        self.minimax_prompt_mode = mode
+        self.minimax_prompt_text = draft.get("prompt", "")
+        self.minimax_refinement_instructions = draft.get("instructions", "")
+        self.minimax_prompt_cache_key = draft.get("sourceHash", "")
+        self.minimax_prompt_updated_at = draft.get("updatedAt", "")
+
+    def project_type_changed(self, _index: int) -> None:
+        if not self._loading:
+            self.set_project_type(self.project_type_combo.currentData())
+
+    def set_project_type(self, project_type: str) -> None:
+        if project_type not in {"ltx", "minimax_frames", "minimax_references"} or project_type == self.project_type:
             return
+        self.store_minimax_draft()
+        self.project_type = project_type
+        self.workspace_revision += 1
+        if project_type != "ltx":
+            self.load_minimax_draft(project_type.removeprefix("minimax_"))
+        self.prompt_scope.blockSignals(True)
+        self.prompt_scope.setCurrentIndex(0)
+        self.prompt_scope.blockSignals(False)
+        self.direction_toggle.setChecked(project_type == "ltx")
+        self.minimax_panel.clear_message()
+        self.sync_minimax_panel()
+        self.minimax_panel.reference_dock.setVisible(project_type == "minimax_references")
+        self.mark_dirty()
+
+    def apply_project_type_ui(self) -> None:
+        ltx = self.project_type == "ltx"
+        refs = self.project_type == "minimax_references"
+        self.project_type_combo.blockSignals(True)
+        self.project_type_combo.setCurrentIndex(self.project_type_combo.findData(self.project_type))
+        self.project_type_combo.blockSignals(False)
+        self.prompt_label.setText("LTX PROMPT" if ltx else "MINIMAX PRODUCTION PROMPT")
+        self.prompt_scope.setVisible(ltx)
+        self.minimax_panel.setVisible(not ltx)
+        self.references_button.setVisible(refs)
+        self.minimax_panel.reference_dock.toggleViewAction().setVisible(refs)
+        if not refs:
+            self.minimax_panel.reference_dock.hide()
+        self.hdr.setVisible(ltx)
+        self.requested_length.setVisible(ltx)
+        self.length_label.setVisible(ltx)
+        self.output_size_control.setVisible(ltx)
+        self.output_label.setVisible(ltx)
+        self.refine_timing_button.setVisible(ltx)
+        self.copy_image_prompt.setVisible(ltx and self.prompt_scope.currentData() == "segment")
+        self.magic_button.setText("✦ Magic Build" if ltx else "✦ Generate Prompt")
+        self.magic_button.setToolTip("Build all LTX segment prompts" if ltx else "Generate the full MiniMax production prompt for this workflow")
+        self.workflow_export_action.setVisible(ltx)
+        visual = bool(self.current_segment() and self.current_segment().kind != "text")
+        self.start_button.setVisible(visual and self.project_type != "minimax_frames")
+        self.end_button.setVisible(visual and self.project_type != "minimax_frames")
+        self.update_spoken_dialog_visibility()
+        self.minimax_panel.refresh_references()
+        self.refresh_shared_editor()
+
+    def prompt_scope_changed(self, _index: int) -> None:
+        self.refresh_shared_editor()
+        self.copy_image_prompt.setVisible(self.project_type == "ltx" and self.prompt_scope.currentData() == "segment")
+
+    def refresh_shared_editor(self) -> None:
+        if self.project_type != "ltx":
+            value = self.minimax_prompt_text
+        elif self.prompt_scope.currentData() == "global":
+            value = self.global_prompt.toPlainText()
+        else:
+            segment = self.current_segment()
+            value = segment.prompt if segment else ""
+        if self.segment_prompt.toPlainText() != value:
+            self.segment_prompt.blockSignals(True)
+            self.segment_prompt.setPlainText(value)
+            self.segment_prompt.blockSignals(False)
+        self.segment_prompt.setPlaceholderText("Select a timeline segment to edit its prompt…" if self.project_type == "ltx" else "Generate a production prompt or write your own…")
+        self.refine_prompt_button.setEnabled(not self.ai_busy and bool(value.strip()) and (self.project_type != "ltx" or self.prompt_scope.currentData() == "segment"))
+        self.update_counts()
+
+    def global_prompt_changed(self) -> None:
+        self.mark_dirty()
+        if self.project_type == "ltx" and self.prompt_scope.currentData() == "global":
+            self.refresh_shared_editor()
+
+    def update_spoken_dialog_visibility(self) -> None:
+        if not hasattr(self, "language_label"):
+            return
+        self.planning_label.setVisible(self.project_type == "ltx" or self.spoken_dialog.isChecked())
+        for widget in (self.speaker_language, self.speaker_accent, self.language_label, self.accent_label):
+            widget.setVisible(self.spoken_dialog.isChecked())
+
+    def show_reference_images(self) -> None:
+        self.minimax_panel.reference_dock.show()
+        self.minimax_panel.reference_dock.raise_()
+
+    def generate_project_prompt(self) -> None:
+        if self.ai_busy:
+            return
+        if self.project_type == "ltx":
+            self.magic_build()
+        else:
+            self._generate_minimax_prompt(self.minimax_prompt_mode)
+
+    def refine_project_prompt(self) -> None:
+        if self.ai_busy:
+            return
+        if self.project_type == "ltx":
+            if self.prompt_scope.currentData() == "segment":
+                self.refine_selected_prompt()
+        else:
+            self.refine_minimax_prompt()
+
+    def export_workflow(self) -> None:
+        if self.project_type == "ltx":
+            self.export_ltx()
+        else:
+            self.copy_minimax_prompt()
+
+    def ensure_minimax_panel(self) -> MiniMaxPromptPanel:
+        return self.minimax_panel
+
+    def sync_minimax_panel(self, cache_state: str | None = None) -> None:
+        if not self.minimax_panel:
+            return
+        self.apply_project_type_ui()
         mode_name = "reference" if self.minimax_prompt_mode == "references" else "frame"
         state = cache_state or (f"Saved {mode_name} prompt" if self.minimax_prompt_text else "Not generated")
-        self.minimax_prompt_window.set_project(
-            self.current_project_name,
-            self.minimax_prompt_text,
-            self.minimax_refinement_instructions,
-            state,
-        )
+        self.minimax_panel.set_project(self.current_project_name, self.minimax_prompt_text,
+                                       self.minimax_refinement_instructions, state)
 
-    def show_minimax_prompt_window(self, cache_state: str | None = None) -> MiniMaxPromptWindow:
-        window = self.ensure_minimax_prompt_window()
-        self.sync_minimax_prompt_window(cache_state)
-        window.show()
-        window.raise_()
-        window.activateWindow()
-        window.focus_prompt_editor()
-        return window
+    def show_minimax_panel(self, cache_state: str | None = None) -> MiniMaxPromptPanel:
+        if self.project_type == "ltx":
+            self.set_project_type("minimax_" + self.minimax_prompt_mode)
+        self.sync_minimax_panel(cache_state)
+        self.minimax_panel.focus_prompt_editor()
+        return self.minimax_panel
 
     def minimax_editor_changed(self) -> None:
-        if self._loading or not self.minimax_prompt_window:
+        if self._loading or not self.minimax_panel or self.project_type == "ltx":
             return
-        self.minimax_prompt_text = self.minimax_prompt_window.editor.toPlainText()
-        self.minimax_refinement_instructions = self.minimax_prompt_window.instructions.toPlainText()
+        self.minimax_prompt_text = self.minimax_panel.editor.toPlainText()
+        self.minimax_refinement_instructions = self.minimax_panel.instructions.toPlainText()
         self.minimax_prompt_updated_at = datetime.now(timezone.utc).isoformat()
+        self.minimax_panel.update_actions()
         self.mark_dirty()
 
     def set_minimax_reference_image(self, slot: int, value: dict | None) -> None:
@@ -5138,24 +4946,20 @@ class MainWindow(QMainWindow):
         self.minimax_reference_images = reference_slots(refs)
         self.minimax_prompt_cache_key = ""
         self.mark_dirty()
-        if self.minimax_prompt_window:
-            self.minimax_prompt_window.refresh_references(update_images=image_changed)
-            if not self.minimax_prompt_window.busy:
-                self.minimax_prompt_window.set_cache_state("References changed · generate when ready")
+        if self.minimax_panel:
+            self.minimax_panel.refresh_references(update_images=image_changed)
+            if not self.minimax_panel.busy:
+                self.minimax_panel.set_cache_state("References changed · generate when ready")
 
     def save_minimax_prompt_on_close(self) -> None:
-        """Write MiniMax editor state only when its window (or the app) closes."""
+        """Persist manual edits when the main application closes."""
         if self.current_project_id and self.segments:
             self.save_library_project(automatic=True)
-
-    def minimax_window_destroyed(self, _window=None) -> None:
-        self.minimax_prompt_window = None
-        self.save_minimax_prompt_on_close()
 
     def current_minimax_cache_key(self, provider: str | None = None, model: str | None = None) -> str:
         provider = provider or str(self.settings.value("provider", "gemini"))
         model = model or str(self.settings.value("gemini_model", GEMINI_MODELS[0]))
-        return minimax_h3_cache_key(
+        return f"{self.workspace_revision}:{self.project_type}:" + minimax_h3_cache_key(
             self.segments,
             provider,
             model,
@@ -5173,29 +4977,29 @@ class MainWindow(QMainWindow):
             return
         QApplication.clipboard().setText(self.minimax_prompt_text)
         message = "MiniMax H3 prompt copied to clipboard"
-        self.minimax_prompt_window.show_message(message, "success")
-
-    def open_minimax_prompt_editor(self) -> None:
-        """Open the editor without generating, refreshing, or analyzing anything."""
-        self.show_minimax_prompt_window()
+        self.minimax_panel.show_message(message, "success")
 
     def generate_minimax_prompt_frames(self) -> None:
         """Manually generate the continuous frame-timeline prompt."""
+        self.set_project_type("minimax_frames")
         self._generate_minimax_prompt("frames")
 
     def generate_minimax_prompt_references(self) -> None:
         """Manually generate a reference prompt for the detected workflow."""
+        self.set_project_type("minimax_references")
         self._generate_minimax_prompt("references")
 
     def _generate_minimax_prompt(self, mode: str) -> None:
+        if self.ai_busy:
+            return
         self.minimax_editor_changed()
         if not self.segments:
-            window = self.show_minimax_prompt_window("Not generated")
+            window = self.show_minimax_panel("Not generated")
             window.show_message("Add at least one timeline item before generating a MiniMax H3 prompt.", "warning")
             return
         reference_mode = mode == "references"
         mode_label = "reference" if reference_mode else "frame"
-        window = self.show_minimax_prompt_window(f"Generating {mode_label} prompt manually…")
+        window = self.show_minimax_panel(f"Generating {mode_label} prompt manually…")
         credentials = self.ai_credentials()
         if not credentials:
             window.set_busy(False, "Generation cancelled")
@@ -5231,9 +5035,9 @@ class MainWindow(QMainWindow):
         if not signature or signature != self.current_minimax_cache_key():
             self.set_ai_controls_enabled(True)
             self.magic_overlay.hide_overlay()
-            if self.minimax_prompt_window:
-                self.minimax_prompt_window.set_busy(False, "Inputs changed • generate again")
-                self.minimax_prompt_window.show_message("The MiniMax result was not applied because the timeline or references changed while it was running. Generate again.", "warning")
+            if self.minimax_panel:
+                self.minimax_panel.set_busy(False, "Inputs changed • generate again")
+                self.minimax_panel.show_message("The MiniMax result was not applied because the timeline or references changed while it was running. Generate again.", "warning")
             return
         editor_snapshot = (
             self.minimax_prompt_text,
@@ -5242,9 +5046,9 @@ class MainWindow(QMainWindow):
         if editor_snapshot != getattr(self, "minimax_operation_editor_snapshot", editor_snapshot):
             self.set_ai_controls_enabled(True)
             self.magic_overlay.hide_overlay()
-            if self.minimax_prompt_window:
-                self.minimax_prompt_window.set_busy(False, "Editor changed • result not applied")
-                self.minimax_prompt_window.show_message("The MiniMax result was not applied because you edited the prompt while it was running. Refine again when ready.", "warning")
+            if self.minimax_panel:
+                self.minimax_panel.set_busy(False, "Editor changed • result not applied")
+                self.minimax_panel.show_message("The MiniMax result was not applied because you edited the prompt while it was running. Refine again when ready.", "warning")
             return
         self.minimax_prompt_text = prompt
         self.minimax_prompt_cache_key = signature
@@ -5260,25 +5064,27 @@ class MainWindow(QMainWindow):
             self.minimax_prompt_mode = "frames"
         mode_label = "reference" if self.minimax_prompt_mode == "references" else "frame"
         state = f"Cached • {mode_label} {'refined' if operation.startswith('refine_') else 'generated'}"
-        window = self.show_minimax_prompt_window(state)
+        window = self.show_minimax_panel(state)
         self.mark_dirty()
         window.show_message(
-            f"MiniMax H3 {self.minimax_prompt_mode} prompt refined. Close the editor to save it to the project."
+            f"MiniMax H3 {self.minimax_prompt_mode} prompt refined. Use Save Project to keep this draft."
             if operation.startswith("refine_") else
-            f"MiniMax H3 {self.minimax_prompt_mode} prompt generated. Close the editor to save it to the project.",
+            f"MiniMax H3 {self.minimax_prompt_mode} prompt generated. Use Save Project to keep this draft.",
             "success",
         )
 
     def refine_minimax_prompt(self) -> None:
+        if self.ai_busy:
+            return
         self.minimax_editor_changed()
         if not self.minimax_prompt_text.strip():
-            if self.minimax_prompt_window:
-                self.minimax_prompt_window.show_message("Write or generate a MiniMax H3 prompt before refining it.", "warning")
+            if self.minimax_panel:
+                self.minimax_panel.show_message("Write or generate a MiniMax H3 prompt before refining it.", "warning")
             return
         credentials = self.ai_credentials()
         if not credentials:
-            if self.minimax_prompt_window:
-                self.minimax_prompt_window.show_message("Refinement cancelled because no API credentials are configured.", "warning")
+            if self.minimax_panel:
+                self.minimax_panel.show_message("Refinement cancelled because no API credentials are configured.", "warning")
             return
         provider, model, key = credentials
         signature = self.current_minimax_cache_key(provider, model)
@@ -5290,8 +5096,8 @@ class MainWindow(QMainWindow):
             self.minimax_refinement_instructions,
         )
         timeout = self.settings.value("api_timeout", 400, int)
-        if self.minimax_prompt_window:
-            self.minimax_prompt_window.set_busy(True, "Refining edited prompt…")
+        if self.minimax_panel:
+            self.minimax_panel.set_busy(True, "Refining edited prompt…")
         operation = refine_minimax_h3_reference_prompt if reference_mode else refine_minimax_h3_prompt
         self.start_ai_worker(
             operation,
@@ -5307,9 +5113,9 @@ class MainWindow(QMainWindow):
         )
 
     def retry_minimax_operation(self) -> None:
-        """Repeat the failed MiniMax operation using the current dialog contents."""
-        if self.minimax_prompt_window:
-            self.minimax_prompt_window.clear_message()
+        """Repeat the failed MiniMax operation using current inline controls."""
+        if self.minimax_panel:
+            self.minimax_panel.clear_message()
         self.minimax_prompt_cache_key = ""
         operation = str(getattr(self, "minimax_operation_kind", "generate_frames"))
         if operation.startswith("refine_"):
@@ -5389,7 +5195,7 @@ class MainWindow(QMainWindow):
         title = getattr(self, "ai_activity_title", "AI operation")
         overloaded = message.startswith("Google Gemini is temporarily overloaded")
         if title.startswith("MiniMax"):
-            window = self.show_minimax_prompt_window("AI request failed")
+            window = self.show_minimax_panel("AI request failed")
             window.set_busy(False, "Gemini overloaded • try again" if overloaded else "AI request failed")
             window.show_message(message, "warning" if overloaded else "error", retry=True)
             return
@@ -5536,6 +5342,12 @@ class MainWindow(QMainWindow):
             self.minimax_prompt_cache_key = ""
             self.minimax_prompt_updated_at = ""
             self.minimax_prompt_mode = "frames"
+            self.minimax_drafts = {}
+            self.project_type = "ltx"
+            self.workspace_revision += 1
+            self.direction_toggle.setChecked(True)
+            self.prompt_scope.setCurrentIndex(0)
+            self.apply_project_type_ui()
             settings = payload.get("settings", {})
             self.output_width.setValue(int(settings.get("custom_width", 1280)))
             self.output_height.setValue(int(settings.get("custom_height", 704)))
@@ -5556,6 +5368,7 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Import failed", str(error))
 
     def project_payload(self) -> dict:
+        self.store_minimax_draft()
         frames = []
         for segment in self.segments:
             value = segment.to_dict()
@@ -5564,7 +5377,8 @@ class MainWindow(QMainWindow):
             frames.append(value)
         return {
             "app": "ltx-director-director",
-            "projectVersion": 7,
+            "projectVersion": 8,
+            "projectType": self.project_type,
             "globalPrompt": self.global_prompt.toPlainText(),
             "directorIntent": self.intent.toPlainText(),
             "directionOptions": {
@@ -5585,6 +5399,7 @@ class MainWindow(QMainWindow):
                 "updatedAt": self.minimax_prompt_updated_at,
                 "mode": self.minimax_prompt_mode,
                 "referenceImages": reference_slots(self.minimax_reference_images),
+                "drafts": {key: dict(value) for key, value in self.minimax_drafts.items()},
             },
             "output": {"width": self.output_width.value(), "height": self.output_height.value()},
             "timelineView": {"scale": self.pixels_per_second, "autoFit": self.timeline_fit_mode, "height": self.timeline_height},
@@ -5642,6 +5457,8 @@ class MainWindow(QMainWindow):
         self.minimax_prompt_updated_at = str(minimax.get("updatedAt", ""))
         self.minimax_prompt_mode = "references" if minimax.get("mode") == "references" else "frames"
         self.minimax_reference_images = reference_slots(minimax.get("referenceImages"))
+        self.workspace_revision += 1
+        self.restore_project_type(payload.get("projectType"), minimax.get("drafts"))
         output = payload.get("output", {})
         self.output_width.setValue(int(output.get("width", 1280)))
         self.output_height.setValue(int(output.get("height", 704)))
@@ -5654,6 +5471,7 @@ class MainWindow(QMainWindow):
         self.timeline_scale.setValue(0 if auto_fit else max(1, min(160, int(view.get("scale", self.pixels_per_second)))))
         self.timeline_fit_mode = auto_fit
         self._loading = False
+        self.sync_minimax_panel()
         self.refresh_timeline()
         if auto_fit:
             self.apply_timeline_fit()
