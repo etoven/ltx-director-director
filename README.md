@@ -53,6 +53,8 @@ In short: use **Project Export** for lossless editing and safekeeping; use **LTX
 - Drag-to-reorder horizontal timeline and smoothly animated AI timing recommendations
 - Selected-segment **Refine Timing** and **Refine Prompt** passes with adjacent-frame continuity context
 - Dedicated MiniMax H3 editor with persistent prompts, private refinement instructions, manual editing, one-click copy, and source-aware generation caching
+- MiniMax References generation detects T2V, I2V, first/last-frame, multiple-keyframe, V2V, or mixed-reference workflows locally
+- Two untimed reference-image drop targets with attribute roles, notes, previews, paste support, and portable project storage
 - Bundled flat SVG toolbar icon family with distinct LTX and MiniMax export branding
 - One-second minimum segment duration in 0.5-second increments
 - Right-click replace, one-click segment export, role assignment, and deletion
@@ -101,7 +103,7 @@ python3 -m pip install --upgrade "$(wget -qO- https://api.github.com/repos/etove
 Or download the `.whl` file from the latest GitHub release, then install it with:
 
 ```bash
-python3 -m pip install ./ltx_prompt_director-1.12.56-py3-none-any.whl
+python3 -m pip install ./ltx_prompt_director-1.12.57-py3-none-any.whl
 ```
 
 You can also install a locally built wheel from the repository:

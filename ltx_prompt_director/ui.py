@@ -27,6 +27,8 @@ from PySide6.QtWidgets import (
 from . import __version__
 from .ai import AIResponseFormatError, GEMINI_MODELS, build_minimax_h3_prompt, build_minimax_h3_reference_prompt, build_prompts, minimax_h3_cache_key, provider_error_message, refine_minimax_h3_prompt, refine_minimax_h3_reference_prompt, refine_segment_prompt, refine_timing, retryable_connection_error
 from .media import APP_CACHE, TIMELINE_VIDEO_SUFFIXES, comfy_input_references, copy_media_for_export, data_url, extract_audio_for_export, prepare_media, safe_media_filename, unique_media_filename, write_data_url
+from .minimax_reference import WORKFLOW_NAMES, detect_workflow, reference_inventory, reference_slots
+from .minimax_reference_widgets import MiniMaxReferenceSlot
 from .models import Segment, order_segments_by_ids, text_segment_from_ltx
 from .project_data import ARCHIVE_COLOR, load_other_tags, load_project_tags, new_note, normalize_notes, normalize_project_labels
 
@@ -2261,7 +2263,7 @@ class MiniMaxPromptWindow(QDialog):
         toolbar_layout.addWidget(self.generate_frames_button)
         self.generate_references_button = QPushButton("◇ Generate Prompt (References)")
         self.generate_references_button.setObjectName("refineButton")
-        self.generate_references_button.setToolTip("Generate MiniMax H3's six-section full-reference prompt manually")
+        self.generate_references_button.setToolTip("Generate a reference prompt for the detected workflow")
         self.generate_references_button.clicked.connect(owner.generate_minimax_prompt_references)
         toolbar_layout.addWidget(self.generate_references_button)
         self.refine_button = QPushButton("✎ Refine Prompt")
@@ -2291,6 +2293,19 @@ class MiniMaxPromptWindow(QDialog):
 
         self.pacing_strip = MiniMaxPacingStrip()
         layout.addWidget(self.pacing_strip)
+        self.workflow_label = QLabel()
+        self.workflow_label.setObjectName("sectionLabel")
+        layout.addWidget(self.workflow_label)
+        references_layout = QHBoxLayout()
+        self.reference_targets = []
+        for index in range(2):
+            target = MiniMaxReferenceSlot(index + 1)
+            target.changed.connect(lambda value, slot=index: owner.set_minimax_reference_image(slot, value))
+            target.error.connect(lambda message: self.show_message(message, "warning"))
+            references_layout.addWidget(target, 1)
+            self.reference_targets.append(target)
+        layout.addLayout(references_layout)
+        self.refresh_references()
 
         self.editing_area = QWidget()
         editing_layout = QVBoxLayout(self.editing_area)
@@ -2368,6 +2383,7 @@ class MiniMaxPromptWindow(QDialog):
     def set_project(self, project_name: str, prompt: str, instructions: str, cache_state: str) -> None:
         self.setWindowTitle(f"MiniMax H3 Prompt — {project_name}")
         self.pacing_strip.set_segments(list(getattr(self.owner, "segments", [])))
+        self.refresh_references()
         for editor, value in ((self.editor, prompt), (self.instructions, instructions)):
             editor.blockSignals(True)
             editor.setPlainText(value)
@@ -2376,6 +2392,22 @@ class MiniMaxPromptWindow(QDialog):
         self.clear_message()
         self.set_cache_state(cache_state)
         self.set_busy(False)
+
+    def refresh_references(self, update_images: bool = True) -> None:
+        segments = list(getattr(self.owner, "segments", []))
+        refs = reference_slots(getattr(self.owner, "minimax_reference_images", []))
+        workflow = detect_workflow(segments, refs)
+        self.workflow_label.setText(f"REFERENCES WORKFLOW: {WORKFLOW_NAMES[workflow]} · detected automatically")
+        inventory = reference_inventory(segments, refs)
+        self.workflow_label.setToolTip("\n".join(
+            f"{item['label']}: {item['name']}"
+            + (f" · {item['role']} at {item['checkpoint_time']:.3f}s" if "checkpoint_time" in item else "")
+            for item in inventory if item["label"]
+        ))
+        if update_images:
+            labels = {item["reference_slot"]: item["label"] for item in inventory if "reference_slot" in item}
+            for index, target in enumerate(self.reference_targets):
+                target.set_value(refs[index], labels.get(index))
 
     def set_cache_state(self, text: str) -> None:
         self.cache_state.setText(text)
@@ -2472,6 +2504,7 @@ class MainWindow(QMainWindow):
         self.minimax_prompt_cache_key = ""
         self.minimax_prompt_updated_at = ""
         self.minimax_prompt_mode = "frames"
+        self.minimax_reference_images = [None, None]
         self.minimax_prompt_window: MiniMaxPromptWindow | None = None
         self.current_collection: str | None = None
         self.autofit_tail_extension = 0
@@ -3905,6 +3938,7 @@ class MainWindow(QMainWindow):
             "minimaxPromptCacheKey": self.minimax_prompt_cache_key,
             "minimaxPromptUpdatedAt": self.minimax_prompt_updated_at,
             "minimaxPromptMode": self.minimax_prompt_mode,
+            "minimaxReferenceImages": reference_slots(self.minimax_reference_images),
         }
 
     def cache_current_workspace(self) -> None:
@@ -3936,6 +3970,7 @@ class MainWindow(QMainWindow):
         self.minimax_prompt_cache_key = str(state.get("minimaxPromptCacheKey", ""))
         self.minimax_prompt_updated_at = str(state.get("minimaxPromptUpdatedAt", ""))
         self.minimax_prompt_mode = "references" if state.get("minimaxPromptMode") == "references" else "frames"
+        self.minimax_reference_images = reference_slots(state.get("minimaxReferenceImages"))
         self.timeline_height_handle.current_height = self.timeline_height
         self.set_timeline_height(self.timeline_height)
         auto_fit = bool(state.get("timelineAutoFit", False))
@@ -4243,6 +4278,7 @@ class MainWindow(QMainWindow):
         self.minimax_prompt_cache_key = ""
         self.minimax_prompt_updated_at = ""
         self.minimax_prompt_mode = "frames"
+        self.minimax_reference_images = [None, None]
         if self.minimax_prompt_window:
             self.minimax_prompt_window.hide()
         self.sfx.setChecked(False)
@@ -4637,6 +4673,9 @@ class MainWindow(QMainWindow):
         self.update_timeline_layout()
 
     def update_summary(self) -> None:
+        if self.minimax_prompt_window:
+            self.minimax_prompt_window.pacing_strip.set_segments(self.segments)
+            self.minimax_prompt_window.refresh_references()
         total = self.total_duration()
         self.sequence_bar.setText(f"Sequence     Start: 0.00s  |  End: {total:.2f}s  |  Length: {total:.2f}s")
         self.add_tile.setText("＋\nAdd media")
@@ -5090,6 +5129,20 @@ class MainWindow(QMainWindow):
         self.minimax_prompt_updated_at = datetime.now(timezone.utc).isoformat()
         self.mark_dirty()
 
+    def set_minimax_reference_image(self, slot: int, value: dict | None) -> None:
+        if self._loading:
+            return
+        refs = reference_slots(self.minimax_reference_images)
+        refs[slot] = dict(value) if value else None
+        image_changed = (self.minimax_reference_images[slot] or {}).get("image") != (value or {}).get("image")
+        self.minimax_reference_images = reference_slots(refs)
+        self.minimax_prompt_cache_key = ""
+        self.mark_dirty()
+        if self.minimax_prompt_window:
+            self.minimax_prompt_window.refresh_references(update_images=image_changed)
+            if not self.minimax_prompt_window.busy:
+                self.minimax_prompt_window.set_cache_state("References changed · generate when ready")
+
     def save_minimax_prompt_on_close(self) -> None:
         """Write MiniMax editor state only when its window (or the app) closes."""
         if self.current_project_id and self.segments:
@@ -5111,6 +5164,7 @@ class MainWindow(QMainWindow):
             self.sfx.isChecked(),
             self.spoken_dialog.isChecked(),
             self.reduce_music.isChecked(),
+            self.minimax_reference_images,
         )
 
     def copy_minimax_prompt(self) -> None:
@@ -5130,7 +5184,7 @@ class MainWindow(QMainWindow):
         self._generate_minimax_prompt("frames")
 
     def generate_minimax_prompt_references(self) -> None:
-        """Manually generate MiniMax H3's six-section full-reference prompt."""
+        """Manually generate a reference prompt for the detected workflow."""
         self._generate_minimax_prompt("references")
 
     def _generate_minimax_prompt(self, mode: str) -> None:
@@ -5164,8 +5218,8 @@ class MainWindow(QMainWindow):
                 self.segments.copy(), provider, model, key, self.build_director_request(),
                 self.global_prompt.toPlainText(), self.sfx.isChecked(), self.spoken_dialog.isChecked(),
                 self.reduce_music.isChecked(), timeout,
-            ),
-            "Writing the official six-section MiniMax H3 full-reference prompt…"
+            ) + ((reference_slots(self.minimax_reference_images),) if reference_mode else ()),
+            "Writing the MiniMax H3 prompt for " + WORKFLOW_NAMES[detect_workflow(self.segments, self.minimax_reference_images)] + "…"
             if reference_mode else
             "Boiling the complete sequence down to one MiniMax H3 frame prompt…",
             self.minimax_h3_finished,
@@ -5178,8 +5232,8 @@ class MainWindow(QMainWindow):
             self.set_ai_controls_enabled(True)
             self.magic_overlay.hide_overlay()
             if self.minimax_prompt_window:
-                self.minimax_prompt_window.set_busy(False, "Timeline changed • generate again")
-                self.minimax_prompt_window.show_message("The MiniMax result was not applied because the timeline changed while it was running. Generate again.", "warning")
+                self.minimax_prompt_window.set_busy(False, "Inputs changed • generate again")
+                self.minimax_prompt_window.show_message("The MiniMax result was not applied because the timeline or references changed while it was running. Generate again.", "warning")
             return
         editor_snapshot = (
             self.minimax_prompt_text,
@@ -5246,7 +5300,7 @@ class MainWindow(QMainWindow):
                 self.global_prompt.toPlainText(), self.sfx.isChecked(), self.spoken_dialog.isChecked(),
                 self.reduce_music.isChecked(), self.minimax_prompt_text,
                 self.minimax_refinement_instructions, timeout,
-            ),
+            ) + ((reference_slots(self.minimax_reference_images),) if reference_mode else ()),
             "Refining the edited MiniMax prompt with timeline continuity context…",
             self.minimax_h3_finished,
             show_main_overlay=False,
@@ -5476,6 +5530,12 @@ class MainWindow(QMainWindow):
             if not loaded:
                 raise ValueError("No supported embedded image, video, or text segments were found.")
             self.segments = loaded
+            self.minimax_reference_images = [None, None]
+            self.minimax_prompt_text = ""
+            self.minimax_refinement_instructions = ""
+            self.minimax_prompt_cache_key = ""
+            self.minimax_prompt_updated_at = ""
+            self.minimax_prompt_mode = "frames"
             settings = payload.get("settings", {})
             self.output_width.setValue(int(settings.get("custom_width", 1280)))
             self.output_height.setValue(int(settings.get("custom_height", 704)))
@@ -5504,7 +5564,7 @@ class MainWindow(QMainWindow):
             frames.append(value)
         return {
             "app": "ltx-director-director",
-            "projectVersion": 6,
+            "projectVersion": 7,
             "globalPrompt": self.global_prompt.toPlainText(),
             "directorIntent": self.intent.toPlainText(),
             "directionOptions": {
@@ -5524,6 +5584,7 @@ class MainWindow(QMainWindow):
                 "sourceHash": self.minimax_prompt_cache_key,
                 "updatedAt": self.minimax_prompt_updated_at,
                 "mode": self.minimax_prompt_mode,
+                "referenceImages": reference_slots(self.minimax_reference_images),
             },
             "output": {"width": self.output_width.value(), "height": self.output_height.value()},
             "timelineView": {"scale": self.pixels_per_second, "autoFit": self.timeline_fit_mode, "height": self.timeline_height},
@@ -5580,6 +5641,7 @@ class MainWindow(QMainWindow):
         self.minimax_prompt_cache_key = str(minimax.get("sourceHash", ""))
         self.minimax_prompt_updated_at = str(minimax.get("updatedAt", ""))
         self.minimax_prompt_mode = "references" if minimax.get("mode") == "references" else "frames"
+        self.minimax_reference_images = reference_slots(minimax.get("referenceImages"))
         output = payload.get("output", {})
         self.output_width.setValue(int(output.get("width", 1280)))
         self.output_height.setValue(int(output.get("height", 704)))

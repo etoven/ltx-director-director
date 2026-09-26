@@ -105,29 +105,15 @@ class MiniMaxH3PromptTests(unittest.TestCase):
         self.assertLess(rules.index("00:00:500 Frame bridge:"), rules.index("00:01:000 {describe"))
         self.assertLess(rules.index("00:04:500 Frame bridge:"), rules.index("00:08:000 {describe"))
 
-    def test_reference_master_uses_official_six_section_contract(self):
+    def test_reference_master_uses_workflow_brief(self):
         rules = ai._minimax_h3_reference_rules(self.segments(4), "", "", True, True, False)
-        headings = (
-            "subject_definitions:",
-            "summary:",
-            "retention_analysis:",
-            "detailed_description:",
-            "overall_soundscape:",
-            "non_diegetic_music:",
-        )
-        positions = [rules.index(heading) for heading in headings]
-        self.assertEqual(positions, sorted(positions))
-        self.assertIn("<Picture 1>", rules)
-        self.assertIn("<Video 1>", rules)
-        self.assertIn("[Shot 1]", rules)
-        self.assertIn("MM:SS.mmm", rules)
-        self.assertIn("350–500 detailed English words", rules)
-        self.assertIn("do not turn every timeline frame into a cut", rules)
-        self.assertIn("fully_preserved", rules)
-        self.assertIn("attribute_transfer", rules)
-        self.assertIn("keyframe completion", rules)
-        self.assertIn("reference generation", rules)
-        self.assertIn("exactly one top-level field", rules)
+        self.assertIn("Mixed references (R2V)", rules)
+        self.assertIn("[REFERENCE USE]", rules)
+        self.assertIn("[TIMED ACTION]", rules)
+        self.assertIn("Image1", rules)
+        self.assertIn("Video1", rules)
+        self.assertNotIn("retention_analysis:", rules)
+        self.assertNotIn("350–500", rules)
 
     def test_reference_builder_returns_prompt_without_semantic_validation(self):
         segments = self.segments(2)
@@ -137,7 +123,7 @@ class MiniMaxH3PromptTests(unittest.TestCase):
                 segments, "gemini", "gemini-3.5-flash-lite", "unused", "", "", False, False, True,
             )
         self.assertEqual(result, "User-controlled full-reference output")
-        self.assertIn("REQUIRED SIX-SECTION OUTPUT", provider.call_args.args[4])
+        self.assertIn("[REFERENCE USE]", provider.call_args.args[4])
 
     def test_returns_prompt_without_semantic_validation(self):
         segments = self.segments(3)
