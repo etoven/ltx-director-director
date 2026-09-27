@@ -28,14 +28,6 @@ class AIResponseFormatError(ValueError):
     """The provider returned text that does not satisfy the response contract."""
 
 
-def minimax_interval_detail_standard(duration: float) -> tuple[int, int]:
-    """Return duration-scaled sentence and word guidance for one MiniMax interval."""
-    duration = max(0.0, float(duration))
-    sentences = 2 if duration < 4.0 else (3 if duration < 7.0 else 4)
-    words = max(24, min(50, round(duration * 10)))
-    return sentences, words
-
-
 def build_prompts(segments: list[Segment], provider: str, model: str, api_key: str, intent: str, sfx: bool, spoken_dialog: bool, hdr: bool, reduce_music: bool, timeout: int = 400) -> dict:
     images = [_segment_input(item) for item in segments]
     rules = _rules(len(images), intent, sfx, spoken_dialog, hdr, reduce_music, sum(item.kind == "text" for item in segments))
@@ -49,9 +41,9 @@ def build_minimax_h3_prompt(segments: list[Segment], provider: str, model: str, 
     if not segments:
         raise ValueError("Add at least one timeline item before exporting a MiniMax H3 prompt.")
     inputs = _minimax_h3_inputs(segments, provider, frame_checkpoints=True)
-    rules = _minimax_h3_rules(segments, intent, global_prompt, sfx, spoken_dialog, reduce_music, structured=True)
+    rules = _minimax_h3_rules(segments, intent, global_prompt, sfx, spoken_dialog, reduce_music)
     raw = _provider_raw(inputs, provider, model, api_key, rules, timeout)
-    return _assemble_minimax_h3_frames(raw, segments)
+    return _extract_minimax_h3_prompt(raw)
 
 
 def build_minimax_h3_reference_prompt(segments: list[Segment], provider: str, model: str, api_key: str, intent: str, global_prompt: str, sfx: bool, spoken_dialog: bool, reduce_music: bool, timeout: int = 400, reference_images: list | None = None) -> str:
@@ -77,7 +69,7 @@ def refine_minimax_h3_prompt(segments: list[Segment], provider: str, model: str,
 REFINEMENT MODE — FOLLOW THIS PRIORITY ORDER WHEN ANY INPUTS COMPETE:
 1. PRIVATE REFINEMENT INSTRUCTIONS are the highest-priority edit request. Apply them completely and literally wherever they target the production prompt.
 2. CURRENT EDITOR PROMPT is the authoritative creative content and current sequence state. Refine it; never rebuild it from the references.
-3. Preserve the required timestamps and three-section production-prompt structure.
+3. Preserve the current production-brief sections and the assigned frame checkpoint times unless the private instructions explicitly request changes.
 4. Timeline frames, videos, segment prompts, global prompt, and Director's Intent are SECONDARY CONTINUITY EVIDENCE only. Use them to verify identity, pose, environment, composition, physical plausibility, and boundary continuity without overriding items 1 or 2.
 
 - Make the smallest complete set of edits needed to satisfy the private refinement instructions. Preserve every deliberate user edit and every untouched passage.
@@ -137,50 +129,6 @@ def _extract_minimax_h3_prompt(raw: str) -> str:
     if not isinstance(prompt, str) or not prompt.strip():
         raise AIResponseFormatError("The AI returned no MiniMax H3 prompt. The operation will retry.")
     return prompt.strip()
-
-
-def _minimax_frame_slots(segments: list[Segment]) -> tuple[list[str], list[tuple[str, str, bool]]]:
-    """Return stable transport keys and chronological timestamps for action/bridge prose."""
-    starts = []
-    cursor = 0.0
-    for segment in segments:
-        starts.append(cursor)
-        cursor += segment.duration
-    visual_indices = [index for index, segment in enumerate(segments) if segment.kind in ("image", "video")]
-    bridge_after = {}
-    for earlier, later in zip(visual_indices, visual_indices[1:]):
-        preceding = later - 1
-        bridge_after[preceding] = _minimax_timestamp((starts[preceding] + starts[later]) / 2)
-    slots = []
-    lines = []
-    for index, segment in enumerate(segments):
-        timestamp = _minimax_timestamp(starts[index])
-        key = f"cue_{index + 1}"
-        slots.append((key, timestamp, False))
-        sentences, words = minimax_interval_detail_standard(segment.duration)
-        lines.append(f'{key} at {timestamp}: {sentences}+ complete sentences, {words}+ words of action prose')
-        if index in bridge_after:
-            bridge_key = f"bridge_after_{index + 1}"
-            slots.append((bridge_key, bridge_after[index], True))
-            lines.append(f'{bridge_key} at {bridge_after[index]}: bridge prose linking the adjacent visual checkpoints')
-    return lines, slots
-
-
-def _assemble_minimax_h3_frames(raw: str, segments: list[Segment]) -> str:
-    """Place model-written prose in fixed slots without parsing or rewriting its language."""
-    value = _parse_json(raw)
-    if not isinstance(value, dict):
-        raise AIResponseFormatError("The AI returned an invalid MiniMax Frames response. The operation will retry.")
-    _, slots = _minimax_frame_slots(segments)
-    required = ("opening", *(key for key, _, _ in slots), "soundscape", "music")
-    missing = [key for key in required if not isinstance(value.get(key), str) or not value[key].strip()]
-    if missing:
-        raise AIResponseFormatError(f"The AI omitted MiniMax Frames field(s): {', '.join(missing)}. The operation will retry.")
-    lines = ["continuous_video:", value["opening"].strip()]
-    for key, timestamp, bridge in slots:
-        lines.append(f'{timestamp} {"Frame bridge: " if bridge else ""}{value[key].strip()}')
-    lines.extend(("", "soundscape:", value["soundscape"].strip(), "", "music:", value["music"].strip()))
-    return "\n".join(lines)
 
 
 @lru_cache(maxsize=256)
@@ -324,17 +272,20 @@ def _minimax_h3_inputs(segments: list[Segment], provider: str = "gemini", refine
             video_number += 1
         if item.kind == "text":
             continuity_function = "action instruction spanning this complete timeline interval"
-        elif not seen_visual:
+        elif not seen_visual and not (frame_checkpoints and item.kind == "image" and item.role == "end"):
             continuity_function = "opening visual anchor establishing the initial continuous state"
             seen_visual = True
         elif item.kind == "video":
             continuity_function = "temporal motion evidence spanning this complete timeline interval"
         elif frame_checkpoints:
-            continuity_function = "visual checkpoint already reached at its cue timestamp; develop toward it before that timestamp and carry its state forward afterward"
+            continuity_function = ("end-frame target reached by this interval's end, then carried forward" if item.role == "end"
+                                   else "start-frame checkpoint present at this interval's beginning; develop onward from it")
         elif item.role == "end":
             continuity_function = "visual target to approach progressively and resolve by this interval's end"
         else:
             continuity_function = "continuity checkpoint to reach progressively from the preceding interval"
+        if item.kind in ("image", "video"):
+            seen_visual = True
         value = {
             "name": item.name,
             "role": item.role,
@@ -343,15 +294,9 @@ def _minimax_h3_inputs(segments: list[Segment], provider: str = "gemini", refine
             "start_time": start,
             "end_time": end,
             "duration": item.duration,
-            "recommended_detail": {
-                "minimum_complete_sentences": minimax_interval_detail_standard(item.duration)[0],
-                "minimum_words": minimax_interval_detail_standard(item.duration)[1],
-                "purpose": "duration-scaled MiniMax motion specificity; do not print these counts in the production prompt",
-            },
             "camera_continuity_requirement": (
                 "Compare this frame's camera angle, position, subject scale, screen placement, background, pose, and action with adjacent frames. "
-                "For each pair of successive visual checkpoints, plan exactly one timed Frame bridge before the next visual checkpoint; "
-                "keep the bridge concise for near-identical states and describe observed video motion instead of inventing another movement."
+                "Describe supported movement in the existing timed ranges; keep near-identical states stable and do not invent camera movement."
             ),
             "action_trajectory_requirement": (
                 "Use this frame in context with every earlier and later frame to direct the complete action path through this interval. Describe the "
@@ -398,87 +343,40 @@ def _minimax_h3_inputs(segments: list[Segment], provider: str = "gemini", refine
     return inputs
 
 
-def _minimax_h3_rules(segments: list[Segment], intent: str, global_prompt: str, sfx: bool, spoken_dialog: bool, reduce_music: bool, structured: bool = False) -> str:
-    """Build a short, explicit interleaved cue template for MiniMax Frames mode."""
-    timestamps = []
-    starts = []
-    cursor = 0.0
-    for item in segments:
-        starts.append(cursor)
-        timestamps.append(_minimax_timestamp(cursor))
-        cursor += item.duration
-    visual_indices = [index for index, item in enumerate(segments) if item.kind in ("image", "video")]
-    bridge_after = {}
-    for previous, following in zip(visual_indices, visual_indices[1:]):
-        # Put the bridge in the last interval before the next visual checkpoint.
-        # This keeps text-only action cues in their original chronological order.
-        preceding = following - 1
-        bridge_time = (starts[preceding] + starts[following]) / 2
-        bridge_after[preceding] = _minimax_timestamp(bridge_time)
-    cue_lines = []
-    for index, item in enumerate(segments):
-        sentences, words = minimax_interval_detail_standard(item.duration)
-        cue_lines.append(f"{timestamps[index]} {{describe the interval's action in at least {sentences} complete sentences and {words} words}}")
-        if index in bridge_after:
-            cue_lines.append(f"{bridge_after[index]} Frame bridge: {{describe the supported progression toward the next visual checkpoint}}")
-    cue_template = "\n".join(cue_lines)
-    field_lines, slots = _minimax_frame_slots(segments)
-    if structured:
-        example = {key: "your prose for this field" for key in ("opening", *(key for key, _, _ in slots), "soundscape", "music")}
-        output_contract = f"""Return ONE JSON object with the following named prose fields. Write text only: no timestamps, section headings, or `Frame bridge:` labels inside field values. The app places each field at its fixed timestamp and assembles the final prompt. Supply every field exactly once.
-opening: one concise sentence with stable scene and opening camera view
-{chr(10).join(field_lines)}
-soundscape: supported sounds or `None specified.`
-music: requested music or `None. Use only the described diegetic soundscape.`
-
-JSON shape:
-{json.dumps(example, ensure_ascii=False)}"""
-    else:
-        output_contract = f"""OUTPUT TEMPLATE — return these three lowercase sections in order:
-continuous_video:
-{{one concise sentence with the stable subject, scene, and opening camera view}}
-{cue_template}
-
-soundscape:
-{{write only the supported soundscape or the required None statement}}
-
-music:
-{{write only the requested music or the required None statement}}
-
-Return strict transport JSON with exactly one top-level field, containing the completed three-section prompt and nothing else:
-{{"prompt": "the complete MiniMax H3 production prompt"}}"""
-    sound_rule = (
-        "Describe supported ambience, physical sounds, and clearly audible source-video audio."
-        if sfx else
-        "Preserve clearly audible source-video audio or explicitly supplied sounds; otherwise write `None specified.`"
+def _minimax_h3_rules(segments: list[Segment], intent: str, global_prompt: str, sfx: bool, spoken_dialog: bool, reduce_music: bool) -> str:
+    """Build a reference-style brief with authoritative frame and interval timing."""
+    inventory = reference_inventory(segments)
+    intervals = "\n".join(
+        f"{_minimax_timestamp(record['start_time'])} - {_minimax_timestamp(record['end_time'])}: "
+        f"{record['label'] or 'Text direction'} ({record['name']}); "
+        f"{('end frame reached at ' + _minimax_timestamp(record['end_time'])) if record['kind'] == 'image' and record['role'] == 'end' else ('start frame at ' + _minimax_timestamp(record['start_time'])) if record['kind'] == 'image' else 'timed source video' if record['kind'] == 'video' else 'text action'}; "
+        f"segment direction: {record['prompt'] or 'none supplied'}"
+        for record in inventory
     )
-    dialog_rule = (
-        "Preserve supplied words, delivery, language, and lip sync."
-        if spoken_dialog else
-        "Do not invent dialogue; retain explicitly supplied words only."
-    )
-    music_rule = (
-        "Write `None. Use only the described diegetic soundscape.` unless music is explicitly supplied."
-        if reduce_music else
-        "Describe explicitly requested music; otherwise use music only when the supplied context requires it."
-    )
-    return f"""You write one detailed, continuous MiniMax H3 video prompt for the complete ordered timeline. Inspect all supplied images, source videos, segment prompts, Director's Intent, and global prompt before writing. Use only supported visual and audio facts. Each timestamp describes a moment in the same evolving scene; never treat a frame as a cut or a reset.
+    return f"""Write one continuous MiniMax H3 production prompt for this Frames workflow. Inspect all supplied timeline frames, videos, and text before writing. Frame images are conditioning checkpoints in the ordered video, not untimed character or style references. A start frame anchors the beginning of its interval; an end frame is the state reached at its end. The image itself does not demonstrate motion between checkpoints.
 
-TIMELINE: {len(segments)} action cues; {len(visual_indices)} visual checkpoints; {len(bridge_after)} required Frame bridges; total {cursor:.2f} seconds. Keep every cue and bridge in its assigned slot. Do not omit or merge slots, and do not add cuts or change the timeline.
+FRAME AND INTERVAL MAP (client-assigned labels and times; preserve their order):
+{intervals}
+Total duration: {sum(item.duration for item in segments):.3f} seconds.
 
-ACTION: Follow each segment's current LTX prompt and the entire frame sequence. Describe what starts moving, its visible intermediate stages, physical cause, contact, weight, material response, and what carries into the next cue. Give each action cue its requested sentence and word detail without repeating the whole scene.
+Use the same compact production-brief layout as References mode, adapted to conditioning frames:
+[FRAME USE] Explain which Image1/Video1 assets anchor the opening, ending, or intermediate states and how video footage contributes motion. Give no frame an untimed identity-only role.
+[CONTINUITY] Specify persistent identity, camera, setting, lighting and spatial relationships while allowing the intentional changes visible across frames.
+[SCENE] State the overall setting and action.
+[TIMED ACTION] Write a continuous action path using the exact interval ranges above in `00:00:000 - 00:03:000: ...` format. Describe onset and intermediate physical motion that reaches an end frame by its assigned end time and continues from that reached state. A start frame is already present at its start time. Include text-only intervals. Compare adjacent visual states for camera, pose, anatomy, clothing, objects and setting; resolve large differences through supported motion during the intervening range. Keep video source time confined to its interval. Do not add mid-interval Frame bridge lines or repeat completed changes after a checkpoint.
+[SOUND] Include supported ambience and physical sounds, exact supplied dialogue and speaker, and music direction.
+[AVOID] Briefly name relevant discontinuities such as hard jumps, unexpected cuts, pose or camera resets.
+Omit sections with nothing useful to say. Keep the production prompt concise and under 7,000 characters. Do not output the interval map or these instructions.
 
-BRIDGES: There is exactly one Frame bridge between every successive pair of visual checkpoints, including video-to-image and nearly identical image pairs. Fill ALL of them. Compare both checkpoints as a whole: camera, subject, pose, anatomy, expression, objects, clothing, lighting, and setting. Describe how A progresses toward B during the existing time span. Start and carry substantial changes BEFORE the next visual checkpoint; the image at its timestamp already shows its reached state. For a large change, give its camera path or physical action stages; for a small change, briefly describe supported continued motion or stability. If a source video already shows the transition, describe that observed motion at the bridge time. Never invent a zoom, turn, fall, or other event to fill a bridge. Keep simultaneous camera and subject action moving together. Do not move the fixed frame timestamps or add time.
+Use only facts supported by the media, segment direction or user intent. Motion between stills is a proposed path, not observed footage; do not present invented events as facts. Preserve an intended continuous shot unless cuts are explicitly requested. Never relabel frames as generic reference images or impose a sentence quota.
 
-DIRECTOR'S INTENT:
-{intent.strip() or 'No additional director intent supplied.'}
+Director's intent: {intent.strip() or 'Not supplied.'}
+Global direction: {global_prompt.strip() or 'Not supplied.'}
+Sound effects: {'Describe supported physical sounds and ambience.' if sfx else 'Only explicitly supplied or clearly audible source sounds; otherwise none specified.'}
+Dialogue: {'Use supplied exact words, speakers and delivery.' if spoken_dialog else 'Do not add dialogue; retain explicitly supplied words only.'}
+Music: {'No background music unless explicitly requested.' if reduce_music else 'Use music only if supplied direction calls for it.'}
 
-GLOBAL CONTINUITY PROMPT:
-{global_prompt.strip() or 'No global prompt supplied.'}
-
-AUDIO DIRECTION: {sound_rule} {dialog_rule} {music_rule}
-
-{output_contract}"""
+Return JSON with exactly one field: {{"prompt": "the complete production brief"}}."""
 
 def _minimax_h3_reference_rules(segments: list[Segment], intent: str, global_prompt: str, sfx: bool, spoken_dialog: bool, reduce_music: bool, reference_images: list | None = None) -> str:
     return reference_rules(segments, intent, global_prompt, sfx, spoken_dialog, reduce_music, reference_images)
