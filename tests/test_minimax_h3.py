@@ -1,8 +1,11 @@
 import json
+import base64
+import io
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from PIL import Image
 
 from ltx_prompt_director import ai
 from ltx_prompt_director.models import Segment
@@ -60,6 +63,33 @@ class MiniMaxH3PromptTests(unittest.TestCase):
         self.assertEqual(output, result.strip())
         self.assertIn('[FRAME USE]', provider.call_args.args[4])
         self.assertTrue(provider.call_args.args[0][0]['frame_mode_checkpoint'])
+
+    def test_two_untimed_references_follow_timed_frames_with_distinct_roles(self):
+        buffer = io.BytesIO()
+        Image.new('RGB', (8, 8), 'blue').save(buffer, format='PNG')
+        encoded = 'data:image/png;base64,' + base64.b64encode(buffer.getvalue()).decode()
+        refs = [{'name': 'face.png', 'role': 'identity', 'image': encoded, 'notes': 'face only'},
+                {'name': 'claws.png', 'role': 'object', 'image': encoded, 'notes': 'claw shape'}]
+        rules = ai._minimax_h3_rules(self.segments(), '', '', False, False, True, refs)
+        self.assertIn('Image3 (face.png): untimed identity reference; notes: face only', rules)
+        self.assertIn('Image4 (claws.png): untimed object reference; notes: claw shape', rules)
+        self.assertIn('one blank line between sections', rules)
+        self.assertIn('each range on its own line', rules)
+        self.assertEqual(rules.split('UNTIMED REFERENCE IMAGES', 1)[0].count('00:00:000 - 00:03:000'), 1)
+        with patch.object(ai, '_provider_raw', return_value='{"prompt":"[FRAME USE] Done."}') as provider:
+            ai.build_minimax_h3_prompt(self.segments(), 'gemini', 'model', '', '', '', False, False, True,
+                                       reference_images=refs)
+        sent = provider.call_args.args[0]
+        self.assertEqual(len(sent), len(self.segments()) + 2)
+        self.assertEqual([item['label'] for item in sent[-2:]], ['Image3', 'Image4'])
+        self.assertEqual([item['role'] for item in sent[-2:]], ['identity', 'object'])
+        self.assertTrue(all('reference_slot' in item and 'start_time' not in item for item in sent[-2:]))
+        self.assertTrue(all(item['image'] == encoded for item in sent[-2:]))
+        with patch.object(ai, '_provider_raw', return_value='{"prompt":"[FRAME USE] Refined."}') as provider:
+            ai.refine_minimax_h3_prompt(self.segments(), 'gemini', 'model', '', '', '', False, False,
+                                        True, '[FRAME USE] Current.', 'Keep it.', reference_images=refs)
+        self.assertEqual(len(provider.call_args.args[0]), len(sent))
+        self.assertIn('SECONDARY CONTINUITY EVIDENCE', provider.call_args.args[0][-1]['guidance_priority'])
 
     def test_bad_transport_retries(self):
         for response in ('not json', '{}', '{"prompt": ""}'):

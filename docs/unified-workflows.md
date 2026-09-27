@@ -69,3 +69,7 @@ python3 -m pip install --force-reinstall --no-deps 'https://raw.githubuserconten
 ### MiniMax Frames brief (1.13.0a3)
 
 Frames generation now uses the same production-brief layout as References, with `[FRAME USE]`, `[CONTINUITY]`, `[SCENE]`, `[TIMED ACTION]`, `[SOUND]` and `[AVOID]` as applicable. `[TIMED ACTION]` uses the exact timeline intervals in `00:00:000 - 00:03:000: ...` form. A start image anchors the beginning of its interval and an end image must be reached at its interval end. The images are timed conditioning checkpoints, while untimed images in References mode are guides for selected attributes. Generation and refinement return the authored brief directly without inserting extra bridge slots or changing user-edited wording.
+
+### MiniMax Frames references and line layout (1.13.0a4)
+
+Both MiniMax modes now expose the same two untimed reference-image drop targets. In Frames mode, those images keep their selected attribute roles and notes; they never become timeline checkpoints or add duration. The Frames prompt asks for a blank line between bracketed sections and one complete `MM:SS:mmm - MM:SS:mmm:` range per line inside `[TIMED ACTION]`, following the example production brief. Manual refinement receives the same two reference images while respecting edits already made in the shared prompt editor.

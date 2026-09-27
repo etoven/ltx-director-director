@@ -2318,7 +2318,7 @@ class MiniMaxPromptPanel(QFrame):
         layout.addWidget(self.message_panel)
         self.clear_message()
 
-        # References are untimed project assets in the main window, not timeline frames.
+        # Untimed project references can accompany either MiniMax workflow.
         self.reference_dock = QDockWidget("REFERENCE IMAGES", owner)
         self.reference_dock.setObjectName("minimaxReferenceDock")
         self.reference_dock.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea)
@@ -2350,11 +2350,11 @@ class MiniMaxPromptPanel(QFrame):
     def refresh_references(self, update_images: bool = True) -> None:
         segments = self.owner.segments
         refs = reference_slots(self.owner.minimax_reference_images)
-        active_refs = refs if self.owner.project_type == "minimax_references" else []
+        active_refs = refs if self.owner.project_type != "ltx" else []
         workflow = detect_workflow(segments, active_refs)
-        if self.owner.project_type == "minimax_frames" and workflow == "fl2v":
-            workflow = "keyframes"
-        self.workflow_label.setText(WORKFLOW_NAMES[workflow])
+        self.workflow_label.setText("Frames + references" if self.owner.project_type == "minimax_frames" and any(active_refs)
+                                    else "Conditioning frames" if self.owner.project_type == "minimax_frames"
+                                    else WORKFLOW_NAMES[workflow])
         inventory = reference_inventory(segments, active_refs)
         self.workflow_label.setToolTip("Detected from timeline and active reference images.\n" + "\n".join(
             f"{item['label']}: {item['name']}"
@@ -5142,7 +5142,7 @@ class MainWindow(QMainWindow):
             self.load_minimax_draft(self.project_type.removeprefix("minimax_"))
         self.prompt_scope.setCurrentIndex(0)
         self.direction_toggle.setChecked(self.project_type == "ltx")
-        self.minimax_panel.reference_dock.setVisible(self.project_type == "minimax_references")
+        self.minimax_panel.reference_dock.setVisible(self.project_type != "ltx")
 
     def load_minimax_draft(self, mode: str) -> None:
         draft = self.minimax_drafts.get(mode, {})
@@ -5170,12 +5170,12 @@ class MainWindow(QMainWindow):
         self.direction_toggle.setChecked(project_type == "ltx")
         self.minimax_panel.clear_message()
         self.sync_minimax_panel()
-        self.minimax_panel.reference_dock.setVisible(project_type == "minimax_references")
+        self.minimax_panel.reference_dock.setVisible(project_type != "ltx")
         self.mark_dirty()
 
     def apply_project_type_ui(self) -> None:
         ltx = self.project_type == "ltx"
-        refs = self.project_type == "minimax_references"
+        refs = not ltx
         self.project_type_combo.blockSignals(True)
         self.project_type_combo.setCurrentIndex(self.project_type_combo.findData(self.project_type))
         self.project_type_combo.blockSignals(False)
@@ -5375,7 +5375,7 @@ class MainWindow(QMainWindow):
                 self.segments.copy(), provider, model, key, self.build_director_request(),
                 self.global_prompt.toPlainText(), self.sfx.isChecked(), self.spoken_dialog.isChecked(),
                 self.reduce_music.isChecked(), timeout,
-            ) + ((reference_slots(self.minimax_reference_images),) if reference_mode else ()),
+            ) + (reference_slots(self.minimax_reference_images),),
             "Writing the MiniMax H3 prompt for " + WORKFLOW_NAMES[detect_workflow(self.segments, self.minimax_reference_images)] + "…"
             if reference_mode else
             "Boiling the complete sequence down to one MiniMax H3 frame prompt…",
@@ -5459,7 +5459,7 @@ class MainWindow(QMainWindow):
                 self.global_prompt.toPlainText(), self.sfx.isChecked(), self.spoken_dialog.isChecked(),
                 self.reduce_music.isChecked(), self.minimax_prompt_text,
                 self.minimax_refinement_instructions, timeout,
-            ) + ((reference_slots(self.minimax_reference_images),) if reference_mode else ()),
+            ) + (reference_slots(self.minimax_reference_images),),
             "Refining the edited MiniMax prompt with timeline continuity context…",
             self.minimax_h3_finished,
             show_main_overlay=False,

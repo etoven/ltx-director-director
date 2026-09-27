@@ -36,12 +36,12 @@ def build_prompts(segments: list[Segment], provider: str, model: str, api_key: s
     return _gemini(images, api_key, model, rules, timeout, sfx, spoken_dialog)
 
 
-def build_minimax_h3_prompt(segments: list[Segment], provider: str, model: str, api_key: str, intent: str, global_prompt: str, sfx: bool, spoken_dialog: bool, reduce_music: bool, timeout: int = 400) -> str:
+def build_minimax_h3_prompt(segments: list[Segment], provider: str, model: str, api_key: str, intent: str, global_prompt: str, sfx: bool, spoken_dialog: bool, reduce_music: bool, timeout: int = 400, reference_images: list | None = None) -> str:
     """Synthesize the complete ordered timeline into one MiniMax H3 prompt."""
     if not segments:
         raise ValueError("Add at least one timeline item before exporting a MiniMax H3 prompt.")
-    inputs = _minimax_h3_inputs(segments, provider, frame_checkpoints=True)
-    rules = _minimax_h3_rules(segments, intent, global_prompt, sfx, spoken_dialog, reduce_music)
+    inputs = _minimax_frames_inputs(segments, provider, reference_images)
+    rules = _minimax_h3_rules(segments, intent, global_prompt, sfx, spoken_dialog, reduce_music, reference_images)
     raw = _provider_raw(inputs, provider, model, api_key, rules, timeout)
     return _extract_minimax_h3_prompt(raw)
 
@@ -56,21 +56,21 @@ def build_minimax_h3_reference_prompt(segments: list[Segment], provider: str, mo
     return _extract_minimax_h3_prompt(raw)
 
 
-def refine_minimax_h3_prompt(segments: list[Segment], provider: str, model: str, api_key: str, intent: str, global_prompt: str, sfx: bool, spoken_dialog: bool, reduce_music: bool, current_prompt: str, refinement_instructions: str, timeout: int = 400) -> str:
+def refine_minimax_h3_prompt(segments: list[Segment], provider: str, model: str, api_key: str, intent: str, global_prompt: str, sfx: bool, spoken_dialog: bool, reduce_music: bool, current_prompt: str, refinement_instructions: str, timeout: int = 400, reference_images: list | None = None) -> str:
     """Refine the user's edited MiniMax prompt without exposing private edit directions."""
     if not segments:
         raise ValueError("Add at least one timeline item before refining a MiniMax H3 prompt.")
     if not current_prompt.strip():
         raise ValueError("Write or generate a MiniMax H3 prompt before refining it.")
-    inputs = _minimax_h3_inputs(segments, provider, refinement=True, frame_checkpoints=True)
-    rules = _minimax_h3_rules(segments, intent, global_prompt, sfx, spoken_dialog, reduce_music)
+    inputs = _minimax_frames_inputs(segments, provider, reference_images, refinement=True)
+    rules = _minimax_h3_rules(segments, intent, global_prompt, sfx, spoken_dialog, reduce_music, reference_images)
     rules += f"""
 
 REFINEMENT MODE — FOLLOW THIS PRIORITY ORDER WHEN ANY INPUTS COMPETE:
 1. PRIVATE REFINEMENT INSTRUCTIONS are the highest-priority edit request. Apply them completely and literally wherever they target the production prompt.
 2. CURRENT EDITOR PROMPT is the authoritative creative content and current sequence state. Refine it; never rebuild it from the references.
 3. Preserve the current production-brief sections and the assigned frame checkpoint times unless the private instructions explicitly request changes.
-4. Timeline frames, videos, segment prompts, global prompt, and Director's Intent are SECONDARY CONTINUITY EVIDENCE only. Use them to verify identity, pose, environment, composition, physical plausibility, and boundary continuity without overriding items 1 or 2.
+4. Timeline frames, videos, untimed reference images, segment prompts, global prompt, and Director's Intent are SECONDARY CONTINUITY EVIDENCE only. Use them to verify identity, pose, environment, composition, physical plausibility, and boundary continuity without overriding items 1 or 2.
 
 - Make the smallest complete set of edits needed to satisfy the private refinement instructions. Preserve every deliberate user edit and every untouched passage.
 - Never replace, ignore, or reinterpret the user's current prompt merely because requested motion is not visible in a still frame or differs from reference-frame guidance.
@@ -343,32 +343,55 @@ def _minimax_h3_inputs(segments: list[Segment], provider: str = "gemini", refine
     return inputs
 
 
-def _minimax_h3_rules(segments: list[Segment], intent: str, global_prompt: str, sfx: bool, spoken_dialog: bool, reduce_music: bool) -> str:
+def _minimax_frames_inputs(segments: list[Segment], provider: str, reference_images: list | None = None, refinement: bool = False) -> list[dict]:
+    """Keep timed conditioning media separate from untimed, role-limited images."""
+    inputs = _minimax_h3_inputs(segments, provider, refinement=refinement, frame_checkpoints=True)
+    slots = reference_slots(reference_images)
+    for record in reference_inventory(segments, slots):
+        if "reference_slot" not in record:
+            continue
+        entry = {**record, "reference_mode_input": True,
+                 "image": reference_image_for_provider(slots[record["reference_slot"]]["image"])}
+        if refinement:
+            entry["guidance_priority"] = "SECONDARY CONTINUITY EVIDENCE ONLY"
+        inputs.append(entry)
+    return inputs
+
+
+def _minimax_h3_rules(segments: list[Segment], intent: str, global_prompt: str, sfx: bool, spoken_dialog: bool, reduce_music: bool, reference_images: list | None = None) -> str:
     """Build a reference-style brief with authoritative frame and interval timing."""
-    inventory = reference_inventory(segments)
+    inventory = reference_inventory(segments, reference_images)
     intervals = "\n".join(
         f"{_minimax_timestamp(record['start_time'])} - {_minimax_timestamp(record['end_time'])}: "
         f"{record['label'] or 'Text direction'} ({record['name']}); "
         f"{('end frame reached at ' + _minimax_timestamp(record['end_time'])) if record['kind'] == 'image' and record['role'] == 'end' else ('start frame at ' + _minimax_timestamp(record['start_time'])) if record['kind'] == 'image' else 'timed source video' if record['kind'] == 'video' else 'text action'}; "
         f"segment direction: {record['prompt'] or 'none supplied'}"
-        for record in inventory
+        for record in inventory if "timeline_index" in record
     )
+    references = [record for record in inventory if "reference_slot" in record]
+    reference_map = "\n".join(
+        f"{record['label']} ({record['name']}): untimed {record['role']} reference"
+        f"; notes: {record['notes'] or 'none'}"
+        for record in references
+    ) or "No untimed reference images supplied."
     return f"""Write one continuous MiniMax H3 production prompt for this Frames workflow. Inspect all supplied timeline frames, videos, and text before writing. Frame images are conditioning checkpoints in the ordered video, not untimed character or style references. A start frame anchors the beginning of its interval; an end frame is the state reached at its end. The image itself does not demonstrate motion between checkpoints.
 
 FRAME AND INTERVAL MAP (client-assigned labels and times; preserve their order):
 {intervals}
+UNTIMED REFERENCE IMAGES (use only for their selected attribute; never as conditioning checkpoints):
+{reference_map}
 Total duration: {sum(item.duration for item in segments):.3f} seconds.
 
 Use the same compact production-brief layout as References mode, adapted to conditioning frames:
-[FRAME USE] Explain which Image1/Video1 assets anchor the opening, ending, or intermediate states and how video footage contributes motion. Give no frame an untimed identity-only role.
+[FRAME USE] Explain which Image1/Video1 assets anchor the opening, ending, or intermediate states and how video footage contributes motion. Identify the two untimed images by their assigned Image labels and selected identity, wardrobe, scene, style, object, or composition role if present. Do not turn a timed frame into an untimed reference or assign an untimed image a checkpoint.
 [CONTINUITY] Specify persistent identity, camera, setting, lighting and spatial relationships while allowing the intentional changes visible across frames.
 [SCENE] State the overall setting and action.
-[TIMED ACTION] Write a continuous action path using the exact interval ranges above in `00:00:000 - 00:03:000: ...` format. Describe onset and intermediate physical motion that reaches an end frame by its assigned end time and continues from that reached state. A start frame is already present at its start time. Include text-only intervals. Compare adjacent visual states for camera, pose, anatomy, clothing, objects and setting; resolve large differences through supported motion during the intervening range. Keep video source time confined to its interval. Do not add mid-interval Frame bridge lines or repeat completed changes after a checkpoint.
+[TIMED ACTION] Write a continuous action path using the exact interval ranges above in `00:00:000 - 00:03:000: ...` format. Put each range on its own line, with a line break after every range; never join two ranges into one paragraph. Describe onset and intermediate physical motion that reaches an end frame by its assigned end time and continues from that reached state. A start frame is already present at its start time. Include text-only intervals. Compare adjacent visual states for camera, pose, anatomy, clothing, objects and setting; resolve large differences through supported motion during the intervening range. Keep video source time confined to its interval. Do not add mid-interval Frame bridge lines or repeat completed changes after a checkpoint.
 [SOUND] Include supported ambience and physical sounds, exact supplied dialogue and speaker, and music direction.
 [AVOID] Briefly name relevant discontinuities such as hard jumps, unexpected cuts, pose or camera resets.
-Omit sections with nothing useful to say. Keep the production prompt concise and under 7,000 characters. Do not output the interval map or these instructions.
+Put exactly one blank line between sections, as in the supplied example. Each section heading begins on its own line, followed by its prose or timed lines. Do not run section headings or action ranges together. Omit sections with nothing useful to say. Keep the production prompt concise and under 7,000 characters. Do not output the interval map or these instructions.
 
-Use only facts supported by the media, segment direction or user intent. Motion between stills is a proposed path, not observed footage; do not present invented events as facts. Preserve an intended continuous shot unless cuts are explicitly requested. Never relabel frames as generic reference images or impose a sentence quota.
+Use only facts supported by the media, segment direction or user intent. Motion between stills is a proposed path, not observed footage; do not present invented events as facts. Untimed references can guide only their selected attributes, never timing or the progression of a transformation. Preserve an intended continuous shot unless cuts are explicitly requested. Never relabel frames as generic reference images or impose a sentence quota.
 
 Director's intent: {intent.strip() or 'Not supplied.'}
 Global direction: {global_prompt.strip() or 'Not supplied.'}
