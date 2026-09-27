@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import base64
+import copy
 import json
 import math
+import os
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import warnings
 import zipfile
@@ -15,7 +18,7 @@ from importlib.resources import files
 from pathlib import Path
 from uuid import uuid4
 
-from PySide6.QtCore import QDateTime, QEasingCurve, QObject, QRunnable, QRectF, QSettings, QSize, QStandardPaths, Qt, QThreadPool, QTimer, QUrl, QVariantAnimation, Signal
+from PySide6.QtCore import QDateTime, QEasingCurve, QObject, QRunnable, QRectF, QSettings, QSize, QStandardPaths, Qt, QThreadPool, QTimer, QUrl, QVariantAnimation, Signal, Slot
 from PySide6.QtGui import QAction, QActionGroup, QBrush, QColor, QIcon, QImageReader, QPainter, QPen, QPixmap
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
@@ -35,6 +38,7 @@ from .minimax_reference import WORKFLOW_NAMES, detect_workflow, reference_invent
 from .minimax_reference_widgets import MiniMaxReferenceSlot
 from .models import Segment, order_segments_by_ids, text_segment_from_ltx
 from .project_data import ARCHIVE_COLOR, load_other_tags, load_project_tags, new_note, normalize_notes, normalize_project_labels
+from .spellcheck import install_spellcheck
 
 FPS = 24
 MIN_DURATION = 0.01
@@ -206,6 +210,139 @@ class MagicWorker(QRunnable):
                     time.sleep(1)
                 if self.retry_cooldown == 0:
                     self.signals.progress.emit(attempt + 1, attempts, f"{retry_subject}—retrying now…")
+
+
+class BackgroundWorker(QRunnable):
+    """Run disk work off the GUI thread; deliver results via Qt queued signals."""
+
+    def __init__(self, operation, args: tuple):
+        super().__init__()
+        self.operation = operation
+        self.args = args
+        self.signals = WorkerSignals()
+
+    def run(self) -> None:
+        try:
+            self.signals.finished.emit(self.operation(*self.args))
+        except Exception as error:
+            self.signals.failed.emit(str(error))
+
+
+class BackgroundCallbacks(QObject):
+    def __init__(self, owner, finished, failed):
+        super().__init__(owner)
+        self.owner = owner
+        self.finished = finished
+        self.failed = failed
+
+    @Slot(object)
+    def on_finished(self, result):
+        self._complete(self.finished, result)
+
+    @Slot(str)
+    def on_failed(self, message):
+        self.owner._close_after_jobs = False
+        self._complete(self.failed, message)
+
+    def _complete(self, callback, result):
+        self.owner._pending_disk_jobs -= 1
+        try:
+            callback(result)
+        finally:
+            if self.owner._close_after_jobs and not self.owner._pending_disk_jobs:
+                QTimer.singleShot(0, self.owner.close)
+            self.deleteLater()
+
+
+def _write_library_archive(path: str, payload: dict, segments: list[Segment], metadata_path: Path, meta: dict) -> None:
+    save_project_archive(path, payload, segments)
+    metadata_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+
+
+def _prepare_media_batch(paths: list[str]) -> tuple[list[tuple[str, str, str, int | None, int | None]], list[str]]:
+    prepared, errors = [], []
+    for path in paths:
+        try:
+            kind, preview, frames, trim = prepare_media(path)
+            prepared.append((path, kind, preview, frames, trim))
+        except Exception as error:
+            errors.append(f"{Path(path).name}: {error}")
+    return prepared, errors
+
+
+def _persist_library_archive(meta: dict, metadata_path: Path) -> None:
+    """Serialize metadata writes after archive saves to avoid concurrent ZIP mutations."""
+    metadata_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    project_path = Path(meta.get("projectPath", ""))
+    if project_path.is_file() and zipfile.is_zipfile(project_path):
+        with zipfile.ZipFile(project_path, "a") as archive:
+            payload = json.loads(archive.read("project.json"))
+            payload["library"] = {key: meta.get(key, "") for key in ("id", "name", "description", "collection", "savedAt", "status", "tags", "tag", "archived", "notes", "previewVideoPath", "previewVideoName", "projectFiles", "workflowFiles")}
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", UserWarning)
+                archive.writestr("project.json", json.dumps(payload, separators=(",", ":")))
+    elif project_path.is_file() and project_path.stat().st_size < 1024 * 1024:
+        payload = json.loads(project_path.read_text(encoding="utf-8"))
+        payload["library"] = {key: meta.get(key, "") for key in ("id", "name", "description", "collection", "savedAt", "status", "tags", "tag", "archived", "notes", "previewVideoPath", "previewVideoName", "projectFiles", "workflowFiles")}
+        project_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+def _export_ltx_snapshot(segments: list[Segment], global_prompt: str, output_width: int, output_height: int,
+                         media_directory: Path, path: str) -> None:
+    """Prepare full-resolution ComfyUI media and JSON away from the GUI thread."""
+    media_directory.mkdir(parents=True, exist_ok=True)
+    cursor = 0
+    timeline = []
+    audio_timeline = []
+    used_media_names: set[str] = set()
+    for segment in segments:
+        start = cursor
+        length = max(1, round(segment.duration * FPS))
+        record = {"id": segment.id, "type": segment.kind, "start": start, "length": length, "prompt": segment.prompt, "isEndFrame": False if segment.kind == "text" else segment.role == "end"}
+        if segment.kind != "text":
+            source = Path(materialize_source(segment))
+            record.update({"imageFile": str(source), "fileName": segment.name,
+                           "fileSize": source.stat().st_size if source.exists() else 0,
+                           "imageB64": data_url(segment.preview_path) if segment.preview_path else ""})
+            if segment.kind == "image" and source.exists():
+                image_path = copy_media_for_export(str(source), segment.name, media_directory, used_media_names, "image")
+                image_file, image_preview = comfy_input_references(image_path.name)
+                record.update({"imageFile": image_file, "imageB64": image_preview})
+                record.pop("fileName", None)
+                record.pop("fileSize", None)
+            elif segment.kind == "video":
+                record.update({"trimStart": segment.trim_start or 0, "videoDurationFrames": segment.media_duration_frames or length})
+                if source.exists():
+                    video_path = copy_media_for_export(str(source), segment.name, media_directory, used_media_names, "video")
+                    video_name = video_path.name
+                    video_file, _ = comfy_input_references(video_name)
+                    record.update({"imageFile": video_file, "fileName": video_name, "fileSize": video_path.stat().st_size})
+                    record["videoB64"] = data_url(str(video_path))
+                    audio_name = unique_media_filename(f"{video_path.stem}_extracted_audio.wav", used_media_names)
+                    audio_path = media_directory / audio_name
+                    try:
+                        audio_duration_frames, peaks = extract_audio_for_export(str(video_path), audio_path, FPS)
+                    except ValueError:
+                        pass
+                    else:
+                        audio_file, _ = comfy_input_references(audio_name)
+                        audio_timeline.append({
+                            "id": f"{segment.id}_a", "type": "audio", "start": start,
+                            "length": length, "trimStart": segment.trim_start or 0,
+                            "audioDurationFrames": audio_duration_frames,
+                            "audioFile": audio_file, "fileName": video_name,
+                            "waveformPeaks": peaks, "fileSize": audio_path.stat().st_size,
+                        })
+        timeline.append(record)
+        cursor += length
+    payload = {"version": 1, "settings": {"start_second": 0, "end_second": cursor / FPS, "duration_seconds": cursor / FPS, "start_frame": 0, "end_frame": cursor, "duration_frames": cursor, "epsilon": .99, "use_custom_audio": bool(audio_timeline), "use_custom_motion": False, "inpaint_audio": True, "frame_rate": FPS, "display_mode": "seconds", "custom_width": output_width, "custom_height": output_height, "resize_method": "crop", "divisible_by": 32, "img_compression": 0, "override_audio": False}, "global_prompt": global_prompt, "retake_global_prompt": "", "timeline": {"mainTrackEnabled": True, "audioTrackEnabled": bool(audio_timeline), "motionTrackEnabled": False, "showFilenames": True, "overrideAudio": False, "inpaint_audio": True, "propHeight": 163, "globalPropHeight": 124, "global_prompt": global_prompt, "retake_global_prompt": "", "retakeMode": False, "retakeStart": 0, "retakeLength": 0, "retakePrompt": "", "retakeStrength": 1, "retakeVideo": None, "normalStartFrame": 0, "normalDurationFrames": cursor, "segments": timeline, "motionSegments": [], "audioSegments": audio_timeline}}
+    temporary_fd, temporary_name = tempfile.mkstemp(prefix=f".{Path(path).name}.", suffix=".tmp", dir=Path(path).parent)
+    try:
+        with os.fdopen(temporary_fd, "w", encoding="utf-8") as output:
+            json.dump(payload, output, indent=2)
+        os.replace(temporary_name, path)
+    finally:
+        Path(temporary_name).unlink(missing_ok=True)
 
 
 class TimelineListWidget(QListWidget):
@@ -1856,6 +1993,7 @@ class ProjectDetailsDialog(QDialog):
         self.name.setPlaceholderText("Project name")
         self.name.setText(name)
         self.description = QTextEdit()
+        install_spellcheck(self.description)
         self.description.setPlaceholderText("Short description shown in the project library")
         self.description.setPlainText(suggested_description[:240])
         self.description.setFixedHeight(90)
@@ -2067,6 +2205,7 @@ class ProjectPropertiesPanel(QWidget):
         form = QFormLayout()
         self.name = QLineEdit()
         self.description = QTextEdit()
+        install_spellcheck(self.description)
         self.description.setMaximumHeight(80)
         self.collection = QLineEdit()
         self.status = QComboBox()
@@ -2444,9 +2583,20 @@ class MainWindow(QMainWindow):
         self._pending_project_id: str | None = None
         self.timeline_height = max(184, min(430, self.settings.value("timeline_panel_height", 184, int)))
         self.thread_pool = QThreadPool.globalInstance()
+        self.disk_pool = QThreadPool(self)
+        self.disk_pool.setMaxThreadCount(1)
+        self.media_pool = QThreadPool(self)
+        self.media_pool.setMaxThreadCount(2)
+        self._edit_serial = 0
+        self._latest_save_id = {}
+        self._pending_disk_jobs = 0
+        self._close_after_jobs = False
+        self._open_serial = 0
         self._loading = False
         self.setDockNestingEnabled(True)
         self._build_ui()
+        for editor in self.findChildren(QTextEdit):
+            install_spellcheck(editor)
         self._apply_theme()
         self.magic_overlay = MagicBuildOverlay(self)
         geometry = self.settings.value("window/geometry")
@@ -3829,19 +3979,9 @@ class MainWindow(QMainWindow):
         normalize_project_labels(clean)
         root = project_library_path()
         (root / f"{clean['id']}.meta.json").write_text(json.dumps(clean, indent=2), encoding="utf-8")
-        project_path = Path(clean.get("projectPath", ""))
-        if project_path.is_file() and zipfile.is_zipfile(project_path):
-            with zipfile.ZipFile(project_path, "a") as archive:
-                payload = json.loads(archive.read("project.json"))
-                payload["library"] = {key: clean.get(key, "") for key in ("id", "name", "description", "collection", "savedAt", "status", "tags", "tag", "archived", "notes", "previewVideoPath", "previewVideoName", "projectFiles", "workflowFiles")}
-                with warnings.catch_warnings():
-                    warnings.simplefilter("ignore", UserWarning)
-                    archive.writestr("project.json", json.dumps(payload, separators=(",", ":")))
-        elif project_path.is_file() and project_path.stat().st_size < 1024 * 1024:
-            # Large legacy JSON files are migrated on the next project save.
-            payload = json.loads(project_path.read_text(encoding="utf-8"))
-            payload["library"] = {key: clean.get(key, "") for key in ("id", "name", "description", "collection", "savedAt", "status", "tags", "tag", "archived", "notes", "previewVideoPath", "previewVideoName", "projectFiles", "workflowFiles")}
-            project_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        self.start_disk_job(_persist_library_archive, (copy.deepcopy(clean), root / f"{clean['id']}.meta.json"),
+                            lambda _result: None,
+                            lambda message: QMessageBox.warning(self, "Project metadata save failed", message), serialized=True)
         if getattr(self, "project_properties_panel", None) and str(clean["id"]) == self.current_project_id:
             self.project_properties_panel.set_project(clean)
 
@@ -4032,20 +4172,35 @@ class MainWindow(QMainWindow):
         payload = self.project_payload(include_media=False)
         normalize_project_labels(meta)
         payload["library"] = {key: meta.get(key, "") for key in ("id", "name", "description", "collection", "savedAt", "status", "tags", "tag", "archived", "notes", "previewVideoPath", "previewVideoName", "projectFiles", "workflowFiles")}
-        save_project_archive(meta["projectPath"], payload, self.segments)
-        (root / f"{meta['id']}.meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
-        self.project_dirty = False
-        self.project_sessions[str(meta["id"])] = {
-            "name": self.current_project_name,
-            "dirty": False,
-            "state": self.capture_workspace_state(),
-        }
-        self.refresh_project_library(meta["id"])
-        self.update_project_preview()
-        self.project_dock.show()
-        self.settings.setValue("last_project_id", str(meta["id"]))
-        self.queue_settings_sync()
-        self.statusBar().showMessage(f"Project saved to library: {meta['name']}")
+        project_id = str(meta["id"])
+        save_id = uuid4().hex
+        self._latest_save_id[project_id] = save_id
+        edit_serial = self._edit_serial
+        snapshot = copy.deepcopy(self.segments)
+        workspace = self.capture_workspace_state()
+        self.statusBar().showMessage(f"Saving project in background: {meta['name']}…")
+
+        def saved(_result):
+            if self._latest_save_id.get(project_id) != save_id:
+                return
+            if self.current_project_id == project_id and self._edit_serial == edit_serial:
+                self.project_dirty = False
+                self.project_sessions[project_id] = {"name": meta["name"], "dirty": False, "state": workspace}
+            self.refresh_project_library(project_id)
+            self.update_project_preview()
+            self.project_dock.show()
+            self.settings.setValue("last_project_id", project_id)
+            self.queue_settings_sync()
+            self.statusBar().showMessage(f"Project saved to library: {meta['name']}")
+
+        def failed(message):
+            self._close_after_jobs = False
+            self.mark_dirty()
+            QMessageBox.critical(self, "Save failed", message)
+
+        self.start_disk_job(_write_library_archive,
+                            (str(meta["projectPath"]), payload, snapshot, root / f"{project_id}.meta.json", copy.deepcopy(meta)),
+                            saved, failed, serialized=True)
 
     def open_library_project(self, checked: bool = False, project_id: str | None = None) -> None:
         self._project_open_timer.stop()
@@ -4057,40 +4212,55 @@ class MainWindow(QMainWindow):
         if not meta:
             return
         if meta.get("kind") == "collection":
+            self._open_serial += 1
             self.current_collection = str(meta["name"])
             self.project_search.clear()
             self.refresh_project_library(preserve_scroll=False)
             return
         project_id = str(meta["id"])
         if project_id == self.current_project_id:
+            self._open_serial += 1
             return
+        self._open_serial += 1
+        request = self._open_serial
         self.cache_current_workspace()
-        try:
-            session = self.project_sessions.get(project_id)
-            if session and session.get("state"):
-                self.restore_workspace_state(session["state"])
-                dirty = bool(session.get("dirty"))
-            else:
-                payload = read_project(meta["projectPath"])
-                self.load_project_payload(payload)
-                dirty = False
-            self.current_project_id = project_id
-            self.current_project_name = str(meta["name"])
-            self.project_dirty = dirty
-            self.project_sessions[project_id] = {
-                "name": self.current_project_name,
-                "dirty": dirty,
-                "state": self.capture_workspace_state(),
-            }
-            self.update_window_title()
-            self.refresh_project_library(project_id)
-            self.update_project_preview()
-            self.settings.setValue("last_project_id", project_id)
-            self.queue_settings_sync()
-            self.statusBar().showMessage(f"Project opened: {meta['name']}")
-        except Exception as error:
-            self._loading = False
-            QMessageBox.critical(self, "Project open failed", str(error))
+
+        def apply_project(payload=None):
+            if request != self._open_serial:
+                return
+            try:
+                session = self.project_sessions.get(project_id)
+                if payload is None and session and session.get("state"):
+                    self.restore_workspace_state(session["state"])
+                    dirty = bool(session.get("dirty"))
+                else:
+                    self.load_project_payload(payload)
+                    dirty = False
+                self.current_project_id = project_id
+                self.current_project_name = str(meta["name"])
+                self.project_dirty = dirty
+                self.project_sessions[project_id] = {
+                    "name": self.current_project_name,
+                    "dirty": dirty,
+                    "state": self.capture_workspace_state(),
+                }
+                self.update_window_title()
+                self.refresh_project_library(project_id)
+                self.update_project_preview()
+                self.settings.setValue("last_project_id", project_id)
+                self.queue_settings_sync()
+                self.statusBar().showMessage(f"Project opened: {meta['name']}")
+            except Exception as error:
+                self._loading = False
+                QMessageBox.critical(self, "Project open failed", str(error))
+
+        session = self.project_sessions.get(project_id)
+        if session and session.get("state"):
+            apply_project()
+            return
+        self.statusBar().showMessage(f"Opening project in background: {meta['name']}…")
+        self.start_disk_job(read_project, (meta["projectPath"],), apply_project,
+                            lambda message: QMessageBox.critical(self, "Project open failed", message))
 
     def delete_library_project(self) -> None:
         meta = self.selected_library_project()
@@ -4193,6 +4363,11 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         self.save_minimax_prompt_on_close()
+        if self._pending_disk_jobs:
+            self._close_after_jobs = True
+            self.statusBar().showMessage("Finishing background file operations before closing…")
+            event.ignore()
+            return
         if hasattr(self, "project_preview_panel"):
             self.project_preview_panel.player.stop()
             if self.project_preview_panel.fullscreen_window.isVisible():
@@ -4218,6 +4393,7 @@ class MainWindow(QMainWindow):
 
     def mark_dirty(self, *_args) -> None:
         if not self._loading:
+            self._edit_serial += 1
             was_dirty = self.project_dirty
             self.project_dirty = True
             if self.current_project_id:
@@ -4227,6 +4403,7 @@ class MainWindow(QMainWindow):
                     self.refresh_project_library(self.current_project_id)
 
     def new_project(self) -> None:
+        self._open_serial += 1
         if self.current_project_id:
             self.cache_current_workspace()
         elif self.segments and self.project_dirty:
@@ -4405,20 +4582,29 @@ class MainWindow(QMainWindow):
         if not paths:
             return
         self.settings.setValue("last_media_dir", str(Path(paths[0]).parent))
-        added = 0
         target = len(self.segments) if insert_index is None else max(0, min(insert_index, len(self.segments)))
-        for path in paths:
-            try:
-                kind, preview, frames, trim = prepare_media(path)
+        before_id = self.segments[target].id if target < len(self.segments) else None
+        workspace = (self.workspace_revision, self.current_project_id)
+        self.statusBar().showMessage(f"Preparing {len(paths)} media file(s) in background…")
+
+        def ready(result):
+            if workspace != (self.workspace_revision, self.current_project_id):
+                return
+            prepared, errors = result
+            index = next((i for i, segment in enumerate(self.segments) if segment.id == before_id), len(self.segments))
+            for path, kind, preview, frames, trim in prepared:
                 duration = 1.0 if kind == "video" else 5.0
-                self.segments.insert(target, Segment(Path(path).name, path, preview, kind, "end" if target % 2 else "start", duration=duration, media_duration_frames=frames, trim_start=trim))
-                target += 1
-                added += 1
-            except Exception as error:
-                QMessageBox.warning(self, "Media error", f"{Path(path).name}: {error}")
-        self.mark_dirty()
-        self.refresh_timeline(max(0, target - 1))
-        self.statusBar().showMessage(f"Added {added} media file{'s' if added != 1 else ''}")
+                self.segments.insert(index, Segment(Path(path).name, path, preview, kind, "end" if index % 2 else "start", duration=duration, media_duration_frames=frames, trim_start=trim))
+                index += 1
+            if prepared:
+                self.mark_dirty()
+                self.refresh_timeline(max(0, index - 1))
+            if errors:
+                QMessageBox.warning(self, "Media error", "\n".join(errors))
+            self.statusBar().showMessage(f"Added {len(prepared)} media file{'s' if len(prepared) != 1 else ''}")
+
+        self.start_disk_job(_prepare_media_batch, (paths,), ready,
+                            lambda message: QMessageBox.warning(self, "Media error", message))
 
     def refresh_timeline(self, selected: int = 0) -> None:
         self.autofit_tail_extension = 0
@@ -4963,6 +5149,15 @@ class MainWindow(QMainWindow):
         worker.signals.finished.connect(self.ai_result_received)
         worker.signals.failed.connect(self.ai_failure_received)
         self.thread_pool.start(worker)
+
+    def start_disk_job(self, operation, args: tuple, finished, failed, *, serialized: bool = False) -> None:
+        """Execute filesystem work without touching widgets outside the GUI thread."""
+        worker = BackgroundWorker(operation, args)
+        self._pending_disk_jobs += 1
+        callbacks = BackgroundCallbacks(self, finished, failed)
+        worker.signals.finished.connect(callbacks.on_finished)
+        worker.signals.failed.connect(callbacks.on_failed)
+        (self.disk_pool if serialized else self.media_pool).start(worker)
 
     def ai_request_is_current(self) -> bool:
         return getattr(self, "ai_request_workspace", None) == (self.workspace_revision, self.current_project_id, self.project_type)
@@ -5565,12 +5760,6 @@ class MainWindow(QMainWindow):
         comfy_root = self.resolve_comfy_root()
         if comfy_root is None:
             return
-        media_directory = comfy_root / "input" / "whatdreamscost"
-        try:
-            media_directory.mkdir(parents=True, exist_ok=True)
-        except OSError as error:
-            QMessageBox.critical(self, "Export failed", f"Could not create the ComfyUI input directory:\n{error}")
-            return
         directory = Path(self.settings.value("last_document_dir", str(Path.home())))
         export_name = safe_media_filename(f"{self.current_project_name}.json", "Untitled")
         path = choose_document_save(self, "Export", str(directory / export_name), "LTX Director JSON (*.json)")
@@ -5581,61 +5770,13 @@ class MainWindow(QMainWindow):
         selected_path = Path(path)
         path = str(selected_path.with_name(safe_media_filename(selected_path.name, "Untitled")))
         self.settings.setValue("last_document_dir", str(Path(path).parent))
-        cursor = 0
-        timeline = []
-        audio_timeline = []
-        used_media_names: set[str] = set()
-        for segment in self.segments:
-            start = cursor
-            length = max(1, round(segment.duration * FPS))
-            record = {"id": segment.id, "type": segment.kind, "start": start, "length": length, "prompt": segment.prompt, "isEndFrame": False if segment.kind == "text" else segment.role == "end"}
-            if segment.kind != "text":
-                source = Path(materialize_source(segment))
-                record.update({"imageFile": str(source), "fileName": segment.name, "fileSize": source.stat().st_size if source.exists() else 0, "imageB64": data_url(str(source) if segment.kind == "image" and source.is_file() else segment.preview_path)})
-                if segment.kind == "image" and source.exists():
-                    try:
-                        image_path = copy_media_for_export(str(source), segment.name, media_directory, used_media_names, "image")
-                    except OSError as error:
-                        QMessageBox.critical(self, "Export failed", f"Could not copy {segment.name} to the ComfyUI input directory:\n{error}")
-                        return
-                    image_file, image_preview = comfy_input_references(image_path.name)
-                    record.update({"imageFile": image_file, "imageB64": image_preview})
-                    record.pop("fileName", None)
-                    record.pop("fileSize", None)
-                elif segment.kind == "video":
-                    record.update({"trimStart": segment.trim_start or 0, "videoDurationFrames": segment.media_duration_frames or length})
-                    if source.exists():
-                        try:
-                            video_path = copy_media_for_export(str(source), segment.name, media_directory, used_media_names, "video")
-                        except OSError as error:
-                            QMessageBox.critical(self, "Export failed", f"Could not copy {segment.name} to the ComfyUI input directory:\n{error}")
-                            return
-                        video_name = video_path.name
-                        video_file, _ = comfy_input_references(video_name)
-                        record.update({"imageFile": video_file, "fileName": video_name, "fileSize": video_path.stat().st_size})
-                        record["videoB64"] = data_url(str(video_path))
-                        audio_name = unique_media_filename(f"{video_path.stem}_extracted_audio.wav", used_media_names)
-                        audio_path = media_directory / audio_name
-                        try:
-                            audio_duration_frames, peaks = extract_audio_for_export(str(video_path), audio_path, FPS)
-                        except ValueError:
-                            pass
-                        else:
-                            audio_file, _ = comfy_input_references(audio_name)
-                            audio_timeline.append({
-                                "id": f"{segment.id}_a", "type": "audio", "start": start,
-                                "length": length, "trimStart": segment.trim_start or 0,
-                                "audioDurationFrames": audio_duration_frames,
-                                "audioFile": audio_file, "fileName": video_name,
-                                "waveformPeaks": peaks, "fileSize": audio_path.stat().st_size,
-                            })
-            timeline.append(record)
-            cursor += length
-        global_prompt = self.global_prompt.toPlainText()
         self.normalize_output_dimensions()
-        payload = {"version": 1, "settings": {"start_second": 0, "end_second": cursor / FPS, "duration_seconds": cursor / FPS, "start_frame": 0, "end_frame": cursor, "duration_frames": cursor, "epsilon": .99, "use_custom_audio": bool(audio_timeline), "use_custom_motion": False, "inpaint_audio": True, "frame_rate": FPS, "display_mode": "seconds", "custom_width": self.output_width.value(), "custom_height": self.output_height.value(), "resize_method": "crop", "divisible_by": 32, "img_compression": 0, "override_audio": False}, "global_prompt": global_prompt, "retake_global_prompt": "", "timeline": {"mainTrackEnabled": True, "audioTrackEnabled": bool(audio_timeline), "motionTrackEnabled": False, "showFilenames": True, "overrideAudio": False, "inpaint_audio": True, "propHeight": 163, "globalPropHeight": 124, "global_prompt": global_prompt, "retake_global_prompt": "", "retakeMode": False, "retakeStart": 0, "retakeLength": 0, "retakePrompt": "", "retakeStrength": 1, "retakeVideo": None, "normalStartFrame": 0, "normalDurationFrames": cursor, "segments": timeline, "motionSegments": [], "audioSegments": audio_timeline}}
-        Path(path).write_text(json.dumps(payload, indent=2), encoding="utf-8")
-        self.statusBar().showMessage(f"LTX Director export saved: {path}")
+        self.statusBar().showMessage(f"Exporting LTX Director JSON in background: {path}…")
+        self.start_disk_job(_export_ltx_snapshot,
+                            (copy.deepcopy(self.segments), self.global_prompt.toPlainText(),
+                             self.output_width.value(), self.output_height.value(), comfy_root / "input" / "whatdreamscost", path),
+                            lambda _result: self.statusBar().showMessage(f"LTX Director export saved: {path}"),
+                            lambda message: QMessageBox.critical(self, "Export failed", message), serialized=True)
 
     def resolve_comfy_root(self) -> Path | None:
         configured = str(self.settings.value("comfy_root_dir", "") or "").strip()
@@ -5855,24 +5996,41 @@ class MainWindow(QMainWindow):
             path += ".LTXD"
         self.settings.setValue("last_document_dir", str(Path(path).parent))
         payload = self.project_payload(include_media=False)
-        save_project_archive(path, payload, self.segments)
-        self.project_dirty = False
-        self.statusBar().showMessage(f"Project saved: {path}")
+        serial = self._edit_serial
+        project_id = self.current_project_id
+        self.statusBar().showMessage(f"Saving project in background: {path}…")
+
+        def saved(_result):
+            if self.current_project_id == project_id and self._edit_serial == serial:
+                self.project_dirty = False
+            self.statusBar().showMessage(f"Project saved: {path}")
+
+        self.start_disk_job(save_project_archive, (path, payload, copy.deepcopy(self.segments)), saved,
+                            lambda message: QMessageBox.critical(self, "Save failed", message), serialized=True)
 
     def open_project(self, checked: bool = False, path: str | None = None) -> None:
         path = path or choose_document_open(self, "Open Project", self.settings.value("last_document_dir", str(Path.home())), "LTX Director - Director Project (*.LTXD *.ltxd)")
         if not path:
             return
         self.settings.setValue("last_document_dir", str(Path(path).parent))
-        try:
-            payload = read_project(path)
-            self.load_project_payload(payload)
-            self.current_project_id = None
-            self.current_project_name = Path(path).stem
-            self.update_window_title()
-            self.project_dirty = False
-            self.save_library_project(automatic=True, source_filename=Path(path).name)
-            self.statusBar().showMessage(f"Opened and added to Project Library: {self.current_project_name}")
-        except Exception as error:
-            self._loading = False
-            QMessageBox.critical(self, "Open project failed", str(error))
+        self._open_serial += 1
+        request = self._open_serial
+        self.statusBar().showMessage(f"Opening project in background: {Path(path).name}…")
+
+        def opened(payload):
+            if request != self._open_serial:
+                return
+            try:
+                self.load_project_payload(payload)
+                self.current_project_id = None
+                self.current_project_name = Path(path).stem
+                self.update_window_title()
+                self.project_dirty = False
+                self.save_library_project(automatic=True, source_filename=Path(path).name)
+                self.statusBar().showMessage(f"Opened and added to Project Library: {self.current_project_name}")
+            except Exception as error:
+                self._loading = False
+                QMessageBox.critical(self, "Open project failed", str(error))
+
+        self.start_disk_job(read_project, (path,), opened,
+                            lambda message: QMessageBox.critical(self, "Open project failed", message))

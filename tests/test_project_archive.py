@@ -3,6 +3,7 @@ import io
 import json
 import os
 import tempfile
+import time
 import unittest
 import zipfile
 import subprocess
@@ -112,6 +113,11 @@ class ProjectArchiveTests(unittest.TestCase):
             output = root / 'ltx.json'
             with patch.object(loaded, 'resolve_comfy_root', return_value=root), patch.object(ui, 'choose_document_save', return_value=str(output)):
                 loaded.export_ltx()
+                deadline = time.monotonic() + 10
+                while loaded._pending_disk_jobs and time.monotonic() < deadline:
+                    self.app.processEvents()
+                    time.sleep(0.01)
+            self.assertEqual(loaded._pending_disk_jobs, 0)
             exported = json.loads(output.read_text(encoding='utf-8'))
             self.assertIn(base64.b64encode(video.read_bytes()).decode(), str(exported))
             self.assertEqual(Path(materialize_source(loaded.segments[0])).read_bytes(), video.read_bytes())

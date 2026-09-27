@@ -127,10 +127,10 @@ Write a compact production brief with these sections:
 [REFERENCE USE] Explain each asset's permitted contribution. Use the exact Image1/Video1 labels in the asset map. Untimed images have no checkpoint or duration.
 [CONTINUITY] State the attributes that must persist; allow intentional changes in the timeline.
 [SCENE] State the requested setting and action.
-[TIMED ACTION] Use time ranges for the major beats, with visible motion, camera behavior and a reached end state. Maintain spatial relationships and ongoing movement across ranges.
+[TIMED ACTION] Use 24 fps non-drop-frame SMPTE HH:MM:SS:FF time ranges for the major beats (e.g. `00:00:00:00 - 00:00:03:00:`). FF means frames 00–23, not milliseconds; round supplied seconds to the nearest frame. Put each range on a separate line, with visible motion, camera behavior and a reached end state. Maintain spatial relationships and ongoing movement across ranges.
 [SOUND] Include requested ambience, effects, exact dialogue with named speakers, and the music direction.
 [AVOID] Briefly name relevant continuity failures.
-Omit empty sections. Keep the production prompt concise and comfortably under 7,000 characters.
+Place exactly one blank line between sections, each heading on its own line. Omit empty sections. Keep the production prompt concise and comfortably under 7,000 characters.
 
 Apply these project semantics:
 - Read the entire timeline before writing. Preserve its chronological progression and total duration.

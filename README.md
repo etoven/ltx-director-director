@@ -1,6 +1,6 @@
 # LTX Director - Director
 
-**Experimental 1.13.0a4 — unified project workflows and faster projects.** This branch uses one shared prompt editor for LTX and MiniMax, portable project archives, a disk thumbnail cache, and a dockable Project Properties panel. See [workflow behavior and experimental installation](docs/unified-workflows.md) and [project performance and properties](docs/performance-and-properties.md). Stable `main` remains on 1.12.57.
+**Experimental 1.13.0a5 — unified project workflows and faster projects.** This branch uses one shared prompt editor for LTX and MiniMax, portable project archives, a disk thumbnail cache, and a dockable Project Properties panel. See [workflow behavior and experimental installation](docs/unified-workflows.md) and [project performance and properties](docs/performance-and-properties.md). Stable `main` remains on 1.12.57.
 
 **LTX Director - Director** is a native companion app for the [LTXDirector custom node for ComfyUI](https://github.com/WhatDreamsCost/WhatDreamsCost-ComfyUI). Its primary purpose is to prepare image, WebM, and MP4 timelines outside ComfyUI, use Gemini or OpenAI to build LTX Video 2.3 prompts, and export the finished sequence directly into LTXDirector.
 
@@ -71,6 +71,9 @@ In short: use **Project Export** for lossless editing and safekeeping; use **LTX
 - LTX Director-compatible JSON import/export
 - Complete portable project import/export, including embedded media
 - Low-resolution segment previews in the operating system cache, with original media loaded from the portable project only when needed
+- Background media preparation, portable project reads and saves, metadata updates, and LTX JSON export keep the editor responsive during disk work
+- Inline spell checking in prompt, intent, refinement, and project-description text boxes using installed system dictionaries
+- MiniMax production briefs with readable sections and 24 fps non-drop-frame SMPTE time ranges
 - Dockable Project Properties for editing project name, status, tags, and tasks alongside the timeline
 - Searchable, resizable local project library with selectable thumbnail sizes, a responsive wrapping grid, collection folders, title sorting, and stable custom drag ordering
 - Automatic Custom-sort activation when a project tile is dragged

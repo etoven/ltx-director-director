@@ -3,6 +3,7 @@ import io
 import json
 import os
 import tempfile
+import time
 import unittest
 import zipfile
 from pathlib import Path
@@ -27,6 +28,11 @@ class PropertiesCacheTests(unittest.TestCase):
             self.addCleanup(window.close)
             window.segments = [Segment('Beat', '', '', kind='text', prompt='Motion')]
             window.save_library_project(automatic=True)
+            deadline = time.monotonic() + 10
+            while window._pending_disk_jobs and time.monotonic() < deadline:
+                self.app.processEvents()
+                time.sleep(0.01)
+            self.assertEqual(window._pending_disk_jobs, 0)
             project = Path(folder) / f'{window.current_project_id}.LTXD'
             size_before = project.stat().st_size
             previous = window.settings.value('project_other_tags', '')
@@ -44,6 +50,11 @@ class PropertiesCacheTests(unittest.TestCase):
             panel.commit_note()
             self.assertEqual(len(panel.notes), 1)
             panel.set_note_checked(panel.notes[0]['id'], True)
+            deadline = time.monotonic() + 10
+            while window._pending_disk_jobs and time.monotonic() < deadline:
+                self.app.processEvents()
+                time.sleep(0.01)
+            self.assertEqual(window._pending_disk_jobs, 0)
             meta = window.current_library_metadata()
             self.assertEqual(meta['status'], 'Done')
             self.assertEqual(meta['tags'], ['Review', 'Needs Foley'])
@@ -56,6 +67,10 @@ class PropertiesCacheTests(unittest.TestCase):
             meta['name'] = 'Renamed in dialog'
             window.persist_library_metadata(meta)
             self.assertEqual(panel.name.text(), 'Renamed in dialog')
+            deadline = time.monotonic() + 10
+            while window._pending_disk_jobs and time.monotonic() < deadline:
+                self.app.processEvents()
+                time.sleep(0.01)
 
     def test_stale_cache_dialog_reports_progress_and_writes_marker(self):
         with tempfile.TemporaryDirectory() as folder:

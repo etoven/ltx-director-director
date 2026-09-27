@@ -1,0 +1,94 @@
+"""Inline spell checking for Qt text boxes using installed system dictionaries."""
+from __future__ import annotations
+
+import re
+from functools import lru_cache
+
+from PySide6.QtCore import QLocale, Qt
+from PySide6.QtGui import QColor, QSyntaxHighlighter, QTextCharFormat, QTextCursor
+from PySide6.QtWidgets import QTextEdit
+
+try:
+    import enchant
+except (ImportError, OSError):
+    enchant = None
+
+
+WORDS = re.compile(r"[^\W\d_]+(?:['’][^\W\d_]+)*", re.UNICODE)
+
+
+@lru_cache(maxsize=1)
+def system_dictionary():
+    if enchant is None:
+        return None
+    try:
+        locale = QLocale.system().name()
+        candidates = (locale, locale.split('_')[0]) if locale not in ('C', 'POSIX') else ('en_US',)
+        return next((enchant.Dict(tag) for tag in candidates if enchant.dict_exists(tag)), None)
+    except (enchant.Error, OSError):
+        return None
+
+
+class SpellHighlighter(QSyntaxHighlighter):
+    def __init__(self, editor: QTextEdit, dictionary):
+        super().__init__(editor.document())
+        self.dictionary = dictionary
+        self._known: dict[str, bool] = {}
+        self._format = QTextCharFormat()
+        self._format.setUnderlineStyle(QTextCharFormat.UnderlineStyle.SpellCheckUnderline)
+        self._format.setUnderlineColor(QColor('#e98686'))
+
+    def misspelled(self, word: str) -> bool:
+        if len(word) < 3 or word.isupper():
+            return False
+        key = word.casefold()
+        if key not in self._known:
+            self._known[key] = not self.dictionary.check(word)
+        return self._known[key]
+
+    def highlightBlock(self, text: str) -> None:
+        for match in WORDS.finditer(text):
+            if self.misspelled(match.group()):
+                self.setFormat(match.start(), len(match.group()), self._format)
+
+    def accept(self, word: str) -> None:
+        self.dictionary.add_to_session(word)
+        self._known.clear()
+        self.rehighlight()
+
+
+def install_spellcheck(editor: QTextEdit) -> SpellHighlighter | None:
+    """Decorate an existing text box; preserve Qt editing and the plain text."""
+    if getattr(editor, '_spell_highlighter', None):
+        return editor._spell_highlighter
+    dictionary = system_dictionary()
+    if dictionary is None:
+        return None
+    highlighter = SpellHighlighter(editor, dictionary)
+    editor._spell_highlighter = highlighter
+    editor.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+
+    def menu_at(point):
+        cursor = editor.cursorForPosition(point)
+        cursor.select(QTextCursor.SelectionType.WordUnderCursor)
+        word = cursor.selectedText().strip()
+        menu = editor.createStandardContextMenu(point)
+        if WORDS.fullmatch(word) and highlighter.misspelled(word):
+            suggestions = menu.addMenu('Spelling suggestions')
+            for replacement in dictionary.suggest(word)[:7]:
+                action = suggestions.addAction(replacement)
+                action.triggered.connect(lambda checked=False, value=replacement, selected=QTextCursor(cursor): _replace(editor, selected, value))
+            if not suggestions.actions():
+                suggestions.addAction('No suggestions').setEnabled(False)
+            suggestions.addSeparator()
+            suggestions.addAction(f'Ignore “{word}” for this session', lambda value=word: highlighter.accept(value))
+        menu.exec(editor.mapToGlobal(point))
+        menu.deleteLater()
+
+    editor.customContextMenuRequested.connect(menu_at)
+    return highlighter
+
+
+def _replace(editor: QTextEdit, cursor: QTextCursor, replacement: str) -> None:
+    cursor.insertText(replacement)
+    editor.setTextCursor(cursor)

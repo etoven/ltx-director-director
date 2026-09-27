@@ -73,3 +73,9 @@ Frames generation now uses the same production-brief layout as References, with 
 ### MiniMax Frames references and line layout (1.13.0a4)
 
 Both MiniMax modes now expose the same two untimed reference-image drop targets. In Frames mode, those images keep their selected attribute roles and notes; they never become timeline checkpoints or add duration. The Frames prompt asks for a blank line between bracketed sections and one complete `MM:SS:mmm - MM:SS:mmm:` range per line inside `[TIMED ACTION]`, following the example production brief. Manual refinement receives the same two reference images while respecting edits already made in the shared prompt editor.
+
+### Responsive projects and inline spelling (1.13.0a5)
+
+Media imports, portable project saves and loads, metadata ZIP updates, and LTX JSON exports now run in Qt background workers. AI requests already run in separate workers. New project selections invalidate unfinished older loads, and closing waits for pending disk work. The existing prompt, intent, refinement, and description text boxes mark misspellings inline and offer right-click suggestions using the installed Enchant system dictionary. On Linux install an Enchant provider and a dictionary for your locale if one is not already available; without a matching dictionary the text boxes remain editable without spell marks.
+
+MiniMax Frames and References prompts now request 24 fps, non-drop-frame SMPTE `HH:MM:SS:FF` timecode, with `FF` as a frame number from 00 to 23. Each timed range occupies one line and sections are separated by a blank line. Frame boundaries from the app's second-based timeline are rounded to the nearest frame, which can differ by up to half a frame from a millisecond timestamp.

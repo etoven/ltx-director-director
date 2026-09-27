@@ -21,21 +21,21 @@ class MiniMaxH3PromptTests(unittest.TestCase):
         ]
 
     def test_timestamp_format(self):
-        self.assertEqual(ai._minimax_timestamp(12.86), '00:12:860')
-        self.assertEqual(ai._minimax_timestamp(65.125), '01:05:125')
+        self.assertEqual(ai._minimax_timestamp(12.86), '00:00:12:21')
+        self.assertEqual(ai._minimax_timestamp(65.125), '00:01:05:03')
 
     def test_frames_rules_use_reference_style_sections_and_exact_ranges(self):
         rules = ai._minimax_h3_rules(self.segments(), 'Intent', 'Global', True, False, True)
         for section in ('[FRAME USE]', '[CONTINUITY]', '[SCENE]', '[TIMED ACTION]', '[SOUND]', '[AVOID]'):
             self.assertIn(section, rules)
         self.assertLess(rules.index('[FRAME USE]'), rules.index('[TIMED ACTION]'))
-        for interval in ('00:00:000 - 00:03:000', '00:03:000 - 00:06:000',
-                         '00:06:000 - 00:09:000', '00:09:000 - 00:12:860'):
+        for interval in ('00:00:00:00 - 00:00:03:00', '00:00:03:00 - 00:00:06:00',
+                         '00:00:06:00 - 00:00:09:00', '00:00:09:00 - 00:00:12:21'):
             self.assertIn(interval, rules)
         self.assertIn('Image1 (opening.png)', rules)
         self.assertIn('Image2 (ending.png)', rules)
-        self.assertIn('end frame reached at 00:12:860', rules)
-        self.assertIn('start frame at 00:00:000', rules)
+        self.assertIn('end frame reached at 00:00:12:21', rules)
+        self.assertIn('start frame at 00:00:00:00', rules)
         self.assertIn('Video1 (motion.mp4)', rules)
         self.assertIn('Frame images are conditioning checkpoints', rules)
         self.assertNotIn('exactly one timed Frame bridge', rules)
@@ -46,7 +46,7 @@ class MiniMaxH3PromptTests(unittest.TestCase):
         self.assertIn('opening visual anchor', inputs[0]['continuity_function'])
         self.assertIn('end-frame target reached by this interval\'s end', inputs[-1]['continuity_function'])
         self.assertEqual([item['cue_timestamp'] for item in inputs],
-                         ['00:00:000', '00:03:000', '00:06:000', '00:09:000'])
+                         ['00:00:00:00', '00:00:03:00', '00:00:06:00', '00:00:09:00'])
         self.assertTrue(inputs[-1]['frame_mode_checkpoint'])
         self.assertNotIn('recommended_detail', inputs[-1])
 
@@ -54,10 +54,10 @@ class MiniMaxH3PromptTests(unittest.TestCase):
         end = Segment('last.png', '', '', 'image', 'end', '', 4.0)
         inputs = ai._minimax_h3_inputs([end], frame_checkpoints=True)
         self.assertIn('end-frame target', inputs[0]['continuity_function'])
-        self.assertIn('00:00:000 - 00:04:000', ai._minimax_h3_rules([end], '', '', False, False, True))
+        self.assertIn('00:00:00:00 - 00:00:04:00', ai._minimax_h3_rules([end], '', '', False, False, True))
 
     def test_builder_returns_reference_style_brief_verbatim(self):
-        result = '[FRAME USE] Image1 is the opening frame.\n\n[TIMED ACTION]\n00:00:000 - 00:03:000: She moves.\n\n[SOUND] Water. '
+        result = '[FRAME USE] Image1 is the opening frame.\n\n[TIMED ACTION]\n00:00:00:00 - 00:00:03:00: She moves.\n\n[SOUND] Water. '
         with patch.object(ai, '_provider_raw', return_value=json.dumps({'prompt': result})) as provider:
             output = ai.build_minimax_h3_prompt(self.segments(), 'gemini', 'model', '', '', '', False, False, True)
         self.assertEqual(output, result.strip())
@@ -75,7 +75,7 @@ class MiniMaxH3PromptTests(unittest.TestCase):
         self.assertIn('Image4 (claws.png): untimed object reference; notes: claw shape', rules)
         self.assertIn('one blank line between sections', rules)
         self.assertIn('each range on its own line', rules)
-        self.assertEqual(rules.split('UNTIMED REFERENCE IMAGES', 1)[0].count('00:00:000 - 00:03:000'), 1)
+        self.assertEqual(rules.split('UNTIMED REFERENCE IMAGES', 1)[0].count('00:00:00:00 - 00:00:03:00'), 1)
         with patch.object(ai, '_provider_raw', return_value='{"prompt":"[FRAME USE] Done."}') as provider:
             ai.build_minimax_h3_prompt(self.segments(), 'gemini', 'model', '', '', '', False, False, True,
                                        reference_images=refs)

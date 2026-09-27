@@ -250,11 +250,12 @@ def _segment_input(item: Segment) -> dict:
 
 
 def _minimax_timestamp(seconds: float) -> str:
-    """Format a MiniMax motion cue as MM:SS:mmm without implying an edit point."""
-    total_milliseconds = max(0, round(float(seconds) * 1000))
-    minutes, remainder = divmod(total_milliseconds, 60_000)
-    whole_seconds, milliseconds = divmod(remainder, 1000)
-    return f"{minutes:02d}:{whole_seconds:02d}:{milliseconds:03d}"
+    """24 fps non-drop-frame SMPTE HH:MM:SS:FF, rounded to the nearest frame."""
+    total_frames = max(0, round(float(seconds) * 24))
+    total_seconds, frame = divmod(total_frames, 24)
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, whole_seconds = divmod(remainder, 60)
+    return f"{hours:02d}:{minutes:02d}:{whole_seconds:02d}:{frame:02d}"
 
 
 def _minimax_h3_inputs(segments: list[Segment], provider: str = "gemini", refinement: bool = False, frame_checkpoints: bool = False) -> list[dict]:
@@ -381,12 +382,13 @@ FRAME AND INTERVAL MAP (client-assigned labels and times; preserve their order):
 UNTIMED REFERENCE IMAGES (use only for their selected attribute; never as conditioning checkpoints):
 {reference_map}
 Total duration: {sum(item.duration for item in segments):.3f} seconds.
+TIMECODE: Use industry-standard non-drop-frame SMPTE HH:MM:SS:FF at 24 fps. FF is a frame number from 00 to 23, never milliseconds. The client rounds interval boundaries to the nearest frame; keep every supplied boundary exactly as shown and do not reinterpret source-video trim times as timeline timecode.
 
 Use the same compact production-brief layout as References mode, adapted to conditioning frames:
 [FRAME USE] Explain which Image1/Video1 assets anchor the opening, ending, or intermediate states and how video footage contributes motion. Identify the two untimed images by their assigned Image labels and selected identity, wardrobe, scene, style, object, or composition role if present. Do not turn a timed frame into an untimed reference or assign an untimed image a checkpoint.
 [CONTINUITY] Specify persistent identity, camera, setting, lighting and spatial relationships while allowing the intentional changes visible across frames.
 [SCENE] State the overall setting and action.
-[TIMED ACTION] Write a continuous action path using the exact interval ranges above in `00:00:000 - 00:03:000: ...` format. Put each range on its own line, with a line break after every range; never join two ranges into one paragraph. Describe onset and intermediate physical motion that reaches an end frame by its assigned end time and continues from that reached state. A start frame is already present at its start time. Include text-only intervals. Compare adjacent visual states for camera, pose, anatomy, clothing, objects and setting; resolve large differences through supported motion during the intervening range. Keep video source time confined to its interval. Do not add mid-interval Frame bridge lines or repeat completed changes after a checkpoint.
+[TIMED ACTION] Write a continuous action path using the exact interval ranges above in `00:00:00:00 - 00:00:03:00: ...` format. Put each range on its own line, with a line break after every range; never join two ranges into one paragraph. Describe onset and intermediate physical motion that reaches an end frame by its assigned end time and continues from that reached state. A start frame is already present at its start time. Include text-only intervals. Compare adjacent visual states for camera, pose, anatomy, clothing, objects and setting; resolve large differences through supported motion during the intervening range. Keep video source time confined to its interval. Do not add mid-interval Frame bridge lines or repeat completed changes after a checkpoint.
 [SOUND] Include supported ambience and physical sounds, exact supplied dialogue and speaker, and music direction.
 [AVOID] Briefly name relevant discontinuities such as hard jumps, unexpected cuts, pose or camera resets.
 Put exactly one blank line between sections, as in the supplied example. Each section heading begins on its own line, followed by its prose or timed lines. Do not run section headings or action ranges together. Omit sections with nothing useful to say. Keep the production prompt concise and under 7,000 characters. Do not output the interval map or these instructions.
@@ -432,9 +434,10 @@ def _minimax_reference_header(item: dict) -> str:
 
 
 def _minimax_reference_timestamp(seconds: float) -> str:
-    timestamp = _minimax_timestamp(seconds)
-    head, milliseconds = timestamp.rsplit(":", 1)
-    return f"{head}.{milliseconds}"
+    milliseconds = max(0, round(float(seconds) * 1000))
+    minutes, remainder = divmod(milliseconds, 60_000)
+    whole_seconds, fraction = divmod(remainder, 1000)
+    return f"{minutes:02d}:{whole_seconds:02d}.{fraction:03d}"
 
 
 def _refinement_images(segments: list[Segment], selected_index: int) -> list[dict]:
