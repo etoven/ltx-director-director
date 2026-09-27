@@ -9,6 +9,7 @@ from pathlib import Path
 import requests
 
 from .media import data_url, video_storyboard_data_urls
+from .project_archive import materialize_source
 from .models import Segment
 from .minimax_reference import reference_image_for_provider, reference_inventory, reference_rules, reference_slots
 
@@ -196,8 +197,10 @@ def _file_content_digest(path_text: str, size: int, modified_ns: int) -> str:
 def _segment_media_digest(segment: Segment) -> str:
     source = Path(segment.media_path or segment.preview_path) if (segment.media_path or segment.preview_path) else None
     if not source or not source.is_file():
-        return ""
+        return str(getattr(segment, "_media_digest", ""))
     stat = source.stat()
+    if getattr(segment, "_materialized_stat", None) == (stat.st_size, stat.st_mtime_ns):
+        return str(getattr(segment, "_media_digest", ""))
     return _file_content_digest(str(source.resolve()), stat.st_size, stat.st_mtime_ns)
 
 
@@ -294,7 +297,7 @@ def refine_segment_prompt(segments: list[Segment], selected_index: int, provider
 def _segment_input(item: Segment) -> dict:
     value = {"name": item.name, "role": item.role, "kind": item.kind}
     if item.kind != "text" and item.preview_path:
-        value["image"] = data_url(item.preview_path, max_edge=384)
+        value["image"] = data_url(materialize_source(item) if item.kind == "image" else item.preview_path, max_edge=384)
     return value
 
 
@@ -369,7 +372,7 @@ def _minimax_h3_inputs(segments: list[Segment], provider: str = "gemini", refine
                 "SECONDARY CONTINUITY EVIDENCE ONLY — do not override the private refinement instructions "
                 "or rebuild the authoritative current editor prompt from this record."
             )
-        source = Path(item.media_path) if item.media_path else None
+        source = Path(materialize_source(item)) if item.media_path and item.kind == "video" else None
         if item.kind == "video" and source and source.is_file():
             value["source_duration"] = round((item.media_duration_frames or 0) / 24, 3) or None
             value["trim_start_frame"] = item.trim_start
@@ -385,8 +388,8 @@ def _minimax_h3_inputs(segments: list[Segment], provider: str = "gemini", refine
             else:
                 value["video_frames"] = video_storyboard_data_urls(str(source))
                 value["video_analysis_mode"] = "timestamped samples across the full source video"
-        if item.kind == "image" and item.preview_path:
-            value["image"] = data_url(item.preview_path, max_edge=512)
+        if item.kind == "image" and item.media_path:
+            value["image"] = data_url(materialize_source(item), max_edge=512)
         elif item.kind == "video" and not value.get("video") and not value.get("video_frames") and item.preview_path:
             value["image"] = data_url(item.preview_path, max_edge=512)
             value["video_analysis_mode"] = "single preview fallback; infer motion only from the authoritative video prompt"
@@ -523,7 +526,7 @@ def _refinement_images(segments: list[Segment], selected_index: int) -> list[dic
             "kind": item.kind,
             "selected": index == selected_index,
             "prompt": item.prompt,
-            **({"image": data_url(item.preview_path, max_edge=384)} if item.kind != "text" and item.preview_path else {}),
+            **({"image": data_url(materialize_source(item) if item.kind == "image" else item.preview_path, max_edge=384)} if item.kind != "text" and item.preview_path else {}),
         }
         for index, item in enumerate(segments[start:end], start)
     ]

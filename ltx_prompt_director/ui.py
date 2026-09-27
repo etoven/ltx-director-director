@@ -8,6 +8,8 @@ import shutil
 import subprocess
 import sys
 import time
+import warnings
+import zipfile
 from datetime import datetime, timezone
 from importlib.resources import files
 from pathlib import Path
@@ -21,12 +23,14 @@ from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
     QColorDialog, QDateTimeEdit, QDockWidget, QFileDialog, QFormLayout, QFrame, QHBoxLayout, QLabel, QLayout, QLineEdit,
     QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox, QPushButton, QScrollArea,
-    QSizePolicy, QSlider, QSpinBox, QStatusBar, QStyle, QStyledItemDelegate, QStyleOptionSlider, QStyleOptionViewItem, QTextEdit, QToolBar, QVBoxLayout, QWidget,
+    QSizePolicy, QSlider, QSpinBox, QProgressBar, QStatusBar, QStyle, QStyledItemDelegate, QStyleOptionSlider, QStyleOptionViewItem, QTextEdit, QToolBar, QVBoxLayout, QWidget,
 )
 
 from . import __version__
+from .cache_maintenance import cover_path, mark_ready, needs_refresh, warm_metadata
 from .ai import AIResponseFormatError, GEMINI_MODELS, build_minimax_h3_prompt, build_minimax_h3_reference_prompt, build_prompts, minimax_h3_cache_key, provider_error_message, refine_minimax_h3_prompt, refine_minimax_h3_reference_prompt, refine_segment_prompt, refine_timing, retryable_connection_error
-from .media import APP_CACHE, TIMELINE_VIDEO_SUFFIXES, comfy_input_references, copy_media_for_export, data_url, extract_audio_for_export, prepare_media, safe_media_filename, unique_media_filename, write_data_url
+from .media import APP_CACHE, TIMELINE_VIDEO_SUFFIXES, comfy_input_references, copy_media_for_export, data_url, extract_audio_for_export, prepare_media, safe_media_filename, thumbnail_for_image, unique_media_filename, video_source_dimensions, write_data_url
+from .project_archive import materialize_source, project_thumbnail_data, read_project, save_project_archive
 from .minimax_reference import WORKFLOW_NAMES, detect_workflow, reference_inventory, reference_slots
 from .minimax_reference_widgets import MiniMaxReferenceSlot
 from .models import Segment, order_segments_by_ids, text_segment_from_ltx
@@ -904,6 +908,7 @@ class ProjectPreviewPanel(QWidget):
     def set_project(self, name: str, video_path: str = "") -> None:
         self.title.setText(name)
         self.choose.setEnabled(True)
+        self.pending_preview_path = video_path
         path = Path(video_path)
         try:
             valid_preview = path.is_file() and path.suffix.casefold() in ProjectVideoWidget.VIDEO_SUFFIXES and path.stat().st_size > 0
@@ -936,7 +941,10 @@ class ProjectPreviewPanel(QWidget):
             self.empty.show()
             self.export.setEnabled(True)
             self.fullscreen.setEnabled(False)
-            QTimer.singleShot(0, lambda p=str(path), token=generation: self.load_project_video(p, token))
+            if self.isVisible():
+                QTimer.singleShot(0, lambda p=str(path), token=generation: self.load_project_video(p, token))
+            else:
+                self.empty.setText("Saved video preview loads when this panel opens")
         else:
             self.video.hide()
             self.empty.setText("Drop a rendered video here\nor use Add Video")
@@ -946,7 +954,7 @@ class ProjectPreviewPanel(QWidget):
 
     def load_project_video(self, path: str, generation: int) -> None:
         """Activate saved preview media only after project/timeline loading has returned."""
-        if generation != self._source_generation:
+        if generation != self._source_generation or not self.isVisible():
             return
         source = Path(path)
         if not source.is_file() or source.suffix.casefold() not in ProjectVideoWidget.VIDEO_SUFFIXES:
@@ -954,6 +962,17 @@ class ProjectPreviewPanel(QWidget):
             return
         self.player.setAudioOutput(self.audio)
         self.player.setSource(QUrl.fromLocalFile(str(source)))
+
+    def set_preview_visible(self, visible: bool) -> None:
+        if visible:
+            pending = getattr(self, "pending_preview_path", "")
+            if pending and Path(pending).is_file() and not self.player.source().isLocalFile():
+                QTimer.singleShot(0, lambda p=pending, token=self._source_generation: self.load_project_video(p, token))
+        else:
+            self._source_generation += 1
+            self.player.stop()
+            self.player.setSource(QUrl())
+            self.current_frame = None
 
     def media_error(self, *_args) -> None:
         self.player.stop()
@@ -1424,7 +1443,13 @@ class SegmentCard(QFrame):
             "border-radius:8px;padding:2px 6px;font-size:9px;font-weight:bold"
         )
         resolution_source = segment.media_path if segment.kind == "image" else segment.preview_path
-        resolution = QImageReader(resolution_source).size() if segment.kind in {"image", "video"} and resolution_source else QSize()
+        resolution = QImageReader(resolution_source).size() if segment.kind in {"image", "video"} and resolution_source and Path(resolution_source).is_file() else QSize()
+        if segment.kind == "video":
+            original_size = video_source_dimensions(segment.media_path) or getattr(segment, "_source_size", None)
+            if original_size:
+                resolution = QSize(*original_size)
+        elif segment.kind == "image" and not resolution.isValid() and getattr(segment, "_source_size", None):
+            resolution = QSize(*segment._source_size)
         if resolution.isValid():
             self.resolution_badge.setText(f"{resolution.width()} × {resolution.height()}")
             self.resolution_badge.adjustSize()
@@ -1774,6 +1799,51 @@ class ProjectNoteRow(QFrame):
         super().mousePressEvent(event)
 
 
+class PreviewCacheDialog(QDialog):
+    """On first run or after cache expiry, prepare project covers without freezing UI."""
+
+    def __init__(self, metadata_files: list[Path], parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Preparing project previews")
+        self.setWindowModality(Qt.WindowModality.WindowModal)
+        self.setMinimumWidth(370)
+        self.files = metadata_files
+        self.position = 0
+        layout = QVBoxLayout(self)
+        self.description = QLabel("Updating the preview cache for saved projects…")
+        self.description.setWordWrap(True)
+        layout.addWidget(self.description)
+        self.progress = QProgressBar()
+        self.progress.setRange(0, max(1, len(metadata_files)))
+        self.progress.setValue(0)
+        layout.addWidget(self.progress)
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.advance)
+
+    def start(self) -> None:
+        self.open()
+        self.timer.start(0)
+
+    def advance(self) -> None:
+        if self.position < len(self.files):
+            path = self.files[self.position]
+            try:
+                warm_metadata(path)
+            except (OSError, ValueError, TypeError):
+                pass  # A broken thumbnail should not block access to the project.
+            self.position += 1
+            self.progress.setValue(self.position)
+            self.description.setText(f"Preparing project previews: {self.position} of {len(self.files)}")
+        else:
+            self.timer.stop()
+            mark_ready()
+            self.accept()
+
+    def reject(self) -> None:
+        self.timer.stop()
+        super().reject()
+
+
 class ProjectDetailsDialog(QDialog):
     def __init__(self, suggested_description: str, parent=None, name: str = "", collection: str = "", collections: list[str] | None = None,
                  thumbnail_options: list[tuple[str, str]] | None = None, thumbnail_data: str = "", thumbnail_source: str = "",
@@ -1979,6 +2049,231 @@ class ProjectDetailsDialog(QDialog):
         return normalize_notes(self.notes)
 
 
+class ProjectPropertiesPanel(QWidget):
+    """Editable project details, statuses, tags, and checklist notes in a dock."""
+
+    def __init__(self, owner):
+        super().__init__(owner)
+        self.owner = owner
+        self.project_id = ""
+        self.notes: list[dict] = []
+        self._loading = False
+        self.editing_note_id = ""
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(8, 8, 8, 8)
+        self.message = QLabel("Select a project in the library to edit its properties.")
+        self.message.setWordWrap(True)
+        outer.addWidget(self.message)
+        form = QFormLayout()
+        self.name = QLineEdit()
+        self.description = QTextEdit()
+        self.description.setMaximumHeight(80)
+        self.collection = QLineEdit()
+        self.status = QComboBox()
+        self.status.addItem("No status", "")
+        self.status.currentIndexChanged.connect(self.commit_fields)
+        self.archived = QCheckBox("Archived")
+        self.archived.toggled.connect(self.commit_fields)
+        form.addRow("Name", self.name)
+        form.addRow("Description", self.description)
+        form.addRow("Collection", self.collection)
+        form.addRow("Status", self.status)
+        form.addRow("", self.archived)
+        outer.addLayout(form)
+        outer.addWidget(QLabel("TAGS"))
+        self.tags_container = QWidget()
+        self.tags_layout = QVBoxLayout(self.tags_container)
+        self.tags_layout.setContentsMargins(0, 0, 0, 0)
+        self.tags_layout.setSpacing(2)
+        outer.addWidget(self.tags_container)
+        self.tag_boxes: list[QCheckBox] = []
+        tag_entry = QHBoxLayout()
+        self.new_tag = QLineEdit()
+        self.new_tag.setPlaceholderText("Add a tag to this project…")
+        self.new_tag.returnPressed.connect(self.create_tag)
+        tag_add = QPushButton("Add tag")
+        tag_add.clicked.connect(self.create_tag)
+        tag_entry.addWidget(self.new_tag, 1)
+        tag_entry.addWidget(tag_add)
+        outer.addLayout(tag_entry)
+        outer.addWidget(QLabel("TASKS & NOTES"))
+        note_input = QHBoxLayout()
+        self.note_date = QDateTimeEdit(QDateTime.currentDateTime())
+        self.note_date.setCalendarPopup(True)
+        self.note_date.setDisplayFormat("yyyy-MM-dd HH:mm")
+        self.note_text = QLineEdit()
+        self.note_text.setPlaceholderText("New task or note…")
+        self.note_text.returnPressed.connect(self.commit_note)
+        add = QPushButton("Add")
+        add.clicked.connect(self.commit_note)
+        note_input.addWidget(self.note_date)
+        note_input.addWidget(self.note_text, 1)
+        note_input.addWidget(add)
+        outer.addLayout(note_input)
+        self.notes_list = QListWidget()
+        self.notes_list.setMinimumHeight(130)
+        outer.addWidget(self.notes_list, 1)
+        self.save_timer = QTimer(self)
+        self.save_timer.setSingleShot(True)
+        self.save_timer.setInterval(500)
+        self.save_timer.timeout.connect(self.commit_fields)
+        self.name.textChanged.connect(self.queue_fields)
+        self.description.textChanged.connect(self.queue_fields)
+        self.collection.textChanged.connect(self.queue_fields)
+        self.set_project(None)
+
+    def queue_fields(self, *_args) -> None:
+        if not self._loading and self.project_id:
+            self.save_timer.start()
+
+    def set_project(self, meta: dict | None) -> None:
+        project_id = str(meta.get("id", "")) if meta and meta.get("kind") != "collection" else ""
+        if project_id != self.project_id and self.save_timer.isActive():
+            self.save_timer.stop()
+            self.commit_fields()
+        self._loading = True
+        self.project_id = project_id
+        self.setEnabled(bool(project_id))
+        self.message.setText("Project properties save as you edit." if project_id else "Select a project in the library to edit its properties.")
+        self.name.setText(str(meta.get("name", "")) if meta else "")
+        self.description.setPlainText(str(meta.get("description", "")) if meta else "")
+        self.collection.setText(str(meta.get("collection", "")) if meta else "")
+        self.status.blockSignals(True)
+        self.status.clear()
+        self.status.addItem("No status", "")
+        for tag in self.owner.project_status_tags():
+            self.status.addItem(tag["name"], tag["name"])
+        current = str(meta.get("status", "")) if meta else ""
+        if current and self.status.findData(current) < 0:
+            self.status.addItem(current, current)
+        self.status.setCurrentIndex(max(0, self.status.findData(current)))
+        self.status.blockSignals(False)
+        self.archived.blockSignals(True)
+        self.archived.setChecked(bool(meta.get("archived")) if meta else False)
+        self.archived.blockSignals(False)
+        for box in self.tag_boxes:
+            self.tags_layout.removeWidget(box)
+            box.deleteLater()
+        self.tag_boxes = []
+        selected = {str(value).casefold() for value in meta.get("tags", [])} if meta else set()
+        definitions = self.owner.project_other_tags()
+        for value in selected:
+            if value not in {tag["name"].casefold() for tag in definitions}:
+                definitions.append({"name": next((tag for tag in meta.get("tags", []) if str(tag).casefold() == value), value)})
+        for tag in definitions:
+            box = QCheckBox(tag["name"])
+            box.setChecked(tag["name"].casefold() in selected)
+            box.toggled.connect(self.commit_fields)
+            self.tags_layout.addWidget(box)
+            self.tag_boxes.append(box)
+        self.notes = normalize_notes(meta.get("notes")) if meta else []
+        self.editing_note_id = ""
+        self.note_text.clear()
+        self.refresh_notes()
+        self._loading = False
+
+    def refresh_notes(self) -> None:
+        self.notes_list.clear()
+        for note in self.notes:
+            item = QListWidgetItem()
+            row = ProjectNoteRow(note, self.notes_list)
+            row.edit_requested.connect(self.edit_note)
+            row.delete_requested.connect(self.delete_note)
+            row.checked_changed.connect(self.set_note_checked)
+            item.setSizeHint(row.sizeHint())
+            self.notes_list.addItem(item)
+            self.notes_list.setItemWidget(item, row)
+
+    def current_metadata(self) -> dict | None:
+        if not self.project_id:
+            return None
+        try:
+            return json.loads((project_library_path() / f"{self.project_id}.meta.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+
+    def commit_fields(self, *_args) -> None:
+        if self._loading:
+            return
+        meta = self.current_metadata()
+        if not meta:
+            return
+        name = self.name.text().strip()
+        if not name:
+            self.name.setText(str(meta.get("name", "")))
+            return
+        self.save_timer.stop()
+        meta.update({"name": name, "description": self.description.toPlainText().strip(),
+                     "collection": self.collection.text().strip(), "status": self.status.currentData() or "",
+                     "tags": [box.text() for box in self.tag_boxes if box.isChecked()],
+                     "archived": self.archived.isChecked(), "notes": normalize_notes(self.notes),
+                     "savedAt": datetime.now(timezone.utc).isoformat()})
+        self.owner.persist_library_metadata(meta)
+        if self.owner.current_project_id == self.project_id:
+            self.owner.current_project_name = name
+            self.owner.update_window_title()
+        self.owner.refresh_project_library(self.project_id)
+
+    def commit_note(self) -> None:
+        value = self.note_text.text().strip()
+        if not self.project_id or not value:
+            return
+        date = self.note_date.dateTime().toUTC().toString(Qt.DateFormat.ISODate)
+        existing = next((note for note in self.notes if note["id"] == self.editing_note_id), None)
+        if existing:
+            existing.update({"text": value, "date": date})
+        else:
+            self.notes.append(new_note(value, date))
+        self.editing_note_id = ""
+        self.note_text.clear()
+        self.note_date.setDateTime(QDateTime.currentDateTime())
+        self.notes = normalize_notes(self.notes)
+        self.refresh_notes()
+        self.commit_fields()
+
+    def create_tag(self) -> None:
+        name = self.new_tag.text().strip()
+        if not self.project_id or not name:
+            return
+        existing = {tag["name"].casefold() for tag in self.owner.project_status_tags() + self.owner.project_other_tags()}
+        if name.casefold() in existing or name.casefold() == "archive":
+            self.message.setText("That tag name is already in use.")
+            return
+        definitions = self.owner.project_other_tags()
+        definitions.append({"name": name, "color": "#567a94"})
+        self.owner.settings.setValue("project_other_tags", json.dumps(definitions))
+        self.new_tag.clear()
+        box = QCheckBox(name)
+        box.setChecked(True)
+        box.toggled.connect(self.commit_fields)
+        self.tags_layout.addWidget(box)
+        self.tag_boxes.append(box)
+        self.commit_fields()
+        self.owner.rebuild_project_filter_buttons()
+
+    def edit_note(self, note_id: str) -> None:
+        note = next((value for value in self.notes if value["id"] == note_id), None)
+        if note:
+            self.editing_note_id = note_id
+            self.note_text.setText(note["text"])
+            timestamp = QDateTime.fromString(note["date"], Qt.DateFormat.ISODate)
+            if timestamp.isValid():
+                self.note_date.setDateTime(timestamp.toLocalTime())
+            self.note_text.setFocus()
+
+    def delete_note(self, note_id: str) -> None:
+        self.notes = [note for note in self.notes if note["id"] != note_id]
+        self.refresh_notes()
+        self.commit_fields()
+
+    def set_note_checked(self, note_id: str, checked: bool) -> None:
+        for note in self.notes:
+            if note["id"] == note_id:
+                note["checked"] = checked
+        self.refresh_notes()
+        self.commit_fields()
+
+
 class MiniMaxPromptPanel(QFrame):
     """Inline MiniMax controls. The production editor belongs to MainWindow."""
 
@@ -2167,6 +2462,7 @@ class MainWindow(QMainWindow):
         self._build_project_dock()
         self._build_project_preview_dock()
         self._build_project_files_dock()
+        self._build_project_properties_dock()
         toolbar = QToolBar("Project")
         toolbar.setObjectName("mainToolbar")
         toolbar.setMovable(False)
@@ -2184,6 +2480,9 @@ class MainWindow(QMainWindow):
         files_action.setText("Project Files")
         files_action.setIcon(toolbar_icon("project-files"))
         toolbar.addAction(files_action)
+        properties_action = self.project_properties_dock.toggleViewAction()
+        properties_action.setText("Properties")
+        toolbar.addAction(properties_action)
         toolbar.addSeparator()
         action_groups = [
             (("New Project", "new", self.new_project),
@@ -2642,6 +2941,7 @@ class MainWindow(QMainWindow):
         self.project_preview_dock.dockLocationChanged.connect(lambda *_: self.save_window_panel_state())
         self.project_preview_dock.topLevelChanged.connect(lambda *_: self.save_window_panel_state())
         self.project_preview_dock.visibilityChanged.connect(lambda *_: self.save_window_panel_state())
+        self.project_preview_dock.visibilityChanged.connect(self.project_preview_panel.set_preview_visible)
         self.project_preview_dock.hide()
 
     def _build_project_files_dock(self) -> None:
@@ -2667,6 +2967,28 @@ class MainWindow(QMainWindow):
         self.project_files_dock.topLevelChanged.connect(lambda *_: self.save_window_panel_state())
         self.project_files_dock.visibilityChanged.connect(lambda *_: self.save_window_panel_state())
         self.project_files_dock.hide()
+
+    def _build_project_properties_dock(self) -> None:
+        self.project_properties_dock = QDockWidget("PROJECT PROPERTIES", self)
+        self.project_properties_dock.setObjectName("projectPropertiesDock")
+        self.project_properties_dock.setAllowedAreas(
+            Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea
+        )
+        self.project_properties_dock.setFeatures(
+            QDockWidget.DockWidgetFeature.DockWidgetClosable
+            | QDockWidget.DockWidgetFeature.DockWidgetMovable
+            | QDockWidget.DockWidgetFeature.DockWidgetFloatable
+        )
+        self.project_properties_panel = ProjectPropertiesPanel(self)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(self.project_properties_panel)
+        self.project_properties_dock.setWidget(scroll)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.project_properties_dock)
+        self.project_properties_dock.dockLocationChanged.connect(lambda *_: self.save_window_panel_state())
+        self.project_properties_dock.topLevelChanged.connect(lambda *_: self.save_window_panel_state())
+        self.project_properties_dock.visibilityChanged.connect(lambda *_: self.save_window_panel_state())
+        self.project_properties_dock.hide()
 
     def _build_project_dock(self) -> None:
         self.project_dock = QDockWidget("PROJECT LIBRARY", self)
@@ -2756,6 +3078,7 @@ class MainWindow(QMainWindow):
         self.project_list.files_dropped.connect(self.project_files_dropped)
         self.project_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.project_list.customContextMenuRequested.connect(self.project_library_menu)
+        self.project_list.currentItemChanged.connect(lambda *_: self.sync_project_properties())
         layout.addWidget(self.project_list, 1)
 
         buttons = QHBoxLayout()
@@ -2850,6 +3173,15 @@ class MainWindow(QMainWindow):
         self.restore_project_panel_width()
         self.restore_timeline_panel_height()
         self.finish_layout_restore()
+        if needs_refresh():
+            files = list(project_library_path().glob("*.meta.json"))
+            if files:
+                self.cache_dialog = PreviewCacheDialog(files, self)
+                self.cache_dialog.finished.connect(lambda *_: QTimer.singleShot(0, self.restore_last_project))
+                self.cache_dialog.finished.connect(lambda *_: self.refresh_project_library())
+                QTimer.singleShot(0, self.cache_dialog.start)
+                return
+            mark_ready()
         QTimer.singleShot(0, self.restore_last_project)
 
     def finish_layout_restore(self) -> None:
@@ -2994,6 +3326,7 @@ class MainWindow(QMainWindow):
             self.magic_overlay.set_scale(scale)
 
     def refresh_project_library(self, select_id: str | None = None, preserve_scroll: bool = True) -> None:
+        self._refreshing_project_library = True
         selected = select_id or self.current_project_id
         previous_scroll = self.project_list.verticalScrollBar().value() if preserve_scroll else 0
         if self.project_list._scroll_animation:
@@ -3056,7 +3389,8 @@ class MainWindow(QMainWindow):
             item.setData(Qt.ItemDataRole.UserRole, {**meta, "kind": "project"})
             item.setToolTip(f"{name}\n\n{meta.get('description', '')}")
             item.setSizeHint(QSize(self.project_icon_size + 28, self.project_icon_size + 76))
-            pixmap = pixmap_from_data_url(str(meta.get("thumbnailData", "")))
+            cover = cover_path(str(meta.get("thumbnailData", ""))) if meta.get("thumbnailData") else None
+            pixmap = QPixmap(str(cover)) if cover and cover.is_file() else pixmap_from_data_url(str(meta.get("thumbnailData", "")))
             if pixmap.isNull():
                 pixmap = QPixmap(self.project_icon_size, self.project_icon_size)
                 pixmap.fill(QColor("#171a1b"))
@@ -3094,7 +3428,20 @@ class MainWindow(QMainWindow):
         if selected_item:
             self.project_list.setCurrentItem(selected_item)
         self.filter_projects(self.project_search.text())
+        self._refreshing_project_library = False
+        self.sync_project_properties()
         QTimer.singleShot(0, lambda value=previous_scroll: self.project_list.verticalScrollBar().setValue(value))
+
+    def sync_project_properties(self) -> None:
+        if not hasattr(self, "project_properties_panel") or getattr(self, "_refreshing_project_library", False):
+            return
+        chosen = self.selected_library_project()
+        if chosen and chosen.get("kind") != "collection":
+            self.project_properties_panel.set_project(chosen)
+        elif self.current_project_id:
+            self.project_properties_panel.set_project(self.current_library_metadata())
+        else:
+            self.project_properties_panel.set_project(None)
 
     @staticmethod
     def project_entry_key(meta: dict) -> str:
@@ -3483,10 +3830,20 @@ class MainWindow(QMainWindow):
         root = project_library_path()
         (root / f"{clean['id']}.meta.json").write_text(json.dumps(clean, indent=2), encoding="utf-8")
         project_path = Path(clean.get("projectPath", ""))
-        if project_path.is_file():
+        if project_path.is_file() and zipfile.is_zipfile(project_path):
+            with zipfile.ZipFile(project_path, "a") as archive:
+                payload = json.loads(archive.read("project.json"))
+                payload["library"] = {key: clean.get(key, "") for key in ("id", "name", "description", "collection", "savedAt", "status", "tags", "tag", "archived", "notes", "previewVideoPath", "previewVideoName", "projectFiles", "workflowFiles")}
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore", UserWarning)
+                    archive.writestr("project.json", json.dumps(payload, separators=(",", ":")))
+        elif project_path.is_file() and project_path.stat().st_size < 1024 * 1024:
+            # Large legacy JSON files are migrated on the next project save.
             payload = json.loads(project_path.read_text(encoding="utf-8"))
             payload["library"] = {key: clean.get(key, "") for key in ("id", "name", "description", "collection", "savedAt", "status", "tags", "tag", "archived", "notes", "previewVideoPath", "previewVideoName", "projectFiles", "workflowFiles")}
             project_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        if getattr(self, "project_properties_panel", None) and str(clean["id"]) == self.current_project_id:
+            self.project_properties_panel.set_project(clean)
 
     def selected_project_members(self) -> tuple[dict | None, list[dict]]:
         meta = self.selected_library_project()
@@ -3672,10 +4029,10 @@ class MainWindow(QMainWindow):
         if not meta.get("thumbnailSource"):
             visual = next((segment for segment in self.segments if segment.kind != "text" and segment.preview_path), None)
             meta["thumbnailData"] = data_url(visual.preview_path, max_edge=360, quality=84) if visual else ""
-        payload = self.project_payload()
+        payload = self.project_payload(include_media=False)
         normalize_project_labels(meta)
         payload["library"] = {key: meta.get(key, "") for key in ("id", "name", "description", "collection", "savedAt", "status", "tags", "tag", "archived", "notes", "previewVideoPath", "previewVideoName", "projectFiles", "workflowFiles")}
-        Path(meta["projectPath"]).write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        save_project_archive(meta["projectPath"], payload, self.segments)
         (root / f"{meta['id']}.meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
         self.project_dirty = False
         self.project_sessions[str(meta["id"])] = {
@@ -3714,7 +4071,7 @@ class MainWindow(QMainWindow):
                 self.restore_workspace_state(session["state"])
                 dirty = bool(session.get("dirty"))
             else:
-                payload = json.loads(Path(meta["projectPath"]).read_text(encoding="utf-8"))
+                payload = read_project(meta["projectPath"])
                 self.load_project_payload(payload)
                 dirty = False
             self.current_project_id = project_id
@@ -3798,11 +4155,7 @@ class MainWindow(QMainWindow):
             return
         collections = [str(record.get("collection")) for record in self.library_records() if record.get("collection")]
         try:
-            stored_payload = json.loads(Path(meta["projectPath"]).read_text(encoding="utf-8"))
-            thumbnail_options = [
-                (f"Segment {index + 1}", str(frame.get("previewData", "")))
-                for index, frame in enumerate(stored_payload.get("frames", [])) if frame.get("previewData")
-            ]
+            thumbnail_options = project_thumbnail_data(meta["projectPath"])
         except (OSError, ValueError, TypeError):
             thumbnail_options = []
         dialog = ProjectDetailsDialog(
@@ -4367,7 +4720,7 @@ class MainWindow(QMainWindow):
         segment = self.current_segment()
         if not segment or segment.kind != "image":
             return
-        source = Path(segment.media_path)
+        source = Path(materialize_source(segment))
         if not source.is_file():
             QMessageBox.warning(self, "Image missing", "The full-resolution source image could not be found.")
             return
@@ -4395,7 +4748,7 @@ class MainWindow(QMainWindow):
         row = self.timeline.currentRow()
         segment.name = f"clipboard-{datetime.now().strftime('%Y%m%d-%H%M%S')}.png"
         segment.media_path = str(destination)
-        segment.preview_path = str(destination)
+        segment.preview_path = thumbnail_for_image(str(destination))
         segment.media_duration_frames = None
         segment.trim_start = None
         self.mark_dirty()
@@ -4438,7 +4791,7 @@ class MainWindow(QMainWindow):
         downloads = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DownloadLocation) or str(Path.home())
         directory = Path(str(self.settings.value("segment_export_dir", self.settings.value("segment_save_dir", downloads))))
         suffix = segment_media_suffix(segment)
-        source = Path(segment.media_path)
+        source = Path(materialize_source(segment))
         if not source.is_file():
             QMessageBox.warning(self, "Media unavailable", "The complete source media for this segment is not available.")
             return
@@ -4953,7 +5306,7 @@ class MainWindow(QMainWindow):
 
     def save_minimax_prompt_on_close(self) -> None:
         """Persist manual edits when the main application closes."""
-        if self.current_project_id and self.segments:
+        if self.current_project_id and self.segments and self.project_dirty:
             self.save_library_project(automatic=True)
 
     def current_minimax_cache_key(self, provider: str | None = None, model: str | None = None) -> str:
@@ -5237,10 +5590,11 @@ class MainWindow(QMainWindow):
             length = max(1, round(segment.duration * FPS))
             record = {"id": segment.id, "type": segment.kind, "start": start, "length": length, "prompt": segment.prompt, "isEndFrame": False if segment.kind == "text" else segment.role == "end"}
             if segment.kind != "text":
-                record.update({"imageFile": segment.media_path, "fileName": segment.name, "fileSize": Path(segment.media_path).stat().st_size if Path(segment.media_path).exists() else 0, "imageB64": data_url(segment.preview_path)})
-                if segment.kind == "image" and Path(segment.media_path).exists():
+                source = Path(materialize_source(segment))
+                record.update({"imageFile": str(source), "fileName": segment.name, "fileSize": source.stat().st_size if source.exists() else 0, "imageB64": data_url(str(source) if segment.kind == "image" and source.is_file() else segment.preview_path)})
+                if segment.kind == "image" and source.exists():
                     try:
-                        image_path = copy_media_for_export(segment.media_path, segment.name, media_directory, used_media_names, "image")
+                        image_path = copy_media_for_export(str(source), segment.name, media_directory, used_media_names, "image")
                     except OSError as error:
                         QMessageBox.critical(self, "Export failed", f"Could not copy {segment.name} to the ComfyUI input directory:\n{error}")
                         return
@@ -5250,9 +5604,9 @@ class MainWindow(QMainWindow):
                     record.pop("fileSize", None)
                 elif segment.kind == "video":
                     record.update({"trimStart": segment.trim_start or 0, "videoDurationFrames": segment.media_duration_frames or length})
-                    if Path(segment.media_path).exists():
+                    if source.exists():
                         try:
-                            video_path = copy_media_for_export(segment.media_path, segment.name, media_directory, used_media_names, "video")
+                            video_path = copy_media_for_export(str(source), segment.name, media_directory, used_media_names, "video")
                         except OSError as error:
                             QMessageBox.critical(self, "Export failed", f"Could not copy {segment.name} to the ComfyUI input directory:\n{error}")
                             return
@@ -5367,13 +5721,15 @@ class MainWindow(QMainWindow):
         except Exception as error:
             QMessageBox.critical(self, "Import failed", str(error))
 
-    def project_payload(self) -> dict:
+    def project_payload(self, include_media: bool = True) -> dict:
         self.store_minimax_draft()
         frames = []
         for segment in self.segments:
             value = segment.to_dict()
-            value["previewData"] = data_url(segment.preview_path) if segment.kind != "text" and segment.preview_path and Path(segment.preview_path).exists() else None
-            value["sourceData"] = data_url(segment.media_path) if segment.kind != "text" and segment.media_path and Path(segment.media_path).exists() else None
+            if include_media:
+                value["previewData"] = data_url(segment.preview_path) if segment.kind != "text" and segment.preview_path and Path(segment.preview_path).exists() else None
+                source = Path(materialize_source(segment)) if segment.kind != "text" and segment.media_path else None
+                value["sourceData"] = data_url(str(source)) if source and source.exists() else None
             frames.append(value)
         return {
             "app": "ltx-director-director",
@@ -5416,10 +5772,14 @@ class MainWindow(QMainWindow):
             raw = dict(original)
             is_text = raw.get("kind") == "text"
             preview_path = APP_CACHE / f"project-{cache_key}-{index}.jpg"
-            if raw.get("previewData"):
-                write_data_url(raw["previewData"], preview_path)
-            media_path = "" if is_text else preview_path
-            if raw.get("sourceData"):
+            if raw.get("_archivePath"):
+                preview_path = Path(raw["_archivePreviewPath"])
+                media_path = Path(raw["_archiveMediaPath"])
+            else:
+                if raw.get("previewData"):
+                    write_data_url(raw["previewData"], preview_path)
+                media_path = "" if is_text else preview_path
+            if not raw.get("_archivePath") and raw.get("sourceData"):
                 original_suffix = Path(raw.get("name", "")).suffix.lower()
                 suffix = (
                     original_suffix if raw.get("kind") == "video" and original_suffix in TIMELINE_VIDEO_SUFFIXES else
@@ -5428,10 +5788,17 @@ class MainWindow(QMainWindow):
                 )
                 media_path = APP_CACHE / f"project-source-{cache_key}-{index}{suffix}"
                 write_data_url(raw["sourceData"], media_path)
+            if not raw.get("_archivePath") and not is_text and preview_path.is_file():
+                preview_path = Path(thumbnail_for_image(str(preview_path)))
             raw.update({"preview_path": "" if is_text else str(preview_path), "media_path": str(media_path)})
             for key in ("previewData", "sourceData"):
                 raw.pop(key, None)
-            loaded.append(Segment.from_dict(raw))
+            segment = Segment.from_dict(raw)
+            if raw.get("_archivePath"):
+                segment._archive_source = (raw["_archivePath"], raw["archiveSource"])
+                segment._media_digest = raw.get("mediaDigest", "")
+                segment._source_size = raw.get("sourceSize")
+            loaded.append(segment)
         if not loaded:
             raise ValueError("Project contains no supported main-track segments.")
         self.segments = loaded
@@ -5487,8 +5854,8 @@ class MainWindow(QMainWindow):
         if not path.lower().endswith(".ltxd"):
             path += ".LTXD"
         self.settings.setValue("last_document_dir", str(Path(path).parent))
-        payload = self.project_payload()
-        Path(path).write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        payload = self.project_payload(include_media=False)
+        save_project_archive(path, payload, self.segments)
         self.project_dirty = False
         self.statusBar().showMessage(f"Project saved: {path}")
 
@@ -5498,7 +5865,7 @@ class MainWindow(QMainWindow):
             return
         self.settings.setValue("last_document_dir", str(Path(path).parent))
         try:
-            payload = json.loads(Path(path).read_text(encoding="utf-8"))
+            payload = read_project(path)
             self.load_project_payload(payload)
             self.current_project_id = None
             self.current_project_name = Path(path).stem

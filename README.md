@@ -1,6 +1,6 @@
 # LTX Director - Director
 
-**Experimental 1.13.0a1 — unified project workflows.** This branch uses one shared prompt editor for LTX and MiniMax. See [workflow behavior and experimental installation](docs/unified-workflows.md). Stable `main` remains on 1.12.57.
+**Experimental 1.13.0a2 — unified project workflows and faster projects.** This branch uses one shared prompt editor for LTX and MiniMax, portable project archives, a disk thumbnail cache, and a dockable Project Properties panel. See [workflow behavior and experimental installation](docs/unified-workflows.md) and [project performance and properties](docs/performance-and-properties.md). Stable `main` remains on 1.12.57.
 
 **LTX Director - Director** is a native companion app for the [LTXDirector custom node for ComfyUI](https://github.com/WhatDreamsCost/WhatDreamsCost-ComfyUI). Its primary purpose is to prepare image, WebM, and MP4 timelines outside ComfyUI, use Gemini or OpenAI to build LTX Video 2.3 prompts, and export the finished sequence directly into LTXDirector.
 
@@ -38,7 +38,7 @@ The app is designed around moving a prepared sequence into [LTXDirector for Comf
 
 - **LTX Director Export** writes an LTXDirector-compatible JSON file containing the supported timeline segments, timing, output width and height, start/end-frame roles, per-segment prompts, global prompt, and referenced media. WebM and MP4 segments remain complete videos in the export even though Magic Build sends only a single optimized preview frame to the vision model.
 - **Open** brings supported LTXDirector JSON data back into the desktop timeline for further prompt and timing work.
-- **Project Export** saves the complete editable LTX Director - Director project as a `.LTXD` file, including embedded media and app-specific state. Use this format when you intend to reopen the project in this app.
+- **Project Export** saves the complete editable LTX Director - Director project as a `.LTXD` archive, including full-resolution original media and app-specific state. Use this format when you intend to reopen the project in this app.
 - **Import** restores a `.LTXD` project without requiring the original media files to remain in their previous locations. Legacy project JSON files remain readable.
 
 In short: use **Project Export** for lossless editing and safekeeping; use **LTX Director Export** when the sequence is ready to move into ComfyUI.
@@ -70,6 +70,8 @@ In short: use **Project Export** for lossless editing and safekeeping; use **LTX
 - Dedicated total-length, speaker-language, and speaker-accent controls dynamically composed into the authoritative Magic Build request
 - LTX Director-compatible JSON import/export
 - Complete portable project import/export, including embedded media
+- Low-resolution segment previews in the operating system cache, with original media loaded from the portable project only when needed
+- Dockable Project Properties for editing project name, status, tags, and tasks alongside the timeline
 - Searchable, resizable local project library with selectable thumbnail sizes, a responsive wrapping grid, collection folders, title sorting, and stable custom drag ordering
 - Automatic Custom-sort activation when a project tile is dragged
 - Multiple live in-memory project workspaces with yellow unsaved-change indicators

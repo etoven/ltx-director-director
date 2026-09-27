@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import io
+import json
+import os
 import re
 import shutil
 import subprocess
@@ -12,11 +15,44 @@ from urllib.parse import quote
 
 import imageio_ffmpeg
 from PIL import Image
+from PIL import ImageOps
+from PySide6.QtCore import QStandardPaths
 
 
-APP_CACHE = Path(tempfile.gettempdir()) / "ltx-director-director"
+_os_cache = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.GenericCacheLocation)
+APP_CACHE = (Path(_os_cache) if _os_cache else Path(tempfile.gettempdir())) / "ltx-director-director"
 APP_CACHE.mkdir(parents=True, exist_ok=True)
 TIMELINE_VIDEO_SUFFIXES = {".webm", ".mp4"}
+THUMBNAIL_EDGE = 640
+_VIDEO_DIMENSIONS: dict[str, tuple[int, int]] = {}
+
+
+def cache_key(path: str) -> str:
+    source = Path(path).resolve()
+    stat = source.stat()
+    return hashlib.sha256(f"{source}:{stat.st_size}:{stat.st_mtime_ns}".encode()).hexdigest()[:24]
+
+
+def thumbnail_for_image(path: str) -> str:
+    """Cache a bounded, orientation-correct JPEG; never replace the source image."""
+    source = Path(path)
+    if not source.is_file():
+        return path
+    destination = APP_CACHE / "thumbnails" / f"image-{cache_key(path)}.jpg"
+    if not destination.is_file():
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        with Image.open(source) as opened:
+            image = ImageOps.exif_transpose(opened)
+            image.thumbnail((THUMBNAIL_EDGE, THUMBNAIL_EDGE), Image.Resampling.LANCZOS)
+            if image.mode != "RGB":
+                image = image.convert("RGB")
+            temporary = destination.with_name(destination.name + f".{os.getpid()}.tmp")
+            try:
+                image.save(temporary, "JPEG", quality=76, optimize=False)
+                os.replace(temporary, destination)
+            finally:
+                temporary.unlink(missing_ok=True)
+    return str(destination)
 
 
 def safe_media_filename(value: str, fallback_stem: str = "media") -> str:
@@ -76,6 +112,9 @@ def probe_video_duration(path: str) -> float:
     """Return a video's duration in seconds using the bundled FFmpeg binary."""
     ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
     probe = subprocess.run([ffmpeg, "-hide_banner", "-i", str(path)], capture_output=True, text=True, check=False)
+    dimensions = re.search(r"Video:[^\n]*?\b(\d{2,5})x(\d{2,5})\b", probe.stderr)
+    if dimensions:
+        _VIDEO_DIMENSIONS[cache_key(path)] = (int(dimensions.group(1)), int(dimensions.group(2)))
     match = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", probe.stderr)
     if not match:
         return 0.0
@@ -117,19 +156,45 @@ def write_data_url(value: str, destination: Path) -> None:
 def capture_video_preview(path: str, fps_out: int = 24) -> tuple[str, int, int]:
     source = Path(path)
     ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+    preview = APP_CACHE / "thumbnails" / f"video-{cache_key(path)}.jpg"
+    metadata = preview.with_suffix(".json")
+    if preview.is_file() and metadata.is_file():
+        try:
+            cached = json.loads(metadata.read_text(encoding="utf-8"))
+            duration = float(cached["duration"])
+            frames = max(1, round(duration * fps_out))
+            return str(preview), frames, max(0, frames - fps_out)
+        except (OSError, ValueError, KeyError):
+            pass
+    preview.parent.mkdir(parents=True, exist_ok=True)
     duration = probe_video_duration(str(source)) or 1.0
-    preview = APP_CACHE / f"{source.stem}-{source.stat().st_mtime_ns}.jpg"
     seek = max(0.0, duration - 1.0)
-    command = [ffmpeg, "-y", "-ss", f"{seek:.3f}", "-i", str(source), "-frames:v", "1", "-q:v", "2", str(preview)]
+    scale = f"scale=w={THUMBNAIL_EDGE}:h={THUMBNAIL_EDGE}:force_original_aspect_ratio=decrease"
+    command = [ffmpeg, "-y", "-ss", f"{seek:.3f}", "-i", str(source), "-frames:v", "1", "-vf", scale, "-q:v", "4", str(preview)]
     result = subprocess.run(command, capture_output=True, check=False)
     if result.returncode or not preview.is_file():
-        fallback = [ffmpeg, "-y", "-i", str(source), "-frames:v", "1", "-q:v", "2", str(preview)]
+        fallback = [ffmpeg, "-y", "-i", str(source), "-frames:v", "1", "-vf", scale, "-q:v", "4", str(preview)]
         result = subprocess.run(fallback, capture_output=True, check=False)
     if result.returncode or not preview.is_file():
         raise ValueError("Could not decode a preview frame from the video file.")
     duration_frames = max(1, round(duration * fps_out))
     trim_start = max(0, duration_frames - fps_out)
+    width, height = _VIDEO_DIMENSIONS.pop(cache_key(path), (0, 0))
+    metadata.write_text(json.dumps({"duration": duration, "width": width, "height": height}), encoding="utf-8")
     return str(preview), duration_frames, trim_start
+
+
+def video_source_dimensions(path: str) -> tuple[int, int] | None:
+    source = Path(path)
+    if not source.is_file():
+        return None
+    metadata = APP_CACHE / "thumbnails" / f"video-{cache_key(path)}.json"
+    try:
+        record = json.loads(metadata.read_text(encoding="utf-8"))
+        width, height = int(record["width"]), int(record["height"])
+        return (width, height) if width > 0 and height > 0 else None
+    except (OSError, ValueError, KeyError):
+        return None
 
 
 def prepare_media(path: str) -> tuple[str, str, int | None, int | None]:
@@ -139,7 +204,7 @@ def prepare_media(path: str) -> tuple[str, str, int | None, int | None]:
         return "video", preview, frames, trim
     with Image.open(source) as image:
         image.verify()
-    return "image", path, None, None
+    return "image", thumbnail_for_image(path), None, None
 
 
 def extract_audio_for_export(source_path: str, destination: str | Path, fps: int = 24) -> tuple[int, list[float]]:
