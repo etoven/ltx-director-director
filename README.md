@@ -1,172 +1,63 @@
 # LTX Director - Director
 
-**Experimental 1.13.0a15 — Aurora.** This branch uses one shared prompt editor for LTX and MiniMax, inline `/` refinement directives, a cinematic startup splash, portable project archives, a disk thumbnail cache, and a dockable Project Properties panel. See [workflow behavior and experimental installation](docs/unified-workflows.md) and [project performance and properties](docs/performance-and-properties.md). Stable `main` remains on 1.12.57.
+**Turn a visual timeline into a production-ready video prompt.** Arrange images, video clips, and text beats; set their timing; then build prompts for **MiniMax H3** or **LTX Video 2.3** without losing track of what happens when.
 
-**LTX Director - Director** is a native companion app for the [LTXDirector custom node for ComfyUI](https://github.com/WhatDreamsCost/WhatDreamsCost-ComfyUI). Its primary purpose is to prepare image, WebM, and MP4 timelines outside ComfyUI, use Gemini or OpenAI to build LTX Video 2.3 prompts, and export the finished sequence directly into LTXDirector.
+This is the **Aurora 1.13.0a15 experimental build**. MiniMax and LTX share one workspace, so you can plan a sequence, adjust its beats, and refine the wording in the same window. The app prepares prompts and exports; video rendering happens in your video workflow.
 
-![LTX Director - Director application overview](docs/images/ltx-director-director-overview.png)
+![MiniMax production prompt, timed timeline, and reference image dock in the Aurora workspace](docs/images/ltx-director-director-overview.png)
 
-*The experimental workspace keeps MiniMax's production prompt, timed actions, timeline, and untimed reference slots in one window. Preview data below is a documentation-only sample.*
+## Choose the way you want to direct
 
-## What it does
+| Workflow | What Director builds | What you edit |
+| --- | --- | --- |
+| **MiniMax H3 · Frames** | One continuous production brief with timed actions grounded in the timeline's conditioning frames | The entire brief in the shared editor |
+| **MiniMax H3 · References** | A production brief that identifies timed video or frame sources and untimed image references | The entire brief, with two optional reference image slots |
+| **LTX Video 2.3** | A prompt for each segment plus a global continuity prompt | The selected segment or global prompt in the same editor |
 
-LTX Director - Director turns a folder of reference frames into a structured LTX Video 2.3 sequence:
+Use **Gemini or OpenAI** for prompt generation and refinement. Generation is manual: changing a workflow, moving a frame, or adding a reference does not call the provider.
 
-1. Start a project, add images, WebM clips, or MP4 clips, and arrange them directly on the visual timeline.
-2. Mark each segment as a start frame or end frame, then drag its edge to set the duration.
-3. Describe the overall scene in the multiline **Director's Intent**, optionally set an exact total sequence length, and enable SFX or Spoken Dialog with speaker context when needed.
-4. Run **Magic Build** to refine timing and generate a focused prompt for every segment.
-5. Fine-tune a selected segment with **Refine Timing** or **Refine Prompt**, export the sequence as JSON for the ComfyUI LTXDirector node, or develop a continuous MiniMax H3 prompt in the same main-window editor.
+## MiniMax: direct the whole sequence
 
-![Timeline, frame roles, duration controls, and Magic Build](docs/images/timeline-and-magic-build.png)
+Choose **Frames** when your images are timed conditioning checkpoints. Choose **References** when you are working with first and last frames, source video, mixed media, or untimed identity and style references. Director detects the available input pattern and writes a structured brief with reference roles, continuity, scene direction, timed action, sound, and avoid instructions where appropriate.
 
-*Duration-scaled segments make the full sequence readable at a glance. Frames can be reordered, resized, replaced, assigned a role, or deleted without leaving the timeline.*
+The production prompt is one editable document. Its **timed action cues stay linked to the timeline segments**: retiming a segment updates the cue timecodes, and editing cue text updates its linked segment. Timecode cells are protected from accidental deletion. Two optional image drop targets let you guide identity, body details, or another selected attribute without pretending those references occur at a particular second.
 
-![Selected LTX prompt with inline refinement and keep notes](docs/images/generated-prompts.png)
+Refine the full prompt after a timeline change, or refine your own edits and inline instructions. Type `/` and press Tab for **Refinement**, **Global refinement**, **Keep**, **Avoid**, or **Focus** notes. The complete instruction stays editable inside the outlined note; a completed global refinement is consumed after a successful pass. The editor also offers inline spelling suggestions from your installed system dictionary.
 
-*The shared editor displays the selected LTX segment or its global prompt. Editable inline notes give refinement instructions without adding another prompt box; Magic Build can generate segment and global prompts.*
+![Editable inline refinement notes in the shared prompt editor](docs/images/inline-refinement-notes.png)
 
-![Rounded refinement notes inside the shared prompt editor](docs/images/inline-refinement-notes.png)
+## LTX: build every beat
 
-*Refinement, Global refinement, Keep, Avoid, and Focus have small footer labels. The full instruction stays editable inside the note outline.*
+Lay out start and end frames, text beats, WebM clips, or MP4 clips on the duration-scaled timeline. **Magic Build** uses the ordered media and Director's Intent to draft segment motion prompts and a global continuity prompt. Add SFX or spoken-dialog direction, adjust a single segment's timing or wording, and keep the rest of the sequence intact. Refinement can lengthen a beat when the action needs more room; its tile grows with it.
 
-## Project library
+The shared editor switches to the segment you select or to the global prompt. When the sequence is ready, **LTX Director Export** produces JSON for the [LTXDirector ComfyUI node](https://github.com/WhatDreamsCost/WhatDreamsCost-ComfyUI), with timing, media references, prompt text, and frame roles.
 
-Save working projects directly into the searchable project library and organize related work into collections. Resize the panel from its dotted right-edge grip, then choose Small, Medium, or Large icons from the control at the top. Tiles wrap left-to-right as room becomes available, while project cards can use the first segment automatically, any segment's starting frame, or a custom uploaded thumbnail.
+![LTX timeline, frame roles, duration controls, and Magic Build](docs/images/timeline-and-magic-build.png)
 
-![Choose a segment frame or custom project thumbnail](docs/images/project-thumbnail-picker.png)
+![An LTX segment prompt with inline direction](docs/images/generated-prompts.png)
 
-*Edit Project Details provides a visual thumbnail picker while preserving the automatic first-segment fallback for projects that do not define one.*
+## Keep the project moving
 
-![Project library alongside the dockable Project Properties panel](docs/images/project-properties.png)
+Save a project to the library, switch between open workspaces, and return to its timeline and independent MiniMax drafts later. The dockable **Project Properties** panel keeps status, tags, and tasks beside the work. **Project Export** creates a portable `.LTXD` archive with original-resolution media; low-resolution timeline thumbnails live in the operating system cache to keep the editor responsive. Use the toolbar save action or close the app to write pending library changes.
 
-*Manage project descriptions, collections, status, tags, and tasks while keeping the timeline in view.*
+![Project library, timeline, and Project Properties dock](docs/images/project-properties.png)
 
-On close, a fixed progress dialog shows project saves finishing before the application exits. See the [current closing dialog and workflow notes](docs/unified-workflows.md#clear-note-outlines-and-closing-progress-1130a15).
-
-## Aurora startup
-
-![Aurora startup artwork and compatible technology marks](docs/images/aurora-startup.png)
-
-*The splash shows live startup tasks, app version, and compatible technology marks. See [artwork and trademark details](docs/aurora-splash.md).*
-
-## Export-first workflow
-
-The app is designed around moving a prepared sequence into [LTXDirector for ComfyUI](https://github.com/WhatDreamsCost/WhatDreamsCost-ComfyUI), where generation and final timeline work take place.
-
-- **LTX Director Export** writes an LTXDirector-compatible JSON file containing the supported timeline segments, timing, output width and height, start/end-frame roles, per-segment prompts, global prompt, and referenced media. WebM and MP4 segments remain complete videos in the export even though Magic Build sends only a single optimized preview frame to the vision model.
-- **Open** brings supported LTXDirector JSON data back into the desktop timeline for further prompt and timing work.
-- **Project Export** saves the complete editable LTX Director - Director project as a `.LTXD` archive, including full-resolution original media and app-specific state. Use this format when you intend to reopen the project in this app.
-- **Import** restores a `.LTXD` project without requiring the original media files to remain in their previous locations. Legacy project JSON files remain readable.
-
-In short: use **Project Export** for lossless editing and safekeeping; use **LTX Director Export** when the sequence is ready to move into ComfyUI.
-
-## Highlights
-
-- Native PySide6 interface for Linux, Windows, and macOS
-- Web-app-matched dark editor layout with a compact toolbar and one workflow-aware prompt editor
-- DPI-aware control spacing with modern sliders, dropdowns, number steppers, rounded scrollbars, and consistent button states
-- Numbered timeline ruler with duration-proportional segment widths
-- Adjustable timeline scale, one-click auto fit, and vertically resizable previews
-- Drag-and-drop media import with a highlighted timeline drop target
-- Animated in-timeline loading indicator while segment tiles are prepared
-- Drag-to-reorder horizontal timeline and smoothly animated AI timing recommendations
-- Selected-segment **Refine Timing** and **Refine Prompt** passes with adjacent-frame continuity context
-- Shared LTX/MiniMax editor with independent persistent MiniMax drafts, inline refinement instructions, manual editing, one-click copy, and source-aware generation caching
-- MiniMax References generation detects T2V, I2V, first/last-frame, multiple-keyframe, V2V, or mixed-reference workflows locally
-- Two untimed reference-image drop targets with attribute roles, notes, previews, paste support, and portable project storage
-- Bundled flat SVG toolbar icons with workflow-specific controls
-- One-second minimum segment duration in 0.5-second increments
-- Right-click replace, one-click segment export, role assignment, and deletion
-- Direct KDE `kdialog`, GNOME `zenity`, macOS, and Windows native media-picker integration
-- Branded application icon and automatic per-user Linux desktop-menu installation
-- WebM and MP4 support with a preview captured at the start of the final second
-- Only one optimized frame per timeline video is sent to vision AI during Magic Build
-- Gemini and OpenAI support with local key storage, configurable API timeout, retry count, and cooldown countdown between transient connection retries
-- Blocking in-app Magic Build overlay with custom animation
-- Independent SFX, Spoken Dialog, HDR, and Reduce Music controls
-- Dedicated total-length, speaker-language, and speaker-accent controls dynamically composed into the authoritative Magic Build request
-- LTX Director-compatible JSON import/export
-- Complete portable project import/export, including embedded media
-- Low-resolution segment previews in the operating system cache, with original media loaded from the portable project only when needed
-- Background media preparation, portable project reads and saves, metadata updates, and LTX JSON export keep the editor responsive during disk work
-- Inline spell checking in prompt, intent, refinement, and project-description text boxes using installed system dictionaries
-- MiniMax production briefs with readable sections and 24 fps non-drop-frame SMPTE time ranges
-- Dockable Project Properties for editing project name, status, tags, and tasks alongside the timeline
-- Searchable, resizable local project library with selectable thumbnail sizes, a responsive wrapping grid, collection folders, title sorting, and stable custom drag ordering
-- Automatic Custom-sort activation when a project tile is dragged
-- Multiple live in-memory project workspaces with yellow unsaved-change indicators
-- Persistent window, dialog, and project-panel placement and width, with automatic reopening of the last active library project
-- Persistent 75–200% UI text scaling for easier reading on high-DPI displays
-- No server, database, account, or telemetry
-
-## Quick start from source
+## Try the experimental wheel
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -r requirements.txt
-python -m ltx_prompt_director
-```
-
-Windows activation:
-
-```powershell
-.venv\Scripts\activate
-```
-
-## Install from a wheel
-
-### One-line Linux install or update
-
-This automatically finds the wheel attached to the latest GitHub release, installs or upgrades it, and creates the Linux desktop shortcut:
-
-```bash
-python3 -m pip install --upgrade "$(wget -qO- https://api.github.com/repos/etoven/ltx-director-director/releases/latest | sed -n 's/.*"browser_download_url": "\(.*\.whl\)".*/\1/p' | head -n 1)" && ltx-director-director-install-desktop
-```
-
-Or download the `.whl` file from the latest GitHub release, then install it with:
-
-```bash
-python3 -m pip install ./ltx_prompt_director-1.12.57-py3-none-any.whl
-```
-
-You can also install a locally built wheel from the repository:
-
-```bash
-python3 -m pip install ./dist/ltx_prompt_director-*.whl
-```
-
-Launch the installed application with:
-
-```bash
+python3 -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/unified-project-workflows/dist/ltx_prompt_director-1.13.0a15-py3-none-any.whl'
 ltx-director-director
 ```
 
-Using a virtual environment is recommended if you do not want to install the package into your user Python environment.
+For a Linux application-menu shortcut, run `ltx-director-director-install-desktop`. The stable `main` branch remains on 1.12.57; see [installation details](install.md) if you prefer that release or want to run from source.
 
-## Linux desktop shortcut
+## Learn more
 
-After installing the wheel or package, add LTX Director - Director to your desktop environment's application menu:
+- [Unified workflow behavior and prompt controls](docs/unified-workflows.md)
+- [MiniMax References and detected workflows](docs/minimax-references.md)
+- [Project performance, storage, and properties](docs/performance-and-properties.md)
+- [Aurora splash and inline directive details](docs/aurora-splash.md)
 
-```bash
-ltx-director-director-install-desktop
-```
+**Local-first workspace.** Media preparation, previews, and project storage run on your machine. Prompt generation and refinement send the selected context to your configured AI provider; the app does not render video or require an app account.
 
-The shortcut is installed for the current user. You may need to reopen the application launcher before it appears. To remove it later:
-
-```bash
-ltx-director-director-uninstall-desktop
-```
-
-The app also attempts to install the per-user shortcut automatically on its first Linux launch.
-
-See [install.md](install.md) for platform setup and [usage.md](usage.md) for the complete workflow.
-
-## Privacy
-
-Media processing happens locally. Magic Build sends compressed 384-pixel reference frames and prompt instructions directly to the selected AI provider. Full timeline video files are not sent during Magic Build. API keys are never included in project or LTX exports.
-
-## License
-
-MIT
+MIT licensed.
