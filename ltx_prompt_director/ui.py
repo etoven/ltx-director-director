@@ -39,7 +39,7 @@ from .minimax_reference_widgets import MiniMaxReferenceSlot
 from .models import Segment, order_segments_by_ids, text_segment_from_ltx
 from .project_data import ARCHIVE_COLOR, load_other_tags, load_project_tags, new_note, normalize_notes, normalize_project_labels
 from .spellcheck import install_spellcheck
-from .prompt_tags import install_prompt_tags
+from .prompt_tags import install_prompt_tags, render_prompt_notes
 from .inline_cues import PromptTextEdit, cue_cells, insert_cue_cells
 from .timed_action import CUE, NEXT, SECTION, compose_actions, split_actions
 
@@ -2624,7 +2624,8 @@ class MainWindow(QMainWindow):
         self.project_dirty = False
         for editor in self.findChildren(QTextEdit):
             install_spellcheck(editor)
-            install_prompt_tags(editor)
+            if isinstance(editor, PromptTextEdit):
+                install_prompt_tags(editor)
         if splash:
             splash.set_status('Preparing text tools and appearance…')
             QApplication.processEvents()
@@ -2887,7 +2888,7 @@ class MainWindow(QMainWindow):
         intent_label = QLabel("DIRECTOR'S INTENT")
         intent_label.setObjectName("panelTitle")
         intent_row.addWidget(intent_label)
-        self.intent = QTextEdit()
+        self.intent = PromptTextEdit()
         self.intent.setAcceptRichText(False)
         self.intent.setMaximumHeight(82)
         intent_example = (
@@ -3090,7 +3091,7 @@ class MainWindow(QMainWindow):
         segment_layout.addLayout(segment_footer)
         # The global prompt is stored here for compatibility with generation/export;
         # it is edited through the same visible text box using the scope selector.
-        self.global_prompt = QTextEdit(self)
+        self.global_prompt = PromptTextEdit(self)
         self.global_prompt.hide()
         self.global_prompt.textChanged.connect(self.global_prompt_changed)
         self.applied_label = QLabel(self)
@@ -4083,6 +4084,7 @@ class MainWindow(QMainWindow):
         self.segments = state.get("segments", [])
         self.global_prompt.setPlainText(str(state.get("globalPrompt", "")))
         self.intent.setPlainText(str(state.get("directorIntent", "")))
+        render_prompt_notes(self.intent)
         self.requested_length.setValue(requested_length_value(state.get("requestedLength")))
         self.speaker_language.setCurrentText(str(state.get("speakerLanguage", "(Image/context provided)")))
         self.speaker_accent.setCurrentText(str(state.get("speakerAccent", state.get("speakerNationality", "(Image/context provided)"))))
@@ -5516,6 +5518,8 @@ class MainWindow(QMainWindow):
             self.segment_prompt.setPlainText(value)
             if self.project_type != "ltx":
                 insert_cue_cells(self.segment_prompt, value, self.segments)
+            render_prompt_notes(self.segment_prompt)
+            if self.project_type != "ltx":
                 cursor = self.segment_prompt.textCursor()
                 cursor.setPosition(min(caret, len(value)))
                 self.segment_prompt.setTextCursor(cursor)
@@ -6151,6 +6155,7 @@ class MainWindow(QMainWindow):
         self.segments = loaded
         self.global_prompt.setPlainText(payload.get("globalPrompt", ""))
         self.intent.setPlainText(payload.get("directorIntent", ""))
+        render_prompt_notes(self.intent)
         direction_options = payload.get("directionOptions", {})
         self.requested_length.setValue(requested_length_value(direction_options.get("requestedLength")))
         self.speaker_language.setCurrentText(str(direction_options.get("speakerLanguage", "(Image/context provided)")))

@@ -7,6 +7,7 @@ from functools import lru_cache
 from PySide6.QtCore import QLocale, Qt
 from PySide6.QtGui import QAction, QColor, QSyntaxHighlighter, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import QTextEdit
+from .inline_cues import NOTE_TAG
 
 try:
     import enchant
@@ -88,6 +89,17 @@ def spellcheck_menu(editor: QTextEdit, point, highlighter: SpellHighlighter):
     cursor.select(QTextCursor.SelectionType.WordUnderCursor)
     word = cursor.selectedText().strip()
     menu = editor.createStandardContextMenu(point)
+    note = editor.cursorForPosition(point).currentTable()
+    if note and note.format().property(NOTE_TAG):
+        anchor = menu.actions()[0] if menu.actions() else None
+        removal = QAction('Remove inline note', menu)
+        if anchor:
+            menu.insertAction(anchor, removal)
+            menu.insertSeparator(anchor)
+        else:
+            menu.addAction(removal)
+            menu.addSeparator()
+        removal.triggered.connect(lambda checked=False, table=note: table.removeRows(0, table.rows()))
     if highlighter.dictionary and WORDS.fullmatch(word) and highlighter.misspelled(word):
         anchor = menu.actions()[0] if menu.actions() else None
         for replacement in highlighter.dictionary.suggest(word)[:7]:

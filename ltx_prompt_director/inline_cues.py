@@ -11,16 +11,31 @@ from .ai import _minimax_timestamp
 from .timed_action import CUE, NEXT, SECTION
 
 CUE_ID = QTextCharFormat.Property.UserProperty
+NOTE_TAG = int(CUE_ID) + 1
 TIME = re.compile(r'\d{2}:\d{2}:\d{2}:\d{2}')
 PREFIX = re.compile(r'^\s*\d{2}:\d{2}:\d{2}:\d{2}\s*-\s*\d{2}:\d{2}:\d{2}:\d{2}:\s*')
 
 
+def _note_line(table) -> str:
+    body = _cell_text(table.cellAt(0, 1)).strip().replace('\n', '\n    ')
+    return f'{table.format().property(NOTE_TAG)} {body}'.rstrip()
+
+
 def _cell_text(cell) -> str:
     first, last = cell.firstCursorPosition().block(), cell.lastCursorPosition().block()
+    container = cell.firstCursorPosition().currentTable()
     lines = []
     block = first
     while block.isValid():
-        lines.append(block.text())
+        probe = _cursor_at(block.document(), block.position())
+        nested = probe.currentTable()
+        if nested and nested != container and nested.format().property(NOTE_TAG):
+            lines.append(_note_line(nested))
+            while block != last and block.next().isValid() and block.next().position() <= last.position() and block.next().position() <= nested.lastPosition():
+                block = block.next()
+        elif block.text() or not (block.next().isValid() and block.next().position() <= last.position()
+                                   and _cursor_at(block.document(), block.next().position()).currentTable()):
+            lines.append(block.text())
         if block == last:
             break
         block = block.next()
@@ -29,7 +44,12 @@ def _cell_text(cell) -> str:
 
 def _inline_table(cursor):
     table = cursor.currentTable()
-    return table if table and table.columns() == 2 else None
+    while table:
+        if table.columns() == 2 and not table.format().property(NOTE_TAG):
+            return table
+        parent = table.parentFrame()
+        table = parent if hasattr(parent, 'columns') else None
+    return None
 
 
 def cue_cells(editor) -> dict[str, str]:
@@ -59,13 +79,26 @@ def inline_prompt(editor) -> str:
         cursor.setPosition(block.position())
         table = _inline_table(cursor)
         if not table:
+            note = cursor.currentTable()
+            if note and note.format().property(NOTE_TAG):
+                lines.append(_note_line(note))
+                while block.isValid() and _cursor_at(document, block.position()).currentTable() == note:
+                    block = block.next()
+                after_table = True
+                continue
             # Qt inserts a structural empty paragraph immediately before every table.
-            if not block.text() and after_table and lines and lines[-1] == '':
+            if not block.text() and after_table:
+                after_table = False
                 block = block.next()
                 continue
-            if not (not block.text() and block.next().isValid()
-                    and _inline_table(_cursor_at(document, block.next().position()))
+            following_table = (_cursor_at(document, block.next().position()).currentTable()
+                               if block.next().isValid() else None)
+            if not (not block.text() and following_table and following_table.format().property(NOTE_TAG)) and not (
+                    not block.text() and block.next().isValid() and _inline_table(_cursor_at(document, block.next().position()))
                     and lines and lines[-1] == '[TIMED ACTION]'):
+                if (NEXT.fullmatch(block.text()) and lines and lines[-1]
+                        and TIME.match(lines[-1])):
+                    lines.append('')
                 lines.append(block.text())
             if block.text():
                 after_table = False
@@ -74,6 +107,8 @@ def inline_prompt(editor) -> str:
         times = TIME.findall(_cell_text(table.cellAt(0, 0)))
         action = _cell_text(table.cellAt(0, 1)).strip()
         if len(times) == 2:
+            if lines and TIME.match(lines[-1]):
+                lines.append('')
             lines.append(f'{times[0]} - {times[1]}: {action}')
         else:
             lines.append(action)
@@ -95,12 +130,25 @@ class PromptTextEdit(QTextEdit):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.inline_cue_mode = False
+        self.inline_note_mode = True
 
     def toPlainText(self):
-        return inline_prompt(self) if self.inline_cue_mode else super().toPlainText()
+        if self.inline_cue_mode:
+            return inline_prompt(self)
+        block = self.document().firstBlock()
+        while block.isValid():
+            table = _cursor_at(self.document(), block.position()).currentTable()
+            if table and table.format().property(NOTE_TAG):
+                return inline_prompt(self)
+            block = block.next()
+        return super().toPlainText()
 
     def _protect_timecode(self) -> bool:
         cursor = self.textCursor()
+        note = cursor.currentTable()
+        if note and note.format().property(NOTE_TAG) and note.cellAt(cursor).column() == 0:
+            self.setTextCursor(note.cellAt(0, 1).firstCursorPosition())
+            return True
         table = _inline_table(cursor)
         if table and table.cellAt(cursor).column() == 0:
             self.setTextCursor(table.cellAt(0, 1).firstCursorPosition())
@@ -110,6 +158,10 @@ class PromptTextEdit(QTextEdit):
             while block.isValid() and block.position() <= cursor.selectionEnd():
                 probe = _cursor_at(self.document(), block.position())
                 selected_table = _inline_table(probe)
+                selected_note = probe.currentTable()
+                if selected_note and selected_note.format().property(NOTE_TAG) and selected_note.cellAt(probe).column() == 0:
+                    self.setTextCursor(selected_note.cellAt(0, 1).firstCursorPosition())
+                    return True
                 if selected_table and selected_table.cellAt(probe).column() == 0:
                     self.setTextCursor(selected_table.cellAt(0, 1).firstCursorPosition())
                     return True
@@ -120,12 +172,19 @@ class PromptTextEdit(QTextEdit):
         editing = bool(event.text() and not event.modifiers() & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.AltModifier))
         editing = editing or event.key() in (Qt.Key.Key_Backspace, Qt.Key.Key_Delete, Qt.Key.Key_Return, Qt.Key.Key_Enter)
         editing = editing or event.matches(QKeySequence.StandardKey.Paste) or event.matches(QKeySequence.StandardKey.Cut)
-        if self.inline_cue_mode and editing:
+        if (self.inline_cue_mode or self.inline_note_mode) and editing:
             if self._protect_timecode():
                 event.accept()
                 return
             cursor = self.textCursor()
             table = _inline_table(cursor)
+            note = cursor.currentTable()
+            if note and note.format().property(NOTE_TAG) and note.cellAt(cursor).column() == 1:
+                cell = note.cellAt(0, 1)
+                if ((event.key() == Qt.Key.Key_Backspace and cursor.position() <= cell.firstCursorPosition().position())
+                        or (event.key() == Qt.Key.Key_Delete and cursor.position() >= cell.lastCursorPosition().position())):
+                    event.accept()
+                    return
             if table and table.cellAt(cursor).column() == 1:
                 cell = table.cellAt(0, 1)
                 if ((event.key() == Qt.Key.Key_Backspace and cursor.position() <= cell.firstCursorPosition().position())
@@ -136,23 +195,23 @@ class PromptTextEdit(QTextEdit):
                 adjacent = cursor.position() + (-1 if event.key() == Qt.Key.Key_Backspace else 1)
                 if 0 <= adjacent < self.document().characterCount():
                     probe = _cursor_at(self.document(), adjacent)
-                    if _inline_table(probe) and not table:
+                    if (_inline_table(probe) and not table) or (probe.currentTable() and probe.currentTable().format().property(NOTE_TAG) and not note):
                         event.accept()
                         return
         super().keyPressEvent(event)
 
     def insertFromMimeData(self, source):
-        if self.inline_cue_mode and self._protect_timecode():
+        if (self.inline_cue_mode or self.inline_note_mode) and self._protect_timecode():
             return
         super().insertFromMimeData(source)
 
     def cut(self):
-        if self.inline_cue_mode and self._protect_timecode():
+        if (self.inline_cue_mode or self.inline_note_mode) and self._protect_timecode():
             return
         super().cut()
 
     def dropEvent(self, event):
-        if self.inline_cue_mode and event.source() is self and self._protect_timecode():
+        if (self.inline_cue_mode or self.inline_note_mode) and event.source() is self and self._protect_timecode():
             event.ignore()
             return
         super().dropEvent(event)

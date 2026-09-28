@@ -4,11 +4,14 @@ from unittest.mock import patch
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 from PySide6.QtCore import QEventLoop, QThread, QTimer, Qt
+from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import QApplication, QDialog, QMessageBox
 
 from ltx_prompt_director import ai
 from ltx_prompt_director.models import Segment
 from ltx_prompt_director.ui import MainWindow
+from ltx_prompt_director.inline_cues import NOTE_TAG
+from ltx_prompt_director.prompt_tags import render_prompt_notes
 
 
 class UnifiedEditorTests(unittest.TestCase):
@@ -59,6 +62,35 @@ class UnifiedEditorTests(unittest.TestCase):
         w.prompt_scope.setCurrentIndex(0)
         self.assertEqual(w.segment_prompt.toPlainText(), 'Second action')
         self.assertTrue(w.global_prompt.isHidden())
+
+    def test_inline_note_survives_ltx_scope_and_minimax_mode_switch(self):
+        w = self.make_window()
+        w.segment_prompt.setPlainText('First action\n/refine Slow the movement')
+        render_prompt_notes(w.segment_prompt)
+        self.assertIn('/refine Slow the movement', w.segments[0].prompt)
+        w.prompt_scope.setCurrentIndex(1)
+        w.segment_prompt.setPlainText('/refine-global Keep the camera still')
+        render_prompt_notes(w.segment_prompt)
+        w.prompt_scope.setCurrentIndex(0)
+        self.assertIn('/refine Slow the movement', w.segment_prompt.toPlainText())
+        w.prompt_scope.setCurrentIndex(1)
+        self.assertIn('/refine-global Keep the camera still', w.segment_prompt.toPlainText())
+        w.set_project_type('minimax_frames')
+        w.segment_prompt.setPlainText('/refine-global Keep continuity\n\n[SCENE]\nOne shot.')
+        render_prompt_notes(w.segment_prompt)
+        w.set_project_type('ltx')
+        w.set_project_type('minimax_frames')
+        self.assertIn('/refine-global Keep continuity', w.segment_prompt.toPlainText())
+        block = w.segment_prompt.document().firstBlock()
+        tags = []
+        while block.isValid():
+            cursor = QTextCursor(w.segment_prompt.document())
+            cursor.setPosition(block.position())
+            table = cursor.currentTable()
+            if table and table.format().property(NOTE_TAG):
+                tags.append(table.format().property(NOTE_TAG))
+            block = block.next()
+        self.assertIn('/refine-global', tags)
 
     def test_switches_only_show_relevant_controls_and_never_generate(self):
         w = self.make_window()
