@@ -55,12 +55,15 @@ def insert_note(editor: PromptTextEdit, cursor: QTextCursor, tag: str, body: str
     fmt.setProperty(NOTE_TAG, tag)
     fmt.setBorder(0)
     fmt.setCellPadding(5)
-    fmt.setCellSpacing(2)
-    fmt.setWidth(QTextLength(QTextLength.Type.PercentageLength, 96))
-    fmt.setColumnWidthConstraints([QTextLength(QTextLength.Type.FixedLength, 160),
-                                   QTextLength(QTextLength.Type.PercentageLength, 80)])
-    table = cursor.insertTable(1, 2, fmt)
-    label, value = table.cellAt(0, 0), table.cellAt(0, 1)
+    fmt.setCellSpacing(0)
+    fmt.setBackground(QColor('#1d333b'))
+    global_note = tag == '/refine-global'
+    fmt.setWidth(QTextLength(QTextLength.Type.PercentageLength, 96 if global_note else 62))
+    if not global_note:
+        fmt.setColumnWidthConstraints([QTextLength(QTextLength.Type.FixedLength, 105),
+                                       QTextLength(QTextLength.Type.PercentageLength, 72)])
+    table = cursor.insertTable(2, 1, fmt) if global_note else cursor.insertTable(1, 2, fmt)
+    label, value = table.cellAt(0, 0), table.cellAt(1, 0) if global_note else table.cellAt(0, 1)
     for cell, color in ((label, '#1d333b'), (value, '#1d333b')):
         cell_format = QTextTableCellFormat(cell.format())
         cell_format.setBackground(QColor(color))

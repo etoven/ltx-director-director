@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QKeySequence, QTextCharFormat, QTextCursor, QTextLength, QTextTableCellFormat, QTextTableFormat
+from PySide6.QtGui import QColor, QKeySequence, QPainter, QPainterPath, QPalette, QPen, QTextCharFormat, QTextCursor, QTextLength, QTextTableCellFormat, QTextTableFormat
 from PySide6.QtWidgets import QTextEdit
 
 from .ai import _minimax_timestamp
@@ -17,8 +17,12 @@ PREFIX = re.compile(r'^\s*\d{2}:\d{2}:\d{2}:\d{2}\s*-\s*\d{2}:\d{2}:\d{2}:\d{2}:
 
 
 def _note_line(table) -> str:
-    body = _cell_text(table.cellAt(0, 1)).strip().replace('\n', '\n    ')
+    body = _cell_text(_note_body_cell(table)).strip().replace('\n', '\n    ')
     return f'{table.format().property(NOTE_TAG)} {body}'.rstrip()
+
+
+def _note_body_cell(table):
+    return table.cellAt(1, 0) if table.rows() > 1 else table.cellAt(0, 1)
 
 
 def _cell_text(cell) -> str:
@@ -143,11 +147,40 @@ class PromptTextEdit(QTextEdit):
             block = block.next()
         return super().toPlainText()
 
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        document = self.document()
+        seen = set()
+        block = document.firstBlock()
+        painter = QPainter(self.viewport())
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        while block.isValid():
+            table = _cursor_at(document, block.position()).currentTable()
+            if table and table.format().property(NOTE_TAG) and table.firstPosition() not in seen:
+                seen.add(table.firstPosition())
+                bounds = document.documentLayout().frameBoundingRect(table)
+                anchor = self.cursorRect(table.firstCursorPosition())
+                bounds.moveTopLeft(anchor.topLeft())
+                bounds.adjust(.5, .5, -.5, -.5)
+                parent = table.parentFrame()
+                corner_color = (QColor('#28343a') if parent and parent.format().property(CUE_ID)
+                                else self.palette().color(QPalette.ColorRole.Base))
+                square = QPainterPath()
+                square.addRect(bounds)
+                pill = QPainterPath()
+                pill.addRoundedRect(bounds, 10, 10)
+                painter.fillPath(square.subtracted(pill), corner_color)
+                painter.setPen(QPen(QColor('#4f8395'), 1))
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.drawPath(pill)
+            block = block.next()
+        painter.end()
+
     def _protect_timecode(self) -> bool:
         cursor = self.textCursor()
         note = cursor.currentTable()
-        if note and note.format().property(NOTE_TAG) and note.cellAt(cursor).column() == 0:
-            self.setTextCursor(note.cellAt(0, 1).firstCursorPosition())
+        if note and note.format().property(NOTE_TAG) and note.cellAt(cursor) != _note_body_cell(note):
+            self.setTextCursor(_note_body_cell(note).firstCursorPosition())
             return True
         table = _inline_table(cursor)
         if table and table.cellAt(cursor).column() == 0:
@@ -159,8 +192,8 @@ class PromptTextEdit(QTextEdit):
                 probe = _cursor_at(self.document(), block.position())
                 selected_table = _inline_table(probe)
                 selected_note = probe.currentTable()
-                if selected_note and selected_note.format().property(NOTE_TAG) and selected_note.cellAt(probe).column() == 0:
-                    self.setTextCursor(selected_note.cellAt(0, 1).firstCursorPosition())
+                if selected_note and selected_note.format().property(NOTE_TAG) and selected_note.cellAt(probe) != _note_body_cell(selected_note):
+                    self.setTextCursor(_note_body_cell(selected_note).firstCursorPosition())
                     return True
                 if selected_table and selected_table.cellAt(probe).column() == 0:
                     self.setTextCursor(selected_table.cellAt(0, 1).firstCursorPosition())
@@ -179,8 +212,8 @@ class PromptTextEdit(QTextEdit):
             cursor = self.textCursor()
             table = _inline_table(cursor)
             note = cursor.currentTable()
-            if note and note.format().property(NOTE_TAG) and note.cellAt(cursor).column() == 1:
-                cell = note.cellAt(0, 1)
+            if note and note.format().property(NOTE_TAG) and note.cellAt(cursor) == _note_body_cell(note):
+                cell = _note_body_cell(note)
                 if ((event.key() == Qt.Key.Key_Backspace and cursor.position() <= cell.firstCursorPosition().position())
                         or (event.key() == Qt.Key.Key_Delete and cursor.position() >= cell.lastCursorPosition().position())):
                     event.accept()

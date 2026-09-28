@@ -18,7 +18,7 @@ from importlib.resources import files
 from pathlib import Path
 from uuid import uuid4
 
-from PySide6.QtCore import QDateTime, QEasingCurve, QObject, QRunnable, QRectF, QSettings, QSize, QStandardPaths, Qt, QThreadPool, QTimer, QUrl, QVariantAnimation, Signal, Slot
+from PySide6.QtCore import QDateTime, QEasingCurve, QEventLoop, QObject, QRunnable, QRectF, QSettings, QSize, QStandardPaths, Qt, QThreadPool, QTimer, QUrl, QVariantAnimation, Signal, Slot
 from PySide6.QtGui import QAction, QActionGroup, QBrush, QColor, QIcon, QImageReader, QPainter, QPen, QPixmap, QTextCharFormat, QTextCursor, QTextOption
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
@@ -262,7 +262,8 @@ class BackgroundCallbacks(QObject):
         finally:
             self.owner.update_closing_progress()
             if self.owner._close_after_jobs and not self.owner._pending_disk_jobs:
-                QTimer.singleShot(0, self.owner.close)
+                # Let the completed progress state reach the screen before dismissing it.
+                QTimer.singleShot(180, self.owner.close)
             self.deleteLater()
 
 
@@ -4420,6 +4421,12 @@ class MainWindow(QMainWindow):
         label = self._closing_progress.findChild(QLabel, "closeProgressLabel")
         if label:
             label.setText(f"Saving projects… {self._closing_total - self._pending_disk_jobs} of {self._closing_total} complete")
+        if self._closing_progress.isVisible():
+            if label:
+                label.repaint()
+            if progress:
+                progress.repaint()
+            self._closing_progress.repaint()
 
     def show_closing_progress(self) -> None:
         if not self.isVisible() or self._closing_progress:
@@ -4442,6 +4449,10 @@ class MainWindow(QMainWindow):
         self.update_closing_progress()
         dialog.show()
         self.hide()
+        dialog.raise_()
+        dialog.repaint()
+        # Saving snapshots may take time on the GUI thread; paint before it starts.
+        QApplication.processEvents(QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents)
 
     def closeEvent(self, event) -> None:
         if not self._close_saves_queued:
@@ -4555,6 +4566,18 @@ class MainWindow(QMainWindow):
         self.ruler.set_scale(value)
         self.update_timeline_layout()
         self.mark_dirty()
+
+    def preserve_timeline_scale_for_growth(self, target_total: float) -> None:
+        """Keep expanded AI/manual segments visibly wider instead of squeezing Auto fit."""
+        if not self.timeline_fit_mode or target_total <= self.total_duration() + .005:
+            return
+        self.timeline_fit_mode = False
+        scale = max(1, round(self.pixels_per_second))
+        self.timeline_scale.blockSignals(True)
+        self.timeline_scale.setMaximum(max(self.timeline_scale.maximum(), scale))
+        self.timeline_scale.setValue(scale)
+        self.timeline_scale.blockSignals(False)
+        self.timeline_scale.setToolTip('Timeline scale; Auto fit is available from the button when you want all segments visible')
 
     def autofit_timeline(self) -> None:
         self.timeline_fit_mode = True
@@ -4925,6 +4948,7 @@ class MainWindow(QMainWindow):
     def change_duration(self, segment_id: str, value: float) -> None:
         self.autofit_tail_extension = 0
         segment = next(item for item in self.segments if item.id == segment_id)
+        self.preserve_timeline_scale_for_growth(sum(item.duration for item in self.segments) - segment.duration + value)
         segment.duration = max(MIN_DURATION, round(value, 2))
         self.mark_dirty()
         for row in range(self.timeline.count()):
@@ -4938,6 +4962,8 @@ class MainWindow(QMainWindow):
                     self.timeline.setUpdatesEnabled(True)
                 card = self.timeline.itemWidget(item)
                 if isinstance(card, SegmentCard):
+                    card.resize_handle.duration = segment.duration
+                    card.duration_label.setText(f"{segment.duration:.2f}s")
                     card.update()
                     card.content.update()
                 break
@@ -5148,14 +5174,14 @@ class MainWindow(QMainWindow):
         self.speaker_accent.setEnabled(checked)
         self.mark_dirty()
 
-    def build_director_request(self) -> str:
+    def build_director_request(self, *, include_requested_length: bool = True) -> str:
         """Compose focused planning controls into the authoritative model request."""
         lines = []
         creative_intent = self.intent.toPlainText().strip()
         if creative_intent:
             lines.append(creative_intent)
         requested_length = self.requested_length.value()
-        if requested_length > 0 and self.project_type == "ltx":
+        if include_requested_length and requested_length > 0 and self.project_type == "ltx":
             if len(self.segments) == 1:
                 item_label = "single text-only segment" if self.segments[0].kind == "text" else "single-frame sequence"
                 lines.append(
@@ -5186,7 +5212,7 @@ class MainWindow(QMainWindow):
         return "\n\n".join(lines)
 
     def build_refinement_request(self) -> str:
-        lines = [self.build_director_request()]
+        lines = [self.build_director_request(include_requested_length=False)]
         lines.append(
             "SFX option is ON: preserve and improve the selected prompt's required `SFX:` clause."
             if self.sfx.isChecked() else
@@ -5332,7 +5358,6 @@ class MainWindow(QMainWindow):
             index, segment = target
             durations = [item.duration for item in self.segments]
             durations[index] = float(result["duration"])
-            self.mark_dirty()
             self.animate_timeline_durations(durations)
             self.statusBar().showMessage(f"Segment {index + 1} timing refined to {durations[index]:.2f}s; prompt text unchanged")
         self.set_ai_controls_enabled(True)
@@ -5350,7 +5375,6 @@ class MainWindow(QMainWindow):
                 self.refresh_segment_prompt_box(index)
                 self.copy_image_prompt.setEnabled(bool(segment.image_prompt))
             self.refresh_text_segment_previews()
-            self.mark_dirty()
             self.animate_timeline_durations(durations)
             self.statusBar().showMessage(f"Segment {index + 1} prompt refined")
         self.set_ai_controls_enabled(True)
@@ -5374,6 +5398,8 @@ class MainWindow(QMainWindow):
     def magic_progress(self, attempt: int, total: int, detail: str) -> None:
         if not self.ai_request_is_current():
             return
+        if attempt > 1:
+            self.statusBar().showMessage(f"{self.ai_activity_title}: {detail} (attempt {attempt}/{total})")
         if getattr(self, "ai_activity_in_minimax", False) and self.minimax_panel:
             action = "Refining" if str(getattr(self, "minimax_operation_kind", "")).startswith("refine_") else "Generating"
             self.minimax_panel.set_busy(True, f"{detail}  •  attempt {attempt}/{total}")
@@ -5909,16 +5935,27 @@ class MainWindow(QMainWindow):
 
     def animate_timeline_durations(self, target_durations: list[float]) -> None:
         self.autofit_tail_extension = 0
+        if getattr(self, 'duration_animation', None):
+            self.duration_animation.stop()
+        self.preserve_timeline_scale_for_growth(sum(target_durations))
         if not self.segments or self.timeline.count() != len(self.segments):
             for segment, target in zip(self.segments, target_durations):
                 segment.duration = target
             self.refresh_timeline(self.timeline.currentRow())
+            self.mark_dirty()
             return
         start_widths = [self.timeline.item(row).sizeHint().width() for row in range(self.timeline.count())]
         target_widths = self.timeline_item_widths(target_durations)
         for segment, target in zip(self.segments, target_durations):
             segment.duration = target
+        self.mark_dirty()
+        for row, target in enumerate(target_durations):
+            card = self.timeline.itemWidget(self.timeline.item(row))
+            if isinstance(card, SegmentCard):
+                card.resize_handle.duration = target
         self.sync_selected_duration_control()
+        self.update_segment_start_times()
+        self.update_summary()
         animation = QVariantAnimation(self)
         animation.setDuration(950)
         animation.setStartValue(0.0)

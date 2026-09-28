@@ -195,24 +195,13 @@ def refine_timing(segments: list[Segment], selected_index: int, provider: str, m
     """Retiming pass that may change only the selected segment's duration."""
     if not 0 <= selected_index < len(segments):
         raise ValueError("Select a segment to refine its timing.")
-    untouched_total = sum(segment.duration for index, segment in enumerate(segments) if index != selected_index)
-    required = None
-    if requested_total > 0:
-        required = round(requested_total - untouched_total, 2)
-        if required < 0.01:
-            raise ValueError(
-                f"The requested {requested_total:.2f}s sequence cannot be reached by changing only this segment. "
-                f"It would need a non-positive duration of {required:.2f}s."
-            )
     images = _refinement_images(segments, selected_index)
-    rules = _timing_rules(segments, selected_index, intent, required)
+    rules = _timing_rules(segments, selected_index, intent, requested_total)
     raw = _provider_raw(images, provider, model, api_key, rules, timeout)
     result = _parse_json(raw)
     if not isinstance(result, dict):
         raise AIResponseFormatError("The AI returned an invalid timing response. The operation will retry.")
     duration = _strict_duration(result.get("duration"))
-    if required is not None and duration != required:
-        raise AIResponseFormatError(f"The AI ignored the required {required:.2f}s selected-segment duration. The operation will retry.")
     return {"duration": duration}
 
 
@@ -223,17 +212,8 @@ def refine_segment_prompt(segments: list[Segment], selected_index: int, provider
     selected = segments[selected_index]
     if not selected.prompt.strip():
         raise ValueError("The selected segment needs an existing prompt before it can be refined.")
-    untouched_total = sum(segment.duration for index, segment in enumerate(segments) if index != selected_index)
-    required = None
-    if requested_total > 0:
-        required = round(requested_total - untouched_total, 2)
-        if required < 0.01:
-            raise ValueError(
-                f"The requested {requested_total:.2f}s sequence cannot be reached while changing only this segment. "
-                f"It would need a non-positive duration of {required:.2f}s."
-            )
     images = _refinement_images(segments, selected_index)
-    rules = _prompt_refinement_rules(segments, selected_index, intent, required)
+    rules = _prompt_refinement_rules(segments, selected_index, intent, requested_total)
     raw = _provider_raw(images, provider, model, api_key, rules, timeout)
     result = _parse_json(raw)
     if not isinstance(result, dict):
@@ -245,8 +225,6 @@ def refine_segment_prompt(segments: list[Segment], selected_index: int, provider
     if not image_prompt:
         raise AIResponseFormatError("The AI returned no Gemini image-generation prompt. The operation will retry.")
     duration = _strict_duration(result.get("duration"))
-    if required is not None and duration != required:
-        raise AIResponseFormatError(f"The AI ignored the required {required:.2f}s selected-segment duration. The operation will retry.")
     return {"prompt": prompt.strip(), "imagePrompt": image_prompt, "duration": duration}
 
 
@@ -476,12 +454,16 @@ def _segment_context(segments: list[Segment], selected_index: int) -> str:
     return "\n\n".join(records)
 
 
-def _timing_rules(segments: list[Segment], selected_index: int, intent: str, required: float | None) -> str:
-    duration_instruction = (
-        f"Return exactly {required:.2f} seconds because this is the only duration that satisfies the requested total sequence length."
-        if required is not None else
-        "Choose any positive duration needed for the action, with two decimal places of precision."
-    )
+def _refinement_duration_instruction(requested_total: float) -> str:
+    guidance = "Choose any positive selected-segment duration needed for the action, with two decimal places of precision."
+    if requested_total > 0:
+        guidance += (f" The existing {requested_total:.2f}s requested total is a planning preference, not a hard limit on this refinement. "
+                     "Preserve all other segment durations; let the sequence total grow or shrink when this action needs it.")
+    return guidance
+
+
+def _timing_rules(segments: list[Segment], selected_index: int, intent: str, requested_total: float) -> str:
+    duration_instruction = _refinement_duration_instruction(requested_total)
     return f"""You are performing a TIMING-ONLY refinement for LTX Video 2.3.
 Analyze the complete ordered segment plan below so the selected segment still fits the sequence. Use the immediately previous and next prompts and supplied adjacent frames as the primary motion and continuity context.
 Change ONLY the duration of selected segment {selected_index + 1}. Every prompt is immutable: do not rewrite, summarize or return any prompt text. Do not change any other duration.
@@ -496,12 +478,8 @@ ORDERED EXISTING PLAN:
 Return strict JSON containing only: {{"duration": 5.0}}"""
 
 
-def _prompt_refinement_rules(segments: list[Segment], selected_index: int, intent: str, required: float | None) -> str:
-    duration_instruction = (
-        f"Return exactly {required:.2f} seconds because this is the only duration that satisfies the requested total sequence length."
-        if required is not None else
-        "You may assign any positive duration needed by the refined action or dialog, with two decimal places of precision."
-    )
+def _prompt_refinement_rules(segments: list[Segment], selected_index: int, intent: str, requested_total: float) -> str:
+    duration_instruction = _refinement_duration_instruction(requested_total)
     return f"""You are refining ONE existing segment prompt for LTX Video 2.3.
 Refine ONLY segment {selected_index + 1}. The SELECTED CURRENT EDITOR PROMPT is the authoritative creative instruction and is the text the user explicitly asked you to refine. Preserve every requested action, change, camera instruction, timing cue and constraint from that prompt while improving clarity, temporal progression, physical causality, secondary motion, Spoken Dialog delivery and lip-sync direction where present.
 Treat inline /refine directives as editing instructions for the nearest passage, /refine-global as instructions for the entire selected prompt, and /keep, /avoid and /focus as explicit constraints. Preserve these directives in the returned prompt so the user can refine again.
