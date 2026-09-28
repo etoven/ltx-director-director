@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QKeySequence, QPainter, QPainterPath, QPalette, QPen, QTextCharFormat, QTextCursor, QTextLength, QTextTableCellFormat, QTextTableFormat
+from PySide6.QtGui import QColor, QKeySequence, QPainter, QPainterPath, QPen, QTextCharFormat, QTextCursor, QTextLength, QTextTableCellFormat, QTextTableFormat
 from PySide6.QtWidgets import QTextEdit
 
 from .ai import _minimax_timestamp
@@ -22,7 +22,7 @@ def _note_line(table) -> str:
 
 
 def _note_body_cell(table):
-    return table.cellAt(1, 0) if table.rows() > 1 else table.cellAt(0, 1)
+    return table.cellAt(0, 0)
 
 
 def _cell_text(cell) -> str:
@@ -161,15 +161,9 @@ class PromptTextEdit(QTextEdit):
                 bounds = document.documentLayout().frameBoundingRect(table)
                 anchor = self.cursorRect(table.firstCursorPosition())
                 bounds.moveTopLeft(anchor.topLeft())
-                bounds.adjust(.5, .5, -.5, -.5)
-                parent = table.parentFrame()
-                corner_color = (QColor('#28343a') if parent and parent.format().property(CUE_ID)
-                                else self.palette().color(QPalette.ColorRole.Base))
-                square = QPainterPath()
-                square.addRect(bounds)
+                bounds.adjust(-9.5, -5.5, -12.5, -17.5)
                 pill = QPainterPath()
                 pill.addRoundedRect(bounds, 10, 10)
-                painter.fillPath(square.subtracted(pill), corner_color)
                 painter.setPen(QPen(QColor('#4f8395'), 1))
                 painter.setBrush(Qt.BrushStyle.NoBrush)
                 painter.drawPath(pill)

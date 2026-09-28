@@ -4436,14 +4436,19 @@ class MainWindow(QMainWindow):
         dialog.setModal(True)
         dialog.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.CustomizeWindowHint | Qt.WindowType.WindowTitleHint)
         layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(22, 18, 22, 18)
+        layout.setSpacing(10)
         label = QLabel("Saving projects…")
         label.setObjectName("closeProgressLabel")
         layout.addWidget(label)
         bar = QProgressBar()
         bar.setObjectName("closeProgressBar")
         bar.setTextVisible(True)
+        bar.setMinimumHeight(24)
         layout.addWidget(bar)
-        dialog.setMinimumWidth(330)
+        # Use a consistent window size while allowing large system fonts to fit.
+        hint = dialog.sizeHint()
+        dialog.setFixedSize(max(420, hint.width()), max(112, hint.height()))
         self._closing_progress = dialog
         self._closing_total = self._pending_disk_jobs
         self.update_closing_progress()

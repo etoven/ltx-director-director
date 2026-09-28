@@ -104,8 +104,12 @@ class RefinementGrowthTests(unittest.TestCase):
             block = block.next()
         self.assertEqual(tables['/refine-global'].rows(), 2)
         self.assertEqual(tables['/refine-global'].columns(), 1)
-        self.assertEqual(tables['/refine'].rows(), 1)
-        self.assertEqual(tables['/refine'].columns(), 2)
+        self.assertEqual(tables['/refine'].rows(), 2)
+        self.assertEqual(tables['/refine'].columns(), 1)
+        self.assertEqual(tables['/refine-global'].cellAt(1, 0).firstCursorPosition().block().text(),
+                         'Global refinement')
+        self.assertEqual(tables['/refine'].cellAt(1, 0).firstCursorPosition().block().text(),
+                         'Refinement')
         self.assertEqual(editor.toPlainText(), original)
         editor.close()
 

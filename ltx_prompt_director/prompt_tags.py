@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import re
 
-from PySide6.QtCore import QEvent, QObject, QTimer, Qt, QUrl
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QImage, QPainter, QPen, QTextCursor, QTextDocument, QTextImageFormat, QTextLength, QTextTableCellFormat, QTextTableFormat
+from PySide6.QtCore import QEvent, QObject, QTimer, Qt
+from PySide6.QtGui import QColor, QFont, QTextBlockFormat, QTextCharFormat, QTextCursor, QTextLength, QTextTableCellFormat, QTextTableFormat
 from PySide6.QtWidgets import QCompleter, QTextEdit
 from .inline_cues import NOTE_TAG, PromptTextEdit
 
@@ -16,6 +16,8 @@ HINTS = {
     '/avoid': 'Exclude this detail',
     '/focus': 'Emphasize this detail',
 }
+NOTE_LABELS = {'/refine': 'Refinement', '/refine-global': 'Global refinement',
+               '/keep': 'Keep', '/avoid': 'Avoid', '/focus': 'Focus'}
 PARTIAL = re.compile(r'/[\w-]*$')
 EXISTING = re.compile(r'(?<!\w)/(refine-global|refine|keep|avoid|focus)\b[ \t]*([^\n]*)', re.IGNORECASE)
 GLOBAL_REFINEMENT_LINE = re.compile(r'(?im)^[ \t]*/refine-global\b[^\n]*(?:\n[ ]{4}[^\n]*)*\n?')
@@ -25,34 +27,6 @@ def consume_global_refinements(prompt: str) -> str:
     """Remove completed global edit instructions from a successful response."""
     return re.sub(r'\n{3,}', '\n\n', GLOBAL_REFINEMENT_LINE.sub('', prompt)).strip()
 
-def _pill_image(editor: PromptTextEdit, tag: str) -> QTextImageFormat:
-    """Draw a crisp rounded glyph as a document image, keeping the body Qt-editable."""
-    title = tag.upper()
-    font = QFont('Sans Serif', 9, QFont.Weight.DemiBold)
-    width = max(79, QFontMetrics(font).horizontalAdvance(title) + 23)
-    height = 22
-    scale = 2
-    image = QImage(width * scale, height * scale, QImage.Format.Format_ARGB32_Premultiplied)
-    image.fill(Qt.GlobalColor.transparent)
-    painter = QPainter(image)
-    painter.scale(scale, scale)
-    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    painter.setBrush(QColor('#336c80'))
-    painter.setPen(QPen(QColor('#81b8ca'), 1))
-    painter.drawRoundedRect(1, 1, width - 2, height - 2, 10, 10)
-    painter.setPen(QColor('#f0fbfe'))
-    painter.setFont(font)
-    painter.drawText(0, 0, width, height, Qt.AlignmentFlag.AlignCenter, title)
-    painter.end()
-    resource = QUrl('director-note:' + tag[1:])
-    editor.document().addResource(QTextDocument.ResourceType.ImageResource, resource, image)
-    image_format = QTextImageFormat()
-    image_format.setName(resource.toString())
-    image_format.setWidth(width)
-    image_format.setHeight(height)
-    return image_format
-
-
 def insert_note(editor: PromptTextEdit, cursor: QTextCursor, tag: str, body: str = '') -> None:
     """Insert a native wrapping note inside the existing document and focus its body."""
     cursor.beginEditBlock()
@@ -60,21 +34,30 @@ def insert_note(editor: PromptTextEdit, cursor: QTextCursor, tag: str, body: str
     fmt = QTextTableFormat()
     fmt.setProperty(NOTE_TAG, tag)
     fmt.setBorder(0)
-    fmt.setCellPadding(5)
+    fmt.setMargin(4)
+    fmt.setCellPadding(0)
     fmt.setCellSpacing(0)
-    fmt.setBackground(QColor('#1d333b'))
     global_note = tag == '/refine-global'
     fmt.setWidth(QTextLength(QTextLength.Type.PercentageLength, 96 if global_note else 62))
-    if not global_note:
-        fmt.setColumnWidthConstraints([QTextLength(QTextLength.Type.FixedLength, 105),
-                                       QTextLength(QTextLength.Type.PercentageLength, 72)])
-    table = cursor.insertTable(2, 1, fmt) if global_note else cursor.insertTable(1, 2, fmt)
-    label, value = table.cellAt(0, 0), table.cellAt(1, 0) if global_note else table.cellAt(0, 1)
-    for cell, color in ((label, '#1d333b'), (value, '#1d333b')):
+    table = cursor.insertTable(2, 1, fmt)
+    value, label = table.cellAt(0, 0), table.cellAt(1, 0)
+    for cell, top, bottom in ((value, 8, 1), (label, 0, 6)):
         cell_format = QTextTableCellFormat(cell.format())
-        cell_format.setBackground(QColor(color))
+        cell_format.setTopPadding(top)
+        cell_format.setBottomPadding(bottom)
+        cell_format.setLeftPadding(10)
+        cell_format.setRightPadding(10)
         cell.setFormat(cell_format)
-    label.firstCursorPosition().insertImage(_pill_image(editor, tag))
+    label_cursor = label.firstCursorPosition()
+    label_block = QTextBlockFormat()
+    label_block.setAlignment(Qt.AlignmentFlag.AlignRight)
+    label_block.setTopMargin(0)
+    label_block.setBottomMargin(0)
+    label_cursor.setBlockFormat(label_block)
+    label_format = QTextCharFormat()
+    label_format.setForeground(QColor('#91b6c2'))
+    label_format.setFont(QFont('Sans Serif', 8, QFont.Weight.Medium))
+    label_cursor.insertText(NOTE_LABELS.get(tag, tag[1:].replace('-', ' ').title()), label_format)
     body_cursor = value.firstCursorPosition()
     if body:
         body_cursor.insertText(body)

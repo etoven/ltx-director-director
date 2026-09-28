@@ -203,6 +203,9 @@ class InlineCuesCloseSpellcheckTests(unittest.TestCase):
                 dialog = window._closing_progress
                 self.assertIsNotNone(dialog)
                 self.assertTrue(dialog.isVisible())
+                self.assertEqual(dialog.minimumSize(), dialog.maximumSize())
+                self.assertGreaterEqual(dialog.width(), 420)
+                self.assertGreaterEqual(dialog.height(), 112)
                 self.assertIn('project saves', dialog.windowTitle())
                 release.set()
                 deadline = time.monotonic() + 5

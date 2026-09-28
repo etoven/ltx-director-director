@@ -107,3 +107,7 @@ LTX timing and prompt refinements may change the selected segment duration beyon
 ### Completed global refinements (1.13.0a14)
 
 Successful LTX or MiniMax prompt refinement consumes `/refine-global` notes, including multiline instructions. Other slash directives remain in the refined prompt. Failed or discarded responses leave the original notes in place for another attempt.
+
+### Clear note outlines and closing progress (1.13.0a15)
+
+The shared prompt editor renders slash directives as editable, rounded outline notes without inner badges or cell shading. Small bottom-right labels identify Refinement, Global refinement, Keep, Avoid, and Focus. Box padding, border insets and spacing are balanced across full-width and compact notes. The close progress dialog has a fixed 420 × 112 logical-pixel footprint that can grow for larger system fonts; it cannot be resized by dragging.
