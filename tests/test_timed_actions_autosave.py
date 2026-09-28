@@ -4,7 +4,7 @@ import unittest
 from unittest.mock import patch
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QTextEdit
 from ltx_prompt_director.ai import _extract_minimax_h3_prompt, AIResponseFormatError
 from ltx_prompt_director.models import Segment
 from ltx_prompt_director.timed_action import compose_actions, split_actions
@@ -38,7 +38,14 @@ class TimedActionsTests(unittest.TestCase):
         window.set_project_type('minimax_frames')
         window.segment_prompt.setPlainText(compose_actions('[SCENE]\nOriginal.\n\n[SOUND]\nRain.', window.segments, ['Opening', 'Ending']))
         window.sync_timed_actions()
-        self.assertEqual(len(window.minimax_panel.action_editors), 2)
+        self.assertEqual(len(window.segment_prompt.extraSelections()), 2)
+        self.assertFalse(hasattr(window.minimax_panel, 'actions_box'))
+        self.assertIn('Opening', window.segment_prompt.toPlainText())
+        self.assertEqual(window.segment_prompt.lineWrapMode(), QTextEdit.LineWrapMode.WidgetWidth)
+        edited = window.segment_prompt.toPlainText().replace('Opening', 'Opening and moving naturally')
+        window.segment_prompt.setPlainText(edited)
+        window.sync_timed_actions()
+        self.assertEqual(window.segments[0].prompt, 'Opening and moving naturally')
         window.change_duration(window.segments[0].id, 4)
         self.assertIn('00:00:04:00 - 00:00:07:00: Ending', window.segment_prompt.toPlainText())
         self.assertIn('[SOUND]\nRain.', window.segment_prompt.toPlainText())

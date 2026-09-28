@@ -19,7 +19,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from PySide6.QtCore import QDateTime, QEasingCurve, QObject, QRunnable, QRectF, QSettings, QSize, QStandardPaths, Qt, QThreadPool, QTimer, QUrl, QVariantAnimation, Signal, Slot
-from PySide6.QtGui import QAction, QActionGroup, QBrush, QColor, QIcon, QImageReader, QPainter, QPen, QPixmap
+from PySide6.QtGui import QAction, QActionGroup, QBrush, QColor, QIcon, QImageReader, QPainter, QPen, QPixmap, QTextCharFormat, QTextCursor, QTextOption
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
@@ -224,9 +224,17 @@ class BackgroundWorker(QRunnable):
 
     def run(self) -> None:
         try:
-            self.signals.finished.emit(self.operation(*self.args))
+            result = self.operation(*self.args)
         except Exception as error:
-            self.signals.failed.emit(str(error))
+            try:
+                self.signals.failed.emit(str(error))
+            except RuntimeError:
+                pass  # The window closed while its queued disk job was finishing.
+            return
+        try:
+            self.signals.finished.emit(result)
+        except RuntimeError:
+            pass  # A test or shutdown released the receiver before delivery.
 
 
 class BackgroundCallbacks(QObject):
@@ -2466,23 +2474,6 @@ class MiniMaxPromptPanel(QFrame):
         self.timeline_refine_button.clicked.connect(owner.refine_minimax_prompt)
         message_layout.addWidget(self.timeline_refine_button)
         layout.addWidget(self.message_panel)
-        self.actions_box = QFrame()
-        self.actions_box.setObjectName("minimaxActionsBox")
-        actions_layout = QVBoxLayout(self.actions_box)
-        actions_layout.setContentsMargins(7, 4, 7, 4)
-        self.actions_title = QLabel("TIMED ACTION  ·  linked to timeline")
-        self.actions_title.setObjectName("sectionLabel")
-        actions_layout.addWidget(self.actions_title)
-        self.actions_scroll = QScrollArea()
-        self.actions_scroll.setWidgetResizable(True)
-        self.actions_scroll.setMaximumHeight(195)
-        self.actions_content = QWidget()
-        self.actions_layout = QVBoxLayout(self.actions_content)
-        self.actions_layout.setContentsMargins(0, 0, 0, 0)
-        self.actions_scroll.setWidget(self.actions_content)
-        actions_layout.addWidget(self.actions_scroll)
-        layout.addWidget(self.actions_box)
-        self.action_editors = []
         self.clear_message()
 
         # Untimed project references can accompany either MiniMax workflow.
@@ -2631,6 +2622,7 @@ class MainWindow(QMainWindow):
         self._autosave_active = False
         self._action_segment_ids = []
         self._action_descriptions = {}
+        self._changed_action_sources = set()
         self._timeline_signature = ()
         self._actions_refresh_timer = QTimer(self)
         self._actions_refresh_timer.setSingleShot(True)
@@ -3077,6 +3069,8 @@ class MainWindow(QMainWindow):
         self.segment_prompt = QTextEdit()
         self.segment_prompt.setObjectName("promptEditor")
         self.segment_prompt.setAcceptRichText(False)
+        self.segment_prompt.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
+        self.segment_prompt.setWordWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
         self.segment_prompt.textChanged.connect(self.save_prompt)
         segment_layout.addWidget(self.segment_prompt)
         segment_footer = QHBoxLayout()
@@ -3415,7 +3409,7 @@ class MainWindow(QMainWindow):
         QMainWindow,QWidget{background:#24292c;color:#d9dcde;font:11px Arial} QMainWindow::separator{width:__DOCK_GRIP_WIDTH__px;height:__DOCK_GRIP_WIDTH__px;background:transparent;background-repeat:no-repeat;background-position:center} QMainWindow::separator:vertical{background-image:url("__DOCK_GRIP_IMAGE__")} QMainWindow::separator:horizontal{background-image:url("__DOCK_GRIP_HORIZONTAL_IMAGE__")} QMainWindow::separator:hover{background-color:rgba(88,118,134,35)} QToolBar{background:#1b2023;border:0;border-bottom:1px solid #111517;spacing:3px;padding:5px} QToolBar::separator{background:#394247;width:1px;margin:7px 5px}
         QToolButton,QPushButton,QComboBox,QSpinBox,QDoubleSpinBox,QLineEdit{background:#303436;border:1px solid #101213;border-radius:3px;padding:3px 7px;min-height:19px}
         #mainToolbar QToolButton{background:transparent;border:1px solid transparent;border-radius:4px;padding:5px 9px;color:#c5cdd1} #mainToolbar QToolButton:hover{background:#2b3438;border-color:#3a464c;color:#f3f7f9} #mainToolbar QToolButton:pressed{background:#17232a;border-color:#477d99;color:#bde6fb} #toolbarButton{background:#23343d;border:1px solid #385667;border-radius:5px;color:#c4e8fb;font-weight:bold}
-        #minimaxActionsBox{background:#1c252a;border:1px solid #374851;border-radius:6px} #minimaxActionRow{background:#202e34;border:1px solid #34434c;border-radius:4px} #minimaxActionRow QLineEdit{background:#162127;border:1px solid #39505b;border-radius:4px;color:#dce9ef;padding:4px 7px} #minimaxActionRow QLineEdit:focus{border-color:#72afca}         #minimaxPromptToolbar{background:#1b2023;border:1px solid #354047;border-radius:6px} #minimaxCacheState{background:#2b3438;color:#aebbc1;border:1px solid #435159;border-radius:9px;padding:2px 8px;font-size:9px} #minimaxCacheState[cached="true"]{background:#244d37;color:#c9f4d6;border-color:#4c9b6a} #minimaxInstructions{background:#1b2023;border:1px solid #37464d;border-radius:4px;color:#d8e1e5;padding:7px} #minimaxMessagePanel{background:#20313a;border:1px solid #49758a;border-radius:6px} #minimaxMessagePanel[level="success"]{background:#20392c;border-color:#4b8962} #minimaxMessagePanel[level="warning"]{background:#3a321f;border-color:#8a7340} #minimaxMessagePanel[level="error"]{background:#3a2325;border-color:#94555a} #minimaxMessageBanner{background:transparent;color:#ccecf8;border:0;padding:1px} #minimaxMessagePanel[level="success"] #minimaxMessageBanner{color:#cef2d9} #minimaxMessagePanel[level="warning"] #minimaxMessageBanner{color:#f2dfb0} #minimaxMessagePanel[level="error"] #minimaxMessageBanner{color:#f2c5c8} #minimaxRetryButton{background:#5b451b;color:#ffe7a1;border:1px solid #c79a39;border-radius:4px;font-weight:bold;padding:4px 10px} #minimaxRetryButton:hover{background:#755b25;border-color:#e2bc5a;color:#fff5cf} #minimaxBusyCard{background:#17262d;border:1px solid #65a7c7;border-radius:8px} #minimaxBusyStatus{background:transparent;color:#d9f2ff;font-weight:bold;padding:2px}
+        #minimaxPromptToolbar{background:#1b2023;border:1px solid #354047;border-radius:6px} #minimaxCacheState{background:#2b3438;color:#aebbc1;border:1px solid #435159;border-radius:9px;padding:2px 8px;font-size:9px} #minimaxCacheState[cached="true"]{background:#244d37;color:#c9f4d6;border-color:#4c9b6a} #minimaxInstructions{background:#1b2023;border:1px solid #37464d;border-radius:4px;color:#d8e1e5;padding:7px} #minimaxMessagePanel{background:#20313a;border:1px solid #49758a;border-radius:6px} #minimaxMessagePanel[level="success"]{background:#20392c;border-color:#4b8962} #minimaxMessagePanel[level="warning"]{background:#3a321f;border-color:#8a7340} #minimaxMessagePanel[level="error"]{background:#3a2325;border-color:#94555a} #minimaxMessageBanner{background:transparent;color:#ccecf8;border:0;padding:1px} #minimaxMessagePanel[level="success"] #minimaxMessageBanner{color:#cef2d9} #minimaxMessagePanel[level="warning"] #minimaxMessageBanner{color:#f2dfb0} #minimaxMessagePanel[level="error"] #minimaxMessageBanner{color:#f2c5c8} #minimaxRetryButton{background:#5b451b;color:#ffe7a1;border:1px solid #c79a39;border-radius:4px;font-weight:bold;padding:4px 10px} #minimaxRetryButton:hover{background:#755b25;border-color:#e2bc5a;color:#fff5cf} #minimaxBusyCard{background:#17262d;border:1px solid #65a7c7;border-radius:8px} #minimaxBusyStatus{background:transparent;color:#d9f2ff;font-weight:bold;padding:2px}
         QToolButton:hover,QPushButton:hover{background:#41474a} QToolButton:pressed,QPushButton:pressed{background:#202729;border-color:#79a8c5} QLineEdit{background:#1e2122}
         QSpinBox,QDoubleSpinBox{padding-right:__SPIN_PAD__px} QSpinBox::up-button,QDoubleSpinBox::up-button{subcontrol-origin:border;subcontrol-position:top right;width:__SPIN_BUTTON__px;background:#3b4347;border:0;border-left:1px solid #171a1c;border-bottom:1px solid #202527;border-top-right-radius:3px} QSpinBox::down-button,QDoubleSpinBox::down-button{subcontrol-origin:border;subcontrol-position:bottom right;width:__SPIN_BUTTON__px;background:#343b3f;border:0;border-left:1px solid #171a1c;border-top:1px solid #202527;border-bottom-right-radius:3px}
         QSpinBox::up-button:hover,QDoubleSpinBox::up-button:hover,QSpinBox::down-button:hover,QDoubleSpinBox::down-button:hover{background:#506471} QSpinBox::up-button:pressed,QDoubleSpinBox::up-button:pressed,QSpinBox::down-button:pressed,QDoubleSpinBox::down-button:pressed{background:#274e66} QSpinBox::up-arrow,QDoubleSpinBox::up-arrow,QSpinBox::down-arrow,QDoubleSpinBox::down-arrow{width:__ARROW_SIZE__px;height:__ARROW_SIZE__px}
@@ -4432,6 +4426,7 @@ class MainWindow(QMainWindow):
                 previous = {item[0]: item[2] for item in self._timeline_signature}
                 for item in self.segments:
                     if item.id in previous and item.prompt != previous[item.id]:
+                        self._changed_action_sources.add(item.id)
                         self._action_descriptions[item.id] = item.prompt.strip()
             self._timeline_signature = signature
             if timeline_changed and self.project_type != "ltx" and self.minimax_prompt_text.strip():
@@ -5397,6 +5392,7 @@ class MainWindow(QMainWindow):
             self.load_minimax_draft(project_type.removeprefix("minimax_"))
         self._action_segment_ids = []
         self._action_descriptions = {}
+        self._changed_action_sources.clear()
         self.prompt_scope.blockSignals(True)
         self.prompt_scope.setCurrentIndex(0)
         self.prompt_scope.blockSignals(False)
@@ -5450,10 +5446,18 @@ class MainWindow(QMainWindow):
             segment = self.current_segment()
             value = segment.prompt if segment else ""
         if self.segment_prompt.toPlainText() != value:
+            caret = self.segment_prompt.textCursor().position()
+            scroll = self.segment_prompt.verticalScrollBar().value()
             self.segment_prompt.blockSignals(True)
             self.segment_prompt.setPlainText(value)
+            if self.project_type != "ltx":
+                cursor = self.segment_prompt.textCursor()
+                cursor.setPosition(min(caret, len(value)))
+                self.segment_prompt.setTextCursor(cursor)
+                self.segment_prompt.verticalScrollBar().setValue(scroll)
             self.segment_prompt.blockSignals(False)
         self.segment_prompt.setPlaceholderText("Select a timeline segment to edit its prompt…" if self.project_type == "ltx" else "Generate a production prompt or write your own…")
+        self.highlight_inline_actions()
         self.refine_prompt_button.setEnabled(not self.ai_busy and bool(value.strip()) and (self.project_type != "ltx" or self.prompt_scope.currentData() == "segment"))
         self.update_counts()
 
@@ -5521,6 +5525,7 @@ class MainWindow(QMainWindow):
             return
         self.minimax_prompt_text = self.minimax_panel.editor.toPlainText()
         self._actions_refresh_timer.start()
+        self.highlight_inline_actions()
         self.minimax_refinement_instructions = self.minimax_panel.instructions.toPlainText()
         self.minimax_prompt_updated_at = datetime.now(timezone.utc).isoformat()
         self.minimax_panel.update_actions()
@@ -5544,12 +5549,13 @@ class MainWindow(QMainWindow):
         panel = self.minimax_panel
         if not panel or self.project_type == "ltx":
             if panel:
-                panel.actions_box.hide()
+                panel.editor.setExtraSelections([])
             return
         ids = [item.id for item in self.segments]
         descriptions, _ = split_actions(self.minimax_prompt_text)
-        if not timeline_changed and len(descriptions) == len(self._action_segment_ids):
-            self._action_descriptions.update(zip(self._action_segment_ids, descriptions))
+        if len(descriptions) == len(self._action_segment_ids):
+            self._action_descriptions.update((sid, description) for sid, description in zip(self._action_segment_ids, descriptions)
+                                             if sid not in self._changed_action_sources)
         elif not timeline_changed and len(descriptions) == len(ids):
             self._action_descriptions.update(zip(ids, descriptions))
         if timeline_changed and "[TIMED ACTION]" in self.minimax_prompt_text:
@@ -5566,49 +5572,26 @@ class MainWindow(QMainWindow):
             self._timeline_signature = tuple((item.id, item.duration, item.prompt, item.kind, item.role, item.name) for item in self.segments)
             self.refresh_text_segment_previews()
         self._action_segment_ids = ids
-        while panel.actions_layout.count():
-            entry = panel.actions_layout.takeAt(0)
-            if entry.widget():
-                entry.widget().deleteLater()
-        panel.action_editors = []
-        if not self.minimax_prompt_text.strip() and not self.segments:
-            panel.actions_box.hide()
+        self._changed_action_sources.clear()
+        self.highlight_inline_actions()
+
+    def highlight_inline_actions(self) -> None:
+        """Subtle cue guides on the shared editor; wrapped prose remains normal QTextEdit text."""
+        editor = self.segment_prompt
+        if self.project_type == "ltx":
+            editor.setExtraSelections([])
             return
-        panel.actions_box.show()
-        cursor = 0.0
-        for segment in self.segments:
-            end = cursor + segment.duration
-            row = QFrame()
-            row.setObjectName("minimaxActionRow")
-            line = QHBoxLayout(row)
-            line.setContentsMargins(5, 2, 5, 2)
-            cue = QLabel(f"{self.minimax_timecode(cursor)} – {self.minimax_timecode(end)}")
-            cue.setMinimumWidth(145)
-            cue.setObjectName("muted")
-            line.addWidget(cue)
-            field = QLineEdit(self._action_descriptions.get(segment.id, segment.prompt.strip()))
-            field.setPlaceholderText("Action during this timeline segment…")
-            field.setToolTip("Timed action for " + segment.name)
-            field.textEdited.connect(lambda value, sid=segment.id: self.edit_timed_action(sid, value))
-            line.addWidget(field, 1)
-            panel.actions_layout.addWidget(row)
-            panel.action_editors.append(field)
-            cursor = end
-
-    @staticmethod
-    def minimax_timecode(seconds: float) -> str:
-        from .ai import _minimax_timestamp
-        return _minimax_timestamp(seconds)
-
-    def edit_timed_action(self, segment_id: str, value: str) -> None:
-        self._action_descriptions[segment_id] = value
-        segment = next((item for item in self.segments if item.id == segment_id), None)
-        if segment is not None:
-            segment.prompt = value
-        descriptions = [self._action_descriptions.get(segment.id, segment.prompt.strip()) for segment in self.segments]
-        self.minimax_prompt_text = compose_actions(self.minimax_prompt_text, self.segments, descriptions)
-        self.refresh_shared_editor()
-        self.mark_dirty()
+        selections = []
+        for match in re.finditer(r"(?m)^\d{2}:\d{2}:\d{2}:\d{2}\s*-\s*\d{2}:\d{2}:\d{2}:\d{2}:", editor.toPlainText()):
+            selected = QTextEdit.ExtraSelection()
+            selected.cursor = QTextCursor(editor.document())
+            selected.cursor.setPosition(match.start())
+            selected.cursor.select(QTextCursor.SelectionType.LineUnderCursor)
+            selected.format = QTextCharFormat()
+            selected.format.setBackground(QColor("#28343a"))
+            selected.format.setProperty(QTextCharFormat.Property.FullWidthSelection, True)
+            selections.append(selected)
+        editor.setExtraSelections(selections)
 
     def replace_timeline_media(self, paths: list[str], index: int) -> None:
         paths = [path for path in paths if Path(path).is_file()]

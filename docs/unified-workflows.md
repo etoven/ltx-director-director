@@ -87,3 +87,7 @@ MiniMax Frames and References request ordered `timed_actions` alongside the rema
 ### Save queue correction (1.13.0a7)
 
 Edits made during a pending archive write enqueue a fresh snapshot when the project changes, so a fast switch or close still persists the latest version.
+
+### Inline timed actions (1.13.0a8)
+
+Removed the duplicate MiniMax timed-action controls and their scroll area. Timed cues live only in the shared production QTextEdit, wrap at word boundaries, and receive a subtle line tint for orientation. Editing a cue updates the linked timeline prompt; timeline edits retime the cues while retaining the prose. Retiming preserves the editor cursor and scroll position.
