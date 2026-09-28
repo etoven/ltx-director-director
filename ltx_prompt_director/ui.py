@@ -39,7 +39,7 @@ from .minimax_reference_widgets import MiniMaxReferenceSlot
 from .models import Segment, order_segments_by_ids, text_segment_from_ltx
 from .project_data import ARCHIVE_COLOR, load_other_tags, load_project_tags, new_note, normalize_notes, normalize_project_labels
 from .spellcheck import install_spellcheck
-from .prompt_tags import install_prompt_tags, render_prompt_notes
+from .prompt_tags import consume_global_refinements, install_prompt_tags, render_prompt_notes
 from .inline_cues import PromptTextEdit, cue_cells, insert_cue_cells
 from .timed_action import CUE, NEXT, SECTION, compose_actions, split_actions
 
@@ -5367,7 +5367,7 @@ class MainWindow(QMainWindow):
         target = self.refinement_target()
         if target:
             index, segment = target
-            segment.prompt = str(result["prompt"]).strip()
+            segment.prompt = consume_global_refinements(str(result["prompt"]))
             segment.image_prompt = str(result["imagePrompt"]).strip()
             durations = [item.duration for item in self.segments]
             durations[index] = float(result["duration"])
@@ -5826,6 +5826,9 @@ class MainWindow(QMainWindow):
                 self.minimax_panel.set_busy(False, "Editor changed • result not applied")
                 self.minimax_panel.show_message("The MiniMax result was not applied because you edited the prompt while it was running. Refine again when ready.", "warning")
             return
+        operation = str(getattr(self, "minimax_operation_kind", "generate_frames"))
+        if operation.startswith("refine_"):
+            prompt = consume_global_refinements(prompt)
         self.minimax_prompt_text = prompt
         self._action_segment_ids = [item.id for item in self.segments]
         descriptions, _ = split_actions(prompt)
@@ -5835,9 +5838,7 @@ class MainWindow(QMainWindow):
         self.minimax_prompt_updated_at = datetime.now(timezone.utc).isoformat()
         self.set_ai_controls_enabled(True)
         self.magic_overlay.hide_overlay()
-        operation = str(getattr(self, "minimax_operation_kind", "generate_frames"))
         if operation.startswith("refine_"):
-            # The visible directives remain in the prompt for later refinements.
             self.minimax_refinement_instructions = ""
         if operation.endswith("references"):
             self.minimax_prompt_mode = "references"

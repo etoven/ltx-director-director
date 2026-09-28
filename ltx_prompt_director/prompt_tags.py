@@ -18,6 +18,12 @@ HINTS = {
 }
 PARTIAL = re.compile(r'/[\w-]*$')
 EXISTING = re.compile(r'(?<!\w)/(refine-global|refine|keep|avoid|focus)\b[ \t]*([^\n]*)', re.IGNORECASE)
+GLOBAL_REFINEMENT_LINE = re.compile(r'(?im)^[ \t]*/refine-global\b[^\n]*(?:\n[ ]{4}[^\n]*)*\n?')
+
+
+def consume_global_refinements(prompt: str) -> str:
+    """Remove completed global edit instructions from a successful response."""
+    return re.sub(r'\n{3,}', '\n\n', GLOBAL_REFINEMENT_LINE.sub('', prompt)).strip()
 
 def _pill_image(editor: PromptTextEdit, tag: str) -> QTextImageFormat:
     """Draw a crisp rounded glyph as a document image, keeping the body Qt-editable."""

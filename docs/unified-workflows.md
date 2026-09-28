@@ -103,3 +103,7 @@ Timed cues now use two styled cells inside the same prompt editor: a narrow, pro
 ### Flexible refinements and whole note pills (1.13.0a13)
 
 LTX timing and prompt refinements may change the selected segment duration beyond the requested sequence length when the action calls for it. Other segment durations stay fixed, and an expanded timeline keeps its scale so the longer segment grows visibly. Failed model responses and transient HTTP errors retry according to the configured retry count and cooldown, with the countdown visible in the status bar; a final failure restores the controls. The close progress dialog paints before project snapshots start saving. Global refinement notes use a full-width rounded block with their editable instruction below the label. Local inline directives use compact rounded notes. Both styles preserve the directive and body when saving and restoring prompts.
+
+### Completed global refinements (1.13.0a14)
+
+Successful LTX or MiniMax prompt refinement consumes `/refine-global` notes, including multiline instructions. Other slash directives remain in the refined prompt. Failed or discarded responses leave the original notes in place for another attempt.

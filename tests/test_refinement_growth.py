@@ -11,7 +11,7 @@ from PySide6.QtGui import QTextCursor
 from ltx_prompt_director import ai, ui
 from ltx_prompt_director.inline_cues import NOTE_TAG, PromptTextEdit
 from ltx_prompt_director.models import Segment
-from ltx_prompt_director.prompt_tags import render_prompt_notes
+from ltx_prompt_director.prompt_tags import consume_global_refinements, render_prompt_notes
 
 
 class RefinementGrowthTests(unittest.TestCase):
@@ -108,6 +108,42 @@ class RefinementGrowthTests(unittest.TestCase):
         self.assertEqual(tables['/refine'].columns(), 2)
         self.assertEqual(editor.toPlainText(), original)
         editor.close()
+
+    def test_completed_global_note_is_removed_without_discarding_other_directives(self):
+        prompt = ('/refine-global Maintain continuity\n    from scene to scene\n\n'
+                  '[SCENE]\nKeep the set.\n/refine Slow the turn\n/keep Wet hair')
+        self.assertEqual(consume_global_refinements(prompt),
+                         '[SCENE]\nKeep the set.\n/refine Slow the turn\n/keep Wet hair')
+
+    def test_successful_ltx_refinement_consumes_global_note(self):
+        with patch.object(ui.MainWindow, 'restore_startup_workspace'):
+            window = ui.MainWindow()
+        self.addCleanup(lambda: (setattr(window, '_close_saves_queued', True), window.close()))
+        segment = Segment('One', '', '', kind='text', duration=2, prompt='/refine-global Stabilize framing\nScene')
+        window.segments = [segment]
+        window.refresh_timeline(0)
+        window.refinement_segment_id = segment.id
+        window.refine_prompt_finished({'prompt': '/refine-global Stabilize framing\nScene improved\n/keep Identity',
+                                       'imagePrompt': 'Scene improved', 'duration': 2})
+        self.assertEqual(segment.prompt, 'Scene improved\n/keep Identity')
+        self.assertEqual(window.segment_prompt.toPlainText(), segment.prompt)
+
+    def test_successful_minimax_refinement_consumes_global_note(self):
+        with patch.object(ui.MainWindow, 'restore_startup_workspace'):
+            window = ui.MainWindow()
+        self.addCleanup(lambda: (setattr(window, '_close_saves_queued', True), window.close()))
+        window.segments = [Segment('One', '', '', kind='text', duration=2, prompt='Walk')]
+        window.refresh_timeline(0)
+        window.set_project_type('minimax_frames')
+        original = '/refine-global Keep framing\n\n[SCENE]\nWalk.'
+        window.segment_prompt.setPlainText(original)
+        window.minimax_editor_changed()
+        window.minimax_operation_kind = 'refine_frames'
+        window.minimax_operation_signature = window.current_minimax_cache_key()
+        window.minimax_operation_editor_snapshot = (original, '')
+        window.minimax_h3_finished('/refine-global Keep framing\n\n[SCENE]\nWalk steadily.\n/keep Wet hair')
+        self.assertEqual(window.minimax_prompt_text, '[SCENE]\nWalk steadily.\n/keep Wet hair')
+        self.assertEqual(window.segment_prompt.toPlainText(), window.minimax_prompt_text)
 
 
 if __name__ == '__main__':
