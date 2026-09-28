@@ -1,4 +1,4 @@
-# MiniMax References — 1.12.57
+# MiniMax References — experimental unified workspace
 
 The MiniMax References project type uses a compact production brief adapted from the
 [PromptSama MiniMax H3 guide](https://www.promptsama.ai/models/minimax-h3.html#overview).
@@ -31,6 +31,8 @@ Video source ranges respect the timeline trim. Text-only segments supply action 
 ## Two reference images
 
 In the experimental unified UI, select **MiniMax · References** and use the **Reference images** dock inside the main window.
+
+![Unified MiniMax editor, timeline, and untimed reference slots](images/ltx-director-director-overview.png)
 
 Drop a local still image into either slot, use Browse, or paste image pixels or a local file
 from the clipboard. Choose Identity, Wardrobe, Setting, Visual style, Object / prop, or

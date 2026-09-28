@@ -6,6 +6,8 @@
 
 ![LTX Director - Director application overview](docs/images/ltx-director-director-overview.png)
 
+*The experimental workspace keeps MiniMax's production prompt, timed actions, timeline, and untimed reference slots in one window. Preview data below is a documentation-only sample.*
+
 ## What it does
 
 LTX Director - Director turns a folder of reference frames into a structured LTX Video 2.3 sequence:
@@ -20,9 +22,13 @@ LTX Director - Director turns a folder of reference frames into a structured LTX
 
 *Duration-scaled segments make the full sequence readable at a glance. Frames can be reordered, resized, replaced, assigned a role, or deleted without leaving the timeline.*
 
-![Generated segment and global prompts](docs/images/generated-prompts.png)
+![Selected LTX prompt with inline refinement and keep notes](docs/images/generated-prompts.png)
 
-*Magic Build creates the selected segment's motion prompt and a global prompt that keeps subject identity, setting, lighting, camera, and style consistent across the sequence.*
+*The shared editor displays the selected LTX segment or its global prompt. Editable inline notes give refinement instructions without adding another prompt box; Magic Build can generate segment and global prompts.*
+
+![Rounded refinement notes inside the shared prompt editor](docs/images/inline-refinement-notes.png)
+
+*Refinement, Global refinement, Keep, Avoid, and Focus have small footer labels. The full instruction stays editable inside the note outline.*
 
 ## Project library
 
@@ -31,6 +37,18 @@ Save working projects directly into the searchable project library and organize 
 ![Choose a segment frame or custom project thumbnail](docs/images/project-thumbnail-picker.png)
 
 *Edit Project Details provides a visual thumbnail picker while preserving the automatic first-segment fallback for projects that do not define one.*
+
+![Project library alongside the dockable Project Properties panel](docs/images/project-properties.png)
+
+*Manage project descriptions, collections, status, tags, and tasks while keeping the timeline in view.*
+
+On close, a fixed progress dialog shows project saves finishing before the application exits. See the [current closing dialog and workflow notes](docs/unified-workflows.md#clear-note-outlines-and-closing-progress-1130a15).
+
+## Aurora startup
+
+![Aurora startup artwork and compatible technology marks](docs/images/aurora-startup.png)
+
+*The splash shows live startup tasks, app version, and compatible technology marks. See [artwork and trademark details](docs/aurora-splash.md).*
 
 ## Export-first workflow
 
