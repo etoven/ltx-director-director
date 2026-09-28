@@ -1,6 +1,6 @@
 # LTX Director - Director
 
-**Experimental 1.13.0a9 — unified project workflows and faster projects.** This branch uses one shared prompt editor for LTX and MiniMax, portable project archives, a disk thumbnail cache, and a dockable Project Properties panel. See [workflow behavior and experimental installation](docs/unified-workflows.md) and [project performance and properties](docs/performance-and-properties.md). Stable `main` remains on 1.12.57.
+**Experimental 1.13.0a10 — unified project workflows and faster projects.** This branch uses one shared prompt editor for LTX and MiniMax, portable project archives, a disk thumbnail cache, and a dockable Project Properties panel. See [workflow behavior and experimental installation](docs/unified-workflows.md) and [project performance and properties](docs/performance-and-properties.md). Stable `main` remains on 1.12.57.
 
 **LTX Director - Director** is a native companion app for the [LTXDirector custom node for ComfyUI](https://github.com/WhatDreamsCost/WhatDreamsCost-ComfyUI). Its primary purpose is to prepare image, WebM, and MP4 timelines outside ComfyUI, use Gemini or OpenAI to build LTX Video 2.3 prompts, and export the finished sequence directly into LTXDirector.
 

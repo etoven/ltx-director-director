@@ -39,8 +39,8 @@ from .minimax_reference_widgets import MiniMaxReferenceSlot
 from .models import Segment, order_segments_by_ids, text_segment_from_ltx
 from .project_data import ARCHIVE_COLOR, load_other_tags, load_project_tags, new_note, normalize_notes, normalize_project_labels
 from .spellcheck import install_spellcheck
-from .inline_cues import cue_cells, insert_cue_cells
-from .timed_action import compose_actions, split_actions
+from .inline_cues import PromptTextEdit, cue_cells, insert_cue_cells
+from .timed_action import CUE, NEXT, SECTION, compose_actions, split_actions
 
 FPS = 24
 MIN_DURATION = 0.01
@@ -3065,7 +3065,7 @@ class MainWindow(QMainWindow):
         segment_meta_layout.addWidget(self.duration_control)
         self.sequence_controls.addWidget(segment_meta)
         segment_layout.addLayout(self.segment_header)
-        self.segment_prompt = QTextEdit()
+        self.segment_prompt = PromptTextEdit()
         self.segment_prompt.setObjectName("promptEditor")
         self.segment_prompt.setAcceptRichText(False)
         self.segment_prompt.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
@@ -5467,6 +5467,7 @@ class MainWindow(QMainWindow):
         self.project_type_combo.setCurrentIndex(self.project_type_combo.findData(self.project_type))
         self.project_type_combo.blockSignals(False)
         self.prompt_label.setText("LTX PROMPT" if ltx else "MINIMAX PRODUCTION PROMPT")
+        self.segment_prompt.inline_cue_mode = not ltx
         self.prompt_scope.setVisible(ltx)
         self.minimax_panel.setVisible(not ltx)
         self.references_button.setVisible(refs)
@@ -5583,7 +5584,7 @@ class MainWindow(QMainWindow):
             return
         self.minimax_prompt_text = self.minimax_panel.editor.toPlainText()
         tagged = cue_cells(self.minimax_panel.editor)
-        if tagged and len(tagged) == len(self.segments):
+        if tagged:
             self._action_descriptions.update(tagged)
         self._actions_refresh_timer.start()
         self.highlight_inline_actions()
@@ -5623,13 +5624,16 @@ class MainWindow(QMainWindow):
         elif not tagged and not timeline_changed and len(descriptions) == len(ids):
             self._action_descriptions.update(zip(ids, descriptions))
         if timeline_changed and "[TIMED ACTION]" in self.minimax_prompt_text:
-            values = [self._action_descriptions.get(item.id, item.prompt.strip()) for item in self.segments]
-            updated = compose_actions(self.minimax_prompt_text, self.segments, values)
-            if updated != self.minimax_prompt_text:
-                self.minimax_prompt_text = updated
-                self.refresh_shared_editor()
-                panel.show_message("Timeline changed. Cue times are synced; refine the prompt to review the action and continuity.", "timeline")
-        if not timeline_changed and len(descriptions) == len(ids):
+            if len(descriptions) != len(ids):
+                panel.show_message("Timeline and timed cue counts differ. Review the extra cues before refining; none were removed.", "timeline")
+            else:
+                values = [self._action_descriptions.get(item.id, item.prompt.strip()) for item in self.segments]
+                updated = compose_actions(self.minimax_prompt_text, self.segments, values)
+                if updated != self.minimax_prompt_text:
+                    self.minimax_prompt_text = updated
+                    self.refresh_shared_editor()
+                    panel.show_message("Timeline changed. Cue times are synced; refine the prompt to review the action and continuity.", "timeline")
+        if not timeline_changed and (tagged or len(descriptions) == len(ids)):
             if not tagged and self.minimax_prompt_text.strip():
                 editor = panel.editor
                 caret, scroll = editor.textCursor().position(), editor.verticalScrollBar().value()
@@ -5640,8 +5644,9 @@ class MainWindow(QMainWindow):
                 editor.setTextCursor(cursor)
                 editor.verticalScrollBar().setValue(scroll)
                 editor.blockSignals(False)
-            for segment, description in zip(self.segments, descriptions):
-                if segment.prompt != description:
+            for index, segment in enumerate(self.segments):
+                description = tagged.get(segment.id) if tagged else descriptions[index]
+                if description is not None and segment.prompt != description:
                     segment.prompt = description
             self._timeline_signature = tuple((item.id, item.duration, item.prompt, item.kind, item.role, item.name) for item in self.segments)
             self.refresh_text_segment_previews()
@@ -5656,15 +5661,35 @@ class MainWindow(QMainWindow):
             editor.setExtraSelections([])
             return
         selections = []
-        for match in re.finditer(r"(?m)^\d{2}:\d{2}:\d{2}:\d{2}\s*-\s*\d{2}:\d{2}:\d{2}:\d{2}:", editor.toPlainText()):
-            selected = QTextEdit.ExtraSelection()
-            selected.cursor = QTextCursor(editor.document())
-            selected.cursor.setPosition(match.start())
-            selected.cursor.select(QTextCursor.SelectionType.LineUnderCursor)
-            selected.format = QTextCharFormat()
-            selected.format.setBackground(QColor("#28343a"))
-            selected.format.setProperty(QTextCharFormat.Property.FullWidthSelection, True)
-            selections.append(selected)
+        prompt = editor.document().toPlainText()
+        if "→ " in prompt and cue_cells(editor):
+            editor.setExtraSelections([])
+            return
+        section = SECTION.search(prompt)
+        following = NEXT.search(prompt, section.end()) if section else None
+        body_end = following.start() if following else len(prompt)
+        if section:
+            body = prompt[section.end():body_end]
+            editor.document().documentLayout().documentSize()
+            for match in CUE.finditer(body):
+                first = section.end() + match.start()
+                last = section.end() + match.end()
+                block = editor.document().findBlock(first)
+                while block.isValid() and block.position() < last:
+                    cursor = QTextCursor(editor.document())
+                    cursor.setPosition(block.position())
+                    if not cursor.currentTable():
+                        layout = block.layout()
+                        starts = [layout.lineAt(line).textStart() for line in range(layout.lineCount())] or [0]
+                        for offset in starts:
+                            selected = QTextEdit.ExtraSelection()
+                            selected.cursor = QTextCursor(editor.document())
+                            selected.cursor.setPosition(block.position() + offset)
+                            selected.format = QTextCharFormat()
+                            selected.format.setBackground(QColor("#28343a"))
+                            selected.format.setProperty(QTextCharFormat.Property.FullWidthSelection, True)
+                            selections.append(selected)
+                    block = block.next()
         editor.setExtraSelections(selections)
 
     def replace_timeline_media(self, paths: list[str], index: int) -> None:

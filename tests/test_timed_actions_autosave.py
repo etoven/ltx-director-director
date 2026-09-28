@@ -41,7 +41,6 @@ class TimedActionsTests(unittest.TestCase):
         window.segment_prompt.setPlainText(compose_actions('[SCENE]\nOriginal.\n\n[SOUND]\nRain.', window.segments, ['Opening', 'Ending']))
         window.sync_timed_actions()
         self.assertEqual(len(cue_cells(window.segment_prompt)), 2)
-        self.assertEqual(len(window.segment_prompt.extraSelections()), 2)
         self.assertFalse(hasattr(window.minimax_panel, 'actions_box'))
         self.assertIn('Opening', window.segment_prompt.toPlainText())
         self.assertEqual(window.segment_prompt.lineWrapMode(), QTextEdit.LineWrapMode.WidgetWidth)

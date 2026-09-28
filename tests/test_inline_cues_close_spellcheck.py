@@ -7,11 +7,12 @@ from pathlib import Path
 from unittest.mock import patch
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
-from PySide6.QtCore import QPoint
+from PySide6.QtCore import QEvent, QPoint, Qt
 from PySide6.QtWidgets import QApplication, QTextEdit
+from PySide6.QtGui import QColor, QKeyEvent, QTextCursor
 
 from ltx_prompt_director import ui
-from ltx_prompt_director.inline_cues import cue_cells
+from ltx_prompt_director.inline_cues import PromptTextEdit, cue_cells, insert_cue_cells
 from ltx_prompt_director.models import Segment
 from ltx_prompt_director.spellcheck import install_spellcheck, spellcheck_menu, system_dictionary
 from ltx_prompt_director.timed_action import compose_actions
@@ -53,6 +54,80 @@ class InlineCuesCloseSpellcheckTests(unittest.TestCase):
         window.change_duration(window.segments[0].id, 4)
         self.assertIn('00:00:04:00 - 00:00:07:00: Turn', window.segment_prompt.toPlainText())
         self.assertEqual(cue_cells(window.segment_prompt)[window.segments[1].id], 'Turn')
+
+    def test_wrapped_cue_background_covers_all_visual_lines(self):
+        editor = QTextEdit()
+        editor.setStyleSheet('QTextEdit{background:#202527;color:#e3e3e3;font:14px Monospace}')
+        editor.resize(800, 280)
+        editor.show()
+        segments = [Segment('A', '', '', kind='text', duration=2)]
+        prompt = '[TIMED ACTION]\n00:00:00:00 - 00:00:02:00: ' + ('This is a long action with many words. ' * 8)
+        self.assertTrue(insert_cue_cells(editor, prompt, segments))
+        self.app.processEvents()
+        image = editor.grab().toImage()
+        tint = QColor('#28343a')
+        for y in (26, 42, 59, 78):
+            tinted_pixels = sum(image.pixelColor(x, y) == tint for x in range(250, 730))
+            self.assertGreater(tinted_pixels, 180)
+        self.assertEqual(image.pixelColor(745, 160), QColor('#202527'))
+        editor.close()
+
+    def test_extra_prompt_cues_all_become_cells_without_falsely_reassigning_ids(self):
+        editor = QTextEdit()
+        segments = [Segment('A', '', '', kind='text', duration=2), Segment('B', '', '', kind='text', duration=3)]
+        prompt = ('[TIMED ACTION]\n00:00:00:00 - 00:00:02:00: First\n\n'
+                  '00:00:02:00 - 00:00:05:00: Second\n\n'
+                  '00:00:05:00 - 00:00:08:00: Additional')
+        self.assertTrue(insert_cue_cells(editor, prompt, segments))
+        self.assertEqual(cue_cells(editor), {segments[0].id: 'First', segments[1].id: 'Second'})
+        tables = set()
+        block = editor.document().firstBlock()
+        while block.isValid():
+            cursor = QTextCursor(editor.document())
+            cursor.setPosition(block.position())
+            if cursor.currentTable():
+                tables.add(cursor.currentTable().firstPosition())
+            block = block.next()
+        self.assertEqual(len(tables), 3)
+
+    def test_extra_cue_is_preserved_when_timeline_length_changes(self):
+        window = self.make_window()
+        window.segments = [Segment('A', '', '', kind='text', duration=2), Segment('B', '', '', kind='text', duration=3)]
+        window.refresh_timeline(0)
+        window.set_project_type('minimax_frames')
+        window.segment_prompt.setPlainText(
+            '[TIMED ACTION]\n00:00:00:00 - 00:00:02:00: First\n\n'
+            '00:00:02:00 - 00:00:05:00: Second\n\n'
+            '00:00:05:00 - 00:00:08:00: Extra')
+        window.sync_timed_actions()
+        window.change_duration(window.segments[0].id, 4)
+        self.assertIn('Extra', window.segment_prompt.toPlainText())
+        self.assertIn('counts differ', window.minimax_panel.message_banner.text())
+
+    def test_timecode_and_inline_cell_cannot_be_deleted(self):
+        editor = PromptTextEdit()
+        editor.inline_cue_mode = True
+        segment = Segment('A', '', '', kind='text', duration=2)
+        prompt = '[TIMED ACTION]\n00:00:00:00 - 00:00:02:00: Walk forward'
+        self.assertTrue(insert_cue_cells(editor, prompt, [segment]))
+        block = editor.document().firstBlock()
+        while block.isValid() and '00:00:00:00' not in block.text():
+            block = block.next()
+        cursor = QTextCursor(editor.document())
+        cursor.setPosition(block.position() + 3)
+        editor.setTextCursor(cursor)
+        editor.keyPressEvent(QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_X, Qt.KeyboardModifier.NoModifier, 'x'))
+        self.assertEqual(cue_cells(editor)[segment.id], 'Walk forward')
+        self.assertIn('00:00:00:00 - 00:00:02:00', editor.toPlainText())
+        cursor = editor.textCursor()
+        table = cursor.currentTable()
+        cursor.setPosition(table.firstPosition())
+        cursor.setPosition(table.lastPosition(), QTextCursor.MoveMode.KeepAnchor)
+        editor.setTextCursor(cursor)
+        editor.keyPressEvent(QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Delete, Qt.KeyboardModifier.NoModifier))
+        self.assertEqual(cue_cells(editor)[segment.id], 'Walk forward')
+        self.assertIn('00:00:00:00 - 00:00:02:00', editor.toPlainText())
+        editor.close()
 
     def test_saved_cue_ids_restore_action_to_original_segment(self):
         window = self.make_window()

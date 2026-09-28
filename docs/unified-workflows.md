@@ -95,3 +95,7 @@ Removed the duplicate MiniMax timed-action controls and their scroll area. Timed
 ### Native MiniMax cue cells, deliberate saves, and close progress (1.13.0a9)
 
 MiniMax timed actions now live in wrapping, editable Qt table cells at their actual positions in the shared prompt editor. Each cell stores its timeline segment ID in its document format; cue text is also persisted by ID in the project archive. Surrounding prose edits cannot shift these associations. Projects keep edits in memory across switches and write archives only from the top toolbar's **Save to Library** command or when the app closes. **Export Project** still writes a portable copy on request. On close, the main window hides, a modal project-save progress dialog remains visible, and the window is disposed of after background writes finish. The spelling menu's suggestion actions use Qt QAction objects, restoring right-click replacements at the top level.
+
+### Whole-cue highlighting and protected timecodes (1.13.0a10)
+
+Timed cues now use two styled cells inside the same prompt editor: a narrow, protected timecode column and a wrapping action column shaded across every line. The prompt sent to MiniMax remains the normal one-line SMPTE interval format. Keyboard editing, paste and cut cannot remove the timecode cell or its table; mismatched additional cues remain visible instead of being silently discarded during timeline changes.
