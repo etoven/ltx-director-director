@@ -4124,9 +4124,6 @@ class MainWindow(QMainWindow):
         self.refresh_project_library(preserve_scroll=False)
 
     def save_library_project(self, automatic: bool = False, source_filename: str | None = None) -> None:
-        if automatic and self._autosave_active:
-            self._autosave_pending = True
-            return
         if not self.segments and not self.current_project_id:
             if not automatic:
                 QMessageBox.information(self, "Nothing to save", "Add at least one image, WebM, MP4, or text segment first.")
@@ -5640,9 +5637,6 @@ class MainWindow(QMainWindow):
 
     def autosave_project(self) -> None:
         if self._loading or (not self.segments and not self.current_project_id) or not self.project_dirty:
-            return
-        if self._autosave_active:
-            self._autosave_pending = True
             return
         self.save_library_project(automatic=True)
 

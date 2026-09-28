@@ -83,3 +83,7 @@ MiniMax Frames and References prompts now request 24 fps, non-drop-frame SMPTE `
 ### Linked MiniMax cues and automatic projects (1.13.0a6)
 
 MiniMax Frames and References request ordered `timed_actions` alongside the remaining brief in JSON. The client assembles SMPTE cue boundaries from timeline segment lengths. Compact per-segment action controls edit the same `[TIMED ACTION]` section as the shared production editor; retiming and rearranging update cue boundaries locally and show a yellow refine prompt action for continuity review. Ctrl+drop media onto an existing timeline tile replaces that segment while retaining its duration, prompt, role and ID. Projects save in the background after edits and when switching or closing; the tile action row and unsaved badges have been removed. Project operations remain in the tile context menu. Spelling suggestions appear directly at the top of the editor context menu.
+
+### Save queue correction (1.13.0a7)
+
+Edits made during a pending archive write enqueue a fresh snapshot when the project changes, so a fast switch or close still persists the latest version.
