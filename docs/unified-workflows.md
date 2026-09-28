@@ -91,3 +91,7 @@ Edits made during a pending archive write enqueue a fresh snapshot when the proj
 ### Inline timed actions (1.13.0a8)
 
 Removed the duplicate MiniMax timed-action controls and their scroll area. Timed cues live only in the shared production QTextEdit, wrap at word boundaries, and receive a subtle line tint for orientation. Editing a cue updates the linked timeline prompt; timeline edits retime the cues while retaining the prose. Retiming preserves the editor cursor and scroll position.
+
+### Native MiniMax cue cells, deliberate saves, and close progress (1.13.0a9)
+
+MiniMax timed actions now live in wrapping, editable Qt table cells at their actual positions in the shared prompt editor. Each cell stores its timeline segment ID in its document format; cue text is also persisted by ID in the project archive. Surrounding prose edits cannot shift these associations. Projects keep edits in memory across switches and write archives only from the top toolbar's **Save to Library** command or when the app closes. **Export Project** still writes a portable copy on request. On close, the main window hides, a modal project-save progress dialog remains visible, and the window is disposed of after background writes finish. The spelling menu's suggestion actions use Qt QAction objects, restoring right-click replacements at the top level.

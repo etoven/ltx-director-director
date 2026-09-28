@@ -5,7 +5,7 @@ import re
 from functools import lru_cache
 
 from PySide6.QtCore import QLocale, Qt
-from PySide6.QtGui import QColor, QSyntaxHighlighter, QTextCharFormat, QTextCursor
+from PySide6.QtGui import QAction, QColor, QSyntaxHighlighter, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import QTextEdit
 
 try:
@@ -69,26 +69,38 @@ def install_spellcheck(editor: QTextEdit) -> SpellHighlighter | None:
     editor.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
 
     def menu_at(point):
-        cursor = editor.cursorForPosition(point)
-        cursor.select(QTextCursor.SelectionType.WordUnderCursor)
-        word = cursor.selectedText().strip()
-        menu = editor.createStandardContextMenu(point)
-        if WORDS.fullmatch(word) and highlighter.misspelled(word):
-            anchor = menu.actions()[0] if menu.actions() else None
-            for replacement in dictionary.suggest(word)[:7]:
-                action = menu.insertAction(anchor, replacement) if anchor else menu.addAction(replacement)
-                action.triggered.connect(lambda checked=False, value=replacement, selected=QTextCursor(cursor): _replace(editor, selected, value))
-            ignore = menu.insertAction(anchor, f'Ignore “{word}” for this session') if anchor else menu.addAction(f'Ignore “{word}” for this session')
-            ignore.triggered.connect(lambda checked=False, value=word: highlighter.accept(value))
-            if anchor:
-                menu.insertSeparator(anchor)
-            else:
-                menu.addSeparator()
-        menu.exec(editor.mapToGlobal(point))
+        menu = spellcheck_menu(editor, point, highlighter)
+        menu.exec(editor.viewport().mapToGlobal(point))
         menu.deleteLater()
 
     editor.customContextMenuRequested.connect(menu_at)
     return highlighter
+
+
+def spellcheck_menu(editor: QTextEdit, point, highlighter: SpellHighlighter):
+    """Build a standard editor menu with inline suggestions before editing actions."""
+    cursor = editor.cursorForPosition(point)
+    cursor.select(QTextCursor.SelectionType.WordUnderCursor)
+    word = cursor.selectedText().strip()
+    menu = editor.createStandardContextMenu(point)
+    if WORDS.fullmatch(word) and highlighter.misspelled(word):
+        anchor = menu.actions()[0] if menu.actions() else None
+        for replacement in highlighter.dictionary.suggest(word)[:7]:
+            action = QAction(replacement, menu)
+            if anchor:
+                menu.insertAction(anchor, action)
+            else:
+                menu.addAction(action)
+            action.triggered.connect(lambda checked=False, value=replacement, selected=QTextCursor(cursor): _replace(editor, selected, value))
+        ignore = QAction(f'Ignore “{word}” for this session', menu)
+        if anchor:
+            menu.insertAction(anchor, ignore)
+            menu.insertSeparator(anchor)
+        else:
+            menu.addAction(ignore)
+            menu.addSeparator()
+        ignore.triggered.connect(lambda checked=False, value=word: highlighter.accept(value))
+    return menu
 
 
 def _replace(editor: QTextEdit, cursor: QTextCursor, replacement: str) -> None:

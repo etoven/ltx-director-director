@@ -29,10 +29,10 @@ class ProjectArchiveTests(unittest.TestCase):
         cls.app = QApplication.instance() or QApplication([])
 
     def make_window(self, segments):
-        with patch.object(MainWindow, 'restore_startup_workspace'), patch.object(MainWindow, 'save_minimax_prompt_on_close'):
+        with patch.object(MainWindow, 'restore_startup_workspace'):
             window = MainWindow()
         window.segments = segments
-        self.addCleanup(lambda: (window._autosave_timer.stop(), setattr(window, "project_dirty", False), window.close()))
+        self.addCleanup(lambda: (setattr(window, "_close_saves_queued", True), setattr(window, "project_dirty", False), window.close()))
         return window
 
     def test_portable_image_and_video_round_trip_is_lazy_and_preserves_original(self):

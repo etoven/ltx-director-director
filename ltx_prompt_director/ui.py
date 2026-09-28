@@ -39,6 +39,7 @@ from .minimax_reference_widgets import MiniMaxReferenceSlot
 from .models import Segment, order_segments_by_ids, text_segment_from_ltx
 from .project_data import ARCHIVE_COLOR, load_other_tags, load_project_tags, new_note, normalize_notes, normalize_project_labels
 from .spellcheck import install_spellcheck
+from .inline_cues import cue_cells, insert_cue_cells
 from .timed_action import compose_actions, split_actions
 
 FPS = 24
@@ -258,6 +259,7 @@ class BackgroundCallbacks(QObject):
         try:
             callback(result)
         finally:
+            self.owner.update_closing_progress()
             if self.owner._close_after_jobs and not self.owner._pending_disk_jobs:
                 QTimer.singleShot(0, self.owner.close)
             self.deleteLater()
@@ -2613,13 +2615,10 @@ class MainWindow(QMainWindow):
         self._latest_save_id = {}
         self._pending_disk_jobs = 0
         self._close_after_jobs = False
+        self._close_saves_queued = False
+        self._closing_progress = None
+        self._closing_total = 0
         self._open_serial = 0
-        self._autosave_timer = QTimer(self)
-        self._autosave_timer.setSingleShot(True)
-        self._autosave_timer.setInterval(900)
-        self._autosave_timer.timeout.connect(self.autosave_project)
-        self._autosave_pending = False
-        self._autosave_active = False
         self._action_segment_ids = []
         self._action_descriptions = {}
         self._changed_action_sources = set()
@@ -2633,7 +2632,6 @@ class MainWindow(QMainWindow):
         self._build_ui()
         self._loading = False
         self.project_dirty = False
-        self._autosave_timer.stop()
         for editor in self.findChildren(QTextEdit):
             install_spellcheck(editor)
         self._apply_theme()
@@ -2676,7 +2674,8 @@ class MainWindow(QMainWindow):
         action_groups = [
             (("New Project", "new", self.new_project),
              ("Open", "open", self.open_project),
-             ("Save Project", "save", self.export_project)),
+             ("Save to Library", "save", self.save_library_project),
+             ("Export Project", "save", self.export_project)),
             (("Import", "import", self.import_ltx),
              ("Export", "export-ltx", self.export_workflow)),
             (("Delete selected", "delete", self.delete_selected),),
@@ -4039,6 +4038,7 @@ class MainWindow(QMainWindow):
         return {
             "projectType": self.project_type,
             "minimaxDrafts": {key: dict(value) for key, value in self.minimax_drafts.items()},
+            "minimaxCueActions": dict(self._action_descriptions),
             "segments": self.segments,
             "globalPrompt": self.global_prompt.toPlainText(),
             "directorIntent": self.intent.toPlainText(),
@@ -4107,7 +4107,10 @@ class MainWindow(QMainWindow):
         self._loading = False
         self._timeline_signature = tuple((item.id, item.duration, item.prompt, item.kind, item.role, item.name) for item in self.segments)
         self._action_segment_ids = [item.id for item in self.segments]
-        self._action_descriptions = {}
+        self._action_descriptions = {str(key): str(value) for key, value in (state.get("minimaxCueActions") or self._action_descriptions or {}).items()}
+        if self._action_descriptions and "[TIMED ACTION]" in self.minimax_prompt_text:
+            self.minimax_prompt_text = compose_actions(self.minimax_prompt_text, self.segments,
+                                                      [self._action_descriptions.get(segment.id, segment.prompt) for segment in self.segments])
         self.sync_minimax_panel()
         self.refresh_timeline()
         if auto_fit:
@@ -4133,7 +4136,7 @@ class MainWindow(QMainWindow):
                 except (OSError, ValueError):
                     meta = None
         if not meta:
-            project_id = uuid4().hex
+            project_id = self.current_project_id or uuid4().hex
             if automatic:
                 intent = " ".join(self.intent.toPlainText().split())
                 source_name = Path(self.segments[0].name).stem if self.segments else "Sequence"
@@ -4201,22 +4204,18 @@ class MainWindow(QMainWindow):
                 self.update_project_preview()
                 self.settings.setValue("last_project_id", project_id)
                 self.queue_settings_sync()
-            self._autosave_active = False
-            if self._autosave_pending or self.project_dirty:
-                self._autosave_pending = False
-                if self._close_after_jobs:
-                    self.autosave_project()
-                else:
-                    self._autosave_timer.start()
             self.statusBar().showMessage(f"Project saved to library: {meta['name']}")
 
         def failed(message):
             self._close_after_jobs = False
-            self._autosave_active = False
+            self._close_saves_queued = False
+            if self._closing_progress:
+                self._closing_progress.close()
+                self._closing_progress = None
+                self.show()
             self.project_dirty = True
             QMessageBox.critical(self, "Save failed", message)
 
-        self._autosave_active = True
         self.start_disk_job(_write_library_archive,
                             (str(meta["projectPath"]), payload, snapshot, root / f"{project_id}.meta.json", copy.deepcopy(meta)),
                             saved, failed, serialized=True)
@@ -4242,9 +4241,7 @@ class MainWindow(QMainWindow):
             return
         self._open_serial += 1
         request = self._open_serial
-        if self.project_dirty and self.segments:
-            self._autosave_timer.stop()
-            self.autosave_project()
+        self.stage_current_workspace()
         self.cache_current_workspace()
 
         def apply_project(payload=None):
@@ -4383,15 +4380,79 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(application_window_title(self.current_project_name))
         self.sync_minimax_panel()
 
+    def queue_closing_projects(self) -> None:
+        """Save every dirty workspace only after the user requests app close."""
+        self.stage_current_workspace()
+        self.cache_current_workspace()
+        active_id, active_name = self.current_project_id, self.current_project_name
+        active_state = self.capture_workspace_state()
+        active_dirty = self.project_dirty
+        dirty = [(project_id, dict(session)) for project_id, session in self.project_sessions.items()
+                 if session.get("dirty") and session.get("state")]
+        for project_id, session in dirty:
+            self.current_project_id = project_id
+            self.current_project_name = session.get("name", "Untitled")
+            self.restore_workspace_state(session["state"])
+            self.project_dirty = True
+            self.save_library_project(automatic=True)
+        self.current_project_id, self.current_project_name = active_id, active_name
+        if dirty:
+            self.restore_workspace_state(active_state)
+            self.project_dirty = active_dirty
+            self.update_window_title()
+        self._close_saves_queued = True
+
+    def update_closing_progress(self) -> None:
+        if not self._closing_progress:
+            return
+        progress = self._closing_progress.findChild(QProgressBar, "closeProgressBar")
+        if progress:
+            progress.setMaximum(max(1, self._closing_total))
+            progress.setValue(self._closing_total - self._pending_disk_jobs)
+        label = self._closing_progress.findChild(QLabel, "closeProgressLabel")
+        if label:
+            label.setText(f"Saving projects… {self._closing_total - self._pending_disk_jobs} of {self._closing_total} complete")
+
+    def show_closing_progress(self) -> None:
+        if not self.isVisible() or self._closing_progress:
+            return
+        dialog = QDialog(None)
+        dialog.setWindowTitle("Finishing project saves")
+        dialog.setModal(True)
+        dialog.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.CustomizeWindowHint | Qt.WindowType.WindowTitleHint)
+        layout = QVBoxLayout(dialog)
+        label = QLabel("Saving projects…")
+        label.setObjectName("closeProgressLabel")
+        layout.addWidget(label)
+        bar = QProgressBar()
+        bar.setObjectName("closeProgressBar")
+        bar.setTextVisible(True)
+        layout.addWidget(bar)
+        dialog.setMinimumWidth(330)
+        self._closing_progress = dialog
+        self._closing_total = self._pending_disk_jobs
+        self.update_closing_progress()
+        dialog.show()
+        self.hide()
+
     def closeEvent(self, event) -> None:
-        self._autosave_timer.stop()
-        if self._autosave_pending or self.project_dirty:
-            self.autosave_project()
+        if not self._close_saves_queued:
+            needs_save = self.project_dirty or any(session.get("dirty") for session in self.project_sessions.values())
+            if needs_save or self._pending_disk_jobs:
+                self.show_closing_progress()
+            self.queue_closing_projects()
+            self._closing_total = self._pending_disk_jobs
+            self.update_closing_progress()
         if self._pending_disk_jobs:
             self._close_after_jobs = True
-            self.statusBar().showMessage("Finishing background file operations before closing…")
+            self.statusBar().showMessage("Finishing background project saves before closing…")
+            self.show_closing_progress()
             event.ignore()
             return
+        if self._closing_progress:
+            self._closing_progress.close()
+            self._closing_progress = None
+            self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         if hasattr(self, "project_preview_panel"):
             self.project_preview_panel.player.stop()
             if self.project_preview_panel.fullscreen_window.isVisible():
@@ -4431,8 +4492,6 @@ class MainWindow(QMainWindow):
             self._timeline_signature = signature
             if timeline_changed and self.project_type != "ltx" and self.minimax_prompt_text.strip():
                 self.sync_timed_actions(timeline_changed=True)
-            if self.segments or self.current_project_id:
-                self._autosave_timer.start()
             if self.current_project_id:
                 session = self.project_sessions.setdefault(self.current_project_id, {"name": self.current_project_name})
                 session["dirty"] = True
@@ -4441,9 +4500,7 @@ class MainWindow(QMainWindow):
 
     def new_project(self) -> None:
         self._open_serial += 1
-        if self.project_dirty and self.segments:
-            self._autosave_timer.stop()
-            self.autosave_project()
+        self.stage_current_workspace()
         if self.current_project_id:
             self.cache_current_workspace()
         self._loading = True
@@ -5269,7 +5326,6 @@ class MainWindow(QMainWindow):
             durations[index] = float(result["duration"])
             self.mark_dirty()
             self.animate_timeline_durations(durations)
-            self.save_library_project(automatic=True)
             self.statusBar().showMessage(f"Segment {index + 1} timing refined to {durations[index]:.2f}s; prompt text unchanged")
         self.set_ai_controls_enabled(True)
         self.magic_overlay.hide_overlay()
@@ -5288,7 +5344,6 @@ class MainWindow(QMainWindow):
             self.refresh_text_segment_previews()
             self.mark_dirty()
             self.animate_timeline_durations(durations)
-            self.save_library_project(automatic=True)
             self.statusBar().showMessage(f"Segment {index + 1} prompt refined")
         self.set_ai_controls_enabled(True)
         self.magic_overlay.hide_overlay()
@@ -5344,7 +5399,6 @@ class MainWindow(QMainWindow):
         self.set_ai_controls_enabled(True)
         self.magic_overlay.hide_overlay()
         self.animate_timeline_durations(target_durations)
-        self.save_library_project(automatic=True)
         self.statusBar().showMessage("Magic Build complete")
 
     def store_minimax_draft(self) -> None:
@@ -5353,11 +5407,13 @@ class MainWindow(QMainWindow):
             "instructions": self.minimax_refinement_instructions,
             "sourceHash": self.minimax_prompt_cache_key,
             "updatedAt": self.minimax_prompt_updated_at,
+            "cueActions": dict(self._action_descriptions),
         }
 
     def restore_project_type(self, value, drafts) -> None:
         self.minimax_drafts = {
-            key: {field: str(item.get(field, "")) for field in ("prompt", "instructions", "sourceHash", "updatedAt")}
+            key: {**{field: str(item.get(field, "")) for field in ("prompt", "instructions", "sourceHash", "updatedAt")},
+                  "cueActions": dict(item.get("cueActions") or {})}
             for key, item in (drafts.items() if isinstance(drafts, dict) else [])
             if key in {"frames", "references"} and isinstance(item, dict)
         }
@@ -5377,6 +5433,7 @@ class MainWindow(QMainWindow):
         self.minimax_refinement_instructions = draft.get("instructions", "")
         self.minimax_prompt_cache_key = draft.get("sourceHash", "")
         self.minimax_prompt_updated_at = draft.get("updatedAt", "")
+        self._action_descriptions = dict(draft.get("cueActions") or {})
 
     def project_type_changed(self, _index: int) -> None:
         if not self._loading:
@@ -5451,6 +5508,7 @@ class MainWindow(QMainWindow):
             self.segment_prompt.blockSignals(True)
             self.segment_prompt.setPlainText(value)
             if self.project_type != "ltx":
+                insert_cue_cells(self.segment_prompt, value, self.segments)
                 cursor = self.segment_prompt.textCursor()
                 cursor.setPosition(min(caret, len(value)))
                 self.segment_prompt.setTextCursor(cursor)
@@ -5524,6 +5582,9 @@ class MainWindow(QMainWindow):
         if self._loading or not self.minimax_panel or self.project_type == "ltx":
             return
         self.minimax_prompt_text = self.minimax_panel.editor.toPlainText()
+        tagged = cue_cells(self.minimax_panel.editor)
+        if tagged and len(tagged) == len(self.segments):
+            self._action_descriptions.update(tagged)
         self._actions_refresh_timer.start()
         self.highlight_inline_actions()
         self.minimax_refinement_instructions = self.minimax_panel.instructions.toPlainText()
@@ -5552,11 +5613,14 @@ class MainWindow(QMainWindow):
                 panel.editor.setExtraSelections([])
             return
         ids = [item.id for item in self.segments]
+        tagged = cue_cells(panel.editor)
+        if tagged:
+            self._action_descriptions.update(tagged)
         descriptions, _ = split_actions(self.minimax_prompt_text)
-        if len(descriptions) == len(self._action_segment_ids):
+        if not tagged and len(descriptions) == len(self._action_segment_ids):
             self._action_descriptions.update((sid, description) for sid, description in zip(self._action_segment_ids, descriptions)
                                              if sid not in self._changed_action_sources)
-        elif not timeline_changed and len(descriptions) == len(ids):
+        elif not tagged and not timeline_changed and len(descriptions) == len(ids):
             self._action_descriptions.update(zip(ids, descriptions))
         if timeline_changed and "[TIMED ACTION]" in self.minimax_prompt_text:
             values = [self._action_descriptions.get(item.id, item.prompt.strip()) for item in self.segments]
@@ -5566,6 +5630,16 @@ class MainWindow(QMainWindow):
                 self.refresh_shared_editor()
                 panel.show_message("Timeline changed. Cue times are synced; refine the prompt to review the action and continuity.", "timeline")
         if not timeline_changed and len(descriptions) == len(ids):
+            if not tagged and self.minimax_prompt_text.strip():
+                editor = panel.editor
+                caret, scroll = editor.textCursor().position(), editor.verticalScrollBar().value()
+                editor.blockSignals(True)
+                insert_cue_cells(editor, self.minimax_prompt_text, self.segments)
+                cursor = editor.textCursor()
+                cursor.setPosition(min(caret, editor.document().characterCount() - 1))
+                editor.setTextCursor(cursor)
+                editor.verticalScrollBar().setValue(scroll)
+                editor.blockSignals(False)
             for segment, description in zip(self.segments, descriptions):
                 if segment.prompt != description:
                     segment.prompt = description
@@ -5618,15 +5692,12 @@ class MainWindow(QMainWindow):
         self.start_disk_job(_prepare_media_batch, (paths,), ready,
                             lambda message: QMessageBox.warning(self, "Media error", message))
 
-    def autosave_project(self) -> None:
-        if self._loading or (not self.segments and not self.current_project_id) or not self.project_dirty:
-            return
-        self.save_library_project(automatic=True)
-
-    def save_minimax_prompt_on_close(self) -> None:
-        """Persist manual edits when the main application closes."""
-        if self.current_project_id and self.segments and self.project_dirty:
-            self.save_library_project(automatic=True)
+    def stage_current_workspace(self) -> None:
+        """Keep an unsaved project in memory when switching tabs or starting anew."""
+        if self.segments and self.project_dirty and not self.current_project_id:
+            self.current_project_id = uuid4().hex
+            self.current_project_name = Path(self.segments[0].name).stem or "Untitled"
+            self.update_window_title()
 
     def current_minimax_cache_key(self, provider: str | None = None, model: str | None = None) -> str:
         provider = provider or str(self.settings.value("provider", "gemini"))
@@ -5743,9 +5814,9 @@ class MainWindow(QMainWindow):
         window = self.show_minimax_panel(state)
         self.mark_dirty()
         window.show_message(
-            f"MiniMax H3 {self.minimax_prompt_mode} prompt refined. The draft saves automatically."
+            f"MiniMax H3 {self.minimax_prompt_mode} prompt refined. Save it from the toolbar or when closing."
             if operation.startswith("refine_") else
-            f"MiniMax H3 {self.minimax_prompt_mode} prompt generated. The draft saves automatically.",
+            f"MiniMax H3 {self.minimax_prompt_mode} prompt generated. Save it from the toolbar or when closing.",
             "success",
         )
 
@@ -5924,6 +5995,8 @@ class MainWindow(QMainWindow):
         if not path:
             return
         self.settings.setValue("last_document_dir", str(Path(path).parent))
+        self.stage_current_workspace()
+        self.cache_current_workspace()
         try:
             payload = json.loads(Path(path).read_text(encoding="utf-8"))
             fps = float(payload.get("settings", {}).get("frame_rate", FPS))
@@ -5985,8 +6058,8 @@ class MainWindow(QMainWindow):
             self.update_window_title()
             self.refresh_timeline()
             self.project_dirty = False
-            self.save_library_project(automatic=True, source_filename=Path(path).name)
-            self.statusBar().showMessage(f"Imported into Project Library: {self.current_project_name}")
+            self.mark_dirty()
+            self.statusBar().showMessage(f"Imported: {self.current_project_name} · save to Library from toolbar or when closing")
         except Exception as error:
             QMessageBox.critical(self, "Import failed", str(error))
 
@@ -6024,6 +6097,7 @@ class MainWindow(QMainWindow):
                 "updatedAt": self.minimax_prompt_updated_at,
                 "mode": self.minimax_prompt_mode,
                 "referenceImages": reference_slots(self.minimax_reference_images),
+                "cueActions": dict(self._action_descriptions),
                 "drafts": {key: dict(value) for key, value in self.minimax_drafts.items()},
             },
             "output": {"width": self.output_width.value(), "height": self.output_height.value()},
@@ -6095,6 +6169,10 @@ class MainWindow(QMainWindow):
         self.minimax_reference_images = reference_slots(minimax.get("referenceImages"))
         self.workspace_revision += 1
         self.restore_project_type(payload.get("projectType"), minimax.get("drafts"))
+        self._action_descriptions = {str(key): str(value) for key, value in (minimax.get("cueActions") or self._action_descriptions or {}).items()}
+        if self._action_descriptions and "[TIMED ACTION]" in self.minimax_prompt_text:
+            self.minimax_prompt_text = compose_actions(self.minimax_prompt_text, self.segments,
+                                                      [self._action_descriptions.get(segment.id, segment.prompt) for segment in self.segments])
         output = payload.get("output", {})
         self.output_width.setValue(int(output.get("width", 1280)))
         self.output_height.setValue(int(output.get("height", 704)))
@@ -6141,6 +6219,8 @@ class MainWindow(QMainWindow):
         if not path:
             return
         self.settings.setValue("last_document_dir", str(Path(path).parent))
+        self.stage_current_workspace()
+        self.cache_current_workspace()
         self._open_serial += 1
         request = self._open_serial
         self.statusBar().showMessage(f"Opening project in background: {Path(path).name}…")
@@ -6154,8 +6234,8 @@ class MainWindow(QMainWindow):
                 self.current_project_name = Path(path).stem
                 self.update_window_title()
                 self.project_dirty = False
-                self.save_library_project(automatic=True, source_filename=Path(path).name)
-                self.statusBar().showMessage(f"Opened and added to Project Library: {self.current_project_name}")
+                self.mark_dirty()
+                self.statusBar().showMessage(f"Opened: {self.current_project_name} · save to Library from toolbar or when closing")
             except Exception as error:
                 self._loading = False
                 QMessageBox.critical(self, "Open project failed", str(error))
