@@ -43,7 +43,7 @@ def build_minimax_h3_prompt(segments: list[Segment], provider: str, model: str, 
     inputs = _minimax_frames_inputs(segments, provider, reference_images)
     rules = _minimax_h3_rules(segments, intent, global_prompt, sfx, spoken_dialog, reduce_music, reference_images)
     raw = _provider_raw(inputs, provider, model, api_key, rules, timeout)
-    return _extract_minimax_h3_prompt(raw)
+    return _extract_minimax_h3_prompt(raw, segments)
 
 
 def build_minimax_h3_reference_prompt(segments: list[Segment], provider: str, model: str, api_key: str, intent: str, global_prompt: str, sfx: bool, spoken_dialog: bool, reduce_music: bool, timeout: int = 400, reference_images: list | None = None) -> str:
@@ -53,7 +53,7 @@ def build_minimax_h3_reference_prompt(segments: list[Segment], provider: str, mo
     inputs = _minimax_reference_inputs(segments, provider, reference_images)
     rules = _minimax_h3_reference_rules(segments, intent, global_prompt, sfx, spoken_dialog, reduce_music, reference_images)
     raw = _provider_raw(inputs, provider, model, api_key, rules, timeout)
-    return _extract_minimax_h3_prompt(raw)
+    return _extract_minimax_h3_prompt(raw, segments)
 
 
 def refine_minimax_h3_prompt(segments: list[Segment], provider: str, model: str, api_key: str, intent: str, global_prompt: str, sfx: bool, spoken_dialog: bool, reduce_music: bool, current_prompt: str, refinement_instructions: str, timeout: int = 400, reference_images: list | None = None) -> str:
@@ -77,7 +77,7 @@ REFINEMENT MODE — FOLLOW THIS PRIORITY ORDER WHEN ANY INPUTS COMPETE:
 - Do not introduce a new action, camera path, transformation, setting, or visual fact from secondary evidence unless the refinement instructions request it or it is strictly necessary to repair a physical contradiction.
 - Keep existing cue content attached to the same timestamp unless the private instructions explicitly request timing changes.
 - The refinement instructions are private editing directions. Never quote, summarize, mention, or append them inside the production prompt.
-- Return the same strict transport JSON contract containing only the refined production prompt.
+- Return the same strict transport JSON contract: the refined prompt prose and one timed_actions string per timeline segment. The client assembles timecodes.
 
 CURRENT EDITOR PROMPT:
 {current_prompt.strip()}
@@ -86,7 +86,7 @@ PRIVATE REFINEMENT INSTRUCTIONS:
 {refinement_instructions.strip() or 'Improve clarity, motion continuity, causal flow, and production readiness without changing the creative intent.'}
 """
     raw = _provider_raw(inputs, provider, model, api_key, rules, timeout)
-    return _extract_minimax_h3_prompt(raw)
+    return _extract_minimax_h3_prompt(raw, segments)
 
 
 def refine_minimax_h3_reference_prompt(segments: list[Segment], provider: str, model: str, api_key: str, intent: str, global_prompt: str, sfx: bool, spoken_dialog: bool, reduce_music: bool, current_prompt: str, refinement_instructions: str, timeout: int = 400, reference_images: list | None = None) -> str:
@@ -108,7 +108,7 @@ REFERENCE-MODE REFINEMENT — FOLLOW THIS PRIORITY ORDER:
 - Make the smallest complete edits required by the private instructions.
 - Use the current client asset map for Image1/Video1 labels. When converting an older prompt, retain the same source-to-subject relationships; do not mistake a subject label for an asset index.
 - Never quote or expose the private refinement instructions in the production prompt.
-- Return strict transport JSON containing only the refined prompt.
+- Return strict transport JSON with prompt prose and one timed_actions string per timeline segment. Preserve untouched content; the client assembles timecodes.
 
 CURRENT EDITOR PROMPT:
 {current_prompt.strip()}
@@ -117,10 +117,10 @@ PRIVATE REFINEMENT INSTRUCTIONS:
 {refinement_instructions.strip() or 'Improve reference clarity, action continuity, camera direction, and production detail without changing creative intent.'}
 """
     raw = _provider_raw(inputs, provider, model, api_key, rules, timeout)
-    return _extract_minimax_h3_prompt(raw)
+    return _extract_minimax_h3_prompt(raw, segments)
 
 
-def _extract_minimax_h3_prompt(raw: str) -> str:
+def _extract_minimax_h3_prompt(raw: str, segments: list[Segment] | None = None) -> str:
     """Extract the MiniMax prompt without second-guessing its creative content."""
     result = _parse_json(raw)
     if not isinstance(result, dict):
@@ -128,6 +128,12 @@ def _extract_minimax_h3_prompt(raw: str) -> str:
     prompt = result.get("prompt") or result.get("minimaxPrompt") or result.get("minimax_prompt")
     if not isinstance(prompt, str) or not prompt.strip():
         raise AIResponseFormatError("The AI returned no MiniMax H3 prompt. The operation will retry.")
+    actions = result.get("timed_actions")
+    if actions is not None and segments is not None:
+        if not isinstance(actions, list) or len(actions) != len(segments) or not all(isinstance(action, str) and action.strip() for action in actions):
+            raise AIResponseFormatError("MiniMax returned incomplete timed actions. The operation will retry.")
+        from .timed_action import compose_actions
+        return compose_actions(prompt.strip(), segments, [action.strip() for action in actions]).strip()
     return prompt.strip()
 
 
@@ -401,7 +407,7 @@ Sound effects: {'Describe supported physical sounds and ambience.' if sfx else '
 Dialogue: {'Use supplied exact words, speakers and delivery.' if spoken_dialog else 'Do not add dialogue; retain explicitly supplied words only.'}
 Music: {'No background music unless explicitly requested.' if reduce_music else 'Use music only if supplied direction calls for it.'}
 
-Return JSON with exactly one field: {{"prompt": "the complete production brief"}}."""
+Return JSON with two fields: {{"prompt": "production brief with a [TIMED ACTION] heading but no action lines; retain all other sections", "timed_actions": ["action prose for segment 1", "action prose for segment 2"]}}. The timed_actions array must have exactly one nonempty string for each timeline interval in order. The client inserts authoritative SMPTE timecodes and assembles the production prompt. Do not put timecodes inside action strings."""
 
 def _minimax_h3_reference_rules(segments: list[Segment], intent: str, global_prompt: str, sfx: bool, spoken_dialog: bool, reduce_music: bool, reference_images: list | None = None) -> str:
     return reference_rules(segments, intent, global_prompt, sfx, spoken_dialog, reduce_music, reference_images)

@@ -39,6 +39,7 @@ from .minimax_reference_widgets import MiniMaxReferenceSlot
 from .models import Segment, order_segments_by_ids, text_segment_from_ltx
 from .project_data import ARCHIVE_COLOR, load_other_tags, load_project_tags, new_note, normalize_notes, normalize_project_labels
 from .spellcheck import install_spellcheck
+from .timed_action import compose_actions, split_actions
 
 FPS = 24
 MIN_DURATION = 0.01
@@ -347,6 +348,7 @@ def _export_ltx_snapshot(segments: list[Segment], global_prompt: str, output_wid
 
 class TimelineListWidget(QListWidget):
     files_dropped = Signal(list, int)
+    files_replaced = Signal(list, int)
     projects_dropped = Signal(list)
 
     def __init__(self, parent=None):
@@ -434,7 +436,9 @@ class TimelineListWidget(QListWidget):
         media_paths = self._media_paths(event)
         project_paths = self._project_paths(event)
         if media_paths or project_paths:
-            self._drop_index = self.insertion_index(event.position().toPoint()) if media_paths else -1
+            replacing = bool(getattr(event, "modifiers", lambda: Qt.KeyboardModifier.NoModifier)() & Qt.KeyboardModifier.ControlModifier)
+            target = self.itemAt(event.position().toPoint()) if replacing else None
+            self._drop_index = self.row(target) if target else self.insertion_index(event.position().toPoint()) if media_paths else -1
             self.viewport().update()
             event.acceptProposedAction()
             return
@@ -454,7 +458,11 @@ class TimelineListWidget(QListWidget):
             event.acceptProposedAction()
             return
         if paths:
-            self.files_dropped.emit(paths, insertion_index)
+            target = self.itemAt(event.position().toPoint()) if getattr(event, "modifiers", lambda: Qt.KeyboardModifier.NoModifier)() & Qt.KeyboardModifier.ControlModifier else None
+            if target:
+                self.files_replaced.emit(paths, self.row(target))
+            else:
+                self.files_dropped.emit(paths, insertion_index)
             event.acceptProposedAction()
             return
         super().dropEvent(event)
@@ -2454,7 +2462,27 @@ class MiniMaxPromptPanel(QFrame):
         self.retry_button = QPushButton("↻ Retry")
         self.retry_button.clicked.connect(owner.retry_minimax_operation)
         message_layout.addWidget(self.retry_button)
+        self.timeline_refine_button = QPushButton("✎ Refine prompt")
+        self.timeline_refine_button.clicked.connect(owner.refine_minimax_prompt)
+        message_layout.addWidget(self.timeline_refine_button)
         layout.addWidget(self.message_panel)
+        self.actions_box = QFrame()
+        self.actions_box.setObjectName("minimaxActionsBox")
+        actions_layout = QVBoxLayout(self.actions_box)
+        actions_layout.setContentsMargins(7, 4, 7, 4)
+        self.actions_title = QLabel("TIMED ACTION  ·  linked to timeline")
+        self.actions_title.setObjectName("sectionLabel")
+        actions_layout.addWidget(self.actions_title)
+        self.actions_scroll = QScrollArea()
+        self.actions_scroll.setWidgetResizable(True)
+        self.actions_scroll.setMaximumHeight(195)
+        self.actions_content = QWidget()
+        self.actions_layout = QVBoxLayout(self.actions_content)
+        self.actions_layout.setContentsMargins(0, 0, 0, 0)
+        self.actions_scroll.setWidget(self.actions_content)
+        actions_layout.addWidget(self.actions_scroll)
+        layout.addWidget(self.actions_box)
+        self.action_editors = []
         self.clear_message()
 
         # Untimed project references can accompany either MiniMax workflow.
@@ -2514,11 +2542,13 @@ class MiniMaxPromptPanel(QFrame):
         self.message_panel.style().unpolish(self.message_panel)
         self.message_panel.style().polish(self.message_panel)
         self.retry_button.setVisible(retry)
+        self.timeline_refine_button.setVisible(level == "timeline")
         self.message_panel.show()
 
     def clear_message(self) -> None:
         self.message_banner.clear()
         self.retry_button.hide()
+        self.timeline_refine_button.hide()
         self.message_panel.hide()
 
     def set_busy(self, busy: bool, status: str = "") -> None:
@@ -2531,6 +2561,7 @@ class MiniMaxPromptPanel(QFrame):
         if self.owner.project_type != "ltx":
             self.refine_button.setEnabled(not self.busy and bool(self.editor.toPlainText().strip()))
         self.retry_button.setEnabled(not self.busy)
+        self.timeline_refine_button.setEnabled(not self.busy)
 
     def focus_prompt_editor(self) -> None:
         self.editor.setFocus(Qt.FocusReason.OtherFocusReason)
@@ -2592,9 +2623,25 @@ class MainWindow(QMainWindow):
         self._pending_disk_jobs = 0
         self._close_after_jobs = False
         self._open_serial = 0
-        self._loading = False
+        self._autosave_timer = QTimer(self)
+        self._autosave_timer.setSingleShot(True)
+        self._autosave_timer.setInterval(900)
+        self._autosave_timer.timeout.connect(self.autosave_project)
+        self._autosave_pending = False
+        self._autosave_active = False
+        self._action_segment_ids = []
+        self._action_descriptions = {}
+        self._timeline_signature = ()
+        self._actions_refresh_timer = QTimer(self)
+        self._actions_refresh_timer.setSingleShot(True)
+        self._actions_refresh_timer.setInterval(280)
+        self._actions_refresh_timer.timeout.connect(self.sync_timed_actions)
+        self._loading = True
         self.setDockNestingEnabled(True)
         self._build_ui()
+        self._loading = False
+        self.project_dirty = False
+        self._autosave_timer.stop()
         for editor in self.findChildren(QTextEdit):
             install_spellcheck(editor)
         self._apply_theme()
@@ -2803,6 +2850,7 @@ class MainWindow(QMainWindow):
         self.timeline.itemClicked.connect(self.reload_clicked_segment)
         self.timeline.model().rowsMoved.connect(lambda *_: self.sync_order())
         self.timeline.files_dropped.connect(self.add_media_paths)
+        self.timeline.files_replaced.connect(self.replace_timeline_media)
         self.timeline.projects_dropped.connect(self.project_files_dropped)
         self.timeline.horizontalScrollBar().valueChanged.connect(self.ruler.set_offset)
         self.timeline_loading = TimelineLoadingOverlay(self.timeline.viewport())
@@ -3231,28 +3279,6 @@ class MainWindow(QMainWindow):
         self.project_list.currentItemChanged.connect(lambda *_: self.sync_project_properties())
         layout.addWidget(self.project_list, 1)
 
-        buttons = QHBoxLayout()
-        self.save_library_button = QPushButton("Save Current")
-        self.save_library_button.setObjectName("librarySave")
-        self.save_library_button.clicked.connect(self.save_library_project)
-        open_button = QPushButton("Open")
-        open_button.setObjectName("librarySecondary")
-        open_button.clicked.connect(self.open_library_project)
-        edit_button = QPushButton("Edit")
-        edit_button.setObjectName("librarySecondary")
-        edit_button.clicked.connect(self.edit_library_project)
-        delete_button = QPushButton("Delete")
-        delete_button.setObjectName("libraryDelete")
-        delete_button.clicked.connect(self.delete_library_project)
-        archive_button = QPushButton("Archive")
-        archive_button.setObjectName("librarySecondary")
-        archive_button.clicked.connect(self.toggle_archive_selected)
-        buttons.addWidget(self.save_library_button, 1)
-        buttons.addWidget(open_button)
-        buttons.addWidget(edit_button)
-        buttons.addWidget(archive_button)
-        buttons.addWidget(delete_button)
-        layout.addLayout(buttons)
         self.update_project_icon_controls()
         self.project_dock.setWidget(panel)
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.project_dock)
@@ -3389,7 +3415,7 @@ class MainWindow(QMainWindow):
         QMainWindow,QWidget{background:#24292c;color:#d9dcde;font:11px Arial} QMainWindow::separator{width:__DOCK_GRIP_WIDTH__px;height:__DOCK_GRIP_WIDTH__px;background:transparent;background-repeat:no-repeat;background-position:center} QMainWindow::separator:vertical{background-image:url("__DOCK_GRIP_IMAGE__")} QMainWindow::separator:horizontal{background-image:url("__DOCK_GRIP_HORIZONTAL_IMAGE__")} QMainWindow::separator:hover{background-color:rgba(88,118,134,35)} QToolBar{background:#1b2023;border:0;border-bottom:1px solid #111517;spacing:3px;padding:5px} QToolBar::separator{background:#394247;width:1px;margin:7px 5px}
         QToolButton,QPushButton,QComboBox,QSpinBox,QDoubleSpinBox,QLineEdit{background:#303436;border:1px solid #101213;border-radius:3px;padding:3px 7px;min-height:19px}
         #mainToolbar QToolButton{background:transparent;border:1px solid transparent;border-radius:4px;padding:5px 9px;color:#c5cdd1} #mainToolbar QToolButton:hover{background:#2b3438;border-color:#3a464c;color:#f3f7f9} #mainToolbar QToolButton:pressed{background:#17232a;border-color:#477d99;color:#bde6fb} #toolbarButton{background:#23343d;border:1px solid #385667;border-radius:5px;color:#c4e8fb;font-weight:bold}
-        #minimaxPromptToolbar{background:#1b2023;border:1px solid #354047;border-radius:6px} #minimaxCacheState{background:#2b3438;color:#aebbc1;border:1px solid #435159;border-radius:9px;padding:2px 8px;font-size:9px} #minimaxCacheState[cached="true"]{background:#244d37;color:#c9f4d6;border-color:#4c9b6a} #minimaxInstructions{background:#1b2023;border:1px solid #37464d;border-radius:4px;color:#d8e1e5;padding:7px} #minimaxMessagePanel{background:#20313a;border:1px solid #49758a;border-radius:6px} #minimaxMessagePanel[level="success"]{background:#20392c;border-color:#4b8962} #minimaxMessagePanel[level="warning"]{background:#3a321f;border-color:#8a7340} #minimaxMessagePanel[level="error"]{background:#3a2325;border-color:#94555a} #minimaxMessageBanner{background:transparent;color:#ccecf8;border:0;padding:1px} #minimaxMessagePanel[level="success"] #minimaxMessageBanner{color:#cef2d9} #minimaxMessagePanel[level="warning"] #minimaxMessageBanner{color:#f2dfb0} #minimaxMessagePanel[level="error"] #minimaxMessageBanner{color:#f2c5c8} #minimaxRetryButton{background:#5b451b;color:#ffe7a1;border:1px solid #c79a39;border-radius:4px;font-weight:bold;padding:4px 10px} #minimaxRetryButton:hover{background:#755b25;border-color:#e2bc5a;color:#fff5cf} #minimaxBusyCard{background:#17262d;border:1px solid #65a7c7;border-radius:8px} #minimaxBusyStatus{background:transparent;color:#d9f2ff;font-weight:bold;padding:2px}
+        #minimaxActionsBox{background:#1c252a;border:1px solid #374851;border-radius:6px} #minimaxActionRow{background:#202e34;border:1px solid #34434c;border-radius:4px} #minimaxActionRow QLineEdit{background:#162127;border:1px solid #39505b;border-radius:4px;color:#dce9ef;padding:4px 7px} #minimaxActionRow QLineEdit:focus{border-color:#72afca}         #minimaxPromptToolbar{background:#1b2023;border:1px solid #354047;border-radius:6px} #minimaxCacheState{background:#2b3438;color:#aebbc1;border:1px solid #435159;border-radius:9px;padding:2px 8px;font-size:9px} #minimaxCacheState[cached="true"]{background:#244d37;color:#c9f4d6;border-color:#4c9b6a} #minimaxInstructions{background:#1b2023;border:1px solid #37464d;border-radius:4px;color:#d8e1e5;padding:7px} #minimaxMessagePanel{background:#20313a;border:1px solid #49758a;border-radius:6px} #minimaxMessagePanel[level="success"]{background:#20392c;border-color:#4b8962} #minimaxMessagePanel[level="warning"]{background:#3a321f;border-color:#8a7340} #minimaxMessagePanel[level="error"]{background:#3a2325;border-color:#94555a} #minimaxMessageBanner{background:transparent;color:#ccecf8;border:0;padding:1px} #minimaxMessagePanel[level="success"] #minimaxMessageBanner{color:#cef2d9} #minimaxMessagePanel[level="warning"] #minimaxMessageBanner{color:#f2dfb0} #minimaxMessagePanel[level="error"] #minimaxMessageBanner{color:#f2c5c8} #minimaxRetryButton{background:#5b451b;color:#ffe7a1;border:1px solid #c79a39;border-radius:4px;font-weight:bold;padding:4px 10px} #minimaxRetryButton:hover{background:#755b25;border-color:#e2bc5a;color:#fff5cf} #minimaxBusyCard{background:#17262d;border:1px solid #65a7c7;border-radius:8px} #minimaxBusyStatus{background:transparent;color:#d9f2ff;font-weight:bold;padding:2px}
         QToolButton:hover,QPushButton:hover{background:#41474a} QToolButton:pressed,QPushButton:pressed{background:#202729;border-color:#79a8c5} QLineEdit{background:#1e2122}
         QSpinBox,QDoubleSpinBox{padding-right:__SPIN_PAD__px} QSpinBox::up-button,QDoubleSpinBox::up-button{subcontrol-origin:border;subcontrol-position:top right;width:__SPIN_BUTTON__px;background:#3b4347;border:0;border-left:1px solid #171a1c;border-bottom:1px solid #202527;border-top-right-radius:3px} QSpinBox::down-button,QDoubleSpinBox::down-button{subcontrol-origin:border;subcontrol-position:bottom right;width:__SPIN_BUTTON__px;background:#343b3f;border:0;border-left:1px solid #171a1c;border-top:1px solid #202527;border-bottom-right-radius:3px}
         QSpinBox::up-button:hover,QDoubleSpinBox::up-button:hover,QSpinBox::down-button:hover,QDoubleSpinBox::down-button:hover{background:#506471} QSpinBox::up-button:pressed,QDoubleSpinBox::up-button:pressed,QSpinBox::down-button:pressed,QDoubleSpinBox::down-button:pressed{background:#274e66} QSpinBox::up-arrow,QDoubleSpinBox::up-arrow,QSpinBox::down-arrow,QDoubleSpinBox::down-arrow{width:__ARROW_SIZE__px;height:__ARROW_SIZE__px}
@@ -3518,15 +3544,6 @@ class MainWindow(QMainWindow):
                 item.setToolTip(f"Collection: {name}")
                 item.setSizeHint(QSize(self.project_icon_size + 28, self.project_icon_size + 76))
                 collection_cover = self.collection_pixmap(members[:4], self.project_icon_size)
-                if any(self.project_is_dirty(str(member.get("id", ""))) for member in members):
-                    painter = QPainter(collection_cover)
-                    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-                    dot_size = max(10, round(self.project_icon_size * .078))
-                    dot_margin = max(5, round(self.project_icon_size * .039))
-                    painter.setPen(QPen(QColor("#5a4300"), max(1, round(self.project_icon_size * .013))))
-                    painter.setBrush(QColor("#ffd83d"))
-                    painter.drawEllipse(dot_margin, dot_margin, dot_size, dot_size)
-                    painter.end()
                 item.setIcon(QIcon(collection_cover))
                 self.project_list.addItem(item)
                 continue
@@ -3561,16 +3578,6 @@ class MainWindow(QMainWindow):
                 labels.append(("Archive", ARCHIVE_COLOR))
             if labels:
                 pixmap = self.add_thumbnail_labels(pixmap, labels)
-            if self.project_is_dirty(str(meta.get("id", ""))):
-                pixmap = pixmap.copy()
-                painter = QPainter(pixmap)
-                painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-                dot_size = max(10, round(self.project_icon_size * .078))
-                dot_margin = max(5, round(self.project_icon_size * .039))
-                painter.setPen(QPen(QColor("#5a4300"), max(1, round(self.project_icon_size * .013))))
-                painter.setBrush(QColor("#ffd83d"))
-                painter.drawEllipse(dot_margin, dot_margin, dot_size, dot_size)
-                painter.end()
             item.setIcon(QIcon(pixmap))
             self.project_list.addItem(item)
             if meta.get("id") == selected:
@@ -3970,6 +3977,7 @@ class MainWindow(QMainWindow):
             menu.exec(self.project_list.viewport().mapToGlobal(point))
             return
         menu.addSeparator()
+        menu.addAction("Open project", self.open_library_project)
         menu.addAction("Edit project details", self.edit_library_project)
         menu.addAction("Delete project", self.delete_library_project)
         menu.exec(self.project_list.viewport().mapToGlobal(point))
@@ -4103,6 +4111,9 @@ class MainWindow(QMainWindow):
         self.timeline_fit_mode = auto_fit
         self.ruler.set_scale(scale)
         self._loading = False
+        self._timeline_signature = tuple((item.id, item.duration, item.prompt, item.kind, item.role, item.name) for item in self.segments)
+        self._action_segment_ids = [item.id for item in self.segments]
+        self._action_descriptions = {}
         self.sync_minimax_panel()
         self.refresh_timeline()
         if auto_fit:
@@ -4113,8 +4124,12 @@ class MainWindow(QMainWindow):
         self.refresh_project_library(preserve_scroll=False)
 
     def save_library_project(self, automatic: bool = False, source_filename: str | None = None) -> None:
-        if not self.segments:
-            QMessageBox.information(self, "Nothing to save", "Add at least one image, WebM, MP4, or text segment first.")
+        if automatic and self._autosave_active:
+            self._autosave_pending = True
+            return
+        if not self.segments and not self.current_project_id:
+            if not automatic:
+                QMessageBox.information(self, "Nothing to save", "Add at least one image, WebM, MP4, or text segment first.")
             return
         root = project_library_path()
         meta = None
@@ -4186,18 +4201,31 @@ class MainWindow(QMainWindow):
             if self.current_project_id == project_id and self._edit_serial == edit_serial:
                 self.project_dirty = False
                 self.project_sessions[project_id] = {"name": meta["name"], "dirty": False, "state": workspace}
-            self.refresh_project_library(project_id)
-            self.update_project_preview()
-            self.project_dock.show()
-            self.settings.setValue("last_project_id", project_id)
-            self.queue_settings_sync()
+            elif self.current_project_id != project_id:
+                session = self.project_sessions.get(project_id)
+                if session and session.get("state") == workspace:
+                    session["dirty"] = False
+            self.refresh_project_library(self.current_project_id)
+            if self.current_project_id == project_id:
+                self.update_project_preview()
+                self.settings.setValue("last_project_id", project_id)
+                self.queue_settings_sync()
+            self._autosave_active = False
+            if self._autosave_pending or self.project_dirty:
+                self._autosave_pending = False
+                if self._close_after_jobs:
+                    self.autosave_project()
+                else:
+                    self._autosave_timer.start()
             self.statusBar().showMessage(f"Project saved to library: {meta['name']}")
 
         def failed(message):
             self._close_after_jobs = False
-            self.mark_dirty()
+            self._autosave_active = False
+            self.project_dirty = True
             QMessageBox.critical(self, "Save failed", message)
 
+        self._autosave_active = True
         self.start_disk_job(_write_library_archive,
                             (str(meta["projectPath"]), payload, snapshot, root / f"{project_id}.meta.json", copy.deepcopy(meta)),
                             saved, failed, serialized=True)
@@ -4223,6 +4251,9 @@ class MainWindow(QMainWindow):
             return
         self._open_serial += 1
         request = self._open_serial
+        if self.project_dirty and self.segments:
+            self._autosave_timer.stop()
+            self.autosave_project()
         self.cache_current_workspace()
 
         def apply_project(payload=None):
@@ -4362,7 +4393,9 @@ class MainWindow(QMainWindow):
         self.sync_minimax_panel()
 
     def closeEvent(self, event) -> None:
-        self.save_minimax_prompt_on_close()
+        self._autosave_timer.stop()
+        if self._autosave_pending or self.project_dirty:
+            self.autosave_project()
         if self._pending_disk_jobs:
             self._close_after_jobs = True
             self.statusBar().showMessage("Finishing background file operations before closing…")
@@ -4396,6 +4429,18 @@ class MainWindow(QMainWindow):
             self._edit_serial += 1
             was_dirty = self.project_dirty
             self.project_dirty = True
+            signature = tuple((item.id, item.duration, item.prompt, item.kind, item.role, item.name) for item in self.segments)
+            timeline_changed = signature != self._timeline_signature
+            if timeline_changed:
+                previous = {item[0]: item[2] for item in self._timeline_signature}
+                for item in self.segments:
+                    if item.id in previous and item.prompt != previous[item.id]:
+                        self._action_descriptions[item.id] = item.prompt.strip()
+            self._timeline_signature = signature
+            if timeline_changed and self.project_type != "ltx" and self.minimax_prompt_text.strip():
+                self.sync_timed_actions(timeline_changed=True)
+            if self.segments or self.current_project_id:
+                self._autosave_timer.start()
             if self.current_project_id:
                 session = self.project_sessions.setdefault(self.current_project_id, {"name": self.current_project_name})
                 session["dirty"] = True
@@ -4404,17 +4449,11 @@ class MainWindow(QMainWindow):
 
     def new_project(self) -> None:
         self._open_serial += 1
+        if self.project_dirty and self.segments:
+            self._autosave_timer.stop()
+            self.autosave_project()
         if self.current_project_id:
             self.cache_current_workspace()
-        elif self.segments and self.project_dirty:
-            answer = QMessageBox.question(
-                self, "Start a new project",
-                "Start a new project? Any changes not saved to the project library or an exported project file will be lost.",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
-                QMessageBox.StandardButton.Cancel,
-            )
-            if answer != QMessageBox.StandardButton.Yes:
-                return
         self._loading = True
         self.segments = []
         self.current_project_id = None
@@ -5359,6 +5398,8 @@ class MainWindow(QMainWindow):
         self.workspace_revision += 1
         if project_type != "ltx":
             self.load_minimax_draft(project_type.removeprefix("minimax_"))
+        self._action_segment_ids = []
+        self._action_descriptions = {}
         self.prompt_scope.blockSignals(True)
         self.prompt_scope.setCurrentIndex(0)
         self.prompt_scope.blockSignals(False)
@@ -5366,6 +5407,7 @@ class MainWindow(QMainWindow):
         self.minimax_panel.clear_message()
         self.sync_minimax_panel()
         self.minimax_panel.reference_dock.setVisible(project_type != "ltx")
+        self.sync_timed_actions()
         self.mark_dirty()
 
     def apply_project_type_ui(self) -> None:
@@ -5468,6 +5510,7 @@ class MainWindow(QMainWindow):
         state = cache_state or (f"Saved {mode_name} prompt" if self.minimax_prompt_text else "Not generated")
         self.minimax_panel.set_project(self.current_project_name, self.minimax_prompt_text,
                                        self.minimax_refinement_instructions, state)
+        self.sync_timed_actions()
 
     def show_minimax_panel(self, cache_state: str | None = None) -> MiniMaxPromptPanel:
         if self.project_type == "ltx":
@@ -5480,6 +5523,7 @@ class MainWindow(QMainWindow):
         if self._loading or not self.minimax_panel or self.project_type == "ltx":
             return
         self.minimax_prompt_text = self.minimax_panel.editor.toPlainText()
+        self._actions_refresh_timer.start()
         self.minimax_refinement_instructions = self.minimax_panel.instructions.toPlainText()
         self.minimax_prompt_updated_at = datetime.now(timezone.utc).isoformat()
         self.minimax_panel.update_actions()
@@ -5498,6 +5542,109 @@ class MainWindow(QMainWindow):
             self.minimax_panel.refresh_references(update_images=image_changed)
             if not self.minimax_panel.busy:
                 self.minimax_panel.set_cache_state("References changed · generate when ready")
+
+    def sync_timed_actions(self, timeline_changed: bool = False) -> None:
+        panel = self.minimax_panel
+        if not panel or self.project_type == "ltx":
+            if panel:
+                panel.actions_box.hide()
+            return
+        ids = [item.id for item in self.segments]
+        descriptions, _ = split_actions(self.minimax_prompt_text)
+        if not timeline_changed and len(descriptions) == len(self._action_segment_ids):
+            self._action_descriptions.update(zip(self._action_segment_ids, descriptions))
+        elif not timeline_changed and len(descriptions) == len(ids):
+            self._action_descriptions.update(zip(ids, descriptions))
+        if timeline_changed and "[TIMED ACTION]" in self.minimax_prompt_text:
+            values = [self._action_descriptions.get(item.id, item.prompt.strip()) for item in self.segments]
+            updated = compose_actions(self.minimax_prompt_text, self.segments, values)
+            if updated != self.minimax_prompt_text:
+                self.minimax_prompt_text = updated
+                self.refresh_shared_editor()
+                panel.show_message("Timeline changed. Cue times are synced; refine the prompt to review the action and continuity.", "timeline")
+        if not timeline_changed and len(descriptions) == len(ids):
+            for segment, description in zip(self.segments, descriptions):
+                if segment.prompt != description:
+                    segment.prompt = description
+            self._timeline_signature = tuple((item.id, item.duration, item.prompt, item.kind, item.role, item.name) for item in self.segments)
+            self.refresh_text_segment_previews()
+        self._action_segment_ids = ids
+        while panel.actions_layout.count():
+            entry = panel.actions_layout.takeAt(0)
+            if entry.widget():
+                entry.widget().deleteLater()
+        panel.action_editors = []
+        if not self.minimax_prompt_text.strip() and not self.segments:
+            panel.actions_box.hide()
+            return
+        panel.actions_box.show()
+        cursor = 0.0
+        for segment in self.segments:
+            end = cursor + segment.duration
+            row = QFrame()
+            row.setObjectName("minimaxActionRow")
+            line = QHBoxLayout(row)
+            line.setContentsMargins(5, 2, 5, 2)
+            cue = QLabel(f"{self.minimax_timecode(cursor)} – {self.minimax_timecode(end)}")
+            cue.setMinimumWidth(145)
+            cue.setObjectName("muted")
+            line.addWidget(cue)
+            field = QLineEdit(self._action_descriptions.get(segment.id, segment.prompt.strip()))
+            field.setPlaceholderText("Action during this timeline segment…")
+            field.setToolTip("Timed action for " + segment.name)
+            field.textEdited.connect(lambda value, sid=segment.id: self.edit_timed_action(sid, value))
+            line.addWidget(field, 1)
+            panel.actions_layout.addWidget(row)
+            panel.action_editors.append(field)
+            cursor = end
+
+    @staticmethod
+    def minimax_timecode(seconds: float) -> str:
+        from .ai import _minimax_timestamp
+        return _minimax_timestamp(seconds)
+
+    def edit_timed_action(self, segment_id: str, value: str) -> None:
+        self._action_descriptions[segment_id] = value
+        segment = next((item for item in self.segments if item.id == segment_id), None)
+        if segment is not None:
+            segment.prompt = value
+        descriptions = [self._action_descriptions.get(segment.id, segment.prompt.strip()) for segment in self.segments]
+        self.minimax_prompt_text = compose_actions(self.minimax_prompt_text, self.segments, descriptions)
+        self.refresh_shared_editor()
+        self.mark_dirty()
+
+    def replace_timeline_media(self, paths: list[str], index: int) -> None:
+        paths = [path for path in paths if Path(path).is_file()]
+        if not paths or not 0 <= index < len(self.segments):
+            return
+        target_id = self.segments[index].id
+        workspace = (self.workspace_revision, self.current_project_id)
+        def ready(result):
+            if workspace != (self.workspace_revision, self.current_project_id):
+                return
+            prepared, errors = result
+            location = next((i for i, item in enumerate(self.segments) if item.id == target_id), -1)
+            if prepared and location >= 0:
+                old = self.segments[location]
+                path, kind, preview, frames, trim = prepared[0]
+                self.segments[location] = Segment(Path(path).name, path, preview, kind, old.role, old.prompt,
+                                                   old.duration, frames, trim, old.id)
+                self.mark_dirty()
+                self.refresh_timeline(location)
+                if len(prepared) > 1:
+                    self.add_media_paths(paths[1:], location + 1)
+            if errors:
+                QMessageBox.warning(self, "Media error", "\n".join(errors))
+        self.start_disk_job(_prepare_media_batch, (paths,), ready,
+                            lambda message: QMessageBox.warning(self, "Media error", message))
+
+    def autosave_project(self) -> None:
+        if self._loading or (not self.segments and not self.current_project_id) or not self.project_dirty:
+            return
+        if self._autosave_active:
+            self._autosave_pending = True
+            return
+        self.save_library_project(automatic=True)
 
     def save_minimax_prompt_on_close(self) -> None:
         """Persist manual edits when the main application closes."""
@@ -5599,6 +5746,10 @@ class MainWindow(QMainWindow):
                 self.minimax_panel.show_message("The MiniMax result was not applied because you edited the prompt while it was running. Refine again when ready.", "warning")
             return
         self.minimax_prompt_text = prompt
+        self._action_segment_ids = [item.id for item in self.segments]
+        descriptions, _ = split_actions(prompt)
+        if len(descriptions) == len(self.segments):
+            self._action_descriptions = dict(zip(self._action_segment_ids, descriptions))
         self.minimax_prompt_cache_key = signature
         self.minimax_prompt_updated_at = datetime.now(timezone.utc).isoformat()
         self.set_ai_controls_enabled(True)
@@ -5615,9 +5766,9 @@ class MainWindow(QMainWindow):
         window = self.show_minimax_panel(state)
         self.mark_dirty()
         window.show_message(
-            f"MiniMax H3 {self.minimax_prompt_mode} prompt refined. Use Save Project to keep this draft."
+            f"MiniMax H3 {self.minimax_prompt_mode} prompt refined. The draft saves automatically."
             if operation.startswith("refine_") else
-            f"MiniMax H3 {self.minimax_prompt_mode} prompt generated. Use Save Project to keep this draft.",
+            f"MiniMax H3 {self.minimax_prompt_mode} prompt generated. The draft saves automatically.",
             "success",
         )
 

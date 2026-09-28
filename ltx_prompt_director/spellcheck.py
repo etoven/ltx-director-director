@@ -74,14 +74,16 @@ def install_spellcheck(editor: QTextEdit) -> SpellHighlighter | None:
         word = cursor.selectedText().strip()
         menu = editor.createStandardContextMenu(point)
         if WORDS.fullmatch(word) and highlighter.misspelled(word):
-            suggestions = menu.addMenu('Spelling suggestions')
+            anchor = menu.actions()[0] if menu.actions() else None
             for replacement in dictionary.suggest(word)[:7]:
-                action = suggestions.addAction(replacement)
+                action = menu.insertAction(anchor, replacement) if anchor else menu.addAction(replacement)
                 action.triggered.connect(lambda checked=False, value=replacement, selected=QTextCursor(cursor): _replace(editor, selected, value))
-            if not suggestions.actions():
-                suggestions.addAction('No suggestions').setEnabled(False)
-            suggestions.addSeparator()
-            suggestions.addAction(f'Ignore “{word}” for this session', lambda value=word: highlighter.accept(value))
+            ignore = menu.insertAction(anchor, f'Ignore “{word}” for this session') if anchor else menu.addAction(f'Ignore “{word}” for this session')
+            ignore.triggered.connect(lambda checked=False, value=word: highlighter.accept(value))
+            if anchor:
+                menu.insertSeparator(anchor)
+            else:
+                menu.addSeparator()
         menu.exec(editor.mapToGlobal(point))
         menu.deleteLater()
 

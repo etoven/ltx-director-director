@@ -147,5 +147,5 @@ Sound effects: {'Describe supported physical sounds and ambience.' if sfx else '
 Dialogue: {'Use supplied exact words, speakers and delivery.' if spoken_dialog else 'Do not add dialogue; retain explicitly supplied words only.'}
 Music: {'No background music unless explicitly requested.' if reduce_music else 'Use music only if the supplied direction calls for it.'}
 
-Return JSON with one field: {{"prompt": "the complete production brief"}}.
+Return JSON with two fields: {{"prompt": "production brief with a [TIMED ACTION] heading but no action lines; retain all other sections", "timed_actions": ["action prose for segment 1", "action prose for segment 2"]}}. Supply one nonempty timed_actions string per timeline segment in order; the client inserts exact SMPTE timecodes.
 """

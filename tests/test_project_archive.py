@@ -32,7 +32,7 @@ class ProjectArchiveTests(unittest.TestCase):
         with patch.object(MainWindow, 'restore_startup_workspace'), patch.object(MainWindow, 'save_minimax_prompt_on_close'):
             window = MainWindow()
         window.segments = segments
-        self.addCleanup(window.close)
+        self.addCleanup(lambda: (window._autosave_timer.stop(), setattr(window, "project_dirty", False), window.close()))
         return window
 
     def test_portable_image_and_video_round_trip_is_lazy_and_preserves_original(self):
