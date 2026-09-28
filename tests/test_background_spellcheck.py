@@ -63,7 +63,7 @@ class BackgroundSpellcheckTests(unittest.TestCase):
         window = self.make_window()
         if system_dictionary() is None:
             self.skipTest('No installed OS dictionary in this environment')
-        editors = (window.intent, window.segment_prompt, window.global_prompt, window.minimax_panel.instructions)
+        editors = (window.intent, window.segment_prompt, window.global_prompt)
         for editor in editors:
             checker = install_spellcheck(editor)
             self.assertIs(checker, editor._spell_highlighter)

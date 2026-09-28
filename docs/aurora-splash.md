@@ -1,0 +1,9 @@
+# Aurora startup splash (1.13.0a11)
+
+The startup splash is rendered locally from `assets/splash-aurora-background.png`, three embedded provider SVGs, and native Qt typography. The scenic background was generated specifically for this application. No network access is required at startup. A status strip shows actual startup phases, including panel construction, text tools, layout restoration, and thumbnail checks; the existing cache migration dialog remains visible when migration is necessary.
+
+The provider marks are embedded from these sources: MiniMax and Google Gemini vector paths from the Simple Icons project (`simple-icons/simple-icons`, `icons/minimax.svg` and `icons/googlegemini.svg`); OpenAI Blossom from the OpenAI cookbook asset mirrored at `aryan877/trialrun/docs/assets/logos/openai.svg`. LTX Video is shown as an LTX wordmark. These marks identify compatible technologies; their owners retain their trademarks and no endorsement is implied.
+
+## Inline prompt directives
+
+Type `/` in an editor to choose `/refine`, `/refine-global`, `/keep`, `/avoid`, or `/focus`. The command is real, editable prompt text with a tinted label. A nearby `/refine` applies to a passage or MiniMax timed cue; `/refine-global` can be placed at the beginning of the prompt to direct the whole refinement. This works in both LTX and MiniMax fields. Old private MiniMax refinement notes are migrated to a visible `/refine-global` line when their draft is opened. Untimed MiniMax brief sections do not receive timed-action background shading.

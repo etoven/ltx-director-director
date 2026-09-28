@@ -39,6 +39,7 @@ from .minimax_reference_widgets import MiniMaxReferenceSlot
 from .models import Segment, order_segments_by_ids, text_segment_from_ltx
 from .project_data import ARCHIVE_COLOR, load_other_tags, load_project_tags, new_note, normalize_notes, normalize_project_labels
 from .spellcheck import install_spellcheck
+from .prompt_tags import install_prompt_tags
 from .inline_cues import PromptTextEdit, cue_cells, insert_cue_cells
 from .timed_action import CUE, NEXT, SECTION, compose_actions, split_actions
 
@@ -2448,18 +2449,7 @@ class MiniMaxPromptPanel(QFrame):
         self.cache_state.setObjectName("minimaxCacheState")
         header.addWidget(self.cache_state)
         header.addStretch()
-        self.notes_toggle = QCheckBox("Refinement notes")
-        header.addWidget(self.notes_toggle)
         layout.addLayout(header)
-        self.instructions = QTextEdit()
-        self.instructions.setAcceptRichText(False)
-        self.instructions.setObjectName("minimaxInstructions")
-        self.instructions.setPlaceholderText("Private instructions for the next refinement; excluded from the production prompt.")
-        self.instructions.setMaximumHeight(72)
-        self.instructions.hide()
-        self.notes_toggle.toggled.connect(self.instructions.setVisible)
-        self.instructions.textChanged.connect(owner.minimax_editor_changed)
-        layout.addWidget(self.instructions)
         self.message_panel = QFrame()
         self.message_panel.setObjectName("minimaxMessagePanel")
         message_layout = QHBoxLayout(self.message_panel)
@@ -2500,10 +2490,6 @@ class MiniMaxPromptPanel(QFrame):
 
     def set_project(self, project_name: str, prompt: str, instructions: str, cache_state: str) -> None:
         self.refresh_references()
-        self.instructions.blockSignals(True)
-        self.instructions.setPlainText(instructions)
-        self.instructions.blockSignals(False)
-        self.notes_toggle.setChecked(bool(instructions))
         self.set_cache_state(cache_state)
         self.owner.refresh_shared_editor()
 
@@ -2629,11 +2615,19 @@ class MainWindow(QMainWindow):
         self._actions_refresh_timer.timeout.connect(self.sync_timed_actions)
         self._loading = True
         self.setDockNestingEnabled(True)
+        splash = getattr(QApplication.instance(), '_director_splash', None)
+        if splash:
+            splash.set_status('Creating timeline and project panels…')
+            QApplication.processEvents()
         self._build_ui()
         self._loading = False
         self.project_dirty = False
         for editor in self.findChildren(QTextEdit):
             install_spellcheck(editor)
+            install_prompt_tags(editor)
+        if splash:
+            splash.set_status('Preparing text tools and appearance…')
+            QApplication.processEvents()
         self._apply_theme()
         self.magic_overlay = MagicBuildOverlay(self)
         geometry = self.settings.value("window/geometry")
@@ -3342,15 +3336,27 @@ class MainWindow(QMainWindow):
         self.restore_project_panel_width()
         self.restore_timeline_panel_height()
         self.finish_layout_restore()
+        splash = getattr(QApplication.instance(), '_director_splash', None)
+        if splash:
+            splash.set_status('Checking project thumbnails…')
+            QApplication.processEvents()
         if needs_refresh():
             files = list(project_library_path().glob("*.meta.json"))
             if files:
                 self.cache_dialog = PreviewCacheDialog(files, self)
                 self.cache_dialog.finished.connect(lambda *_: QTimer.singleShot(0, self.restore_last_project))
                 self.cache_dialog.finished.connect(lambda *_: self.refresh_project_library())
+                if splash:
+                    splash.finish(self)
+                    QApplication.instance()._director_splash = None
                 QTimer.singleShot(0, self.cache_dialog.start)
                 return
             mark_ready()
+        if splash:
+            splash.set_status('Opening the last workspace…')
+            QApplication.processEvents()
+            splash.finish(self)
+            QApplication.instance()._director_splash = None
         QTimer.singleShot(0, self.restore_last_project)
 
     def finish_layout_restore(self) -> None:
@@ -5565,6 +5571,13 @@ class MainWindow(QMainWindow):
     def sync_minimax_panel(self, cache_state: str | None = None) -> None:
         if not self.minimax_panel:
             return
+        if self.minimax_refinement_instructions.strip():
+            # Migrate older drafts' hidden refinement notes into visible, editable instructions.
+            note = self.minimax_refinement_instructions.strip().replace('\n', ' ')
+            directive = f'/refine-global {note}'
+            if directive not in self.minimax_prompt_text:
+                self.minimax_prompt_text = directive + '\n\n' + self.minimax_prompt_text
+            self.minimax_refinement_instructions = ''
         self.apply_project_type_ui()
         mode_name = "reference" if self.minimax_prompt_mode == "references" else "frame"
         state = cache_state or (f"Saved {mode_name} prompt" if self.minimax_prompt_text else "Not generated")
@@ -5588,7 +5601,6 @@ class MainWindow(QMainWindow):
             self._action_descriptions.update(tagged)
         self._actions_refresh_timer.start()
         self.highlight_inline_actions()
-        self.minimax_refinement_instructions = self.minimax_panel.instructions.toPlainText()
         self.minimax_prompt_updated_at = datetime.now(timezone.utc).isoformat()
         self.minimax_panel.update_actions()
         self.mark_dirty()
@@ -5655,42 +5667,8 @@ class MainWindow(QMainWindow):
         self.highlight_inline_actions()
 
     def highlight_inline_actions(self) -> None:
-        """Subtle cue guides on the shared editor; wrapped prose remains normal QTextEdit text."""
-        editor = self.segment_prompt
-        if self.project_type == "ltx":
-            editor.setExtraSelections([])
-            return
-        selections = []
-        prompt = editor.document().toPlainText()
-        if "→ " in prompt and cue_cells(editor):
-            editor.setExtraSelections([])
-            return
-        section = SECTION.search(prompt)
-        following = NEXT.search(prompt, section.end()) if section else None
-        body_end = following.start() if following else len(prompt)
-        if section:
-            body = prompt[section.end():body_end]
-            editor.document().documentLayout().documentSize()
-            for match in CUE.finditer(body):
-                first = section.end() + match.start()
-                last = section.end() + match.end()
-                block = editor.document().findBlock(first)
-                while block.isValid() and block.position() < last:
-                    cursor = QTextCursor(editor.document())
-                    cursor.setPosition(block.position())
-                    if not cursor.currentTable():
-                        layout = block.layout()
-                        starts = [layout.lineAt(line).textStart() for line in range(layout.lineCount())] or [0]
-                        for offset in starts:
-                            selected = QTextEdit.ExtraSelection()
-                            selected.cursor = QTextCursor(editor.document())
-                            selected.cursor.setPosition(block.position() + offset)
-                            selected.format = QTextCharFormat()
-                            selected.format.setBackground(QColor("#28343a"))
-                            selected.format.setProperty(QTextCharFormat.Property.FullWidthSelection, True)
-                            selections.append(selected)
-                    block = block.next()
-        editor.setExtraSelections(selections)
+        """Only native timed-action cells have background shading."""
+        self.segment_prompt.setExtraSelections([])
 
     def replace_timeline_media(self, paths: list[str], index: int) -> None:
         paths = [path for path in paths if Path(path).is_file()]
@@ -5829,6 +5807,7 @@ class MainWindow(QMainWindow):
         self.magic_overlay.hide_overlay()
         operation = str(getattr(self, "minimax_operation_kind", "generate_frames"))
         if operation.startswith("refine_"):
+            # The visible directives remain in the prompt for later refinements.
             self.minimax_refinement_instructions = ""
         if operation.endswith("references"):
             self.minimax_prompt_mode = "references"

@@ -15,6 +15,7 @@ except (ImportError, OSError):
 
 
 WORDS = re.compile(r"[^\W\d_]+(?:['’][^\W\d_]+)*", re.UNICODE)
+DIRECTIVES = re.compile(r'(?<!\w)/(?:refine-global|refine|keep|avoid|focus)\b', re.IGNORECASE)
 
 
 @lru_cache(maxsize=1)
@@ -39,7 +40,7 @@ class SpellHighlighter(QSyntaxHighlighter):
         self._format.setUnderlineColor(QColor('#e98686'))
 
     def misspelled(self, word: str) -> bool:
-        if len(word) < 3 or word.isupper():
+        if self.dictionary is None or len(word) < 3 or word.isupper():
             return False
         key = word.casefold()
         if key not in self._known:
@@ -48,8 +49,14 @@ class SpellHighlighter(QSyntaxHighlighter):
 
     def highlightBlock(self, text: str) -> None:
         for match in WORDS.finditer(text):
-            if self.misspelled(match.group()):
+            if not any(tag.start() <= match.start() < tag.end() for tag in DIRECTIVES.finditer(text)) and self.misspelled(match.group()):
                 self.setFormat(match.start(), len(match.group()), self._format)
+        pill = QTextCharFormat()
+        pill.setForeground(QColor('#d0f3ff'))
+        pill.setBackground(QColor('#245163'))
+        pill.setFontWeight(700)
+        for match in DIRECTIVES.finditer(text):
+            self.setFormat(match.start(), len(match.group()), pill)
 
     def accept(self, word: str) -> None:
         self.dictionary.add_to_session(word)
@@ -62,8 +69,6 @@ def install_spellcheck(editor: QTextEdit) -> SpellHighlighter | None:
     if getattr(editor, '_spell_highlighter', None):
         return editor._spell_highlighter
     dictionary = system_dictionary()
-    if dictionary is None:
-        return None
     highlighter = SpellHighlighter(editor, dictionary)
     editor._spell_highlighter = highlighter
     editor.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -83,7 +88,7 @@ def spellcheck_menu(editor: QTextEdit, point, highlighter: SpellHighlighter):
     cursor.select(QTextCursor.SelectionType.WordUnderCursor)
     word = cursor.selectedText().strip()
     menu = editor.createStandardContextMenu(point)
-    if WORDS.fullmatch(word) and highlighter.misspelled(word):
+    if highlighter.dictionary and WORDS.fullmatch(word) and highlighter.misspelled(word):
         anchor = menu.actions()[0] if menu.actions() else None
         for replacement in highlighter.dictionary.suggest(word)[:7]:
             action = QAction(replacement, menu)

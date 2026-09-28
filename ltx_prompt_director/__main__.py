@@ -18,6 +18,7 @@ def main() -> int:
     try:
         from PySide6.QtWidgets import QApplication
         from .ui import MainWindow
+        from .splash import StartupSplash
     except ModuleNotFoundError as error:
         if error.name and error.name.startswith("PySide6"):
             print(
@@ -38,7 +39,14 @@ def main() -> int:
     app.setApplicationName("LTX Director - Director")
     app.setOrganizationName("LTXDirectorDirector")
     migrate_settings()
+    splash = StartupSplash()
+    app._director_splash = splash
+    splash.show()
+    app.processEvents()
+    splash.set_status('Loading workspace and project tools…')
+    app.processEvents()
     window = MainWindow()
+    splash.set_status('Restoring editor layout…')
     window.show()
     return app.exec()
 

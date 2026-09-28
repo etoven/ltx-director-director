@@ -67,7 +67,8 @@ def refine_minimax_h3_prompt(segments: list[Segment], provider: str, model: str,
     rules += f"""
 
 REFINEMENT MODE — FOLLOW THIS PRIORITY ORDER WHEN ANY INPUTS COMPETE:
-1. PRIVATE REFINEMENT INSTRUCTIONS are the highest-priority edit request. Apply them completely and literally wherever they target the production prompt.
+1. INLINE SLASH DIRECTIVES in CURRENT EDITOR PROMPT are the highest-priority edit request. /refine applies to the nearby passage or timed cue; /refine-global applies throughout the prompt. /keep, /avoid and /focus state explicit creative constraints. Apply them completely and literally, retaining their text and placement in the output so the user can refine again.
+1a. Legacy private refinement instructions have the same priority if present.
 2. CURRENT EDITOR PROMPT is the authoritative creative content and current sequence state. Refine it; never rebuild it from the references.
 3. Preserve the current production-brief sections and the assigned frame checkpoint times unless the private instructions explicitly request changes.
 4. Timeline frames, videos, untimed reference images, segment prompts, global prompt, and Director's Intent are SECONDARY CONTINUITY EVIDENCE only. Use them to verify identity, pose, environment, composition, physical plausibility, and boundary continuity without overriding items 1 or 2.
@@ -100,7 +101,8 @@ def refine_minimax_h3_reference_prompt(segments: list[Segment], provider: str, m
     rules += f"""
 
 REFERENCE-MODE REFINEMENT — FOLLOW THIS PRIORITY ORDER:
-1. PRIVATE REFINEMENT INSTRUCTIONS are the highest-priority edit request.
+1. INLINE SLASH DIRECTIVES in CURRENT EDITOR PROMPT are the highest-priority edit request. /refine applies to the nearby passage or timed cue; /refine-global applies throughout the prompt. /keep, /avoid and /focus are explicit constraints. Keep the directives visible in their original places in the returned prompt.
+1a. Legacy private refinement instructions have the same priority if present.
 2. CURRENT EDITOR PROMPT is authoritative. Refine it instead of rebuilding it from the reference assets.
 3. Use the compact production-brief format while preserving the edited content, reference roles, timing, speakers and dialogue. Convert legacy formatting without adding actions or discarding user edits.
 4. Timeline assets and prompts are secondary continuity evidence only and must not override items 1 or 2.
@@ -502,6 +504,7 @@ def _prompt_refinement_rules(segments: list[Segment], selected_index: int, inten
     )
     return f"""You are refining ONE existing segment prompt for LTX Video 2.3.
 Refine ONLY segment {selected_index + 1}. The SELECTED CURRENT EDITOR PROMPT is the authoritative creative instruction and is the text the user explicitly asked you to refine. Preserve every requested action, change, camera instruction, timing cue and constraint from that prompt while improving clarity, temporal progression, physical causality, secondary motion, Spoken Dialog delivery and lip-sync direction where present.
+Treat inline /refine directives as editing instructions for the nearest passage, /refine-global as instructions for the entire selected prompt, and /keep, /avoid and /focus as explicit constraints. Preserve these directives in the returned prompt so the user can refine again.
 For an image segment, use the supplied image only to ground visible identity, pose, environment and composition. Never replace, ignore or reinterpret the user's selected prompt merely because its requested motion is not visible in the still frame.
 Use the immediately previous and next prompts and supplied adjacent frames for continuity, but do not rewrite or return any other prompt. Do not change the global prompt.
 Also return `imagePrompt` as a separate Gemini still-image generation prompt derived from the refined selected prompt. Do not simplify, replace, or remove audio/vocal language from `prompt`; the established production-ready video prompt remains authoritative and complete. In `imagePrompt` only, preserve its visible subject, transformation state or action moment, pose, expression, environment, composition, camera, lighting and style, but remove every audio-only instruction including SFX, Foley, ambience, music, Spoken Dialog, voice, accent, vocalization, lip-sync and sound cues. Describe one representative still frame rather than a timed video sequence.

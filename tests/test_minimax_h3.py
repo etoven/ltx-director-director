@@ -108,7 +108,7 @@ class MiniMaxH3PromptTests(unittest.TestCase):
             result = ai.refine_minimax_h3_prompt(self.segments(), 'gemini', 'model', '', '', '',
                                                   False, False, True, '[FRAME USE] Current.', 'Preserve my camera.')
         self.assertEqual(result, '[FRAME USE] Edited.')
-        self.assertIn('PRIVATE REFINEMENT INSTRUCTIONS are the highest-priority', provider.call_args.args[4])
+        self.assertIn('INLINE SLASH DIRECTIVES in CURRENT EDITOR PROMPT', provider.call_args.args[4])
         self.assertIn('Preserve my camera.', provider.call_args.args[4])
         self.assertIn('production-brief sections', provider.call_args.args[4])
 
