@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 from pathlib import Path
 from uuid import uuid4
 
@@ -13,6 +14,7 @@ from PySide6.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QFormLayout, Q
 
 from .workspaces import WorkspaceStore, KINDS, validate_definition
 from .spellcheck import install_spellcheck
+from .prompt_templates import stock_prompt
 
 
 class WorkspaceEditor(QWidget):
@@ -33,6 +35,7 @@ class WorkspaceEditor(QWidget):
         self.engine.addItem("LTX", "ltx")
         self.engine.addItem("MiniMax Frames", "minimax_frames")
         self.engine.addItem("MiniMax References", "minimax_references")
+        self.engine.addItem("Generic", "generic")
         self.mode = QComboBox()
         self.mode.addItem("One unified prompt", "unified")
         self.mode.addItem("Per-segment prompts", "segmented")
@@ -68,6 +71,16 @@ class WorkspaceEditor(QWidget):
         self.status.setWordWrap(True)
         outer.addWidget(self.status)
         self.reload()
+        self.engine.currentIndexChanged.connect(self.engine_changed)
+
+    def engine_changed(self):
+        if self.engine.currentData() != "generic":
+            return
+        # Replace only untouched stock prompts; custom instructions remain authoritative.
+        for kind, editor in (("generate", self.generate), ("refine", self.refine)):
+            if any(editor.toPlainText() == stock_prompt(engine, kind) for engine in ("ltx", "minimax_frames", "minimax_references")):
+                editor.setPlainText(stock_prompt("generic", kind))
+        self.variables.setText("${director_intent}, ${global_direction}, ${asset_map}, ${ordered_plan}, ${total_duration}, ${current_prompt}, ${refinement_instructions}, ${sound_effects}, ${dialogue}, ${music}")
 
     def reload(self, selected=None):
         self.values = self.store.load()
@@ -92,7 +105,9 @@ class WorkspaceEditor(QWidget):
     def populate(self, value):
         self.identifier.setText(value["id"])
         self.name.setText(value["name"])
+        self.engine.blockSignals(True)
         self.engine.setCurrentIndex(self.engine.findData(value["engine"]))
+        self.engine.blockSignals(False)
         self.mode.setCurrentIndex(self.mode.findData(value["prompt_mode"]))
         self.global_prompt.setChecked(value["global_prompt"])
         self.audio.setChecked(value["audio_generation"])
@@ -100,7 +115,7 @@ class WorkspaceEditor(QWidget):
         self.kinds.setText(", ".join(value["references"]["kinds"]))
         self.slots.setValue(value["references"].get("untimed_slots", 0))
         fields = value.get("template_variables", {})
-        names = sorted(set(fields.get("generate", []) + fields.get("refine", [])))
+        names = sorted(set(fields.get("generate", []) + fields.get("refine", [])) | set(re.findall(r"\$\{(\w+)\}", value["generation_prompts"]["generate"] + value["generation_prompts"].get("refine", ""))))
         self.variables.setText(", ".join("${" + name + "}" for name in names) or "Plain instructions or supported ${field} substitutions")
         self.generate.setPlainText(value["generation_prompts"]["generate"])
         self.refine.setPlainText(value["generation_prompts"].get("refine", ""))

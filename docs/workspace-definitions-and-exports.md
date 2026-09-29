@@ -11,25 +11,25 @@ Open **Settings → Workspaces**. Every stock workspace is an editable JSON defi
 | Field | Purpose |
 | --- | --- |
 | ID and name | Stable project identity and the label in the workspace selector |
-| Generation engine | LTX, MiniMax Frames, or MiniMax References input handling and response validation |
+| Generation engine | LTX, MiniMax Frames, MiniMax References, or Generic input handling and response validation |
 | Prompt layout | One unified production prompt or per-segment prompts |
 | Global prompt | Whether a segmented workspace exposes a global prompt |
 | Audio generation | Whether audio generation controls are available |
 | Reference media and kinds | Permitted timeline media and untimed image attributes |
-| Untimed image slots | Zero, one, or two image targets; available to MiniMax engines |
+| Untimed image slots | Zero, one, or two image targets; available to MiniMax and Generic engines |
 | Generation and refinement instructions | Full editable master templates used by the AI worker |
 
 Select a workspace and edit it, including a stock workspace, then choose **Save / rename**. **New** creates a definition you can customize. **Delete** removes the selected definition. **Import** reads a definition JSON file; a matching ID is overwritten. **Export** writes the edited definition to the project's download folder and adds it to Recent exports.
 
 **Restore stock** overwrites the three stock IDs with the installed templates. It preserves every other custom definition. Deleted stock definitions stay deleted across restarts until restored.
 
-Templates use data substitutions such as `${director_intent}`, `${current_prompt}`, `${intervals}`, and `${asset_map}`. The editor lists the fields for the selected definition. These substitutions cannot run code. The generation engine still enforces its JSON response contract and validates returned durations. A new definition configures the existing engines; it does not install a new video model or renderer. LTX uses segmented prompts and timeline frames; MiniMax uses unified prompts and can also use untimed images.
+Templates use data substitutions such as `${director_intent}`, `${current_prompt}`, `${intervals}`, and `${asset_map}`. The editor lists the fields for the selected definition. These substitutions cannot run code. The generation engine still enforces its JSON response contract and validates returned durations. A new definition configures the available engines; it does not install a new video model or renderer. **Generic** uses your templates without model-specific prompting rules and supports either unified or segmented layouts. LTX uses segmented prompts and timeline frames; MiniMax uses unified prompts and can also use untimed images.
 
 Projects store their workspace ID and a portable copy of the definition. When importing a project whose definition is missing locally, the embedded definition is installed. An existing local definition with that ID is preserved.
 
 ## Keep prompt and timeline connected
 
-Director's Intent, total length, and generation options remain available across workspaces. Clicking a connected segment in a unified workspace focuses its inline action cell and highlights the whole action, including wrapped lines.
+The **Director’s Intent** checkbox expands or collapses the shared intent and generation controls in every workspace. Its state persists across mode changes and app restarts; collapsing it retains the entered intent and options. Clicking a connected segment in a unified workspace focuses its inline action cell and highlights the whole action, including wrapped lines.
 
 Paste a production brief or a `[TIMED ACTION]` block containing lines such as:
 

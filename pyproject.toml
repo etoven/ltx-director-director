@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ltx-prompt-director"
-version = "1.13.0a16"
+version = "1.13.0a17"
 description = "LTX Director - Director: native timeline prompt builder for LTX Video 2.3"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -32,4 +32,4 @@ ltx-prompt-director-uninstall-desktop = "ltx_prompt_director.desktop:uninstall_m
 include = ["ltx_prompt_director*"]
 
 [tool.setuptools.package-data]
-ltx_prompt_director = ["assets/*.png", "assets/*.svg", "workspace_templates/*.json"]
+ltx_prompt_director = ["assets/*.png", "assets/*.svg", "workspace_templates/*.json", "engine_templates/*.json"]

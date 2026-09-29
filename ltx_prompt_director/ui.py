@@ -36,6 +36,7 @@ from .media import APP_CACHE, TIMELINE_VIDEO_SUFFIXES, comfy_input_references, c
 from .project_archive import materialize_source, project_thumbnail_data, read_project, save_project_archive
 from .minimax_reference import WORKFLOW_NAMES, detect_workflow, reference_inventory, reference_slots
 from .minimax_reference_widgets import MiniMaxReferenceSlot
+from .generic_ai import build_generic_prompt, refine_generic_prompt, build_generic_segments, refine_generic_segment
 from .downloads import DownloadTray
 from .workspaces import WorkspaceStore
 from .workspace_editor import WorkspaceEditor
@@ -2537,7 +2538,7 @@ class MiniMaxPromptPanel(QFrame):
     def refresh_references(self, update_images: bool = True) -> None:
         segments = self.owner.segments
         refs = reference_slots(self.owner.minimax_reference_images)
-        active_refs = self.owner.active_reference_images() if self.owner.unified_workspace else []
+        active_refs = self.owner.active_reference_images() if self.owner.unified_workspace or self.owner.workspace_engine == "generic" else []
         workflow = detect_workflow(segments, active_refs)
         self.workflow_label.setText("Frames + references" if self.owner.workspace_engine == "minimax_frames" and any(active_refs)
                                     else "Conditioning frames" if self.owner.workspace_engine == "minimax_frames"
@@ -2782,9 +2783,8 @@ class MainWindow(QMainWindow):
         self.workflow_label.setObjectName("muted")
         workflow_row.addWidget(self.workflow_label)
         workflow_row.addStretch()
-        self.direction_toggle = QPushButton("Direction && audio")
-        self.direction_toggle.setCheckable(True)
-        self.direction_toggle.setChecked(True)
+        self.direction_toggle = QCheckBox("Director’s Intent")
+        self.direction_toggle.setChecked(self.settings.value("director_intent_expanded", True, bool))
         self.direction_toggle.setToolTip("Show Director's Intent and the options used for generation")
         workflow_row.addWidget(self.direction_toggle)
         self.references_button = QPushButton("Reference images")
@@ -2928,6 +2928,8 @@ class MainWindow(QMainWindow):
         director_panel = QFrame()
         self.director_panel = director_panel
         self.direction_toggle.toggled.connect(director_panel.setVisible)
+        self.direction_toggle.toggled.connect(lambda expanded: self.settings.setValue("director_intent_expanded", expanded))
+        director_panel.setVisible(self.direction_toggle.isChecked())
         director_panel.setObjectName("directorPanel")
         self.director_controls = QVBoxLayout(director_panel)
         self.director_controls.setContentsMargins(10, 8, 10, 8)
@@ -4582,7 +4584,6 @@ class MainWindow(QMainWindow):
         self.minimax_drafts = {}
         self.project_type = "ltx" if "ltx" in self.workspace_definitions else next(iter(self.workspace_definitions), "")
         self.workspace_revision += 1
-        self.direction_toggle.setChecked(True)
         self.apply_project_type_ui()
         self.sfx.setChecked(False)
         self.spoken_dialog.setChecked(False)
@@ -5305,6 +5306,8 @@ class MainWindow(QMainWindow):
         retry_cooldown = self.settings.value("api_retry_cooldown", 10, int)
         self.set_ai_controls_enabled(False)
         self.ai_activity_title = (
+            "Generic Generate" if operation in {build_generic_prompt, build_generic_segments} else
+            "Generic Refine" if operation in {refine_generic_prompt, refine_generic_segment} else
             "Magic Build" if operation is build_prompts else
             "MiniMax H3 Reference Generate" if operation is build_minimax_h3_reference_prompt else
             "MiniMax H3 Frame Generate" if operation is build_minimax_h3_prompt else
@@ -5400,8 +5403,8 @@ class MainWindow(QMainWindow):
         timeout = self.settings.value("api_timeout", 400, int)
         self.statusBar().showMessage(f"Refining prompt for segment {row + 1}…")
         self.start_ai_worker(
-            refine_segment_prompt,
-            (self.segments.copy(), row, provider, model, key, self.build_refinement_request(), self.requested_length.value(), timeout),
+            refine_generic_segment if self.workspace_engine == "generic" else refine_segment_prompt,
+            (self.segments.copy(), row, provider, model, key, self.build_refinement_request(), self.requested_length.value(), timeout) + ((self.active_reference_images(),) if self.workspace_engine == "generic" else ()),
             "Refining the selected prompt with adjacent-frame context…",
             self.refine_prompt_finished,
         )
@@ -5450,10 +5453,10 @@ class MainWindow(QMainWindow):
         provider, model, key = credentials
         self.statusBar().showMessage("Magic Build is analyzing ordered timeline items…")
         timeout = self.settings.value("api_timeout", 400, int)
-        self.start_ai_worker(build_prompts, (
+        self.start_ai_worker(build_generic_segments if self.workspace_engine == "generic" else build_prompts, (
             self.segments.copy(), provider, model, key,
             self.build_director_request(), self.sfx.isChecked(), self.spoken_dialog.isChecked(), self.hdr.isChecked(), self.reduce_music.isChecked(), timeout,
-        ), "Analyzing timeline context and directing motion…", self.magic_finished)
+        ) + ((self.active_reference_images(),) if self.workspace_engine == "generic" else ()), "Analyzing timeline context and directing motion…", self.magic_finished)
 
     def magic_progress(self, attempt: int, total: int, detail: str) -> None:
         if not self.ai_request_is_current():
@@ -5514,9 +5517,8 @@ class MainWindow(QMainWindow):
         legacy = "minimax_" + self.minimax_prompt_mode if self.minimax_prompt_text else "ltx"
         self.project_type = value if value in self.workspace_definitions else (legacy if legacy in self.workspace_definitions else next(iter(self.workspace_definitions), ""))
         if self.unified_workspace:
-            self.load_minimax_draft(self.workspace_engine.removeprefix("minimax_"))
+            self.load_minimax_draft(("frames" if self.workspace_engine == "generic" else self.workspace_engine.removeprefix("minimax_")))
         self.prompt_scope.setCurrentIndex(0)
-        self.direction_toggle.setChecked(True)
         self.minimax_panel.reference_dock.setVisible(self.unified_workspace)
 
     def load_minimax_draft(self, mode: str) -> None:
@@ -5564,7 +5566,7 @@ class MainWindow(QMainWindow):
         if self.project_type not in self.workspace_definitions:
             self.project_type = next(iter(self.workspace_definitions), "")
         if self.unified_workspace:
-            self.load_minimax_draft(self.workspace_engine.removeprefix("minimax_"))
+            self.load_minimax_draft(("frames" if self.workspace_engine == "generic" else self.workspace_engine.removeprefix("minimax_")))
         self.workspace_revision += 1
         self.apply_project_type_ui()
         self.mark_dirty()
@@ -5580,14 +5582,13 @@ class MainWindow(QMainWindow):
         self.project_type = project_type
         self.workspace_revision += 1
         if self.unified_workspace:
-            self.load_minimax_draft(self.workspace_engine.removeprefix("minimax_"))
+            self.load_minimax_draft(("frames" if self.workspace_engine == "generic" else self.workspace_engine.removeprefix("minimax_")))
         self._action_segment_ids = []
         self._action_descriptions = {}
         self._changed_action_sources.clear()
         self.prompt_scope.blockSignals(True)
         self.prompt_scope.setCurrentIndex(0)
         self.prompt_scope.blockSignals(False)
-        self.direction_toggle.setChecked(True)
         self.minimax_panel.clear_message()
         self.sync_minimax_panel()
         self.minimax_panel.reference_dock.setVisible(self.unified_workspace and self.workspace_definition.get("references", {}).get("enabled", False))
@@ -5597,7 +5598,7 @@ class MainWindow(QMainWindow):
     def apply_project_type_ui(self) -> None:
         ltx = not self.unified_workspace
         references = self.workspace_definition.get("references", {})
-        refs = not ltx and references.get("enabled", False) and references.get("untimed_slots", 0) > 0
+        refs = (not ltx or self.workspace_engine == "generic") and references.get("enabled", False) and references.get("untimed_slots", 0) > 0
         self.project_type_combo.blockSignals(True)
         self.project_type_combo.setCurrentIndex(self.project_type_combo.findData(self.project_type))
         self.project_type_combo.blockSignals(False)
@@ -5630,7 +5631,6 @@ class MainWindow(QMainWindow):
         visual = bool(self.current_segment() and self.current_segment().kind != "text")
         self.start_button.setVisible(visual and self.workspace_engine != "minimax_frames")
         self.end_button.setVisible(visual and self.workspace_engine != "minimax_frames")
-        self.direction_toggle.setChecked(True)
         self.update_spoken_dialog_visibility()
         self.minimax_panel.refresh_references()
         reference_options = self.workspace_definition.get("references", {})
@@ -5942,12 +5942,18 @@ class MainWindow(QMainWindow):
 
     def generate_minimax_prompt_frames(self) -> None:
         """Manually generate the continuous frame-timeline prompt."""
+        if self.workspace_engine == "generic":
+            self._generate_minimax_prompt(self.minimax_prompt_mode)
+            return
         if self.workspace_engine != "minimax_frames":
             self.set_project_type("minimax_frames")
         self._generate_minimax_prompt("frames")
 
     def generate_minimax_prompt_references(self) -> None:
         """Manually generate a reference prompt for the detected workflow."""
+        if self.workspace_engine == "generic":
+            self._generate_minimax_prompt(self.minimax_prompt_mode)
+            return
         if self.workspace_engine != "minimax_references":
             self.set_project_type("minimax_references")
         self._generate_minimax_prompt("references")
@@ -5978,7 +5984,7 @@ class MainWindow(QMainWindow):
         )
         timeout = self.settings.value("api_timeout", 400, int)
         window.set_busy(True, f"Generating {mode_label} prompt…")
-        operation = build_minimax_h3_reference_prompt if reference_mode else build_minimax_h3_prompt
+        operation = build_generic_prompt if self.workspace_engine == "generic" else (build_minimax_h3_reference_prompt if reference_mode else build_minimax_h3_prompt)
         self.start_ai_worker(
             operation,
             (
@@ -5986,6 +5992,7 @@ class MainWindow(QMainWindow):
                 self.global_prompt.toPlainText(), self.sfx.isChecked(), self.spoken_dialog.isChecked(),
                 self.reduce_music.isChecked(), timeout,
             ) + (self.active_reference_images(),),
+            "Writing the generic workspace prompt…" if self.workspace_engine == "generic" else
             "Writing the MiniMax H3 prompt for " + WORKFLOW_NAMES[detect_workflow(self.segments, self.minimax_reference_images)] + "…"
             if reference_mode else
             "Boiling the complete sequence down to one MiniMax H3 frame prompt…",
@@ -6039,9 +6046,9 @@ class MainWindow(QMainWindow):
             window.show_message("Some timeline segments could not be conformed. Correct the timed ranges or refine again to reconnect them.", "timeline")
             return
         window.show_message(
-            f"MiniMax H3 {self.minimax_prompt_mode} prompt refined. Save it from the toolbar or when closing."
+            f"{self.workspace_definition.get('name', 'Production')} prompt refined. Save it from the toolbar or when closing."
             if operation.startswith("refine_") else
-            f"MiniMax H3 {self.minimax_prompt_mode} prompt generated. Save it from the toolbar or when closing.",
+            f"{self.workspace_definition.get('name', 'Production')} prompt generated. Save it from the toolbar or when closing.",
             "success",
         )
 
@@ -6070,7 +6077,7 @@ class MainWindow(QMainWindow):
         timeout = self.settings.value("api_timeout", 400, int)
         if self.minimax_panel:
             self.minimax_panel.set_busy(True, "Refining edited prompt…")
-        operation = refine_minimax_h3_reference_prompt if reference_mode else refine_minimax_h3_prompt
+        operation = refine_generic_prompt if self.workspace_engine == "generic" else (refine_minimax_h3_reference_prompt if reference_mode else refine_minimax_h3_prompt)
         self.start_ai_worker(
             operation,
             (
@@ -6177,7 +6184,7 @@ class MainWindow(QMainWindow):
         self.magic_overlay.hide_overlay()
         title = getattr(self, "ai_activity_title", "AI operation")
         overloaded = message.startswith("Google Gemini is temporarily overloaded")
-        if title.startswith("MiniMax"):
+        if title.startswith("MiniMax") or (self.workspace_engine == "generic" and self.unified_workspace):
             window = self.show_minimax_panel("AI request failed")
             window.set_busy(False, "Gemini overloaded • try again" if overloaded else "AI request failed")
             window.show_message(message, "warning" if overloaded else "error", retry=True)
@@ -6268,7 +6275,6 @@ class MainWindow(QMainWindow):
             self.minimax_drafts = {}
             self.project_type = "ltx" if "ltx" in self.workspace_definitions else next(iter(self.workspace_definitions), "")
             self.workspace_revision += 1
-            self.direction_toggle.setChecked(True)
             self.prompt_scope.setCurrentIndex(0)
             self.apply_project_type_ui()
             settings = payload.get("settings", {})

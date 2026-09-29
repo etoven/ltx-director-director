@@ -27,9 +27,9 @@ def validate_definition(value: dict) -> dict:
         raise ValueError("A workspace name is required.")
     if value.get("prompt_mode") not in {"unified", "segmented"}:
         raise ValueError("Prompt mode must be unified or segmented.")
-    if value.get("engine") not in {"ltx", "minimax_frames", "minimax_references"}:
-        raise ValueError("Choose the LTX, MiniMax Frames or MiniMax References generation engine.")
-    if (value["engine"] == "ltx") != (value["prompt_mode"] == "segmented"):
+    if value.get("engine") not in {"ltx", "minimax_frames", "minimax_references", "generic"}:
+        raise ValueError("Choose LTX, MiniMax Frames, MiniMax References or Generic.")
+    if value["engine"] != "generic" and (value["engine"] == "ltx") != (value["prompt_mode"] == "segmented"):
         raise ValueError("The LTX engine requires segmented prompts; MiniMax engines require unified prompts.")
     for key in ("global_prompt", "audio_generation"):
         if not isinstance(value.get(key), bool):

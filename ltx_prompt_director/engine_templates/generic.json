@@ -1,0 +1,7 @@
+{
+  "generation_prompts": {
+    "generate": "Build a production-ready video prompt from the supplied ordered timeline and director's intent. Use the workspace's requested layout and the required response transport. Preserve supplied identities, scene continuity, media order and explicit timing. Do not impose any video model's special prompt style.\n\nDIRECTOR'S INTENT\n${director_intent}\n\nGLOBAL DIRECTION\n${global_direction}\n\nASSET MAP\n${asset_map}\n\nORDERED PLAN\n${ordered_plan}\n\nAudio effects: ${sound_effects}. Dialogue: ${dialogue}. Music: ${music}.",
+    "refine": "Refine the current prompt according to inline /refine and /refine-global directives and the editing instructions. Preserve unrelated content. Consume completed /refine-global directives; keep other directives. Do not impose model-specific creative defaults. Use the required response transport.\n\nCURRENT PROMPT\n${current_prompt}\n\nEDITING INSTRUCTIONS\n${refinement_instructions}\n\nDIRECTOR'S INTENT\n${director_intent}\n\nASSET MAP\n${asset_map}\n\nORDERED PLAN\n${ordered_plan}"
+  },
+  "template_variables": ["director_intent", "global_direction", "asset_map", "ordered_plan", "total_duration", "current_prompt", "refinement_instructions", "sound_effects", "dialogue", "music"]
+}
