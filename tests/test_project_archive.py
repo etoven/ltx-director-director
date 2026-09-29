@@ -111,7 +111,7 @@ class ProjectArchiveTests(unittest.TestCase):
             loaded.load_project_payload(read_project(archive))
             self.assertFalse(Path(loaded.segments[0].media_path).exists())
             output = root / 'ltx.json'
-            with patch.object(loaded, 'resolve_comfy_root', return_value=root), patch.object(ui, 'choose_document_save', return_value=str(output)):
+            with patch.object(loaded, 'resolve_comfy_root', return_value=root), patch.object(loaded, 'next_export_path', return_value=output):
                 loaded.export_ltx()
                 deadline = time.monotonic() + 10
                 while loaded._pending_disk_jobs and time.monotonic() < deadline:

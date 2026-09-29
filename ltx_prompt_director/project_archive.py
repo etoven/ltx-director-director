@@ -93,7 +93,7 @@ def save_project_archive(path: str | Path, payload: dict, segments: list) -> Non
                 ref["archiveImage"] = member
                 ref["imageMime"] = header.removeprefix("data:").split(";", 1)[0]
             payload["projectVersion"] = 9
-            archive.writestr(MANIFEST, json.dumps(payload, separators=(",", ":"), ensure_ascii=False))
+            archive.writestr(MANIFEST, json.dumps(payload, separators=(",", ":"), ensure_ascii=False), compress_type=zipfile.ZIP_DEFLATED, compresslevel=6)
         os.replace(temporary.name, target)
         for frame, segment in zip(payload["frames"], segments):
             if frame.get("archiveSource"):

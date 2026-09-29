@@ -97,11 +97,11 @@ class UnifiedEditorTests(unittest.TestCase):
         with patch.object(w, 'start_ai_worker') as worker:
             w.project_type_combo.setCurrentIndex(2)
             self.assertEqual(w.project_type, 'minimax_references')
-            self.assertTrue(w.hdr.isHidden())
+            self.assertFalse(w.hdr.isHidden())
             self.assertTrue(w.refine_timing_button.isHidden())
-            self.assertTrue(w.requested_length.isHidden())
+            self.assertFalse(w.requested_length.isHidden())
             self.assertTrue(w.prompt_scope.isHidden())
-            self.assertTrue(w.copy_image_prompt.isHidden())
+            self.assertFalse(hasattr(w, "copy_image_prompt"))
             self.assertFalse(w.references_button.isHidden())
             self.assertFalse(w.minimax_panel.reference_dock.isHidden())
             w.project_type_combo.setCurrentIndex(1)
@@ -258,10 +258,10 @@ class UnifiedEditorTests(unittest.TestCase):
             w.minimax_panel.retry_button.click()
         retry.assert_called_once_with()
 
-    def test_minimax_uses_timeline_duration_not_hidden_ltx_length(self):
+    def test_minimax_uses_visible_requested_total_length(self):
         w = self.make_window('minimax_references')
         w.requested_length.setValue(99)
-        self.assertNotIn('99', w.build_director_request())
+        self.assertIn('99.0 seconds', w.build_director_request())
         self.assertEqual(w.total_duration(), 5)
 
 

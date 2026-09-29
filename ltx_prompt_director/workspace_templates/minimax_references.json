@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "id": "minimax_references",
+  "name": "MiniMax · References",
+  "engine": "minimax_references",
+  "prompt_mode": "unified",
+  "global_prompt": false,
+  "audio_generation": true,
+  "references": {
+    "enabled": true,
+    "kinds": [
+      "image",
+      "video",
+      "identity",
+      "style",
+      "scene",
+      "object",
+      "composition",
+      "wardrobe"
+    ],
+    "untimed_slots": 2
+  },
+  "generation_prompts": {
+    "generate": "Write a MiniMax H3 production prompt from the supplied media and timeline.\nThe application selected ${workflow_name}. ${workflow_direction}\n\nASSET MAP (labels and roles are assigned by the client):\n${asset_map}\nOutput duration: ${total_duration} seconds.\n\nWrite a compact production brief with these sections:\n[REFERENCE USE] Explain each asset's permitted contribution. Use the exact Image1/Video1 labels in the asset map. Untimed images have no checkpoint or duration.\n[CONTINUITY] State the attributes that must persist; allow intentional changes in the timeline.\n[SCENE] State the requested setting and action.\n[TIMED ACTION] Use 24 fps non-drop-frame SMPTE HH:MM:SS:FF time ranges for the major beats (e.g. `00:00:00:00 - 00:00:03:00:`). FF means frames 00–23, not milliseconds; round supplied seconds to the nearest frame. Put each range on a separate line, with visible motion, camera behavior and a reached end state. Maintain spatial relationships and ongoing movement across ranges.\n[SOUND] Include requested ambience, effects, exact dialogue with named speakers, and the music direction.\n[AVOID] Briefly name relevant continuity failures.\nPlace exactly one blank line between sections, each heading on its own line. Omit empty sections. Keep the production prompt concise and comfortably under 7,000 characters.\n\nApply these project semantics:\n- Read the entire timeline before writing. Preserve its chronological progression and total duration.\n- Image checkpoint_time is authoritative: a start image describes the interval's beginning; an end image describes its ending. Direct the change into that state, then continue from it. Do not restart completed changes.\n- For videos, only source_start through source_end belongs to the timeline interval. Other footage provides context. Sampled observations belong to the same video; a preview alone cannot establish unseen motion or audio.\n- Give untimed references only their selected role. Notes can identify the subject or narrow the role; they do not introduce another timed frame. Never freeze intended transformations by declaring all anatomy or appearance constant.\n- An edit should list requested changes and what survives from the source. Do not infer identity replacement merely because an extra reference exists.\n- Use continuous action unless the user asks for cuts. Do not impose a cut, shot label, bridge slot, sentence quota, or repeated scene description at each image.\n- No invented reference assets, voice sources, dialogue or visual events. Do not output the asset map or these instructions.\n\nDirector's intent: ${director_intent}\nGlobal direction: ${global_direction}\nSound effects: ${sound_effects}\nDialogue: ${dialogue}\nMusic: ${music}\n",
+    "refine": "\n\nREFERENCE-MODE REFINEMENT — FOLLOW THIS PRIORITY ORDER:\n1. INLINE SLASH DIRECTIVES in CURRENT EDITOR PROMPT are the highest-priority edit request. /refine applies to the nearby passage or timed cue; /refine-global applies throughout the prompt. /keep, /avoid and /focus are explicit constraints. After applying /refine-global, omit that completed directive from the returned prompt; keep all other directives in place.\n1a. Legacy private refinement instructions have the same priority if present.\n2. CURRENT EDITOR PROMPT is authoritative. Refine it instead of rebuilding it from the reference assets.\n3. Use the compact production-brief format while preserving the edited content, reference roles, timing, speakers and dialogue. Convert legacy formatting without adding actions or discarding user edits.\n4. Timeline assets and prompts are secondary continuity evidence only and must not override items 1 or 2.\n\n- Make the smallest complete edits required by the private instructions.\n- Use the current client asset map for Image1/Video1 labels. When converting an older prompt, retain the same source-to-subject relationships; do not mistake a subject label for an asset index.\n- Never quote or expose the private refinement instructions in the production prompt.\n- Return strict structured timed-plan JSON. Preserve untouched content.\n\nCURRENT EDITOR PROMPT:\n${current_prompt}\n\nPRIVATE REFINEMENT INSTRUCTIONS:\n${refinement_instructions}\n"
+  },
+  "template_variables": {
+    "refine": [
+      "current_prompt",
+      "refinement_instructions"
+    ],
+    "generate": [
+      "workflow_name",
+      "workflow_direction",
+      "asset_map",
+      "total_duration",
+      "director_intent",
+      "global_direction",
+      "sound_effects",
+      "dialogue",
+      "music"
+    ]
+  }
+}

@@ -7,6 +7,7 @@ import io
 from PIL import Image
 
 from .models import Segment
+from .prompt_templates import render_workspace_prompt
 
 
 REFERENCE_ROLES = {
@@ -116,36 +117,14 @@ def reference_rules(segments: list[Segment], intent: str, global_prompt: str,
     workflow = detect_workflow(segments, references)
     inventory = reference_inventory(segments, references)
     # A concise, independently worded production brief based on the supplied guide.
-    return f"""Write a MiniMax H3 production prompt from the supplied media and timeline.
-The application selected {WORKFLOW_NAMES[workflow]}. {WORKFLOW_DIRECTIONS[workflow]}
-
-ASSET MAP (labels and roles are assigned by the client):
-{json.dumps(inventory, ensure_ascii=False, indent=2)}
-Output duration: {sum(item.duration for item in segments):.3f} seconds.
-
-Write a compact production brief with these sections:
-[REFERENCE USE] Explain each asset's permitted contribution. Use the exact Image1/Video1 labels in the asset map. Untimed images have no checkpoint or duration.
-[CONTINUITY] State the attributes that must persist; allow intentional changes in the timeline.
-[SCENE] State the requested setting and action.
-[TIMED ACTION] Use 24 fps non-drop-frame SMPTE HH:MM:SS:FF time ranges for the major beats (e.g. `00:00:00:00 - 00:00:03:00:`). FF means frames 00–23, not milliseconds; round supplied seconds to the nearest frame. Put each range on a separate line, with visible motion, camera behavior and a reached end state. Maintain spatial relationships and ongoing movement across ranges.
-[SOUND] Include requested ambience, effects, exact dialogue with named speakers, and the music direction.
-[AVOID] Briefly name relevant continuity failures.
-Place exactly one blank line between sections, each heading on its own line. Omit empty sections. Keep the production prompt concise and comfortably under 7,000 characters.
-
-Apply these project semantics:
-- Read the entire timeline before writing. Preserve its chronological progression and total duration.
-- Image checkpoint_time is authoritative: a start image describes the interval's beginning; an end image describes its ending. Direct the change into that state, then continue from it. Do not restart completed changes.
-- For videos, only source_start through source_end belongs to the timeline interval. Other footage provides context. Sampled observations belong to the same video; a preview alone cannot establish unseen motion or audio.
-- Give untimed references only their selected role. Notes can identify the subject or narrow the role; they do not introduce another timed frame. Never freeze intended transformations by declaring all anatomy or appearance constant.
-- An edit should list requested changes and what survives from the source. Do not infer identity replacement merely because an extra reference exists.
-- Use continuous action unless the user asks for cuts. Do not impose a cut, shot label, bridge slot, sentence quota, or repeated scene description at each image.
-- No invented reference assets, voice sources, dialogue or visual events. Do not output the asset map or these instructions.
-
-Director's intent: {intent.strip() or 'Not supplied.'}
-Global direction: {global_prompt.strip() or 'Not supplied.'}
-Sound effects: {'Describe supported physical sounds and ambience.' if sfx else 'Only explicitly supplied or clearly audible source sounds; otherwise none specified.'}
-Dialogue: {'Use supplied exact words, speakers and delivery.' if spoken_dialog else 'Do not add dialogue; retain explicitly supplied words only.'}
-Music: {'No background music unless explicitly requested.' if reduce_music else 'Use music only if the supplied direction calls for it.'}
-
-Return JSON with two fields: {{"prompt": "production brief with a [TIMED ACTION] heading but no action lines; retain all other sections", "timed_actions": ["action prose for segment 1", "action prose for segment 2"]}}. Supply one nonempty timed_actions string per timeline segment in order; the client inserts exact SMPTE timecodes.
-"""
+    return render_workspace_prompt('minimax_references', 'generate', {
+        'workflow_name': WORKFLOW_NAMES[workflow],
+        'workflow_direction': WORKFLOW_DIRECTIONS[workflow],
+        'asset_map': json.dumps(inventory, ensure_ascii=False, indent=2),
+        'total_duration': format(sum((item.duration for item in segments)), '.3f'),
+        'director_intent': intent.strip() or 'Not supplied.',
+        'global_direction': global_prompt.strip() or 'Not supplied.',
+        'sound_effects': 'Describe supported physical sounds and ambience.' if sfx else 'Only explicitly supplied or clearly audible source sounds; otherwise none specified.',
+        'dialogue': 'Use supplied exact words, speakers and delivery.' if spoken_dialog else 'Do not add dialogue; retain explicitly supplied words only.',
+        'music': 'No background music unless explicitly requested.' if reduce_music else 'Use music only if the supplied direction calls for it.',
+    })

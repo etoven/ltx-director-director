@@ -1,4 +1,4 @@
-# Unified project workflows — 1.13.0a15
+# Unified project workflows — 1.13.0a16
 
 Experimental branch: `experimental/unified-project-workflows`. Stable `main` remains
 on 1.12.57. This experiment brings all MiniMax controls into the main timeline window.
@@ -28,9 +28,8 @@ are stored independently. The existing LTX prompts and global context survive mo
 - One Generate action routes to the selected project type. One Refine action targets the
   active segment or the full MiniMax prompt. Copy copies exactly the visible editor text.
 - Direction & audio opens the shared Director's Intent and generation options. It starts
-  expanded for LTX and collapsed for MiniMax to give the production prompt more room.
-- MiniMax hides LTX JSON export, HDR prefixing, requested total length, output dimensions,
-  per-segment AI retiming, and Gemini image-prompt copy. MiniMax timing comes from the timeline.
+  expanded in every workspace; intent, total length, and prompt options persist across modes.
+- MiniMax hides LTX JSON export, output dimensions, and per-segment AI retiming. Total length and HDR direction remain available. The separate Gemini image-prompt copy action has been removed.
 - Start/end roles are available for LTX and MiniMax References visual segments. Frames mode
   continues to use segment-start checkpoints and does not expose unused end-frame controls.
 - Language and accent appear when Spoken Dialog is enabled.
@@ -39,6 +38,16 @@ are stored independently. The existing LTX prompts and global context survive mo
 - Slash directives are editable notes inside the shared editor; copying and exporting serialize them as readable prompt text.
 - The extra MiniMax window, duplicate pacing strip, parallel generation buttons, and the
   always-visible second global prompt box have been removed.
+
+## Editable workspaces, timed paste, and exports
+
+Workspaces now load from exportable JSON definitions. Settings includes the full generation and refinement templates, layout and reference capabilities, create/rename/delete/import/export controls, and a stock restore action that preserves custom definitions.
+
+Pasted SMPTE action ranges conform existing segments in ascending order and can add new text segments. AI generation and refinement return explicit start/end/action records and use the same reconciliation path. Missing or invalid ranges detach and disable unmatched timeline tiles until corrected. Clicking a connected tile focuses and highlights its entire action cell.
+
+All external exports use the project download folder with automatic collision-safe names. The toolbar download button pulses on completion and opens a dismissible history popup with native file dragging.
+
+See [workspace definitions, timed paste, and export history](workspace-definitions-and-exports.md) for the format and behavior.
 
 ## Project storage and running requests
 
@@ -59,7 +68,7 @@ editable during MiniMax generation. No live provider request was made for automa
 ## Install this experimental wheel
 
 ```bash
-python3 -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/unified-project-workflows/dist/ltx_prompt_director-1.13.0a15-py3-none-any.whl'
+python3 -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/unified-project-workflows/dist/ltx_prompt_director-1.13.0a16-py3-none-any.whl'
 ```
 
 To return to the stable build, install its wheel explicitly:
@@ -117,3 +126,8 @@ The shared prompt editor renders slash directives as editable, rounded outline n
 ![Refinement directives inside the current shared editor](images/inline-refinement-notes.png)
 
 ![Fixed-size closing project progress dialog](images/closing-project-saves.png)
+
+
+### Workspace definitions and connected exports (1.13.0a16)
+
+Shared intent and length controls, cue navigation, structured timing plans, protected timed-block paste, partial-conformance recovery, editable filesystem workspace templates, and Recent exports now work together in the main window. Stock full master prompts are stored in the installed definition templates. Project JSON manifests are compressed while full-resolution media remains stored for quick recovery and export.

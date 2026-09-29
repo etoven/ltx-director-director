@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import hashlib
+import math
 import json
 import re
 from functools import lru_cache
+from .prompt_templates import WORKSPACE_PROMPTS as WORKSPACE_INSTRUCTIONS, render_workspace_prompt
 from pathlib import Path
 
 import requests
@@ -31,6 +33,7 @@ class AIResponseFormatError(ValueError):
 def build_prompts(segments: list[Segment], provider: str, model: str, api_key: str, intent: str, sfx: bool, spoken_dialog: bool, hdr: bool, reduce_music: bool, timeout: int = 400) -> dict:
     images = [_segment_input(item) for item in segments]
     rules = _rules(len(images), intent, sfx, spoken_dialog, hdr, reduce_music, sum(item.kind == "text" for item in segments))
+    rules += f'\n\nRequired transport: exactly {len(segments)} segment records in input order. Return JSON with segments (each duration, prompt, imagePrompt) and globalPrompt. Each duration must be positive and finite. Preserve all media and segment identities.'
     if provider == "openai":
         return _openai(images, api_key, rules, timeout, sfx, spoken_dialog)
     return _gemini(images, api_key, model, rules, timeout, sfx, spoken_dialog)
@@ -42,6 +45,7 @@ def build_minimax_h3_prompt(segments: list[Segment], provider: str, model: str, 
         raise ValueError("Add at least one timeline item before exporting a MiniMax H3 prompt.")
     inputs = _minimax_frames_inputs(segments, provider, reference_images)
     rules = _minimax_h3_rules(segments, intent, global_prompt, sfx, spoken_dialog, reduce_music, reference_images)
+    rules += "\n\nTIMED PLAN TRANSPORT: Return timed_actions as objects with start, end (SMPTE HH:MM:SS:FF at 24 fps), and action. Use contiguous ascending intervals beginning at zero. Respect the requested total duration when supplied. You may retime intervals and add action intervals at the end when direction requires it. Preserve the ordered existing conditioning states and media; do not remove intervals containing media. The client reconciles your explicit timing plan with the timeline. Keep [TIMED ACTION] in prompt prose with no action lines. This structured timing contract supersedes earlier string-array or fixed-time instructions."
     raw = _provider_raw(inputs, provider, model, api_key, rules, timeout)
     return _extract_minimax_h3_prompt(raw, segments)
 
@@ -52,6 +56,7 @@ def build_minimax_h3_reference_prompt(segments: list[Segment], provider: str, mo
         raise ValueError("Add at least one timeline item before generating a MiniMax H3 reference prompt.")
     inputs = _minimax_reference_inputs(segments, provider, reference_images)
     rules = _minimax_h3_reference_rules(segments, intent, global_prompt, sfx, spoken_dialog, reduce_music, reference_images)
+    rules += "\n\nTIMED PLAN TRANSPORT: Return timed_actions as objects with start, end (SMPTE HH:MM:SS:FF at 24 fps), and action. Use contiguous ascending intervals beginning at zero. Respect the requested total duration when supplied. You may retime intervals and add action intervals at the end when direction requires it. Preserve the ordered existing conditioning states and media; do not remove intervals containing media. The client reconciles your explicit timing plan with the timeline. Keep [TIMED ACTION] in prompt prose with no action lines. This structured timing contract supersedes earlier string-array or fixed-time instructions."
     raw = _provider_raw(inputs, provider, model, api_key, rules, timeout)
     return _extract_minimax_h3_prompt(raw, segments)
 
@@ -64,28 +69,11 @@ def refine_minimax_h3_prompt(segments: list[Segment], provider: str, model: str,
         raise ValueError("Write or generate a MiniMax H3 prompt before refining it.")
     inputs = _minimax_frames_inputs(segments, provider, reference_images, refinement=True)
     rules = _minimax_h3_rules(segments, intent, global_prompt, sfx, spoken_dialog, reduce_music, reference_images)
-    rules += f"""
-
-REFINEMENT MODE — FOLLOW THIS PRIORITY ORDER WHEN ANY INPUTS COMPETE:
-1. INLINE SLASH DIRECTIVES in CURRENT EDITOR PROMPT are the highest-priority edit request. /refine applies to the nearby passage or timed cue; /refine-global applies throughout the prompt. /keep, /avoid and /focus state explicit creative constraints. Apply them completely and literally. After applying /refine-global, omit that completed directive from the returned prompt; keep all other directives in place.
-1a. Legacy private refinement instructions have the same priority if present.
-2. CURRENT EDITOR PROMPT is the authoritative creative content and current sequence state. Refine it; never rebuild it from the references.
-3. Preserve the current production-brief sections and the assigned frame checkpoint times unless the private instructions explicitly request changes.
-4. Timeline frames, videos, untimed reference images, segment prompts, global prompt, and Director's Intent are SECONDARY CONTINUITY EVIDENCE only. Use them to verify identity, pose, environment, composition, physical plausibility, and boundary continuity without overriding items 1 or 2.
-
-- Make the smallest complete set of edits needed to satisfy the private refinement instructions. Preserve every deliberate user edit and every untouched passage.
-- Never replace, ignore, or reinterpret the user's current prompt merely because requested motion is not visible in a still frame or differs from reference-frame guidance.
-- Do not introduce a new action, camera path, transformation, setting, or visual fact from secondary evidence unless the refinement instructions request it or it is strictly necessary to repair a physical contradiction.
-- Keep existing cue content attached to the same timestamp unless the private instructions explicitly request timing changes.
-- The refinement instructions are private editing directions. Never quote, summarize, mention, or append them inside the production prompt.
-- Return the same strict transport JSON contract: the refined prompt prose and one timed_actions string per timeline segment. The client assembles timecodes.
-
-CURRENT EDITOR PROMPT:
-{current_prompt.strip()}
-
-PRIVATE REFINEMENT INSTRUCTIONS:
-{refinement_instructions.strip() or 'Improve clarity, motion continuity, causal flow, and production readiness without changing the creative intent.'}
-"""
+    rules += render_workspace_prompt('minimax_frames', 'refine', {
+        'current_prompt': current_prompt.strip(),
+        'refinement_instructions': refinement_instructions.strip() or 'Improve clarity, motion continuity, causal flow, and production readiness without changing the creative intent.',
+    })
+    rules += "\n\nTIMED PLAN TRANSPORT: Return timed_actions as objects with start, end (SMPTE HH:MM:SS:FF at 24 fps), and action. Use contiguous ascending intervals beginning at zero. Respect the requested total duration when supplied. You may retime intervals and add action intervals at the end when direction requires it. Preserve the ordered existing conditioning states and media; do not remove intervals containing media. The client reconciles your explicit timing plan with the timeline. Keep [TIMED ACTION] in prompt prose with no action lines. This structured timing contract supersedes earlier string-array or fixed-time instructions."
     raw = _provider_raw(inputs, provider, model, api_key, rules, timeout)
     return _extract_minimax_h3_prompt(raw, segments)
 
@@ -98,26 +86,11 @@ def refine_minimax_h3_reference_prompt(segments: list[Segment], provider: str, m
         raise ValueError("Write or generate a MiniMax H3 reference prompt before refining it.")
     inputs = _minimax_reference_inputs(segments, provider, reference_images, refinement=True)
     rules = _minimax_h3_reference_rules(segments, intent, global_prompt, sfx, spoken_dialog, reduce_music, reference_images)
-    rules += f"""
-
-REFERENCE-MODE REFINEMENT — FOLLOW THIS PRIORITY ORDER:
-1. INLINE SLASH DIRECTIVES in CURRENT EDITOR PROMPT are the highest-priority edit request. /refine applies to the nearby passage or timed cue; /refine-global applies throughout the prompt. /keep, /avoid and /focus are explicit constraints. After applying /refine-global, omit that completed directive from the returned prompt; keep all other directives in place.
-1a. Legacy private refinement instructions have the same priority if present.
-2. CURRENT EDITOR PROMPT is authoritative. Refine it instead of rebuilding it from the reference assets.
-3. Use the compact production-brief format while preserving the edited content, reference roles, timing, speakers and dialogue. Convert legacy formatting without adding actions or discarding user edits.
-4. Timeline assets and prompts are secondary continuity evidence only and must not override items 1 or 2.
-
-- Make the smallest complete edits required by the private instructions.
-- Use the current client asset map for Image1/Video1 labels. When converting an older prompt, retain the same source-to-subject relationships; do not mistake a subject label for an asset index.
-- Never quote or expose the private refinement instructions in the production prompt.
-- Return strict transport JSON with prompt prose and one timed_actions string per timeline segment. Preserve untouched content; the client assembles timecodes.
-
-CURRENT EDITOR PROMPT:
-{current_prompt.strip()}
-
-PRIVATE REFINEMENT INSTRUCTIONS:
-{refinement_instructions.strip() or 'Improve reference clarity, action continuity, camera direction, and production detail without changing creative intent.'}
-"""
+    rules += render_workspace_prompt('minimax_references', 'refine', {
+        'current_prompt': current_prompt.strip(),
+        'refinement_instructions': refinement_instructions.strip() or 'Improve reference clarity, action continuity, camera direction, and production detail without changing creative intent.',
+    })
+    rules += "\n\nTIMED PLAN TRANSPORT: Return timed_actions as objects with start, end (SMPTE HH:MM:SS:FF at 24 fps), and action. Use contiguous ascending intervals beginning at zero. Respect the requested total duration when supplied. You may retime intervals and add action intervals at the end when direction requires it. Preserve the ordered existing conditioning states and media; do not remove intervals containing media. The client reconciles your explicit timing plan with the timeline. Keep [TIMED ACTION] in prompt prose with no action lines. This structured timing contract supersedes earlier string-array or fixed-time instructions."
     raw = _provider_raw(inputs, provider, model, api_key, rules, timeout)
     return _extract_minimax_h3_prompt(raw, segments)
 
@@ -132,10 +105,33 @@ def _extract_minimax_h3_prompt(raw: str, segments: list[Segment] | None = None) 
         raise AIResponseFormatError("The AI returned no MiniMax H3 prompt. The operation will retry.")
     actions = result.get("timed_actions")
     if actions is not None and segments is not None:
-        if not isinstance(actions, list) or len(actions) != len(segments) or not all(isinstance(action, str) and action.strip() for action in actions):
+        if not isinstance(actions, list) or not actions:
             raise AIResponseFormatError("MiniMax returned incomplete timed actions. The operation will retry.")
-        from .timed_action import compose_actions
-        return compose_actions(prompt.strip(), segments, [action.strip() for action in actions]).strip()
+        from .timed_action import compose_actions, SECTION, NEXT, timecode_seconds
+        if all(isinstance(action, str) and action.strip() for action in actions):
+            if len(actions) != len(segments):
+                raise AIResponseFormatError("New timed actions require explicit start and end timecodes.")
+            return compose_actions(prompt.strip(), segments, [action.strip() for action in actions]).strip()
+        cues = []
+        for action in actions:
+            if not isinstance(action, dict):
+                raise AIResponseFormatError("Invalid timed action record.")
+            description = action.get("action") or action.get("description")
+            try:
+                start, end = action["start"], action["end"]
+                a = timecode_seconds(start) if isinstance(start, str) else float(start)
+                b = timecode_seconds(end) if isinstance(end, str) else float(end)
+                if not math.isfinite(a) or not math.isfinite(b) or a < 0 or b <= a or not isinstance(description, str) or not description.strip():
+                    raise ValueError("Invalid interval")
+            except (KeyError, ValueError, TypeError):
+                raise AIResponseFormatError("Invalid timed action interval. The operation will retry.") from None
+            cues.append(f"{_minimax_timestamp(a)} - {_minimax_timestamp(b)}: {description.strip()}")
+        section = SECTION.search(prompt)
+        if not section:
+            prompt = prompt.rstrip() + "\n\n[TIMED ACTION]\n"
+            section = SECTION.search(prompt)
+        following = NEXT.search(prompt, section.end())
+        return prompt[:section.end()].rstrip() + "\n" + "\n\n".join(cues) + ("\n\n" + prompt[following.start():] if following else "")
     return prompt.strip()
 
 
@@ -214,6 +210,7 @@ def refine_segment_prompt(segments: list[Segment], selected_index: int, provider
         raise ValueError("The selected segment needs an existing prompt before it can be refined.")
     images = _refinement_images(segments, selected_index)
     rules = _prompt_refinement_rules(segments, selected_index, intent, requested_total)
+    rules += '\n\nRequired response schema: {"prompt":"refined selected prompt","imagePrompt":"audio-free still-image prompt","duration":5.0}. Return only the selected segment, with a positive finite duration.'
     raw = _provider_raw(images, provider, model, api_key, rules, timeout)
     result = _parse_json(raw)
     if not isinstance(result, dict):
@@ -361,33 +358,16 @@ def _minimax_h3_rules(segments: list[Segment], intent: str, global_prompt: str, 
         f"; notes: {record['notes'] or 'none'}"
         for record in references
     ) or "No untimed reference images supplied."
-    return f"""Write one continuous MiniMax H3 production prompt for this Frames workflow. Inspect all supplied timeline frames, videos, and text before writing. Frame images are conditioning checkpoints in the ordered video, not untimed character or style references. A start frame anchors the beginning of its interval; an end frame is the state reached at its end. The image itself does not demonstrate motion between checkpoints.
-
-FRAME AND INTERVAL MAP (client-assigned labels and times; preserve their order):
-{intervals}
-UNTIMED REFERENCE IMAGES (use only for their selected attribute; never as conditioning checkpoints):
-{reference_map}
-Total duration: {sum(item.duration for item in segments):.3f} seconds.
-TIMECODE: Use industry-standard non-drop-frame SMPTE HH:MM:SS:FF at 24 fps. FF is a frame number from 00 to 23, never milliseconds. The client rounds interval boundaries to the nearest frame; keep every supplied boundary exactly as shown and do not reinterpret source-video trim times as timeline timecode.
-
-Use the same compact production-brief layout as References mode, adapted to conditioning frames:
-[FRAME USE] Explain which Image1/Video1 assets anchor the opening, ending, or intermediate states and how video footage contributes motion. Identify the two untimed images by their assigned Image labels and selected identity, wardrobe, scene, style, object, or composition role if present. Do not turn a timed frame into an untimed reference or assign an untimed image a checkpoint.
-[CONTINUITY] Specify persistent identity, camera, setting, lighting and spatial relationships while allowing the intentional changes visible across frames.
-[SCENE] State the overall setting and action.
-[TIMED ACTION] Write a continuous action path using the exact interval ranges above in `00:00:00:00 - 00:00:03:00: ...` format. Put each range on its own line, with a line break after every range; never join two ranges into one paragraph. Describe onset and intermediate physical motion that reaches an end frame by its assigned end time and continues from that reached state. A start frame is already present at its start time. Include text-only intervals. Compare adjacent visual states for camera, pose, anatomy, clothing, objects and setting; resolve large differences through supported motion during the intervening range. Keep video source time confined to its interval. Do not add mid-interval Frame bridge lines or repeat completed changes after a checkpoint.
-[SOUND] Include supported ambience and physical sounds, exact supplied dialogue and speaker, and music direction.
-[AVOID] Briefly name relevant discontinuities such as hard jumps, unexpected cuts, pose or camera resets.
-Put exactly one blank line between sections, as in the supplied example. Each section heading begins on its own line, followed by its prose or timed lines. Do not run section headings or action ranges together. Omit sections with nothing useful to say. Keep the production prompt concise and under 7,000 characters. Do not output the interval map or these instructions.
-
-Use only facts supported by the media, segment direction or user intent. Motion between stills is a proposed path, not observed footage; do not present invented events as facts. Untimed references can guide only their selected attributes, never timing or the progression of a transformation. Preserve an intended continuous shot unless cuts are explicitly requested. Never relabel frames as generic reference images or impose a sentence quota.
-
-Director's intent: {intent.strip() or 'Not supplied.'}
-Global direction: {global_prompt.strip() or 'Not supplied.'}
-Sound effects: {'Describe supported physical sounds and ambience.' if sfx else 'Only explicitly supplied or clearly audible source sounds; otherwise none specified.'}
-Dialogue: {'Use supplied exact words, speakers and delivery.' if spoken_dialog else 'Do not add dialogue; retain explicitly supplied words only.'}
-Music: {'No background music unless explicitly requested.' if reduce_music else 'Use music only if supplied direction calls for it.'}
-
-Return JSON with two fields: {{"prompt": "production brief with a [TIMED ACTION] heading but no action lines; retain all other sections", "timed_actions": ["action prose for segment 1", "action prose for segment 2"]}}. The timed_actions array must have exactly one nonempty string for each timeline interval in order. The client inserts authoritative SMPTE timecodes and assembles the production prompt. Do not put timecodes inside action strings."""
+    return render_workspace_prompt('minimax_frames', 'generate', {
+        'intervals': intervals,
+        'reference_map': reference_map,
+        'total_duration': format(sum((item.duration for item in segments)), '.3f'),
+        'director_intent': intent.strip() or 'Not supplied.',
+        'global_direction': global_prompt.strip() or 'Not supplied.',
+        'sound_effects': 'Describe supported physical sounds and ambience.' if sfx else 'Only explicitly supplied or clearly audible source sounds; otherwise none specified.',
+        'dialogue': 'Use supplied exact words, speakers and delivery.' if spoken_dialog else 'Do not add dialogue; retain explicitly supplied words only.',
+        'music': 'No background music unless explicitly requested.' if reduce_music else 'Use music only if supplied direction calls for it.',
+    })
 
 def _minimax_h3_reference_rules(segments: list[Segment], intent: str, global_prompt: str, sfx: bool, spoken_dialog: bool, reduce_music: bool, reference_images: list | None = None) -> str:
     return reference_rules(segments, intent, global_prompt, sfx, spoken_dialog, reduce_music, reference_images)
@@ -480,20 +460,12 @@ Return strict JSON containing only: {{"duration": 5.0}}"""
 
 def _prompt_refinement_rules(segments: list[Segment], selected_index: int, intent: str, requested_total: float) -> str:
     duration_instruction = _refinement_duration_instruction(requested_total)
-    return f"""You are refining ONE existing segment prompt for LTX Video 2.3.
-Refine ONLY segment {selected_index + 1}. The SELECTED CURRENT EDITOR PROMPT is the authoritative creative instruction and is the text the user explicitly asked you to refine. Preserve every requested action, change, camera instruction, timing cue and constraint from that prompt while improving clarity, temporal progression, physical causality, secondary motion, Spoken Dialog delivery and lip-sync direction where present.
-Treat inline /refine directives as editing instructions for the nearest passage, /refine-global as instructions for the entire selected prompt, and /keep, /avoid and /focus as explicit constraints. Once applied, omit /refine-global from the returned prompt; preserve all other directives.
-For an image segment, use the supplied image only to ground visible identity, pose, environment and composition. Never replace, ignore or reinterpret the user's selected prompt merely because its requested motion is not visible in the still frame.
-Use the immediately previous and next prompts and supplied adjacent frames for continuity, but do not rewrite or return any other prompt. Do not change the global prompt.
-Also return `imagePrompt` as a separate Gemini still-image generation prompt derived from the refined selected prompt. Do not simplify, replace, or remove audio/vocal language from `prompt`; the established production-ready video prompt remains authoritative and complete. In `imagePrompt` only, preserve its visible subject, transformation state or action moment, pose, expression, environment, composition, camera, lighting and style, but remove every audio-only instruction including SFX, Foley, ambience, music, Spoken Dialog, voice, accent, vocalization, lip-sync and sound cues. Describe one representative still frame rather than a timed video sequence.
-{duration_instruction}
-Director's intent and planning controls:
-{intent.strip() or 'No additional intent supplied.'}
-
-ORDERED EXISTING PLAN:
-{_segment_context(segments, selected_index)}
-
-Return strict JSON containing only: {{"prompt":"refined selected prompt","imagePrompt":"Gemini still-image prompt with no audio or vocal directions","duration":5.0}}"""
+    return render_workspace_prompt('ltx', 'refine', {
+        'selected_segment': selected_index + 1,
+        'duration_instruction': duration_instruction,
+        'director_intent': intent.strip() or 'No additional intent supplied.',
+        'ordered_plan': _segment_context(segments, selected_index),
+    })
 
 
 def _strict_duration(value: object) -> float:
@@ -562,22 +534,14 @@ def _rules(count: int, intent: str, sfx: bool, spoken_dialog: bool, hdr: bool, r
         frame_planning_rule = "Infer visual transitions only from adjacent supplied frames. Text-only segments deliberately have no image; use their ordered prompt context without inventing unseen visual facts."
         duration_rule = "Assign any positive duration genuinely required by the action."
     authoritative_intent = intent.strip() or "Infer motion only from the ordered frames."
-    return f"""EXPECTED SEGMENT COUNT: {count}
-
-AUTHORITATIVE DIRECTOR'S INTENT:
-{authoritative_intent}
-
-Before planning, identify every explicit constraint in Director's Intent—including requested duration, timing, action, pacing, camera, audio and ending state—and obey all of them. These constraints are mandatory, not suggestions. For a single-frame sequence, an explicitly requested total or scene duration is the duration of that one segment and must be returned exactly.
-
-You are LTXDirector, an expert prompt planner for LTX Video 2.3. Analyze all {count} supplied timeline items in order.
-Return exactly one segment per timeline item; never add, remove, merge or reorder. Visual items supply a frame; text-only items deliberately supply no image and must still receive a prompt and duration. A start frame is the exact opening frame and an end frame is the exact target.
-Write production-ready natural-language prompts describing visible subject, action, expression, physical change, secondary motion, environment and camera behavior. {frame_planning_rule} Preserve identity, outfit, scene, lighting, angle, composition, aspect ratio and style. Use a stationary camera unless the frames clearly demand otherwise. Require gradual motion, overlapping progression, direct continuity and no cross-fade. Do not invent visual facts.
-For every segment, also return `imagePrompt` as a separate Gemini still-image generation prompt derived from that segment's video prompt. Do not simplify, replace, or remove audio/vocal language from `prompt`; the established production-ready video prompt remains authoritative and complete. In `imagePrompt` only, preserve the visible subject, transformation state or action moment, pose, expression, environment, composition, camera, lighting and style. Remove every audio-only instruction, including SFX, Foley, ambience, music, Spoken Dialog, voice, accent, vocalization, lip-sync and sound cues. Describe one representative still frame rather than a timed video sequence.
-Treat the creative guidance above as defaults. When User intent explicitly requests something different, follow the user's instruction. User intent overrides conflicting creative defaults, but not the required segment count, frame order, start/end-frame meaning or strict JSON schema.
-{duration_rule} Use no more than two decimal places of precision. There is no segment-duration or total sequence-duration ceiling. {audio}
-The globalPrompt contains persistent subject, scene, camera, lighting, style, continuity and negative constraints only. {global_format}
-Recheck the JSON against AUTHORITATIVE DIRECTOR'S INTENT before returning it. Correct any duration or prompt that fails an explicit constraint.
-Return strict JSON: {{"segments":[{{"duration":5,"prompt":"...","imagePrompt":"Gemini still-image prompt with no audio or vocal directions"}}],"globalPrompt":"..."}}"""
+    return render_workspace_prompt('ltx', 'generate', {
+        'count': count,
+        'authoritative_intent': authoritative_intent,
+        'frame_planning_rule': frame_planning_rule,
+        'duration_rule': duration_rule,
+        'audio': audio,
+        'global_format': global_format,
+    })
 
 
 def _gemini(images: list[dict], key: str, model: str, rules: str, timeout: int, sfx: bool, spoken_dialog: bool) -> dict:

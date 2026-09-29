@@ -24,24 +24,27 @@ from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
-    QColorDialog, QDateTimeEdit, QDockWidget, QFileDialog, QFormLayout, QFrame, QHBoxLayout, QLabel, QLayout, QLineEdit,
-    QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox, QPushButton, QScrollArea,
-    QSizePolicy, QSlider, QSpinBox, QProgressBar, QStatusBar, QStyle, QStyledItemDelegate, QStyleOptionSlider, QStyleOptionViewItem, QTextEdit, QToolBar, QVBoxLayout, QWidget,
+    QColorDialog, QDateTimeEdit, QDockWidget, QGraphicsOpacityEffect, QFileDialog, QFormLayout, QFrame, QHBoxLayout, QLabel, QLayout, QLineEdit,
+    QListWidget, QListWidgetItem, QTabWidget, QMainWindow, QMenu, QMessageBox, QPushButton, QScrollArea,
+    QSizePolicy, QSlider, QSpinBox, QProgressBar, QStatusBar, QStyle, QStyledItemDelegate, QStyleOptionSlider, QStyleOptionViewItem, QTextEdit, QToolBar, QToolTip, QVBoxLayout, QWidget,
 )
 
 from . import __version__
 from .cache_maintenance import cover_path, mark_ready, needs_refresh, warm_metadata
-from .ai import AIResponseFormatError, GEMINI_MODELS, build_minimax_h3_prompt, build_minimax_h3_reference_prompt, build_prompts, minimax_h3_cache_key, provider_error_message, refine_minimax_h3_prompt, refine_minimax_h3_reference_prompt, refine_segment_prompt, refine_timing, retryable_connection_error
+from .ai import AIResponseFormatError, GEMINI_MODELS, build_minimax_h3_prompt, build_minimax_h3_reference_prompt, build_prompts, minimax_h3_cache_key, provider_error_message, WORKSPACE_INSTRUCTIONS, refine_minimax_h3_prompt, refine_minimax_h3_reference_prompt, refine_segment_prompt, refine_timing, retryable_connection_error
 from .media import APP_CACHE, TIMELINE_VIDEO_SUFFIXES, comfy_input_references, copy_media_for_export, data_url, extract_audio_for_export, prepare_media, safe_media_filename, thumbnail_for_image, unique_media_filename, video_source_dimensions, write_data_url
 from .project_archive import materialize_source, project_thumbnail_data, read_project, save_project_archive
 from .minimax_reference import WORKFLOW_NAMES, detect_workflow, reference_inventory, reference_slots
 from .minimax_reference_widgets import MiniMaxReferenceSlot
+from .downloads import DownloadTray
+from .workspaces import WorkspaceStore
+from .workspace_editor import WorkspaceEditor
 from .models import Segment, order_segments_by_ids, text_segment_from_ltx
 from .project_data import ARCHIVE_COLOR, load_other_tags, load_project_tags, new_note, normalize_notes, normalize_project_labels
 from .spellcheck import install_spellcheck
 from .prompt_tags import consume_global_refinements, install_prompt_tags, render_prompt_notes
-from .inline_cues import PromptTextEdit, cue_cells, insert_cue_cells
-from .timed_action import CUE, NEXT, SECTION, compose_actions, split_actions
+from .inline_cues import PromptTextEdit, cue_cells, insert_cue_cells, focus_cue
+from .timed_action import CUE, NEXT, SECTION, compose_actions, split_actions, parse_timed_plan
 
 FPS = 24
 MIN_DURATION = 0.01
@@ -102,6 +105,13 @@ def application_window_title(project_name: str = "") -> str:
 def toolbar_icon(name: str) -> QIcon:
     """Return one of the bundled, theme-independent toolbar icons."""
     return QIcon(str(files("ltx_prompt_director").joinpath(f"assets/toolbar-{name}.svg")))
+
+
+def _export_segment_source(segment: Segment, target: Path):
+    source = Path(materialize_source(segment))
+    if not source.is_file():
+        raise FileNotFoundError("The complete source media for this segment is not available.")
+    return shutil.copy2(source, target)
 
 
 def segment_media_suffix(segment: Segment) -> str:
@@ -290,13 +300,13 @@ def _persist_library_archive(meta: dict, metadata_path: Path) -> None:
     if project_path.is_file() and zipfile.is_zipfile(project_path):
         with zipfile.ZipFile(project_path, "a") as archive:
             payload = json.loads(archive.read("project.json"))
-            payload["library"] = {key: meta.get(key, "") for key in ("id", "name", "description", "collection", "savedAt", "status", "tags", "tag", "archived", "notes", "previewVideoPath", "previewVideoName", "projectFiles", "workflowFiles")}
+            payload["library"] = {key: meta.get(key, "") for key in ("id", "name", "description", "collection", "savedAt", "status", "tags", "tag", "archived", "notes", "previewVideoPath", "previewVideoName", "projectFiles", "workflowFiles", "downloadDirectory")}
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", UserWarning)
-                archive.writestr("project.json", json.dumps(payload, separators=(",", ":")))
+                archive.writestr("project.json", json.dumps(payload, separators=(",", ":")), compress_type=zipfile.ZIP_DEFLATED, compresslevel=6)
     elif project_path.is_file() and project_path.stat().st_size < 1024 * 1024:
         payload = json.loads(project_path.read_text(encoding="utf-8"))
-        payload["library"] = {key: meta.get(key, "") for key in ("id", "name", "description", "collection", "savedAt", "status", "tags", "tag", "archived", "notes", "previewVideoPath", "previewVideoName", "projectFiles", "workflowFiles")}
+        payload["library"] = {key: meta.get(key, "") for key in ("id", "name", "description", "collection", "savedAt", "status", "tags", "tag", "archived", "notes", "previewVideoPath", "previewVideoName", "projectFiles", "workflowFiles", "downloadDirectory")}
         project_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
@@ -1008,20 +1018,17 @@ class ProjectPreviewPanel(QWidget):
         source = Path(self.player.source().toLocalFile())
         stem = source.stem or "video"
         suggested = f"{stem}_{self.player.position():010d}ms.png"
-        filename, _ = QFileDialog.getSaveFileName(
-            self,
-            "Export Current Frame",
-            suggested,
-            "PNG Image (*.png);;JPEG Image (*.jpg *.jpeg)",
-        )
-        if not filename:
+        owner = self.window()
+        while owner is not None and not hasattr(owner, "next_export_path"):
+            owner = owner.parent()
+        if owner is None:
             return
-        path = Path(filename)
-        if path.suffix.lower() not in {".png", ".jpg", ".jpeg"}:
-            path = path.with_suffix(".png")
+        path = owner.next_export_path(suggested)
         if not self.current_frame.save(str(path)):
+            owner._reserved_exports.discard(str(path))
             QMessageBox.warning(self, "Export Current Frame", "The current frame could not be saved.")
             return
+        owner.record_export(path)
         self.show_player_message(f"Exported frame to {path.name}")
 
     def copy_current_frame(self) -> None:
@@ -1774,7 +1781,14 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self.settings = settings
         self.setWindowTitle("Application Settings")
-        form = QFormLayout(self)
+        outer = QVBoxLayout(self)
+        tabs = QTabWidget()
+        outer.addWidget(tabs)
+        general = QWidget()
+        form = QFormLayout(general)
+        tabs.addTab(general, "Application")
+        tabs.addTab(WorkspaceEditor(parent.workspace_store, parent, tabs), "Workspaces")
+        self.resize(850, 760)
         self.provider = QComboBox()
         self.provider.addItems(["gemini", "openai"])
         self.provider.setCurrentText(settings.value("provider", "gemini"))
@@ -1851,7 +1865,7 @@ class SettingsDialog(QDialog):
         form.addRow("Connection retries", self.retries)
         form.addRow("Retry cooldown", self.retry_cooldown)
         form.addRow("UI text scale (DPI)", text_scale_row)
-        form.addRow("Default segment export folder", save_directory_row)
+        form.addRow("Default download folder", save_directory_row)
         form.addRow("ComfyUI working directory", comfy_directory_row)
         form.addRow("Status tags (choose one)", self.project_status_tags)
         form.addRow("Other tags (choose many)", self.project_other_tags)
@@ -1897,7 +1911,7 @@ class SettingsDialog(QDialog):
         super().accept()
 
     def choose_segment_save_directory(self) -> None:
-        selected = choose_directory(self, "Choose default segment export folder", self.segment_save_dir.text().strip() or str(Path.home()))
+        selected = choose_directory(self, "Choose default download folder", self.segment_save_dir.text().strip() or str(Path.home()))
         if selected:
             self.segment_save_dir.setText(selected)
 
@@ -2004,9 +2018,11 @@ class PreviewCacheDialog(QDialog):
 class ProjectDetailsDialog(QDialog):
     def __init__(self, suggested_description: str, parent=None, name: str = "", collection: str = "", collections: list[str] | None = None,
                  thumbnail_options: list[tuple[str, str]] | None = None, thumbnail_data: str = "", thumbnail_source: str = "",
-                 notes: list[dict] | None = None):
+                 notes: list[dict] | None = None, download_directory: str = ""):
         super().__init__(parent)
         self.setWindowTitle("Save project to library")
+        self.download_folder = QLineEdit(download_directory)
+        self.download_folder.setPlaceholderText("Use the application download folder")
         self.setMinimumWidth(430)
         form = QFormLayout(self)
         self.name = QLineEdit()
@@ -2082,6 +2098,7 @@ class ProjectDetailsDialog(QDialog):
         form.addRow("Name", self.name)
         form.addRow("Description", self.description)
         form.addRow("Collection", self.collection)
+        form.addRow("Download folder", self.download_folder)
         form.addRow("Thumbnail", thumbnail_box)
         form.addRow("Notes", notes_box)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
@@ -2236,6 +2253,16 @@ class ProjectPropertiesPanel(QWidget):
         form.addRow("Name", self.name)
         form.addRow("Description", self.description)
         form.addRow("Collection", self.collection)
+        self.download_folder = QLineEdit()
+        folder_row = QWidget()
+        folder_layout = QHBoxLayout(folder_row)
+        folder_layout.setContentsMargins(0, 0, 0, 0)
+        folder_layout.addWidget(self.download_folder, 1)
+        browse = QPushButton("…")
+        browse.clicked.connect(self.choose_download_folder)
+        folder_layout.addWidget(browse)
+        self.download_folder.textChanged.connect(self.queue_fields)
+        form.addRow("Download folder", folder_row)
         form.addRow("Status", self.status)
         form.addRow("", self.archived)
         outer.addLayout(form)
@@ -2281,6 +2308,12 @@ class ProjectPropertiesPanel(QWidget):
         self.collection.textChanged.connect(self.queue_fields)
         self.set_project(None)
 
+    def choose_download_folder(self) -> None:
+        directory = choose_directory(self, "Project download folder", self.download_folder.text() or str(self.owner.export_directory()))
+        if directory:
+            self.download_folder.setText(directory)
+            self.commit_fields()
+
     def queue_fields(self, *_args) -> None:
         if not self._loading and self.project_id:
             self.save_timer.start()
@@ -2297,6 +2330,9 @@ class ProjectPropertiesPanel(QWidget):
         self.name.setText(str(meta.get("name", "")) if meta else "")
         self.description.setPlainText(str(meta.get("description", "")) if meta else "")
         self.collection.setText(str(meta.get("collection", "")) if meta else "")
+        directory = (self.owner.download_directory if project_id == self.owner.current_project_id else str(meta.get("downloadDirectory", ""))) if meta else ""
+        self.download_folder.setText(directory)
+        self.download_folder.setPlaceholderText(str(self.owner.export_directory()))
         self.status.blockSignals(True)
         self.status.clear()
         self.status.addItem("No status", "")
@@ -2362,6 +2398,9 @@ class ProjectPropertiesPanel(QWidget):
             self.name.setText(str(meta.get("name", "")))
             return
         self.save_timer.stop()
+        meta["downloadDirectory"] = self.download_folder.text().strip()
+        if self.project_id == self.owner.current_project_id:
+            self.owner.download_directory = meta["downloadDirectory"]
         meta.update({"name": name, "description": self.description.toPlainText().strip(),
                      "collection": self.collection.text().strip(), "status": self.status.currentData() or "",
                      "tags": [box.text() for box in self.tag_boxes if box.isChecked()],
@@ -2369,6 +2408,7 @@ class ProjectPropertiesPanel(QWidget):
                      "savedAt": datetime.now(timezone.utc).isoformat()})
         self.owner.persist_library_metadata(meta)
         if self.owner.current_project_id == self.project_id:
+            self.owner.mark_dirty()
             self.owner.current_project_name = name
             self.owner.update_window_title()
         self.owner.refresh_project_library(self.project_id)
@@ -2497,10 +2537,10 @@ class MiniMaxPromptPanel(QFrame):
     def refresh_references(self, update_images: bool = True) -> None:
         segments = self.owner.segments
         refs = reference_slots(self.owner.minimax_reference_images)
-        active_refs = refs if self.owner.project_type != "ltx" else []
+        active_refs = self.owner.active_reference_images() if self.owner.unified_workspace else []
         workflow = detect_workflow(segments, active_refs)
-        self.workflow_label.setText("Frames + references" if self.owner.project_type == "minimax_frames" and any(active_refs)
-                                    else "Conditioning frames" if self.owner.project_type == "minimax_frames"
+        self.workflow_label.setText("Frames + references" if self.owner.workspace_engine == "minimax_frames" and any(active_refs)
+                                    else "Conditioning frames" if self.owner.workspace_engine == "minimax_frames"
                                     else WORKFLOW_NAMES[workflow])
         inventory = reference_inventory(segments, active_refs)
         self.workflow_label.setToolTip("Detected from timeline and active reference images.\n" + "\n".join(
@@ -2538,7 +2578,7 @@ class MiniMaxPromptPanel(QFrame):
         self.update_actions()
 
     def update_actions(self) -> None:
-        if self.owner.project_type != "ltx":
+        if self.owner.unified_workspace:
             self.refine_button.setEnabled(not self.busy and bool(self.editor.toPlainText().strip()))
         self.retry_button.setEnabled(not self.busy)
         self.timeline_refine_button.setEnabled(not self.busy)
@@ -2562,6 +2602,8 @@ class MainWindow(QMainWindow):
         self.segments: list[Segment] = []
         self.current_project_id: str | None = None
         self.current_project_name = "Untitled"
+        self.download_directory = ""
+        self._reserved_exports = set()
         self.project_dirty = False
         self.project_sessions: dict[str, dict] = {}
         self.minimax_prompt_text = ""
@@ -2571,7 +2613,9 @@ class MainWindow(QMainWindow):
         self.minimax_prompt_mode = "frames"
         self.minimax_reference_images = [None, None]
         self.minimax_panel: MiniMaxPromptPanel | None = None
-        self.project_type = "ltx"
+        self.workspace_store = WorkspaceStore()
+        self.workspace_definitions = self.workspace_store.load()
+        self.project_type = "ltx" if "ltx" in self.workspace_definitions else next(iter(self.workspace_definitions), "")
         self.minimax_drafts: dict[str, dict] = {}
         self.workspace_revision = 0
         self.ai_busy = False
@@ -2688,6 +2732,12 @@ class MainWindow(QMainWindow):
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         toolbar.addWidget(spacer)
+        self.downloads_button = QPushButton("↓")
+        self.downloads_button.setToolTip("Recent exports")
+        self.downloads_button.clicked.connect(self.toggle_downloads)
+        toolbar.addWidget(self.downloads_button)
+        self.download_tray = DownloadTray(self.settings, self)
+        self.download_tray.folder_button.clicked.connect(self.open_download_folder)
         self.provider_button = QPushButton()
         self.provider_button.setObjectName("toolbarButton")
         self.provider_button.clicked.connect(self.open_settings)
@@ -2724,9 +2774,8 @@ class MainWindow(QMainWindow):
         workflow_row = QHBoxLayout()
         workflow_row.addWidget(QLabel("PROJECT TYPE"))
         self.project_type_combo = QComboBox()
-        self.project_type_combo.addItem("LTX Video", "ltx")
-        self.project_type_combo.addItem("MiniMax · Frames", "minimax_frames")
-        self.project_type_combo.addItem("MiniMax · References", "minimax_references")
+        for key, definition in self.workspace_definitions.items():
+            self.project_type_combo.addItem(definition["name"], key)
         self.project_type_combo.currentIndexChanged.connect(self.project_type_changed)
         workflow_row.addWidget(self.project_type_combo)
         self.workflow_label = QLabel()
@@ -3067,6 +3116,7 @@ class MainWindow(QMainWindow):
         self.segment_prompt.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
         self.segment_prompt.setWordWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
         self.segment_prompt.textChanged.connect(self.save_prompt)
+        self.segment_prompt.timedPasteRequested.connect(self.paste_timed_prompt)
         segment_layout.addWidget(self.segment_prompt)
         segment_footer = QHBoxLayout()
         segment_footer.setContentsMargins(0, 0, 0, 0)
@@ -3078,17 +3128,9 @@ class MainWindow(QMainWindow):
         self.copy_segment.setFlat(True)
         self.copy_segment.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.copy_segment.clicked.connect(lambda: QApplication.clipboard().setText(self.segment_prompt.toPlainText()))
-        self.copy_image_prompt = QPushButton("□ Copy Gemini Image")
-        self.copy_image_prompt.setObjectName("copyButton")
-        self.copy_image_prompt.setFlat(True)
-        self.copy_image_prompt.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        self.copy_image_prompt.setToolTip("Copy the selected segment's audio-free Gemini image-generation prompt")
-        self.copy_image_prompt.clicked.connect(self.copy_selected_image_prompt)
-        self.copy_image_prompt.setEnabled(False)
         segment_footer.addWidget(self.segment_count)
         segment_footer.addStretch()
         segment_footer.addWidget(self.copy_segment, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        segment_footer.addWidget(self.copy_image_prompt, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         segment_layout.addLayout(segment_footer)
         # The global prompt is stored here for compatibility with generation/export;
         # it is edited through the same visible text box using the scope selector.
@@ -3416,7 +3458,7 @@ class MainWindow(QMainWindow):
         QMainWindow,QWidget{background:#24292c;color:#d9dcde;font:11px Arial} QMainWindow::separator{width:__DOCK_GRIP_WIDTH__px;height:__DOCK_GRIP_WIDTH__px;background:transparent;background-repeat:no-repeat;background-position:center} QMainWindow::separator:vertical{background-image:url("__DOCK_GRIP_IMAGE__")} QMainWindow::separator:horizontal{background-image:url("__DOCK_GRIP_HORIZONTAL_IMAGE__")} QMainWindow::separator:hover{background-color:rgba(88,118,134,35)} QToolBar{background:#1b2023;border:0;border-bottom:1px solid #111517;spacing:3px;padding:5px} QToolBar::separator{background:#394247;width:1px;margin:7px 5px}
         QToolButton,QPushButton,QComboBox,QSpinBox,QDoubleSpinBox,QLineEdit{background:#303436;border:1px solid #101213;border-radius:3px;padding:3px 7px;min-height:19px}
         #mainToolbar QToolButton{background:transparent;border:1px solid transparent;border-radius:4px;padding:5px 9px;color:#c5cdd1} #mainToolbar QToolButton:hover{background:#2b3438;border-color:#3a464c;color:#f3f7f9} #mainToolbar QToolButton:pressed{background:#17232a;border-color:#477d99;color:#bde6fb} #toolbarButton{background:#23343d;border:1px solid #385667;border-radius:5px;color:#c4e8fb;font-weight:bold}
-        #minimaxPromptToolbar{background:#1b2023;border:1px solid #354047;border-radius:6px} #minimaxCacheState{background:#2b3438;color:#aebbc1;border:1px solid #435159;border-radius:9px;padding:2px 8px;font-size:9px} #minimaxCacheState[cached="true"]{background:#244d37;color:#c9f4d6;border-color:#4c9b6a} #minimaxInstructions{background:#1b2023;border:1px solid #37464d;border-radius:4px;color:#d8e1e5;padding:7px} #minimaxMessagePanel{background:#20313a;border:1px solid #49758a;border-radius:6px} #minimaxMessagePanel[level="success"]{background:#20392c;border-color:#4b8962} #minimaxMessagePanel[level="warning"]{background:#3a321f;border-color:#8a7340} #minimaxMessagePanel[level="error"]{background:#3a2325;border-color:#94555a} #minimaxMessageBanner{background:transparent;color:#ccecf8;border:0;padding:1px} #minimaxMessagePanel[level="success"] #minimaxMessageBanner{color:#cef2d9} #minimaxMessagePanel[level="warning"] #minimaxMessageBanner{color:#f2dfb0} #minimaxMessagePanel[level="error"] #minimaxMessageBanner{color:#f2c5c8} #minimaxRetryButton{background:#5b451b;color:#ffe7a1;border:1px solid #c79a39;border-radius:4px;font-weight:bold;padding:4px 10px} #minimaxRetryButton:hover{background:#755b25;border-color:#e2bc5a;color:#fff5cf} #minimaxBusyCard{background:#17262d;border:1px solid #65a7c7;border-radius:8px} #minimaxBusyStatus{background:transparent;color:#d9f2ff;font-weight:bold;padding:2px}
+        #minimaxPromptToolbar{background:#1b2023;border:1px solid #354047;border-radius:6px} #minimaxCacheState{background:#2b3438;color:#aebbc1;border:1px solid #435159;border-radius:9px;padding:2px 8px;font-size:9px} #minimaxCacheState[cached="true"]{background:#244d37;color:#c9f4d6;border-color:#4c9b6a} #minimaxInstructions{background:#1b2023;border:1px solid #37464d;border-radius:4px;color:#d8e1e5;padding:7px} #minimaxMessagePanel{background:#20313a;border:1px solid #49758a;border-radius:6px} #minimaxMessagePanel[level="success"]{background:#20392c;border-color:#4b8962} #minimaxMessagePanel[level="warning"]{background:#3a321f;border-color:#8a7340} #minimaxMessagePanel[level="timeline"]{background:#3a321f;border-color:#b4974a} #minimaxMessagePanel[level="error"]{background:#3a2325;border-color:#94555a} #minimaxMessageBanner{background:transparent;color:#ccecf8;border:0;padding:1px} #minimaxMessagePanel[level="success"] #minimaxMessageBanner{color:#cef2d9} #minimaxMessagePanel[level="warning"] #minimaxMessageBanner{color:#f2dfb0} #minimaxMessagePanel[level="timeline"] #minimaxMessageBanner{color:#f2dfb0} #minimaxMessagePanel[level="error"] #minimaxMessageBanner{color:#f2c5c8} #minimaxRetryButton{background:#5b451b;color:#ffe7a1;border:1px solid #c79a39;border-radius:4px;font-weight:bold;padding:4px 10px} #minimaxRetryButton:hover{background:#755b25;border-color:#e2bc5a;color:#fff5cf} #minimaxBusyCard{background:#17262d;border:1px solid #65a7c7;border-radius:8px} #minimaxBusyStatus{background:transparent;color:#d9f2ff;font-weight:bold;padding:2px}
         QToolButton:hover,QPushButton:hover{background:#41474a} QToolButton:pressed,QPushButton:pressed{background:#202729;border-color:#79a8c5} QLineEdit{background:#1e2122}
         QSpinBox,QDoubleSpinBox{padding-right:__SPIN_PAD__px} QSpinBox::up-button,QDoubleSpinBox::up-button{subcontrol-origin:border;subcontrol-position:top right;width:__SPIN_BUTTON__px;background:#3b4347;border:0;border-left:1px solid #171a1c;border-bottom:1px solid #202527;border-top-right-radius:3px} QSpinBox::down-button,QDoubleSpinBox::down-button{subcontrol-origin:border;subcontrol-position:bottom right;width:__SPIN_BUTTON__px;background:#343b3f;border:0;border-left:1px solid #171a1c;border-top:1px solid #202527;border-bottom-right-radius:3px}
         QSpinBox::up-button:hover,QDoubleSpinBox::up-button:hover,QSpinBox::down-button:hover,QDoubleSpinBox::down-button:hover{background:#506471} QSpinBox::up-button:pressed,QDoubleSpinBox::up-button:pressed,QSpinBox::down-button:pressed,QDoubleSpinBox::down-button:pressed{background:#274e66} QSpinBox::up-arrow,QDoubleSpinBox::up-arrow,QSpinBox::down-arrow,QDoubleSpinBox::down-arrow{width:__ARROW_SIZE__px;height:__ARROW_SIZE__px}
@@ -3494,7 +3536,7 @@ class MainWindow(QMainWindow):
         self.duration_spin.setFixedWidth(metric(82))
         self.add_tile_wrap.setFixedWidth(metric(128))
         self.add_tile_layout.setContentsMargins(metric(8), 0, metric(8), 0)
-        for button in (self.copy_segment, self.copy_image_prompt):
+        for button in (self.copy_segment,):
             button.setFixedHeight(button.fontMetrics().height() + metric(4))
             button.setMinimumWidth(button.fontMetrics().horizontalAdvance(button.text()) + metric(10))
         if hasattr(self, "timeline_loading"):
@@ -3849,19 +3891,9 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "No project video", "Add a rendered video to this project first.")
             return
         original = str(meta.get("previewVideoName") or source.name)
-        suggested = str(Path.home() / safe_media_filename(original, "project_video"))
-        destination = choose_document_save(self, "Export rendered project video", suggested, "Videos (*%s);;All files (*)" % source.suffix.lower())
-        if not destination:
-            return
-        target = Path(destination)
-        if not target.suffix:
-            target = target.with_suffix(source.suffix)
-        try:
-            shutil.copy2(source, target)
-        except OSError as error:
-            QMessageBox.critical(self, "Video export failed", str(error))
-            return
-        self.statusBar().showMessage(f"Project video exported: {target}")
+        target = self.next_export_path(original)
+        self.start_disk_job(shutil.copy2, (source, target), lambda _result: self.record_export(target),
+                            lambda message: self.export_failed(target, message), serialized=True)
 
     def choose_project_workflow(self) -> None:
         source_name = choose_document_open(self, "Add project file", str(Path.home()), "All files (*)")
@@ -3899,19 +3931,9 @@ class MainWindow(QMainWindow):
         source = Path(str(workflow.get("path", ""))) if workflow else Path()
         if not workflow or not source.is_file():
             return
-        suggested = str(Path.home() / safe_media_filename(str(workflow.get("name") or source.name), "project_file"))
-        destination = choose_document_save(self, "Export project file", suggested, "All files (*)")
-        if not destination:
-            return
-        target = Path(destination)
-        if not target.suffix and source.suffix:
-            target = target.with_suffix(source.suffix)
-        try:
-            shutil.copy2(source, target)
-        except OSError as error:
-            QMessageBox.critical(self, "Project file export failed", str(error))
-            return
-        self.statusBar().showMessage(f"ComfyUI workspace exported: {target}")
+        target = self.next_export_path(str(workflow.get("name") or source.name))
+        self.start_disk_job(shutil.copy2, (source, target), lambda _result: self.record_export(target),
+                            lambda message: self.export_failed(target, message), serialized=True)
 
     def remove_project_workflow(self) -> None:
         meta = self.current_library_metadata()
@@ -4045,6 +4067,8 @@ class MainWindow(QMainWindow):
         self.store_minimax_draft()
         return {
             "projectType": self.project_type,
+            "workspaceDefinition": copy.deepcopy(self.workspace_definition),
+            "downloadDirectory": self.download_directory,
             "minimaxDrafts": {key: dict(value) for key, value in self.minimax_drafts.items()},
             "minimaxCueActions": dict(self._action_descriptions),
             "segments": self.segments,
@@ -4083,6 +4107,7 @@ class MainWindow(QMainWindow):
         self._loading = True
         self.workspace_revision += 1
         self.segments = state.get("segments", [])
+        self.download_directory = str(state.get("downloadDirectory", ""))
         self.global_prompt.setPlainText(str(state.get("globalPrompt", "")))
         self.intent.setPlainText(str(state.get("directorIntent", "")))
         render_prompt_notes(self.intent)
@@ -4167,9 +4192,10 @@ class MainWindow(QMainWindow):
                 }
             else:
                 collections = [str(record.get("collection")) for record in self.library_records() if record.get("collection")]
-                dialog = ProjectDetailsDialog(self.intent.toPlainText(), self, collection=self.current_collection or "", collections=collections)
+                dialog = ProjectDetailsDialog(self.intent.toPlainText(), self, collection=self.current_collection or "", collections=collections, download_directory=self.download_directory)
                 if not dialog.exec():
                     return
+                self.download_directory = dialog.download_folder.text().strip()
                 meta = {
                     "id": project_id,
                     "name": dialog.name.text().strip(),
@@ -4180,7 +4206,10 @@ class MainWindow(QMainWindow):
                 }
             self.current_project_id = project_id
             self.current_project_name = meta["name"]
+            if "downloadDirectory" in meta:
+                self.download_directory = str(meta["downloadDirectory"])
             self.update_window_title()
+        meta["downloadDirectory"] = self.download_directory
         meta["savedAt"] = datetime.now(timezone.utc).isoformat()
         meta["duration"] = self.total_duration()
         meta["segmentCount"] = len(self.segments)
@@ -4189,7 +4218,7 @@ class MainWindow(QMainWindow):
             meta["thumbnailData"] = data_url(visual.preview_path, max_edge=360, quality=84) if visual else ""
         payload = self.project_payload(include_media=False)
         normalize_project_labels(meta)
-        payload["library"] = {key: meta.get(key, "") for key in ("id", "name", "description", "collection", "savedAt", "status", "tags", "tag", "archived", "notes", "previewVideoPath", "previewVideoName", "projectFiles", "workflowFiles")}
+        payload["library"] = {key: meta.get(key, "") for key in ("id", "name", "description", "collection", "savedAt", "status", "tags", "tag", "archived", "notes", "previewVideoPath", "previewVideoName", "projectFiles", "workflowFiles", "downloadDirectory")}
         project_id = str(meta["id"])
         save_id = uuid4().hex
         self._latest_save_id[project_id] = save_id
@@ -4264,6 +4293,7 @@ class MainWindow(QMainWindow):
                 else:
                     self.load_project_payload(payload)
                     dirty = False
+                self.download_directory = str(meta.get("downloadDirectory", self.download_directory))
                 self.current_project_id = project_id
                 self.current_project_name = str(meta["name"])
                 self.project_dirty = dirty
@@ -4362,6 +4392,7 @@ class MainWindow(QMainWindow):
             thumbnail_options=thumbnail_options, thumbnail_data=str(meta.get("thumbnailData", "")),
             thumbnail_source=str(meta.get("thumbnailSource", "")),
             notes=meta.get("notes", []),
+            download_directory=self.download_directory if meta["id"] == self.current_project_id else str(meta.get("downloadDirectory", "")),
         )
         if not dialog.exec():
             return
@@ -4373,11 +4404,14 @@ class MainWindow(QMainWindow):
             "thumbnailSource": thumbnail_source,
             "thumbnailData": thumbnail_data,
             "notes": dialog.notes_value(),
+            "downloadDirectory": dialog.download_folder.text().strip(),
             "savedAt": datetime.now(timezone.utc).isoformat(),
         })
         self.persist_library_metadata(meta)
         if self.current_project_id == meta["id"]:
             self.current_project_name = meta["name"]
+            if "downloadDirectory" in meta:
+                self.download_directory = str(meta["downloadDirectory"])
             self.update_window_title()
             self.update_project_preview()
         if str(meta["id"]) in self.project_sessions:
@@ -4514,7 +4548,7 @@ class MainWindow(QMainWindow):
                         self._changed_action_sources.add(item.id)
                         self._action_descriptions[item.id] = item.prompt.strip()
             self._timeline_signature = signature
-            if timeline_changed and self.project_type != "ltx" and self.minimax_prompt_text.strip():
+            if timeline_changed and self.unified_workspace and self.minimax_prompt_text.strip():
                 self.sync_timed_actions(timeline_changed=True)
             if self.current_project_id:
                 session = self.project_sessions.setdefault(self.current_project_id, {"name": self.current_project_name})
@@ -4523,6 +4557,7 @@ class MainWindow(QMainWindow):
                     self.refresh_project_library(self.current_project_id)
 
     def new_project(self) -> None:
+        self.download_directory = ""
         self._open_serial += 1
         self.stage_current_workspace()
         if self.current_project_id:
@@ -4545,7 +4580,7 @@ class MainWindow(QMainWindow):
         self.minimax_prompt_mode = "frames"
         self.minimax_reference_images = [None, None]
         self.minimax_drafts = {}
-        self.project_type = "ltx"
+        self.project_type = "ltx" if "ltx" in self.workspace_definitions else next(iter(self.workspace_definitions), "")
         self.workspace_revision += 1
         self.direction_toggle.setChecked(True)
         self.apply_project_type_ui()
@@ -4705,6 +4740,17 @@ class MainWindow(QMainWindow):
         paths = [path for path in paths if Path(path).is_file()]
         if not paths:
             return
+        options = self.workspace_definition.get("references", {})
+        if not options.get("enabled", False):
+            QMessageBox.information(self, "Workspace references", "This workspace accepts text segments only.")
+            return
+        kinds = options.get("kinds", [])
+        allowed_paths = [path for path in paths if ("video" if Path(path).suffix.lower() in TIMELINE_VIDEO_SUFFIXES else "image") in kinds]
+        if len(allowed_paths) != len(paths):
+            self.statusBar().showMessage("Media types unsupported by this workspace were skipped.")
+        paths = allowed_paths
+        if not paths:
+            return
         self.settings.setValue("last_media_dir", str(Path(paths[0]).parent))
         target = len(self.segments) if insert_index is None else max(0, min(insert_index, len(self.segments)))
         before_id = self.segments[target].id if target < len(self.segments) else None
@@ -4801,6 +4847,16 @@ class MainWindow(QMainWindow):
             card = self.timeline.itemWidget(self.timeline.item(row))
             if not isinstance(card, SegmentCard):
                 continue
+            detached = self.unified_workspace and self.segments[row].prompt_detached
+            card.setEnabled(not detached)
+            if detached and card.graphicsEffect() is None:
+                effect = QGraphicsOpacityEffect(card)
+                effect.setOpacity(0.4)
+                card.setGraphicsEffect(effect)
+            elif not detached and card.graphicsEffect() is not None:
+                card.setGraphicsEffect(None)
+            self.timeline.item(row).setFlags(self.timeline.item(row).flags() & ~Qt.ItemFlag.ItemIsEnabled if detached else self.timeline.item(row).flags() | Qt.ItemFlag.ItemIsEnabled)
+            card.setToolTip("Detached from prompt: correct or refine the timed ranges to reconnect." if detached else "")
             selected = row == selected_row
             if card.property("selected") == selected:
                 continue
@@ -4839,15 +4895,15 @@ class MainWindow(QMainWindow):
         segment = self.current_segment()
         self.duration_spin.setMaximum(sys.float_info.max)
         self.duration_spin.setToolTip("Segment duration in seconds")
+        self.duration_spin.setEnabled(bool(segment) and not (self.unified_workspace and segment.prompt_detached))
         self.refresh_shared_editor()
         visual = bool(segment and segment.kind != "text")
         self.start_button.setEnabled(visual)
         self.end_button.setEnabled(visual)
-        self.start_button.setVisible(visual and self.project_type != "minimax_frames")
-        self.end_button.setVisible(visual and self.project_type != "minimax_frames")
+        self.start_button.setVisible(visual and self.workspace_engine != "minimax_frames")
+        self.end_button.setVisible(visual and self.workspace_engine != "minimax_frames")
         self.refine_timing_button.setEnabled(not self.ai_busy and bool(segment))
-        self.refine_prompt_button.setEnabled(not self.ai_busy and bool(self.segment_prompt.toPlainText().strip()) and (self.project_type != "ltx" or self.prompt_scope.currentData() == "segment"))
-        self.copy_image_prompt.setEnabled(bool(segment and segment.image_prompt.strip()))
+        self.refine_prompt_button.setEnabled(not self.ai_busy and bool(self.segment_prompt.toPlainText().strip()) and (self.unified_workspace or self.prompt_scope.currentData() == "segment"))
         if segment:
             self.start_button.setChecked(segment.role == "start" if visual else False)
             self.end_button.setChecked(segment.role == "end" if visual else False)
@@ -4857,10 +4913,14 @@ class MainWindow(QMainWindow):
             self.frame_number.setText("Frame —")
         self._loading = False
         self.update_counts()
+        if segment and self.unified_workspace:
+            focus_cue(self.segment_prompt, segment.id)
 
     def reload_clicked_segment(self, item: QListWidgetItem) -> None:
         """Refresh prompt text when the clicked segment is already selected."""
         self.refresh_segment_prompt_box(self.timeline.row(item))
+        if self.unified_workspace and self.current_segment():
+            focus_cue(self.segment_prompt, self.current_segment().id)
 
     def refresh_segment_prompt_box(self, row: int) -> None:
         """Update only the segment prompt box, preserving all other editor state."""
@@ -4870,7 +4930,6 @@ class MainWindow(QMainWindow):
         self._loading = True
         try:
             self.refresh_shared_editor()
-            self.copy_image_prompt.setEnabled(bool(self.segments[row].image_prompt.strip()))
         finally:
             self._loading = previous_loading
         self.update_counts()
@@ -4889,7 +4948,7 @@ class MainWindow(QMainWindow):
     def save_prompt(self) -> None:
         if self._loading:
             return
-        if self.project_type != "ltx":
+        if self.unified_workspace:
             self.minimax_editor_changed()
             self.update_counts()
             return
@@ -4910,13 +4969,6 @@ class MainWindow(QMainWindow):
                     card.set_text_preview(self.current_segment().prompt)
             self.mark_dirty()
             self.update_counts()
-
-    def copy_selected_image_prompt(self) -> None:
-        segment = self.current_segment()
-        if not segment or not segment.image_prompt.strip():
-            return
-        QApplication.clipboard().setText(segment.image_prompt.strip())
-        self.statusBar().showMessage("Gemini image-generation prompt copied")
 
     def refresh_text_segment_previews(self) -> None:
         by_id = {segment.id: segment for segment in self.segments}
@@ -5005,11 +5057,19 @@ class MainWindow(QMainWindow):
         item = self.timeline.itemAt(point)
         if not item:
             return
+        target = self.segments[self.timeline.row(item)]
+        if self.unified_workspace and target.prompt_detached:
+            menu = QMenu(self)
+            message = menu.addAction("Detached — correct the timed prompt to reconnect")
+            message.setEnabled(False)
+            menu.addAction("Refine prompt", self.refine_minimax_prompt)
+            menu.exec(self.timeline.mapToGlobal(point))
+            return
         self.timeline.setCurrentItem(item)
         segment = self.current_segment()
         menu = QMenu(self)
         if segment and segment.kind == "text":
-            if self.project_type == "ltx":
+            if not self.unified_workspace:
                 menu.addAction("Edit text prompt", self.focus_segment_prompt)
             menu.addAction("Convert to image segment…", self.convert_text_segment_to_image)
         else:
@@ -5101,28 +5161,11 @@ class MainWindow(QMainWindow):
         segment = self.current_segment()
         if not segment:
             return
-        downloads = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DownloadLocation) or str(Path.home())
-        directory = Path(str(self.settings.value("segment_export_dir", self.settings.value("segment_save_dir", downloads))))
         suffix = segment_media_suffix(segment)
-        source = Path(materialize_source(segment))
-        if not source.is_file():
-            QMessageBox.warning(self, "Media unavailable", "The complete source media for this segment is not available.")
-            return
-        try:
-            directory.mkdir(parents=True, exist_ok=True)
-            row = max(0, self.timeline.currentRow()) + 1
-            base = f"{safe_export_name(self.current_project_name)} - Segment {row:02d}"
-            destination = directory / f"{base}{suffix}"
-            counter = 2
-            while destination.exists() and source.resolve() != destination.resolve():
-                destination = directory / f"{base} ({counter}){suffix}"
-                counter += 1
-            if source.resolve() != destination.resolve():
-                shutil.copy2(source, destination)
-            self.settings.setValue("segment_export_dir", str(destination.parent))
-            self.statusBar().showMessage(f"Segment exported: {destination}")
-        except OSError as error:
-            QMessageBox.critical(self, "Export failed", str(error))
+        row = max(0, self.timeline.currentRow()) + 1
+        target = self.next_export_path(f"{self.current_project_name} - Segment {row:02d}{suffix}")
+        self.start_disk_job(_export_segment_source, (copy.deepcopy(segment), target), lambda _result: self.record_export(target),
+                            lambda message: self.export_failed(target, message), serialized=True)
 
     def replace_selected(self) -> None:
         segment = self.current_segment()
@@ -5185,8 +5228,14 @@ class MainWindow(QMainWindow):
         creative_intent = self.intent.toPlainText().strip()
         if creative_intent:
             lines.append(creative_intent)
+        if self.unified_workspace and self.hdr.isChecked():
+            lines.append("HDR: preserve a high dynamic range cinematic look and visible highlight and shadow detail.")
+        if not self.unified_workspace and not self.workspace_definition.get("global_prompt", True):
+            lines.append("This workspace uses per-segment prompts only. Return an empty globalPrompt and keep required continuity in each segment prompt.")
+        if not self.workspace_definition.get("audio_generation", True):
+            lines.append("This workspace does not generate audio. Omit sound, music, speech and dialogue generation instructions.")
         requested_length = self.requested_length.value()
-        if include_requested_length and requested_length > 0 and self.project_type == "ltx":
+        if include_requested_length and requested_length > 0:
             if len(self.segments) == 1:
                 item_label = "single text-only segment" if self.segments[0].kind == "text" else "single-frame sequence"
                 lines.append(
@@ -5245,7 +5294,7 @@ class MainWindow(QMainWindow):
         self.ai_busy = not enabled
         segment = self.current_segment()
         self.refine_timing_button.setEnabled(enabled and bool(segment))
-        self.refine_prompt_button.setEnabled(enabled and bool(self.segment_prompt.toPlainText().strip()) and (self.project_type != "ltx" or self.prompt_scope.currentData() == "segment"))
+        self.refine_prompt_button.setEnabled(enabled and bool(self.segment_prompt.toPlainText().strip()) and (self.unified_workspace or self.prompt_scope.currentData() == "segment"))
         if self.minimax_panel:
             self.minimax_panel.set_busy(not enabled)
 
@@ -5268,7 +5317,14 @@ class MainWindow(QMainWindow):
         if show_main_overlay:
             self.magic_overlay.update_attempt(1, retries + 1, activity)
             self.magic_overlay.show_overlay()
-        worker = MagicWorker(operation, args, retries, retry_cooldown, activity)
+        instructions = copy.deepcopy(self.workspace_definition.get("generation_prompts", {}))
+        def workspace_operation(*values):
+            token = WORKSPACE_INSTRUCTIONS.set(instructions)
+            try:
+                return operation(*values)
+            finally:
+                WORKSPACE_INSTRUCTIONS.reset(token)
+        worker = MagicWorker(workspace_operation, args, retries, retry_cooldown, activity)
         worker.signals.progress.connect(self.magic_progress)
         self.ai_request_workspace = (self.workspace_revision, self.current_project_id, self.project_type)
         self.ai_finished_callback = finished
@@ -5378,7 +5434,6 @@ class MainWindow(QMainWindow):
             durations[index] = float(result["duration"])
             if self.timeline.currentRow() == index:
                 self.refresh_segment_prompt_box(index)
-                self.copy_image_prompt.setEnabled(bool(segment.image_prompt))
             self.refresh_text_segment_previews()
             self.animate_timeline_durations(durations)
             self.statusBar().showMessage(f"Segment {index + 1} prompt refined")
@@ -5432,7 +5487,6 @@ class MainWindow(QMainWindow):
         self.global_prompt.setPlainText(global_prompt)
         self.refresh_segment_prompt_box(self.timeline.currentRow())
         current = self.current_segment()
-        self.copy_image_prompt.setEnabled(bool(current and current.image_prompt.strip()))
         self.refresh_text_segment_previews()
         self.mark_dirty()
         self.set_ai_controls_enabled(True)
@@ -5441,7 +5495,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Magic Build complete")
 
     def store_minimax_draft(self) -> None:
-        self.minimax_drafts[self.minimax_prompt_mode] = {
+        self.minimax_drafts[self.workspace_draft_key] = {
             "prompt": self.minimax_prompt_text,
             "instructions": self.minimax_refinement_instructions,
             "sourceHash": self.minimax_prompt_cache_key,
@@ -5454,20 +5508,20 @@ class MainWindow(QMainWindow):
             key: {**{field: str(item.get(field, "")) for field in ("prompt", "instructions", "sourceHash", "updatedAt")},
                   "cueActions": dict(item.get("cueActions") or {})}
             for key, item in (drafts.items() if isinstance(drafts, dict) else [])
-            if key in {"frames", "references"} and isinstance(item, dict)
+            if isinstance(item, dict)
         }
         self.store_minimax_draft()
         legacy = "minimax_" + self.minimax_prompt_mode if self.minimax_prompt_text else "ltx"
-        self.project_type = value if value in {"ltx", "minimax_frames", "minimax_references"} else legacy
-        if self.project_type != "ltx":
-            self.load_minimax_draft(self.project_type.removeprefix("minimax_"))
+        self.project_type = value if value in self.workspace_definitions else (legacy if legacy in self.workspace_definitions else next(iter(self.workspace_definitions), ""))
+        if self.unified_workspace:
+            self.load_minimax_draft(self.workspace_engine.removeprefix("minimax_"))
         self.prompt_scope.setCurrentIndex(0)
-        self.direction_toggle.setChecked(self.project_type == "ltx")
-        self.minimax_panel.reference_dock.setVisible(self.project_type != "ltx")
+        self.direction_toggle.setChecked(True)
+        self.minimax_panel.reference_dock.setVisible(self.unified_workspace)
 
     def load_minimax_draft(self, mode: str) -> None:
-        draft = self.minimax_drafts.get(mode, {})
         self.minimax_prompt_mode = mode
+        draft = self.minimax_drafts.get(self.workspace_draft_key, {})
         self.minimax_prompt_text = draft.get("prompt", "")
         self.minimax_refinement_instructions = draft.get("instructions", "")
         self.minimax_prompt_cache_key = draft.get("sourceHash", "")
@@ -5478,64 +5532,119 @@ class MainWindow(QMainWindow):
         if not self._loading:
             self.set_project_type(self.project_type_combo.currentData())
 
+    @property
+    def workspace_definition(self) -> dict:
+        return self.workspace_definitions.get(self.project_type, {})
+
+    @property
+    def workspace_engine(self) -> str:
+        return self.workspace_definition.get("engine", "ltx")
+
+    @property
+    def unified_workspace(self) -> bool:
+        return self.workspace_definition.get("prompt_mode") == "unified"
+
+    @property
+    def workspace_draft_key(self) -> str:
+        return self.minimax_prompt_mode if self.project_type in {"minimax_frames", "minimax_references", "ltx"} else self.project_type
+
+    def reload_workspace_definitions(self, previous_id=None, new_id=None) -> None:
+        self.store_minimax_draft()
+        old_draft_key = self.workspace_draft_key
+        if previous_id == self.project_type and new_id:
+            self.project_type = new_id
+            if new_id not in {"ltx", "minimax_frames", "minimax_references"} and old_draft_key in self.minimax_drafts:
+                self.minimax_drafts[new_id] = self.minimax_drafts.pop(old_draft_key)
+        self.workspace_definitions = self.workspace_store.load()
+        self.project_type_combo.blockSignals(True)
+        self.project_type_combo.clear()
+        for key, value in self.workspace_definitions.items():
+            self.project_type_combo.addItem(value["name"], key)
+        self.project_type_combo.blockSignals(False)
+        if self.project_type not in self.workspace_definitions:
+            self.project_type = next(iter(self.workspace_definitions), "")
+        if self.unified_workspace:
+            self.load_minimax_draft(self.workspace_engine.removeprefix("minimax_"))
+        self.workspace_revision += 1
+        self.apply_project_type_ui()
+        self.mark_dirty()
+        if self.workspace_store.errors:
+            self.statusBar().showMessage("Some workspace definitions could not be loaded. Review Settings → Workspaces.")
+
     def set_project_type(self, project_type: str) -> None:
-        if project_type not in {"ltx", "minimax_frames", "minimax_references"} or project_type == self.project_type:
+        if project_type not in self.workspace_definitions or project_type == self.project_type:
             return
+        if getattr(self, "duration_animation", None):
+            self.duration_animation.stop()
         self.store_minimax_draft()
         self.project_type = project_type
         self.workspace_revision += 1
-        if project_type != "ltx":
-            self.load_minimax_draft(project_type.removeprefix("minimax_"))
+        if self.unified_workspace:
+            self.load_minimax_draft(self.workspace_engine.removeprefix("minimax_"))
         self._action_segment_ids = []
         self._action_descriptions = {}
         self._changed_action_sources.clear()
         self.prompt_scope.blockSignals(True)
         self.prompt_scope.setCurrentIndex(0)
         self.prompt_scope.blockSignals(False)
-        self.direction_toggle.setChecked(project_type == "ltx")
+        self.direction_toggle.setChecked(True)
         self.minimax_panel.clear_message()
         self.sync_minimax_panel()
-        self.minimax_panel.reference_dock.setVisible(project_type != "ltx")
+        self.minimax_panel.reference_dock.setVisible(self.unified_workspace and self.workspace_definition.get("references", {}).get("enabled", False))
         self.sync_timed_actions()
         self.mark_dirty()
 
     def apply_project_type_ui(self) -> None:
-        ltx = self.project_type == "ltx"
-        refs = not ltx
+        ltx = not self.unified_workspace
+        references = self.workspace_definition.get("references", {})
+        refs = not ltx and references.get("enabled", False) and references.get("untimed_slots", 0) > 0
         self.project_type_combo.blockSignals(True)
         self.project_type_combo.setCurrentIndex(self.project_type_combo.findData(self.project_type))
         self.project_type_combo.blockSignals(False)
-        self.prompt_label.setText("LTX PROMPT" if ltx else "MINIMAX PRODUCTION PROMPT")
+        self.prompt_label.setText(self.workspace_definition.get("name", "Workspace").upper() + " PROMPT")
         self.segment_prompt.inline_cue_mode = not ltx
-        self.prompt_scope.setVisible(ltx)
+        self.prompt_scope.setVisible(ltx and self.workspace_definition.get("global_prompt", False))
+        if not self.workspace_definition.get("global_prompt", False):
+            self.prompt_scope.setCurrentIndex(0)
         self.minimax_panel.setVisible(not ltx)
         self.references_button.setVisible(refs)
         self.minimax_panel.reference_dock.toggleViewAction().setVisible(refs)
         if not refs:
             self.minimax_panel.reference_dock.hide()
-        self.hdr.setVisible(ltx)
-        self.requested_length.setVisible(ltx)
-        self.length_label.setVisible(ltx)
+        audio = self.workspace_definition.get("audio_generation", True)
+        for control in (self.sfx, self.spoken_dialog, self.reduce_music):
+            control.setVisible(audio)
+        if not audio:
+            for control in (self.sfx, self.spoken_dialog, self.reduce_music):
+                control.setChecked(False)
+        self.hdr.setVisible(True)
+        self.requested_length.setVisible(True)
+        self.length_label.setVisible(True)
         self.output_size_control.setVisible(ltx)
         self.output_label.setVisible(ltx)
         self.refine_timing_button.setVisible(ltx)
-        self.copy_image_prompt.setVisible(ltx and self.prompt_scope.currentData() == "segment")
         self.magic_button.setText("✦ Magic Build" if ltx else "✦ Generate Prompt")
         self.magic_button.setToolTip("Build all LTX segment prompts" if ltx else "Generate the full MiniMax production prompt for this workflow")
         self.workflow_export_action.setVisible(ltx)
+        self.magic_button.setEnabled(not self.ai_busy and bool(self.workspace_definition))
         visual = bool(self.current_segment() and self.current_segment().kind != "text")
-        self.start_button.setVisible(visual and self.project_type != "minimax_frames")
-        self.end_button.setVisible(visual and self.project_type != "minimax_frames")
+        self.start_button.setVisible(visual and self.workspace_engine != "minimax_frames")
+        self.end_button.setVisible(visual and self.workspace_engine != "minimax_frames")
+        self.direction_toggle.setChecked(True)
         self.update_spoken_dialog_visibility()
         self.minimax_panel.refresh_references()
+        reference_options = self.workspace_definition.get("references", {})
+        for index, target in enumerate(self.minimax_panel.reference_targets):
+            target.setVisible(reference_options.get("enabled", False) and index < reference_options.get("untimed_slots", 0))
+            for row in range(target.role.count()):
+                target.role.model().item(row).setEnabled(target.role.itemData(row) in reference_options.get("kinds", []))
         self.refresh_shared_editor()
 
     def prompt_scope_changed(self, _index: int) -> None:
         self.refresh_shared_editor()
-        self.copy_image_prompt.setVisible(self.project_type == "ltx" and self.prompt_scope.currentData() == "segment")
 
     def refresh_shared_editor(self) -> None:
-        if self.project_type != "ltx":
+        if self.unified_workspace:
             value = self.minimax_prompt_text
         elif self.prompt_scope.currentData() == "global":
             value = self.global_prompt.toPlainText()
@@ -5547,29 +5656,29 @@ class MainWindow(QMainWindow):
             scroll = self.segment_prompt.verticalScrollBar().value()
             self.segment_prompt.blockSignals(True)
             self.segment_prompt.setPlainText(value)
-            if self.project_type != "ltx":
+            if self.unified_workspace:
                 insert_cue_cells(self.segment_prompt, value, self.segments)
             render_prompt_notes(self.segment_prompt)
-            if self.project_type != "ltx":
+            if self.unified_workspace:
                 cursor = self.segment_prompt.textCursor()
                 cursor.setPosition(min(caret, len(value)))
                 self.segment_prompt.setTextCursor(cursor)
                 self.segment_prompt.verticalScrollBar().setValue(scroll)
             self.segment_prompt.blockSignals(False)
-        self.segment_prompt.setPlaceholderText("Select a timeline segment to edit its prompt…" if self.project_type == "ltx" else "Generate a production prompt or write your own…")
+        self.segment_prompt.setPlaceholderText("Select a timeline segment to edit its prompt…" if not self.unified_workspace else "Generate a production prompt or write your own…")
         self.highlight_inline_actions()
-        self.refine_prompt_button.setEnabled(not self.ai_busy and bool(value.strip()) and (self.project_type != "ltx" or self.prompt_scope.currentData() == "segment"))
+        self.refine_prompt_button.setEnabled(not self.ai_busy and bool(value.strip()) and (self.unified_workspace or self.prompt_scope.currentData() == "segment"))
         self.update_counts()
 
     def global_prompt_changed(self) -> None:
         self.mark_dirty()
-        if self.project_type == "ltx" and self.prompt_scope.currentData() == "global":
+        if not self.unified_workspace and self.prompt_scope.currentData() == "global":
             self.refresh_shared_editor()
 
     def update_spoken_dialog_visibility(self) -> None:
         if not hasattr(self, "language_label"):
             return
-        self.planning_label.setVisible(self.project_type == "ltx" or self.spoken_dialog.isChecked())
+        self.planning_label.setVisible(not self.unified_workspace or self.spoken_dialog.isChecked())
         for widget in (self.speaker_language, self.speaker_accent, self.language_label, self.accent_label):
             widget.setVisible(self.spoken_dialog.isChecked())
 
@@ -5580,7 +5689,7 @@ class MainWindow(QMainWindow):
     def generate_project_prompt(self) -> None:
         if self.ai_busy:
             return
-        if self.project_type == "ltx":
+        if not self.unified_workspace:
             self.magic_build()
         else:
             self._generate_minimax_prompt(self.minimax_prompt_mode)
@@ -5588,14 +5697,14 @@ class MainWindow(QMainWindow):
     def refine_project_prompt(self) -> None:
         if self.ai_busy:
             return
-        if self.project_type == "ltx":
+        if not self.unified_workspace:
             if self.prompt_scope.currentData() == "segment":
                 self.refine_selected_prompt()
         else:
             self.refine_minimax_prompt()
 
     def export_workflow(self) -> None:
-        if self.project_type == "ltx":
+        if not self.unified_workspace:
             self.export_ltx()
         else:
             self.copy_minimax_prompt()
@@ -5621,14 +5730,14 @@ class MainWindow(QMainWindow):
         self.sync_timed_actions()
 
     def show_minimax_panel(self, cache_state: str | None = None) -> MiniMaxPromptPanel:
-        if self.project_type == "ltx":
+        if not self.unified_workspace:
             self.set_project_type("minimax_" + self.minimax_prompt_mode)
         self.sync_minimax_panel(cache_state)
         self.minimax_panel.focus_prompt_editor()
         return self.minimax_panel
 
     def minimax_editor_changed(self) -> None:
-        if self._loading or not self.minimax_panel or self.project_type == "ltx":
+        if self._loading or not self.minimax_panel or not self.unified_workspace:
             return
         self.minimax_prompt_text = self.minimax_panel.editor.toPlainText()
         tagged = cue_cells(self.minimax_panel.editor)
@@ -5639,6 +5748,15 @@ class MainWindow(QMainWindow):
         self.minimax_prompt_updated_at = datetime.now(timezone.utc).isoformat()
         self.minimax_panel.update_actions()
         self.mark_dirty()
+
+    def active_reference_images(self) -> list:
+        options = self.workspace_definition.get("references", {})
+        if not options.get("enabled"):
+            return [None, None]
+        count = options.get("untimed_slots", 0)
+        kinds = options.get("kinds", [])
+        return [value if index < count and value and value.get("role", "identity") in kinds else None
+                for index, value in enumerate(reference_slots(self.minimax_reference_images))]
 
     def set_minimax_reference_image(self, slot: int, value: dict | None) -> None:
         if self._loading:
@@ -5654,9 +5772,69 @@ class MainWindow(QMainWindow):
             if not self.minimax_panel.busy:
                 self.minimax_panel.set_cache_state("References changed · generate when ready")
 
+    def paste_timed_prompt(self, text: str) -> None:
+        if SECTION.search(text) or re.search(r"(?m)^\[[A-Z ]+\]", text):
+            prompt = text
+        else:
+            section = SECTION.search(self.minimax_prompt_text)
+            following = NEXT.search(self.minimax_prompt_text, section.end()) if section else None
+            prefix = self.minimax_prompt_text[:section.end()] if section else self.minimax_prompt_text.rstrip() + "\n\n[TIMED ACTION]\n"
+            suffix = self.minimax_prompt_text[following.start():] if following else ""
+            prompt = prefix.rstrip() + "\n" + text.strip() + ("\n\n" + suffix if suffix else "")
+        self.conform_timed_prompt(prompt)
+
+    def conform_timed_prompt(self, prompt: str) -> None:
+        """Apply a prompt plan in order, retaining media and IDs of existing segments."""
+        if not SECTION.search(prompt):
+            first = re.search(r"(?m)^[ \t]*\d{2}:\d{2}:", prompt)
+            if first:
+                prompt = prompt[:first.start()].rstrip() + "\n\n[TIMED ACTION]\n" + prompt[first.start():]
+        plan = parse_timed_plan(prompt)
+        previous_loading = self._loading
+        self._loading = True
+        targets = [segment.duration for segment in self.segments]
+        self.minimax_prompt_text = prompt
+        for index, cue in enumerate(plan):
+            if index >= len(self.segments):
+                if not cue["valid"]:
+                    break
+                self.segments.append(Segment(f"Text {index + 1}", "", "", "text", "text"))
+                targets.append(self.segments[-1].duration)
+            segment = self.segments[index]
+            segment.prompt_detached = not cue["valid"]
+            if cue["valid"]:
+                segment.prompt = cue["description"]
+                targets[index] = round(cue["end"] - cue["start"], 6)
+        for segment in self.segments[len(plan):]:
+            segment.prompt_detached = True
+        self._action_segment_ids = [segment.id for segment in self.segments]
+        self._action_descriptions = {segment.id: segment.prompt for segment in self.segments if not segment.prompt_detached}
+        self.refresh_shared_editor()
+        # Force re-render even when serialized text compares equal to the new source.
+        self.segment_prompt.blockSignals(True)
+        self.segment_prompt.setPlainText(prompt)
+        self.segment_prompt.blockSignals(False)
+        self.refresh_timeline(max(0, self.timeline.currentRow()))
+        self._loading = previous_loading
+        self.update_timeline_selection_style(self.timeline.currentRow())
+        self._conforming_prompt = True
+        try:
+            self.animate_timeline_durations(targets)
+        finally:
+            self._conforming_prompt = False
+        self.segment_prompt.blockSignals(True)
+        insert_cue_cells(self.segment_prompt, prompt, self.segments)
+        render_prompt_notes(self.segment_prompt)
+        self.segment_prompt.blockSignals(False)
+        self.highlight_inline_actions()
+        detached = sum(segment.prompt_detached for segment in self.segments)
+        self.minimax_panel.show_message(
+            f"{detached} segment(s) detached. Use contiguous SMPTE ranges beginning at 00:00:00:00 to reconnect them." if detached else "Timed prompt and timeline are connected.",
+            "timeline" if detached else "success")
+
     def sync_timed_actions(self, timeline_changed: bool = False) -> None:
         panel = self.minimax_panel
-        if not panel or self.project_type == "ltx":
+        if not panel or not self.unified_workspace:
             if panel:
                 panel.editor.setExtraSelections([])
             return
@@ -5670,7 +5848,7 @@ class MainWindow(QMainWindow):
                                              if sid not in self._changed_action_sources)
         elif not tagged and not timeline_changed and len(descriptions) == len(ids):
             self._action_descriptions.update(zip(ids, descriptions))
-        if timeline_changed and "[TIMED ACTION]" in self.minimax_prompt_text:
+        if timeline_changed and not getattr(self, "_conforming_prompt", False) and not any(segment.prompt_detached for segment in self.segments) and "[TIMED ACTION]" in self.minimax_prompt_text:
             if len(descriptions) != len(ids):
                 panel.show_message("Timeline and timed cue counts differ. Review the extra cues before refining; none were removed.", "timeline")
             else:
@@ -5693,7 +5871,7 @@ class MainWindow(QMainWindow):
                 editor.blockSignals(False)
             for index, segment in enumerate(self.segments):
                 description = tagged.get(segment.id) if tagged else descriptions[index]
-                if description is not None and segment.prompt != description:
+                if description is not None and not segment.prompt_detached and segment.prompt != description:
                     segment.prompt = description
             self._timeline_signature = tuple((item.id, item.duration, item.prompt, item.kind, item.role, item.name) for item in self.segments)
             self.refresh_text_segment_previews()
@@ -5703,7 +5881,9 @@ class MainWindow(QMainWindow):
 
     def highlight_inline_actions(self) -> None:
         """Only native timed-action cells have background shading."""
-        self.segment_prompt.setExtraSelections([])
+        segment = self.current_segment()
+        if not self.unified_workspace or not segment or not focus_cue(self.segment_prompt, segment.id, focus=False):
+            self.segment_prompt.setExtraSelections([])
 
     def replace_timeline_media(self, paths: list[str], index: int) -> None:
         paths = [path for path in paths if Path(path).is_file()]
@@ -5720,7 +5900,7 @@ class MainWindow(QMainWindow):
                 old = self.segments[location]
                 path, kind, preview, frames, trim = prepared[0]
                 self.segments[location] = Segment(Path(path).name, path, preview, kind, old.role, old.prompt,
-                                                   old.duration, frames, trim, old.id)
+                                                   old.duration, frames, trim, old.id, old.image_prompt, old.prompt_detached)
                 self.mark_dirty()
                 self.refresh_timeline(location)
                 if len(prepared) > 1:
@@ -5749,7 +5929,7 @@ class MainWindow(QMainWindow):
             self.sfx.isChecked(),
             self.spoken_dialog.isChecked(),
             self.reduce_music.isChecked(),
-            self.minimax_reference_images,
+            self.active_reference_images(),
         )
 
     def copy_minimax_prompt(self) -> None:
@@ -5762,12 +5942,14 @@ class MainWindow(QMainWindow):
 
     def generate_minimax_prompt_frames(self) -> None:
         """Manually generate the continuous frame-timeline prompt."""
-        self.set_project_type("minimax_frames")
+        if self.workspace_engine != "minimax_frames":
+            self.set_project_type("minimax_frames")
         self._generate_minimax_prompt("frames")
 
     def generate_minimax_prompt_references(self) -> None:
         """Manually generate a reference prompt for the detected workflow."""
-        self.set_project_type("minimax_references")
+        if self.workspace_engine != "minimax_references":
+            self.set_project_type("minimax_references")
         self._generate_minimax_prompt("references")
 
     def _generate_minimax_prompt(self, mode: str) -> None:
@@ -5803,7 +5985,7 @@ class MainWindow(QMainWindow):
                 self.segments.copy(), provider, model, key, self.build_director_request(),
                 self.global_prompt.toPlainText(), self.sfx.isChecked(), self.spoken_dialog.isChecked(),
                 self.reduce_music.isChecked(), timeout,
-            ) + (reference_slots(self.minimax_reference_images),),
+            ) + (self.active_reference_images(),),
             "Writing the MiniMax H3 prompt for " + WORKFLOW_NAMES[detect_workflow(self.segments, self.minimax_reference_images)] + "…"
             if reference_mode else
             "Boiling the complete sequence down to one MiniMax H3 frame prompt…",
@@ -5834,7 +6016,7 @@ class MainWindow(QMainWindow):
         operation = str(getattr(self, "minimax_operation_kind", "generate_frames"))
         if operation.startswith("refine_"):
             prompt = consume_global_refinements(prompt)
-        self.minimax_prompt_text = prompt
+        self.conform_timed_prompt(prompt)
         self._action_segment_ids = [item.id for item in self.segments]
         descriptions, _ = split_actions(prompt)
         if len(descriptions) == len(self.segments):
@@ -5853,6 +6035,9 @@ class MainWindow(QMainWindow):
         state = f"Cached • {mode_label} {'refined' if operation.startswith('refine_') else 'generated'}"
         window = self.show_minimax_panel(state)
         self.mark_dirty()
+        if any(segment.prompt_detached for segment in self.segments):
+            window.show_message("Some timeline segments could not be conformed. Correct the timed ranges or refine again to reconnect them.", "timeline")
+            return
         window.show_message(
             f"MiniMax H3 {self.minimax_prompt_mode} prompt refined. Save it from the toolbar or when closing."
             if operation.startswith("refine_") else
@@ -5893,7 +6078,7 @@ class MainWindow(QMainWindow):
                 self.global_prompt.toPlainText(), self.sfx.isChecked(), self.spoken_dialog.isChecked(),
                 self.reduce_music.isChecked(), self.minimax_prompt_text,
                 self.minimax_refinement_instructions, timeout,
-            ) + (reference_slots(self.minimax_reference_images),),
+            ) + (self.active_reference_images(),),
             "Refining the edited MiniMax prompt with timeline continuity context…",
             self.minimax_h3_finished,
             show_main_overlay=False,
@@ -6010,23 +6195,14 @@ class MainWindow(QMainWindow):
         comfy_root = self.resolve_comfy_root()
         if comfy_root is None:
             return
-        directory = Path(self.settings.value("last_document_dir", str(Path.home())))
-        export_name = safe_media_filename(f"{self.current_project_name}.json", "Untitled")
-        path = choose_document_save(self, "Export", str(directory / export_name), "LTX Director JSON (*.json)")
-        if not path:
-            return
-        if not path.lower().endswith(".json"):
-            path += ".json"
-        selected_path = Path(path)
-        path = str(selected_path.with_name(safe_media_filename(selected_path.name, "Untitled")))
-        self.settings.setValue("last_document_dir", str(Path(path).parent))
+        path = str(self.next_export_path(f"{self.current_project_name}.json"))
         self.normalize_output_dimensions()
         self.statusBar().showMessage(f"Exporting LTX Director JSON in background: {path}…")
         self.start_disk_job(_export_ltx_snapshot,
                             (copy.deepcopy(self.segments), self.global_prompt.toPlainText(),
                              self.output_width.value(), self.output_height.value(), comfy_root / "input" / "whatdreamscost", path),
-                            lambda _result: self.statusBar().showMessage(f"LTX Director export saved: {path}"),
-                            lambda message: QMessageBox.critical(self, "Export failed", message), serialized=True)
+                            lambda _result: self.record_export(path),
+                            lambda message: self.export_failed(path, message), serialized=True)
 
     def resolve_comfy_root(self) -> Path | None:
         configured = str(self.settings.value("comfy_root_dir", "") or "").strip()
@@ -6090,7 +6266,7 @@ class MainWindow(QMainWindow):
             self.minimax_prompt_updated_at = ""
             self.minimax_prompt_mode = "frames"
             self.minimax_drafts = {}
-            self.project_type = "ltx"
+            self.project_type = "ltx" if "ltx" in self.workspace_definitions else next(iter(self.workspace_definitions), "")
             self.workspace_revision += 1
             self.direction_toggle.setChecked(True)
             self.prompt_scope.setCurrentIndex(0)
@@ -6128,6 +6304,8 @@ class MainWindow(QMainWindow):
             "app": "ltx-director-director",
             "projectVersion": 8,
             "projectType": self.project_type,
+            "workspaceDefinition": copy.deepcopy(self.workspace_definition),
+            "downloadDirectory": self.download_directory,
             "globalPrompt": self.global_prompt.toPlainText(),
             "directorIntent": self.intent.toPlainText(),
             "directionOptions": {
@@ -6159,7 +6337,12 @@ class MainWindow(QMainWindow):
     def load_project_payload(self, payload: dict) -> None:
         if payload.get("app") not in {"ltx-director-director", "ltx-prompt-director-python"}:
             raise ValueError("This is not an LTX Director - Director project file.")
+        definition = payload.get("workspaceDefinition")
+        if isinstance(definition, dict) and definition.get("id") not in self.workspace_definitions:
+            self.workspace_store.save(definition)
+            self.reload_workspace_definitions()
         self._loading = True
+        self.download_directory = str(payload.get("library", {}).get("downloadDirectory", payload.get("downloadDirectory", "")))
         loaded = []
         cache_key = uuid4().hex[:10]
         for index, original in enumerate(payload.get("frames", [])):
@@ -6243,16 +6426,75 @@ class MainWindow(QMainWindow):
             self.apply_timeline_fit()
         self.project_dirty = False
 
+    def export_directory(self) -> Path:
+        fallback = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DownloadLocation) or str(Path.home())
+        return Path(self.download_directory or str(self.settings.value("segment_export_dir", fallback) or fallback)).expanduser()
+
+    def next_export_path(self, filename: str) -> Path:
+        directory = self.export_directory()
+        directory.mkdir(parents=True, exist_ok=True)
+        target = directory / safe_export_name(Path(filename).name)
+        base, suffix = target.stem, target.suffix
+        counter = 1
+        while target.exists() or str(target) in self._reserved_exports:
+            target = directory / f"{base} ({counter}){suffix}"
+            counter += 1
+        self._reserved_exports.add(str(target))
+        self.statusBar().showMessage(f"Exporting {target.name}…")
+        return target
+
+    def record_export(self, path) -> None:
+        path = Path(path)
+        self._reserved_exports.discard(str(path))
+        self.download_tray.add(path)
+        self.downloads_button.setText("↓ •")
+        self.downloads_button.setToolTip(f"Export ready: {path.name}\nClick for recent exports; drag files from the tray.")
+        self.download_tray.list.setCurrentRow(0)
+        if getattr(self, "_download_feedback_animation", None):
+            self._download_feedback_animation.stop()
+        animation = QVariantAnimation(self)
+        animation.setDuration(900)
+        animation.setLoopCount(3)
+        animation.setStartValue(0.0)
+        animation.setEndValue(1.0)
+        def pulse(value):
+            alpha = round(70 + 130 * math.sin(value * math.pi))
+            self.downloads_button.setStyleSheet(f"QPushButton {{background:rgba(59, 153, 115, {alpha}); border:1px solid #77d3a7; border-radius:6px; padding:5px 10px;}}")
+        animation.valueChanged.connect(pulse)
+        animation.finished.connect(lambda: self.downloads_button.setStyleSheet(""))
+        self._download_feedback_animation = animation
+        animation.start()
+        if self.isVisible():
+            QToolTip.showText(self.downloads_button.mapToGlobal(self.downloads_button.rect().bottomLeft()),
+                             f"Export ready: {path.name}\nFind it in ↓ Recent exports", self.downloads_button, self.downloads_button.rect(), 3500)
+        self.statusBar().showMessage(f"Exported: {path}")
+
+    def export_failed(self, path, message: str) -> None:
+        self._reserved_exports.discard(str(path))
+        QMessageBox.critical(self, "Export failed", message)
+
+    def open_download_folder(self) -> None:
+        from PySide6.QtGui import QDesktopServices
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.export_directory())))
+
+    def toggle_downloads(self) -> None:
+        if self.download_tray.isVisible():
+            self.download_tray.hide()
+            return
+        self.download_tray.refresh()
+        position = self.downloads_button.mapToGlobal(self.downloads_button.rect().bottomRight())
+        position.setX(position.x() - self.download_tray.width())
+        screen = self.screen().availableGeometry()
+        position.setX(max(screen.left(), min(position.x(), screen.right() - self.download_tray.width())))
+        position.setY(min(position.y(), screen.bottom() - self.download_tray.height()))
+        self.download_tray.move(position)
+        self.download_tray.show()
+        self.downloads_button.setText("↓")
+
     def export_project(self) -> None:
         if not self.segments:
             return
-        directory = Path(self.settings.value("last_document_dir", str(Path.home())))
-        path = choose_document_save(self, "Save Project", str(directory / f"{safe_export_name(self.current_project_name)}.LTXD"), "LTX Director - Director Project (*.LTXD *.ltxd)")
-        if not path:
-            return
-        if not path.lower().endswith(".ltxd"):
-            path += ".LTXD"
-        self.settings.setValue("last_document_dir", str(Path(path).parent))
+        path = str(self.next_export_path(f"{self.current_project_name}.LTXD"))
         payload = self.project_payload(include_media=False)
         serial = self._edit_serial
         project_id = self.current_project_id
@@ -6261,10 +6503,10 @@ class MainWindow(QMainWindow):
         def saved(_result):
             if self.current_project_id == project_id and self._edit_serial == serial:
                 self.project_dirty = False
-            self.statusBar().showMessage(f"Project saved: {path}")
+            self.record_export(path)
 
         self.start_disk_job(save_project_archive, (path, payload, copy.deepcopy(self.segments)), saved,
-                            lambda message: QMessageBox.critical(self, "Save failed", message), serialized=True)
+                            lambda message: self.export_failed(path, message), serialized=True)
 
     def open_project(self, checked: bool = False, path: str | None = None) -> None:
         path = path or choose_document_open(self, "Open Project", self.settings.value("last_document_dir", str(Path.home())), "LTX Director - Director Project (*.LTXD *.ltxd)")

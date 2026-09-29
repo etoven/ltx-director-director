@@ -18,10 +18,11 @@ class Segment:
     trim_start: int | None = None
     id: str = ""
     image_prompt: str = ""
+    prompt_detached: bool = False
 
     def __post_init__(self) -> None:
         self.id = self.id or str(uuid4())
-        self.duration = max(0.01, round(float(self.duration), 2))
+        self.duration = max(0.01, round(float(self.duration), 6))
 
     @property
     def exists(self) -> bool:

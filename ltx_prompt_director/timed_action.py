@@ -37,3 +37,45 @@ def compose_actions(prompt: str, segments, descriptions: list[str]) -> str:
         cues.append(f'{_minimax_timestamp(cursor)} - {_minimax_timestamp(end)}: {description}')
         cursor = end
     return before + '\n\n'.join(cues) + ('\n\n' + after if after else '')
+
+
+RANGE_LINE = re.compile(r"(?m)^[ \t]*(\d{2}:\d{2}:\d{2}:\d{2})[ \t]*-[ \t]*(\d{2}:\d{2}:\d{2}:\d{2})[ \t]*:[ \t]*(.*)$")
+
+
+def timecode_seconds(value: str, fps: int = 24) -> float:
+    hours, minutes, seconds, frames = map(int, value.split(":"))
+    if minutes >= 60 or seconds >= 60 or frames >= fps:
+        raise ValueError("Invalid SMPTE timecode")
+    return hours * 3600 + minutes * 60 + seconds + frames / fps
+
+
+def parse_timed_plan(prompt: str, fps: int = 24) -> list[dict]:
+    """Keep invalid cue positions so partial matches never shift later segment identities."""
+    section = SECTION.search(prompt)
+    begin = section.end() if section else 0
+    following = NEXT.search(prompt, begin)
+    end = following.start() if following else len(prompt)
+    body = prompt[begin:end]
+    # A malformed timecode-looking line is a cue, too; it must detach its segment.
+    starts = list(re.finditer(r"(?m)^[ \t]*\d{2}:\d{2}:[^\n]*", body))
+    plan = []
+    expected = 0.0
+    blocked = False
+    for index, start in enumerate(starts):
+        stop = starts[index + 1].start() if index + 1 < len(starts) else len(body)
+        chunk = body[start.start():stop].strip()
+        match = RANGE_LINE.match(chunk)
+        value = {"valid": False, "description": chunk, "start": None, "end": None}
+        if match:
+            value["description"] = chunk[match.start(3):].strip()
+            try:
+                a, b = timecode_seconds(match[1], fps), timecode_seconds(match[2], fps)
+                value.update(start=a, end=b)
+                value["valid"] = not blocked and b > a and abs(a - expected) < 0.5 / fps and bool(value["description"])
+                expected = b
+            except ValueError:
+                pass
+        if not value["valid"]:
+            blocked = True
+        plan.append(value)
+    return plan

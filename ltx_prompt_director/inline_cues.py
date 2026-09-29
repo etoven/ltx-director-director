@@ -3,9 +3,9 @@ from __future__ import annotations
 
 import re
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QKeySequence, QPainter, QPainterPath, QPen, QTextCharFormat, QTextCursor, QTextLength, QTextTableCellFormat, QTextTableFormat
-from PySide6.QtWidgets import QTextEdit
+from PySide6.QtWidgets import QTextEdit, QApplication
 
 from .ai import _minimax_timestamp
 from .timed_action import CUE, NEXT, SECTION
@@ -129,6 +129,8 @@ def _cursor_at(document, position):
 
 
 class PromptTextEdit(QTextEdit):
+    timedPasteRequested = Signal(str)
+
     """One shared editor; protect native MiniMax timecode cells from accidental edits."""
 
     def __init__(self, parent=None):
@@ -196,6 +198,12 @@ class PromptTextEdit(QTextEdit):
         return False
 
     def keyPressEvent(self, event):
+        if self.inline_cue_mode and event.matches(QKeySequence.StandardKey.Paste):
+            source = QApplication.clipboard().mimeData()
+            if source.hasText() and ("[TIMED ACTION]" in source.text() or re.search(r"(?m)^[ \t]*\d{2}:\d{2}:", source.text())):
+                self.insertFromMimeData(source)
+                event.accept()
+                return
         editing = bool(event.text() and not event.modifiers() & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.AltModifier))
         editing = editing or event.key() in (Qt.Key.Key_Backspace, Qt.Key.Key_Delete, Qt.Key.Key_Return, Qt.Key.Key_Enter)
         editing = editing or event.matches(QKeySequence.StandardKey.Paste) or event.matches(QKeySequence.StandardKey.Cut)
@@ -228,6 +236,9 @@ class PromptTextEdit(QTextEdit):
         super().keyPressEvent(event)
 
     def insertFromMimeData(self, source):
+        if self.inline_cue_mode and source.hasText() and (re.search(r"(?m)^[ \t]*\d{2}:\d{2}:", source.text()) or "[TIMED ACTION]" in source.text()):
+            self.timedPasteRequested.emit(source.text())
+            return
         if (self.inline_cue_mode or self.inline_note_mode) and self._protect_timecode():
             return
         super().insertFromMimeData(source)
@@ -254,6 +265,7 @@ def insert_cue_cells(editor, prompt: str, segments) -> bool:
     cues = list(CUE.finditer(prompt[section.end():body_end]))
     if not cues:
         return False
+    editor.setExtraSelections([])
     prefix, suffix = prompt[:section.end()], prompt[body_end:]
     editor.clear()
     cursor = editor.textCursor()
@@ -262,12 +274,13 @@ def insert_cue_cells(editor, prompt: str, segments) -> bool:
     elapsed = 0.0
     for segment in segments:
         end = elapsed + segment.duration
-        boundaries[(_minimax_timestamp(elapsed), _minimax_timestamp(end))] = segment.id
+        if not getattr(segment, "prompt_detached", False):
+            boundaries[(_minimax_timestamp(elapsed), _minimax_timestamp(end))] = segment.id
         elapsed = end
     used = set()
     for index, cue in enumerate(cues):
         segment_id = boundaries.get((cue.group(1), cue.group(2)))
-        if not segment_id and len(cues) == len(segments):
+        if not segment_id and len(cues) == len(segments) and not getattr(segments[index], "prompt_detached", False):
             segment_id = segments[index].id
         if segment_id in used:
             segment_id = None
@@ -301,3 +314,23 @@ def insert_cue_cells(editor, prompt: str, segments) -> bool:
         cursor.insertText('\n')
     cursor.insertText(suffix.lstrip('\n') if suffix else '')
     return True
+
+
+def focus_cue(editor, segment_id: str, *, focus: bool = True) -> bool:
+    block = editor.document().firstBlock()
+    while block.isValid():
+        table = _inline_table(_cursor_at(editor.document(), block.position()))
+        if table and table.format().property(CUE_ID) == segment_id:
+            cell = table.cellAt(0, 1)
+            selection = QTextEdit.ExtraSelection()
+            selection.cursor = cell.firstCursorPosition()
+            selection.cursor.setPosition(cell.lastCursorPosition().position(), QTextCursor.MoveMode.KeepAnchor)
+            selection.format.setBackground(QColor("#375a69"))
+            editor.setExtraSelections([selection])
+            if focus:
+                editor.setTextCursor(cell.firstCursorPosition())
+                editor.setFocus()
+                editor.ensureCursorVisible()
+            return True
+        block = block.next()
+    return False
