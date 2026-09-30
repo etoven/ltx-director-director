@@ -96,7 +96,7 @@ class StartupSplash(QSplashScreen):
                          QColor('#c8e2e7'))
 
     def drawContents(self, painter):
-        painter.fillRect(0, 534, self.width(), 24, QColor('#071521'))
+        painter.fillRect(2, 534, self.width() - 4, 22, QColor('#071521'))
         painter.setPen(QColor('#8fc9d0'))
         painter.setFont(QFont('Sans Serif', 9))
         painter.drawText(52, 550, self.message())

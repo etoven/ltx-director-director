@@ -27,7 +27,7 @@ References keep their original resolution in the saved project. AI analysis uses
 
 ## Choose the right source pattern
 
-**MiniMax · References** recognizes the supplied combination and prepares the prompt around it:
+**MiniMax** recognizes the supplied combination and prepares the prompt around it:
 
 | Your inputs | Recognized workflow | How to direct it |
 | --- | --- | --- |
@@ -40,9 +40,9 @@ References keep their original resolution in the saved project. AI analysis uses
 
 A start image anchors the beginning of its segment; an end image is reached at the segment’s end. Hover over the detected workflow label to inspect asset labels and checkpoint times. Video ranges follow the source metadata retained with the segment.
 
-## References and Frames work together
+## References and timeline frames work together
 
-Choose **Frames** when the sequence is organized around conditioning checkpoints. Choose **References** when opening/closing roles and the combination of sources drive the plan. Both support the two untimed image slots.
+Use the **MiniMax** workspace to combine timeline checkpoints, source video, and two untimed image references in one production brief.
 
 An untimed image supplies attributes rather than chronology: it does not add a segment, move a checkpoint or extend the plan. For a sequence guided entirely by the reference slots, add a text segment to establish the action and duration.
 

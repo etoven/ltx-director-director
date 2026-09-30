@@ -28,7 +28,7 @@ There is no fixed segment-count or total-length cap in the editor. The renderer 
 
 ## Anchor the opening and the destination
 
-**Start frame** tells a compatible workflow to begin a segment from its supplied image. **End frame** describes the image it should reach by that segment’s end. These controls are available in LTX and MiniMax References. MiniMax Frames uses the images as conditioning checkpoints in the ordered sequence.
+**Start frame** tells a compatible workflow to begin a segment from its supplied image. **End frame** describes the image it should reach by that segment’s end. These controls are available in LTX and MiniMax.
 
 Select a card in LTX to edit its segment prompt. Select a connected card in MiniMax to focus and highlight its timed action in the unified editor.
 

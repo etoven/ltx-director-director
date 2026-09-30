@@ -77,7 +77,7 @@ def shot(name, widget=None, height=None):
     print(name, flush=True)
 
 brief = '[FRAME USE]\nImage1 opens the journey. Image2 anchors the final horizon view.\n\n[CONTINUITY]\nOne continuous shot. Preserve the traveler, landscape and blue-gold lighting.\n\n[SCENE]\nA traveler approaches a mountain overlook beneath the northern lights.\n\n[TIMED ACTION]\n00:00:00:00 - 00:00:03:00: '+actions[0]+'\n\n00:00:03:00 - 00:00:08:00: '+actions[1]+'\n\n00:00:08:00 - 00:00:12:00: '+actions[2]+'\n\n[SOUND]\nSoft footsteps, mountain wind and coat fabric.\n\n[AVOID]\nAbrupt cuts, changing wardrobe or added music.'
-w.set_project_type('minimax_frames')
+w.set_project_type('minimax_references')
 w.conform_timed_prompt(brief)
 w.duration_animation.setCurrentTime(w.duration_animation.duration())
 w.autofit_timeline()
@@ -195,6 +195,27 @@ for name,content in [('Aurora - Director.json','{"demo":true}'),('Aurora - Revie
 w.toggle_downloads()
 shot('export-history',w.download_tray)
 w.download_tray.hide()
+# Global catalog with actual demonstration image and video sources.
+from ltx_prompt_director.catalog import CatalogStore
+w.media_catalog.store = CatalogStore(DEMO / 'media-catalog.json')
+w.media_catalog.store.entries = []
+w.media_catalog.store.folders = ['Aurora', 'Aurora/References']
+w.media_catalog.store.add([str(backdrop), str(video)], 'Aurora')
+for entry in w.media_catalog.store.entries:
+    entry['tags'] = ['Aurora', 'Review' if entry['path'].endswith('.mp4') else 'Reference']
+    entry['description'] = 'Aurora demonstration footage for the journey to the overlook.'
+w.media_catalog.store.save()
+w.media_catalog.refresh_folders()
+w.media_catalog.refresh_tiles()
+w.catalog_dock.setFloating(True)
+w.catalog_dock.resize(820, 580)
+w.catalog_dock.show()
+from PySide6.QtCore import QThreadPool
+QThreadPool.globalInstance().waitForDone(10000)
+settle()
+w.media_catalog.tiles.setCurrentRow(0)
+shot('media-catalog', w.catalog_dock)
+w.catalog_dock.hide()
 # Current settings and workspace editor.
 settings=ui.SettingsDialog(w.settings,w)
 settings.resize(960,850)

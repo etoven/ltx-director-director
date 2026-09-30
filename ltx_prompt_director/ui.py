@@ -38,6 +38,7 @@ from .minimax_reference import WORKFLOW_NAMES, detect_workflow, reference_invent
 from .minimax_reference_widgets import MiniMaxReferenceSlot
 from .generic_ai import build_generic_prompt, refine_generic_prompt, build_generic_segments, refine_generic_segment
 from .downloads import DownloadTray
+from .catalog import MediaCatalog
 from .workspaces import WorkspaceStore
 from .workspace_editor import WorkspaceEditor
 from .models import Segment, order_segments_by_ids, text_segment_from_ltx
@@ -2691,6 +2692,13 @@ class MainWindow(QMainWindow):
         self._build_project_preview_dock()
         self._build_project_files_dock()
         self._build_project_properties_dock()
+        self.catalog_dock = QDockWidget("Media Catalog", self)
+        self.catalog_dock.setObjectName("mediaCatalogDock")
+        self.media_catalog = MediaCatalog(self)
+        self.media_catalog.add_to_timeline.connect(self.add_media_paths)
+        self.catalog_dock.setWidget(self.media_catalog)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.catalog_dock)
+        self.catalog_dock.hide()
         toolbar = QToolBar("Project")
         toolbar.setObjectName("mainToolbar")
         toolbar.setMovable(False)
@@ -2711,12 +2719,15 @@ class MainWindow(QMainWindow):
         properties_action = self.project_properties_dock.toggleViewAction()
         properties_action.setText("Properties")
         toolbar.addAction(properties_action)
+        catalog_action = self.catalog_dock.toggleViewAction()
+        catalog_action.setIcon(toolbar_icon("catalog"))
+        toolbar.addAction(catalog_action)
         toolbar.addSeparator()
         action_groups = [
             (("New Project", "new", self.new_project),
              ("Open", "open", self.open_project),
              ("Save to Library", "save", self.save_library_project),
-             ("Export Project", "save", self.export_project)),
+             ("Export Project", "export-project", self.export_project)),
             (("Import", "import", self.import_ltx),
              ("Export", "export-ltx", self.export_workflow)),
             (("Delete selected", "delete", self.delete_selected),),
@@ -2733,7 +2744,9 @@ class MainWindow(QMainWindow):
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         toolbar.addWidget(spacer)
-        self.downloads_button = QPushButton("↓")
+        self.downloads_button = QPushButton()
+        self.downloads_button.setIcon(toolbar_icon("downloads"))
+        self.downloads_button.setIconSize(QSize(22, 22))
         self.downloads_button.setToolTip("Recent exports")
         self.downloads_button.clicked.connect(self.toggle_downloads)
         toolbar.addWidget(self.downloads_button)
@@ -2786,7 +2799,6 @@ class MainWindow(QMainWindow):
         self.direction_toggle = QCheckBox("Director’s Intent")
         self.direction_toggle.setChecked(self.settings.value("director_intent_expanded", True, bool))
         self.direction_toggle.setToolTip("Show Director's Intent and the options used for generation")
-        workflow_row.addWidget(self.direction_toggle)
         self.references_button = QPushButton("Reference images")
         self.references_button.clicked.connect(self.show_reference_images)
         workflow_row.addWidget(self.references_button)
@@ -3056,6 +3068,7 @@ class MainWindow(QMainWindow):
         segment_label = self.prompt_label
         segment_label.setObjectName("sectionLabel")
         self.segment_header.addWidget(segment_label)
+        self.segment_header.addWidget(self.direction_toggle)
         self.prompt_scope = QComboBox()
         self.prompt_scope.addItem("Selected segment", "segment")
         self.prompt_scope.addItem("Global prompt", "global")
@@ -5464,7 +5477,7 @@ class MainWindow(QMainWindow):
         if target:
             index, segment = target
             segment.prompt = consume_global_refinements(str(result["prompt"]))
-            segment.image_prompt = str(result["imagePrompt"]).strip()
+            segment.image_prompt = str(result.get("imagePrompt") or segment.image_prompt).strip()
             durations = [item.duration for item in self.segments]
             durations[index] = float(result["duration"])
             if self.timeline.currentRow() == index:
@@ -5507,7 +5520,7 @@ class MainWindow(QMainWindow):
         generated_segments = result["segments"]
         for segment, generated in zip(self.segments, generated_segments):
             segment.prompt = str(generated.get("prompt", segment.prompt))
-            segment.image_prompt = str(generated.get("imagePrompt", segment.image_prompt)).strip()
+            segment.image_prompt = str(generated.get("imagePrompt") or segment.image_prompt).strip()
             recommended = max(MIN_DURATION, round(float(generated.get("duration", segment.duration)), 2))
             target_durations.append(recommended)
         global_prompt = str(result.get("globalPrompt", "")).strip()
@@ -6485,7 +6498,7 @@ class MainWindow(QMainWindow):
         path = Path(path)
         self._reserved_exports.discard(str(path))
         self.download_tray.add(path)
-        self.downloads_button.setText("↓ •")
+        self.downloads_button.setText("•")
         self.downloads_button.setToolTip(f"Export ready: {path.name}\nClick for recent exports; drag files from the tray.")
         self.download_tray.list.setCurrentRow(0)
         if getattr(self, "_download_feedback_animation", None):
@@ -6527,7 +6540,7 @@ class MainWindow(QMainWindow):
         position.setY(min(position.y(), screen.bottom() - self.download_tray.height()))
         self.download_tray.move(position)
         self.download_tray.show()
-        self.downloads_button.setText("↓")
+        self.downloads_button.setText("")
 
     def export_project(self) -> None:
         if not self.segments:

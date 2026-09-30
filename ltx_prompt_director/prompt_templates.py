@@ -12,7 +12,7 @@ WORKSPACE_PROMPTS = ContextVar("workspace_prompts", default=None)
 
 @lru_cache(maxsize=12)
 def stock_prompt(engine: str, kind: str) -> str:
-    value = json.loads(files("ltx_prompt_director").joinpath(f"{'engine_templates' if engine == 'generic' else 'workspace_templates'}/{engine}.json").read_text(encoding="utf-8"))
+    value = json.loads(files("ltx_prompt_director").joinpath(f"{'engine_templates' if engine in {'generic', 'minimax_frames'} else 'workspace_templates'}/{engine}.json").read_text(encoding="utf-8"))
     return value["generation_prompts"][kind]
 
 

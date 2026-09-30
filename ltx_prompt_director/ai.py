@@ -33,7 +33,7 @@ class AIResponseFormatError(ValueError):
 def build_prompts(segments: list[Segment], provider: str, model: str, api_key: str, intent: str, sfx: bool, spoken_dialog: bool, hdr: bool, reduce_music: bool, timeout: int = 400) -> dict:
     images = [_segment_input(item) for item in segments]
     rules = _rules(len(images), intent, sfx, spoken_dialog, hdr, reduce_music, sum(item.kind == "text" for item in segments))
-    rules += f'\n\nRequired transport: exactly {len(segments)} segment records in input order. Return JSON with segments (each duration, prompt, imagePrompt) and globalPrompt. Each duration must be positive and finite. Preserve all media and segment identities.'
+    rules += f'\n\nRequired transport: exactly {len(segments)} segment records in input order. Return JSON with segments (each duration, prompt) and globalPrompt. Each duration must be positive and finite. Preserve all media and segment identities.'
     if provider == "openai":
         return _openai(images, api_key, rules, timeout, sfx, spoken_dialog)
     return _gemini(images, api_key, model, rules, timeout, sfx, spoken_dialog)
@@ -239,7 +239,7 @@ def refine_segment_prompt(segments: list[Segment], selected_index: int, provider
         raise ValueError("The selected segment needs an existing prompt before it can be refined.")
     images = _refinement_images(segments, selected_index)
     rules = _prompt_refinement_rules(segments, selected_index, intent, requested_total)
-    rules += '\n\nRequired response schema: {"prompt":"refined selected prompt","imagePrompt":"audio-free still-image prompt","duration":5.0}. Return only the selected segment, with a positive finite duration.'
+    rules += '\n\nRequired response schema: {"prompt":"refined selected prompt","duration":5.0}. Return only the selected segment, with a positive finite duration.'
     raw = _provider_raw(images, provider, model, api_key, rules, timeout)
     result = _parse_json(raw)
     if not isinstance(result, dict):
@@ -248,8 +248,6 @@ def refine_segment_prompt(segments: list[Segment], selected_index: int, provider
     if not isinstance(prompt, str) or not prompt.strip():
         raise AIResponseFormatError("The AI returned no refined prompt. The operation will retry.")
     image_prompt = _image_prompt_value(result)
-    if not image_prompt:
-        raise AIResponseFormatError("The AI returned no Gemini image-generation prompt. The operation will retry.")
     duration = _strict_duration(result.get("duration"))
     return {"prompt": prompt.strip(), "imagePrompt": image_prompt, "duration": duration}
 
@@ -508,7 +506,7 @@ def _strict_duration(value: object) -> float:
 
 
 def _image_prompt_value(value: dict) -> str:
-    prompt = value.get("imagePrompt") or value.get("image_prompt") or value.get("geminiImagePrompt") or value.get("gemini_image_prompt")
+    prompt = value.get("imagePrompt") or value.get("image_prompt")
     return prompt.strip() if isinstance(prompt, str) else ""
 
 
@@ -722,8 +720,6 @@ def _validate(raw: str, expected: int, require_sfx: bool = False, require_spoken
         if not isinstance(prompt, str) or not prompt.strip():
             raise AIResponseFormatError("The AI returned a segment without a prompt. Magic Build will retry.")
         image_prompt = _image_prompt_value(segment)
-        if not image_prompt:
-            raise AIResponseFormatError("The AI returned a segment without a Gemini image-generation prompt. Magic Build will retry.")
         prompt_lower = prompt.casefold()
         if require_sfx and "sfx:" not in prompt_lower:
             raise AIResponseFormatError("The AI omitted required SFX direction. Magic Build will retry.")
@@ -786,7 +782,7 @@ def _normalize_single_frame_result(result: object) -> object:
         if isinstance(singular, dict):
             normalized["segments"] = [singular]
         elif any(key in normalized for key in ("prompt", "segmentPrompt", "segment_prompt")):
-            normalized["segments"] = [{key: normalized[key] for key in ("duration", "prompt", "segmentPrompt", "segment_prompt", "imagePrompt", "image_prompt", "geminiImagePrompt", "gemini_image_prompt") if key in normalized}]
+            normalized["segments"] = [{key: normalized[key] for key in ("duration", "prompt", "segmentPrompt", "segment_prompt", "imagePrompt", "image_prompt") if key in normalized}]
     return normalized
 
 

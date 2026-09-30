@@ -8,7 +8,7 @@ Build a visual plan for AI video, turn it into a detailed production prompt, and
 
 ![The Aurora workspace: a visual timeline, creative direction and one continuous MiniMax production brief](docs/images/ltx-director-director-overview.png)
 
-*Current release: Aurora 1.13.0a19 on `experimental`. Screenshots show the current native app with an authored demonstration project.*
+*Current release: Aurora 1.13.0a20 on `experimental`. Screenshots show the current native app with an authored demonstration project.*
 
 ## See the story before you generate
 
@@ -24,8 +24,7 @@ Replace a frame without rebuilding the beat. Copy an original image to the clipb
 
 | Your creative approach | Your workspace | Your result |
 | --- | --- | --- |
-| Connect a sequence of visual checkpoints | **MiniMax · Frames** | One production brief with timed action, continuity, scene and sound direction |
-| Combine opening and closing frames, source video and visual references | **MiniMax · References** | A brief shaped around the roles of your supplied assets |
+| Combine opening and closing frames, source video and visual references | **MiniMax** | A brief shaped around the roles of your supplied assets |
 | Develop the movement of each timeline segment | **LTX Video** | Individual segment prompts and a shared global prompt, ready for Director JSON export |
 | Bring your own prompting style | **Generic workspace** | A unified or segmented editor with your own generation and refinement instructions |
 
@@ -49,11 +48,17 @@ Keep your editing requests beside the passage they affect. Inline **Refinement, 
 
 ## Keep identity, atmosphere and composition in view
 
-Two untimed reference-image slots in the MiniMax workspaces let you guide **Identity, Wardrobe, Setting, Visual style, Object / prop or Composition**. Add a picture by dropping it, browsing or pasting; explain the attributes you want in its notes. Timeline media sets the chronology. These image slots supply visual guidance.
+Two untimed reference-image slots in the MiniMax workspace let you guide **Identity, Wardrobe, Setting, Visual style, Object / prop or Composition**. Add a picture by dropping it, browsing or pasting; explain the attributes you want in its notes. Timeline media sets the chronology. These image slots supply visual guidance.
 
 ![Reference images with explicit visual roles alongside the timed production brief](docs/images/minimax-references.png)
 
 **[Make the most of reference images →](docs/minimax-references.md)**
+
+## Keep your media ready for the next project
+
+Open the dockable **Media Catalog** to browse images and videos as large preview tiles. Organize your collection into folders, add searchable tags and short descriptions, and select several assets at once. Drag media onto the timeline, between catalog folders, or into your file manager.
+
+![Global image and video catalog](docs/images/media-catalog.png)
 
 ## Build a library of work you can return to
 
@@ -88,7 +93,7 @@ Customize the workspace itself in **Settings → Workspaces**: choose the editor
 Install the current experimental wheel:
 
 ```bash
-python3 -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a19-py3-none-any.whl'
+python3 -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a20-py3-none-any.whl'
 ltx-director-director
 ```
 

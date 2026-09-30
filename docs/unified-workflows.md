@@ -8,24 +8,23 @@ Director keeps the visual timeline and writing space together whether you are de
 
 | Workspace | Best suited to | What you develop |
 | --- | --- | --- |
-| MiniMax · Frames | A sequence of visual conditioning checkpoints | One continuous production brief |
-| MiniMax · References | Opening/closing frames, source clips or attribute references | A production brief with explicit asset roles |
+| MiniMax | Opening/closing frames, source clips or attribute references | A production brief with explicit asset roles |
 | LTX Video | Individual motion beats with shared continuity | Segment prompts plus a global prompt |
 | Generic | A custom prompting process | Unified or segmented prompts using your templates |
 
 ## MiniMax: direct the whole sequence
 
-Select **MiniMax · Frames**, add your checkpoints and describe the movement between them in **Director’s Intent**. **Generate Prompt** develops a brief that can include frame or reference use, continuity, scene, timed action, sound and avoid instructions.
+Select **MiniMax**, add your checkpoints and describe the movement between them in **Director’s Intent**. **Generate Prompt** develops a brief that can include frame or reference use, continuity, scene, timed action, sound and avoid instructions.
 
 The **[TIMED ACTION]** section presents each range beside its editable action. The timecode column is protected during ordinary editing. Select a timeline card to focus the corresponding action; edit the action’s words or change the card’s duration to develop the same connected plan.
 
-Choose **MiniMax · References** when the role of each source matters: an opening image, a destination frame, source footage or an untimed style or identity guide. Add up to two untimed images in **Reference images** and specify the attributes to draw from each one.
+Choose **MiniMax** when the role of each source matters: an opening image, a destination frame, source footage or an untimed style or identity guide. Add up to two untimed images in **Reference images** and specify the attributes to draw from each one.
 
 ![MiniMax References with an untimed atmosphere image and an editable production brief](images/minimax-references.png)
 
 **Refine Prompt** works on the complete edited brief, your inline instructions and the available references. You can also write or paste your own prompt and refine that draft. Use **Copy** to take the visible brief into your video workflow.
 
-Frames and References retain independent drafts in the project. Switching approaches lets you explore a different brief while keeping the other draft available.
+LTX and MiniMax retain their prompt drafts in the project. Custom workspace definitions can provide additional prompting approaches.
 
 ## LTX: give every moment its own direction
 

@@ -60,6 +60,26 @@ class WorkspaceStore:
         if not (self.root / ".initialized").exists():
             self.restore_stock(overwrite=False)
             (self.root / ".initialized").touch()
+        marker = self.root / ".stock-single-minimax"
+        if not marker.exists():
+            import hashlib
+            original_hashes = {'minimax_references': '76e1e3d0b159bb5a64620f9e5e15ebee3f052a5fcafd7e6f72424caea643015d', 'minimax_frames': '79aa0f7a834319d465bfb61fe49eb4ce09572b326bc2a31d8e9f5483c2241b9e', 'ltx': 'd84c9c0c4ba1f498d2284dbde26c1b098d400dea4d7d6c75f9a33385be16349a'}
+            for workspace_id, original_hash in original_hashes.items():
+                path = self.root / f"{workspace_id}.json"
+                if not path.exists():
+                    continue
+                try:
+                    value = json.loads(path.read_text(encoding="utf-8"))
+                    unchanged = hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest() == original_hash
+                    if unchanged:
+                        if workspace_id == "minimax_frames":
+                            path.unlink()
+                        else:
+                            stock = files("ltx_prompt_director").joinpath(f"workspace_templates/{workspace_id}.json")
+                            self.save(json.loads(stock.read_text(encoding="utf-8")))
+                except (OSError, ValueError):
+                    pass
+            marker.touch()
         self.errors: list[str] = []
 
     def load(self) -> dict[str, dict]:

@@ -1,0 +1,376 @@
+"""Application-wide media catalog with native file URL interchange."""
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from uuid import uuid4
+
+from PySide6.QtCore import Qt, QSize, QMimeData, QUrl, Signal, QObject, QRunnable, QThreadPool, QStandardPaths
+from PySide6.QtGui import QDrag, QIcon, QDesktopServices
+from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton,
+    QTreeWidget, QTreeWidgetItem, QListWidget, QListWidgetItem, QAbstractItemView,
+    QSplitter, QMenu, QInputDialog, QFileDialog, QDialog, QFormLayout, QTextEdit,
+    QDialogButtonBox, QMessageBox, QStyle)
+from .media import prepare_media, TIMELINE_VIDEO_SUFFIXES
+
+MEDIA_SUFFIXES = {'.png', '.jpg', '.jpeg', '.webp', '.bmp', '.tif', '.tiff'} | TIMELINE_VIDEO_SUFFIXES
+ROLE = Qt.ItemDataRole.UserRole
+
+
+class CatalogStore:
+    def __init__(self, path=None):
+        self.path = Path(path) if path else Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppDataLocation)) / 'media-catalog.json'
+        self.entries = []
+        self.folders = []
+        if self.path.exists():
+            value = json.loads(self.path.read_text(encoding='utf-8'))
+            self.entries = value.get('entries', [])
+            self.folders = value.get('folders', [])
+
+    def save(self):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = self.path.with_suffix('.tmp')
+        temporary.write_text(json.dumps({'schema_version': 1, 'entries': self.entries, 'folders': self.folders}, indent=2), encoding='utf-8')
+        temporary.replace(self.path)
+
+    def add(self, paths, folder=''):
+        added = []
+        for path in paths:
+            source = Path(path).resolve()
+            if not source.is_file() or source.suffix.lower() not in MEDIA_SUFFIXES:
+                continue
+            entry = next((e for e in self.entries if e['path'] == str(source)), None)
+            if entry:
+                entry['folder'] = folder
+            else:
+                entry = {'id': uuid4().hex, 'path': str(source), 'name': source.name,
+                         'folder': folder, 'tags': [], 'description': ''}
+                self.entries.append(entry)
+            added.append(entry)
+        self.save()
+        return added
+
+    def move(self, paths, folder):
+        resolved = {str(Path(p).resolve()) for p in paths}
+        for entry in self.entries:
+            if entry['path'] in resolved:
+                entry['folder'] = folder
+        self.save()
+
+
+class PreviewSignals(QObject):
+    ready = Signal(str, str)
+
+
+class PreviewJob(QRunnable):
+    def __init__(self, entry_id, path):
+        super().__init__()
+        self.entry_id, self.path = entry_id, path
+        self.signals = PreviewSignals()
+
+    def run(self):
+        try:
+            _, preview, _, _ = prepare_media(self.path)
+        except Exception:
+            preview = ''
+        self.signals.ready.emit(self.entry_id, preview)
+
+
+def local_paths(mime):
+    return [url.toLocalFile() for url in mime.urls() if url.isLocalFile()]
+
+
+class CatalogTiles(QListWidget):
+    dropped = Signal(list)
+    def __init__(self):
+        super().__init__()
+        self.setViewMode(QListWidget.ViewMode.IconMode)
+        self.setResizeMode(QListWidget.ResizeMode.Adjust)
+        self.setMovement(QListWidget.Movement.Static)
+        self.setIconSize(QSize(156, 112))
+        self.setGridSize(QSize(184, 160))
+        self.setWordWrap(True)
+        self.setSpacing(8)
+        self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.setDragEnabled(True)
+        self.setAcceptDrops(True)
+        self.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
+
+    def startDrag(self, actions):
+        paths = [item.data(ROLE)['path'] for item in self.selectedItems() if Path(item.data(ROLE)['path']).is_file()]
+        if paths:
+            mime = QMimeData()
+            mime.setUrls([QUrl.fromLocalFile(path) for path in paths])
+            drag = QDrag(self)
+            drag.setMimeData(mime)
+            drag.exec(Qt.DropAction.CopyAction)
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dragMoveEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dropEvent(self, event):
+        self.dropped.emit(local_paths(event.mimeData()))
+        event.acceptProposedAction()
+
+
+class FolderTree(QTreeWidget):
+    dropped = Signal(list, str)
+    def __init__(self):
+        super().__init__()
+        self.setHeaderHidden(True)
+        self.setAcceptDrops(True)
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dragMoveEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dropEvent(self, event):
+        item = self.itemAt(event.position().toPoint())
+        if item:
+            self.dropped.emit(local_paths(event.mimeData()), item.data(0, ROLE) or '')
+            event.acceptProposedAction()
+
+
+class MediaCatalog(QWidget):
+    add_to_timeline = Signal(list)
+    def __init__(self, parent=None, store=None):
+        super().__init__(parent)
+        self.store = store or CatalogStore()
+        self.current_folder = None
+        self.previews, self.pending = {}, set()
+        layout = QVBoxLayout(self)
+        tools = QHBoxLayout()
+        self.search = QLineEdit()
+        self.search.setPlaceholderText('Search names, tags and descriptions…')
+        tools.addWidget(self.search, 1)
+        add = QPushButton('Import media')
+        add.clicked.connect(self.import_media)
+        tools.addWidget(add)
+        folder = QPushButton('New folder')
+        folder.clicked.connect(self.new_folder)
+        tools.addWidget(folder)
+        layout.addLayout(tools)
+        split = QSplitter()
+        self.folders = FolderTree()
+        self.tiles = CatalogTiles()
+        split.addWidget(self.folders)
+        split.addWidget(self.tiles)
+        split.setStretchFactor(1, 1)
+        split.setSizes([160, 480])
+        layout.addWidget(split)
+        self.description = QTextEdit()
+        self.description.setReadOnly(True)
+        self.description.setMaximumHeight(80)
+        self.description.setPlaceholderText('Select a tile to see its description. Right-click to edit.')
+        layout.addWidget(self.description)
+        self.search.textChanged.connect(self.refresh_tiles)
+        self.folders.currentItemChanged.connect(self.select_folder)
+        self.folders.dropped.connect(self.drop_into_folder)
+        self.tiles.dropped.connect(lambda paths: self.import_paths(paths, self.current_folder or ''))
+        self.tiles.itemSelectionChanged.connect(self.show_description)
+        self.tiles.itemDoubleClicked.connect(lambda item: QDesktopServices.openUrl(QUrl.fromLocalFile(item.data(ROLE)['path'])))
+        self.tiles.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.tiles.customContextMenuRequested.connect(self.context_menu)
+        self.folders.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.folders.customContextMenuRequested.connect(self.folder_menu)
+        self.refresh_folders()
+        self.refresh_tiles()
+
+    def refresh_folders(self):
+        self.folders.blockSignals(True)
+        self.folders.clear()
+        items = {}
+        for label, key in [('All media', None), ('Unfiled', '')]:
+            item = QTreeWidgetItem([label])
+            item.setData(0, ROLE, key)
+            self.folders.addTopLevelItem(item)
+        for folder in sorted(self.store.folders):
+            parent = items.get(folder.rpartition('/')[0])
+            item = QTreeWidgetItem([folder.rsplit('/', 1)[-1]])
+            item.setData(0, ROLE, folder)
+            if parent:
+                parent.addChild(item)
+            else:
+                self.folders.addTopLevelItem(item)
+            items[folder] = item
+        self.folders.expandAll()
+        chosen = items.get(self.current_folder)
+        if chosen is None:
+            chosen = self.folders.topLevelItem(1 if self.current_folder == '' else 0)
+        self.folders.setCurrentItem(chosen)
+        self.folders.blockSignals(False)
+
+    def select_folder(self, item, previous):
+        self.current_folder = item.data(0, ROLE) if item else None
+        self.refresh_tiles()
+
+    def refresh_tiles(self):
+        self.tiles.clear()
+        query = self.search.text().strip().casefold()
+        for entry in self.store.entries:
+            if self.current_folder is not None and entry['folder'] != self.current_folder:
+                continue
+            if query and query not in ' '.join([entry['name'], entry['description'], *entry['tags']]).casefold():
+                continue
+            icon = QIcon(self.previews[entry['id']]) if self.previews.get(entry['id']) else self.style().standardIcon(QStyle.StandardPixmap.SP_FileIcon)
+            missing = not Path(entry['path']).is_file()
+            item = QListWidgetItem(icon, entry['name'] + ('\nMissing file' if missing else ''))
+            item.setData(ROLE, entry)
+            item.setToolTip('\n'.join([entry['path'], ', '.join(entry['tags']), entry['description']]))
+            self.tiles.addItem(item)
+            if not missing and entry['id'] not in self.pending and entry['id'] not in self.previews:
+                self.pending.add(entry['id'])
+                job = PreviewJob(entry['id'], entry['path'])
+                job.signals.ready.connect(self.preview_ready)
+                QThreadPool.globalInstance().start(job)
+
+    def preview_ready(self, entry_id, preview):
+        self.pending.discard(entry_id)
+        self.previews[entry_id] = preview
+        for index in range(self.tiles.count()):
+            item = self.tiles.item(index)
+            if item.data(ROLE)['id'] == entry_id and preview:
+                item.setIcon(QIcon(preview))
+
+    def show_description(self):
+        selected = self.tiles.selectedItems()
+        self.description.setPlainText(selected[0].data(ROLE)['description'] if len(selected) == 1 else f'{len(selected)} items selected' if selected else '')
+
+    def import_media(self):
+        paths, _ = QFileDialog.getOpenFileNames(self, 'Import catalog media', '', 'Images and videos (*.png *.jpg *.jpeg *.webp *.bmp *.tif *.tiff *.mp4 *.webm)')
+        if paths:
+            self.import_paths(paths, self.current_folder or '')
+
+    def import_paths(self, paths, folder):
+        expanded = []
+        for path in paths:
+            source = Path(path)
+            if source.is_dir():
+                prefix = '/'.join(filter(None, [folder, source.name]))
+                if prefix not in self.store.folders:
+                    self.store.folders.append(prefix)
+                for file in source.rglob('*'):
+                    if file.is_file() and file.suffix.lower() in MEDIA_SUFFIXES:
+                        relative = file.parent.relative_to(source).as_posix()
+                        destination = prefix if relative == '.' else prefix + '/' + relative
+                        parts = destination.split('/')
+                        for index in range(1, len(parts) + 1):
+                            name = '/'.join(parts[:index])
+                            if name not in self.store.folders:
+                                self.store.folders.append(name)
+                        self.store.add([str(file)], destination)
+            else:
+                expanded.append(path)
+        self.store.add(expanded, folder)
+        self.refresh_folders()
+        self.refresh_tiles()
+
+    def drop_into_folder(self, paths, folder):
+        self.import_paths(paths, folder)
+
+    def new_folder(self):
+        name, ok = QInputDialog.getText(self, 'New catalog folder', 'Folder name:')
+        if ok and name.strip() and '/' not in name and name.strip() not in {'.', '..'}:
+            folder = '/'.join(filter(None, [self.current_folder, name.strip()]))
+            if folder not in self.store.folders:
+                self.store.folders.append(folder)
+                self.store.save()
+                self.refresh_folders()
+
+    def folder_menu(self, point):
+        item = self.folders.itemAt(point)
+        if not item or not item.data(0, ROLE):
+            return
+        folder = item.data(0, ROLE)
+        menu = QMenu(self)
+        rename = menu.addAction('Rename folder')
+        remove = menu.addAction('Remove folder (keep media)')
+        action = menu.exec(self.folders.mapToGlobal(point))
+        if action == rename:
+            name, ok = QInputDialog.getText(self, 'Rename folder', 'Folder name:', text=folder.rsplit('/', 1)[-1])
+            if not ok or not name.strip() or '/' in name or name.strip() in {'.', '..'}:
+                return
+            destination = '/'.join(filter(None, [folder.rpartition('/')[0], name.strip()]))
+            if destination in self.store.folders:
+                return
+            mapping = {f: destination + f[len(folder):] for f in self.store.folders if f == folder or f.startswith(folder + '/')}
+            self.store.folders = [mapping.get(f, f) for f in self.store.folders]
+            for entry in self.store.entries:
+                entry['folder'] = mapping.get(entry['folder'], entry['folder'])
+        elif action == remove:
+            removed = {f for f in self.store.folders if f == folder or f.startswith(folder + '/')}
+            self.store.folders = [f for f in self.store.folders if f not in removed]
+            for entry in self.store.entries:
+                if entry['folder'] in removed:
+                    entry['folder'] = ''
+        else:
+            return
+        self.current_folder = None
+        self.store.save()
+        self.refresh_folders()
+        self.refresh_tiles()
+
+    def context_menu(self, point):
+        item = self.tiles.itemAt(point)
+        if item and not item.isSelected():
+            self.tiles.setCurrentItem(item)
+        entries = [item.data(ROLE) for item in self.tiles.selectedItems()]
+        if not entries:
+            return
+        menu = QMenu(self)
+        menu.addAction('Add to timeline', lambda: self.add_to_timeline.emit([e['path'] for e in entries if Path(e['path']).is_file()]))
+        menu.addAction('Edit details…', lambda: self.edit_details(entries))
+        move = menu.addMenu('Move to folder')
+        for folder in ['', *sorted(self.store.folders)]:
+            move.addAction(folder or 'Unfiled', lambda checked=False, f=folder: self.move_entries(entries, f))
+        menu.addAction('Open containing folder', lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(Path(entries[0]['path']).parent))))
+        menu.addAction('Remove from catalog', lambda: self.remove_entries(entries))
+        menu.exec(self.tiles.mapToGlobal(point))
+
+    def move_entries(self, entries, folder):
+        self.store.move([e['path'] for e in entries], folder)
+        self.refresh_tiles()
+
+    def remove_entries(self, entries):
+        ids = {e['id'] for e in entries}
+        self.store.entries = [e for e in self.store.entries if e['id'] not in ids]
+        self.store.save()
+        self.refresh_tiles()
+
+    def edit_details(self, entries):
+        dialog = QDialog(self)
+        dialog.setWindowTitle('Edit media details' if len(entries) == 1 else 'Edit selected media')
+        form = QFormLayout(dialog)
+        name = QLineEdit(entries[0]['name'])
+        if len(entries) == 1:
+            form.addRow('Display name', name)
+        tags = QLineEdit(', '.join(entries[0]['tags']) if len(entries) == 1 else '')
+        tags.setPlaceholderText('Comma-separated tags; blank keeps current tags for multiple items')
+        form.addRow('Tags', tags)
+        description = QTextEdit()
+        description.setPlainText(entries[0]['description'] if len(entries) == 1 else '')
+        description.setPlaceholderText('Short description; blank keeps current descriptions for multiple items')
+        form.addRow('Description', description)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        form.addRow(buttons)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            for entry in entries:
+                if len(entries) == 1:
+                    entry['name'] = name.text().strip() or Path(entry['path']).name
+                if len(entries) == 1 or tags.text().strip():
+                    entry['tags'] = list(dict.fromkeys(t.strip() for t in tags.text().split(',') if t.strip()))
+                if len(entries) == 1 or description.toPlainText().strip():
+                    entry['description'] = description.toPlainText().strip()
+            self.store.save()
+            self.refresh_tiles()

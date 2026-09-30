@@ -38,7 +38,7 @@ Add dated tasks and notes, edit their text or date, check them off when complete
 
 Several saved projects can remain open as in-memory workspaces. Switching restores each project’s timeline, prompts, options and view. Use **Save to Library** to write creative edits to disk; closing the app saves dirty library projects with visible progress. Give a new unsaved project an initial library save or portable export to establish its destination.
 
-MiniMax Frames and References drafts remain independent. Projects also retain their attached review video and workflow JSON files, so you can return to the prompt and its production context together.
+LTX and MiniMax retain their prompt drafts across workspace changes. Projects also retain their attached review video and workflow JSON files, so you can return to the prompt and its production context together.
 
 ## Carry the complete project
 

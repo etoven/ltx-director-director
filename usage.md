@@ -6,12 +6,12 @@ Start with an image, a video clip or a written beat. Arrange the sequence, descr
 
 ![A complete MiniMax plan in the Aurora workspace](docs/images/ltx-director-director-overview.png)
 
-*The examples throughout this guide use the current 1.13.0a19 native interface with a locally authored Aurora demonstration project.*
+*The examples throughout this guide use the current 1.13.0a20 native interface with a locally authored Aurora demonstration project.*
 
 ## Your first sequence
 
 1. Open **Settings**, choose Gemini or OpenAI and enter that provider’s API key. You can edit and organize projects before configuring AI.
-2. Choose **LTX Video**, **MiniMax · Frames** or **MiniMax · References** from **Project type**.
+2. Choose **LTX Video** or **MiniMax** from **Project type**.
 3. Use **Add media** or drop supported images, MP4 or WebM clips onto the timeline. Use **Add text** for a beat described in words.
 4. Arrange the segments and set their durations. Expand **Director’s Intent**, describe the sequence, and choose a total length or Auto.
 5. Select **Magic Build** in LTX or **Generate Prompt** in MiniMax. Review the generated text and refine it as needed.
@@ -50,7 +50,7 @@ AI generation is an explicit action. Switching workspaces and adding media let y
 | Linked MiniMax cues | Navigate between beat and brief | Select a timeline segment to focus its timed action |
 | Timed prompt paste | Reshape the timeline from a written plan | Paste contiguous 24 fps SMPTE ranges into the unified editor |
 | Two reference slots | Guide untimed visual attributes | Drop, browse or paste images; choose roles and enter notes |
-| Independent drafts | Explore different prompting approaches | Switch project types; MiniMax Frames and References retain separate drafts |
+| Independent drafts | Explore different prompting approaches | Switch between LTX and MiniMax; each workspace retains its own prompt draft |
 | Prompt copy | Send the visible text into your workflow | Use the editor’s Copy button |
 | Project library | Keep an accessible portfolio of plans | Save to Library, then open Projects |
 | Collections | Group related creative work | Set a collection in project details or Properties |
@@ -90,3 +90,15 @@ Follow the illustrated guides for practical examples:
 ## A working rhythm you can make your own
 
 Build the visual order first, then describe what changes between the checkpoints. Generate a draft, read it alongside the timeline and refine the moments that need attention. Bring the rendered video back to the project, capture a useful frame and use it to plan the next pass. Save the project before finishing the session; use a portable export when you want to carry the work elsewhere.
+
+## Global media catalog
+
+![Global media catalog](docs/images/media-catalog.png)
+
+Open **Media Catalog** from the top toolbar. Dock it beside the timeline or float it on another display. Your image and video collection is available across every project.
+
+Import files or drop files and folders from your file manager. Browse large preview tiles, select several with Ctrl/Shift, and search names, tags, or descriptions. Right-click a selection to edit its tags and short description, move it into a catalog folder, or add it to the timeline. Create folders with **New folder**; select a folder first to create a subfolder. Drag tiles onto a folder to organize them, onto the timeline to insert them, or into a file manager using native file URLs.
+
+Catalog folders organize references to your original files. Removing a catalog entry or folder keeps the source media on disk. A missing source stays visible with a **Missing file** label.
+
+The app ships with one **LTX Video** workspace and one **MiniMax** workspace. LTX generation and refinement return video prompts and timing without requiring a separate still-image prompt. The **Director’s Intent** checkbox is in the prompt box header; its collapsed state is shared across modes and remembered after restart.
