@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from uuid import uuid4
 
-from PySide6.QtCore import Qt, QSize, QMimeData, QUrl, Signal, QObject, QRunnable, QThreadPool, QStandardPaths
+from PySide6.QtCore import QEvent, Qt, QSize, QMimeData, QUrl, Signal, QObject, QRunnable, QThreadPool, QStandardPaths
 from PySide6.QtGui import QDrag, QIcon, QDesktopServices
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton,
     QTreeWidget, QTreeWidgetItem, QListWidget, QListWidgetItem, QAbstractItemView,
@@ -184,6 +184,47 @@ class MediaCatalog(QWidget):
         self.folders.customContextMenuRequested.connect(self.folder_menu)
         self.refresh_folders()
         self.refresh_tiles()
+        # Native drag events land on the child under the pointer, including
+        # scroll-area viewports and text boxes. Route every surface through
+        # the catalog rather than letting a child consume file URLs as text.
+        self.setAcceptDrops(True)
+        for widget in self.findChildren(QWidget):
+            widget.setAcceptDrops(True)
+            widget.installEventFilter(self)
+
+    def accepts_files(self, mime):
+        return any(Path(path).is_dir() or
+                   (Path(path).is_file() and Path(path).suffix.lower() in MEDIA_SUFFIXES)
+                   for path in local_paths(mime))
+
+    def handle_file_event(self, watched, event):
+        if not self.accepts_files(event.mimeData()):
+            event.ignore()
+            return True
+        if event.type() == QEvent.Type.Drop:
+            folder = self.current_folder or ''
+            if watched is self.folders.viewport():
+                item = self.folders.itemAt(event.position().toPoint())
+                if item:
+                    folder = item.data(0, ROLE) or ''
+            self.import_paths(local_paths(event.mimeData()), folder)
+        event.setDropAction(Qt.DropAction.CopyAction)
+        event.accept()
+        return True
+
+    def eventFilter(self, watched, event):
+        if event.type() in {QEvent.Type.DragEnter, QEvent.Type.DragMove, QEvent.Type.Drop}:
+            return self.handle_file_event(watched, event)
+        return super().eventFilter(watched, event)
+
+    def dragEnterEvent(self, event):
+        self.handle_file_event(self, event)
+
+    def dragMoveEvent(self, event):
+        self.handle_file_event(self, event)
+
+    def dropEvent(self, event):
+        self.handle_file_event(self, event)
 
     def refresh_folders(self):
         self.folders.blockSignals(True)

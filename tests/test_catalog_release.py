@@ -117,3 +117,55 @@ def test_untouched_factory_workspace_upgrade_and_custom_preservation(tmp_path):
     assert 'imagePrompt' not in values['ltx']['generation_prompts']['generate']
     assert values['minimax_references']['name'] == 'MiniMax'
     assert values['my_custom'] == custom
+
+
+def test_native_filesystem_drop_on_every_catalog_surface(tmp_path):
+    from PySide6.QtCore import QPoint, QPointF, QThreadPool
+    from PySide6.QtGui import QDragEnterEvent, QDragMoveEvent, QDropEvent
+    app = QApplication.instance() or QApplication([])
+    catalog = MediaCatalog(store=CatalogStore(tmp_path / 'catalog.json'))
+    catalog.resize(760, 500)
+    catalog.show()
+    app.processEvents()
+    try:
+        for index, target in enumerate([catalog, catalog.tiles.viewport(), catalog.description.viewport(), catalog.search]):
+            path = tmp_path / f'Frame {index}.png'
+            Image.new('RGB', (16, 16), 'green').save(path)
+            mime = QMimeData()
+            mime.setUrls([QUrl.fromLocalFile(str(path))])
+            for event in [QDragEnterEvent(QPoint(5, 5), Qt.DropAction.CopyAction, mime, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier),
+                          QDragMoveEvent(QPoint(5, 5), Qt.DropAction.CopyAction, mime, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier),
+                          QDropEvent(QPointF(5, 5), Qt.DropAction.CopyAction, mime, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)]:
+                app.sendEvent(target, event)
+                assert event.isAccepted()
+            assert str(path) in [entry['path'] for entry in catalog.store.entries]
+        assert len(catalog.store.entries) == 4
+        assert catalog.search.text() == ''
+        assert len(CatalogStore(catalog.store.path).entries) == 4
+    finally:
+        QThreadPool.globalInstance().waitForDone(10000)
+        app.processEvents()
+        catalog.close()
+
+
+def test_native_directory_drop_uses_target_folder(tmp_path):
+    from PySide6.QtCore import QPointF, QThreadPool
+    from PySide6.QtGui import QDropEvent
+    app = QApplication.instance() or QApplication([])
+    source = tmp_path / 'Incoming'
+    source.mkdir()
+    Image.new('RGB', (16, 16), 'blue').save(source / 'image.png')
+    catalog = MediaCatalog(store=CatalogStore(tmp_path / 'catalog.json'))
+    catalog.store.folders = ['Selected']
+    catalog.current_folder = 'Selected'
+    catalog.refresh_folders()
+    mime = QMimeData()
+    mime.setUrls([QUrl.fromLocalFile(str(source))])
+    event = QDropEvent(QPointF(5, 5), Qt.DropAction.CopyAction, mime, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+    catalog.dropEvent(event)
+    assert event.isAccepted()
+    assert catalog.store.entries[0]['folder'] == 'Selected/Incoming'
+    assert catalog.current_folder == 'Selected'
+    QThreadPool.globalInstance().waitForDone(10000)
+    app.processEvents()
+    catalog.close()
