@@ -2,7 +2,7 @@
 
 **Turn a visual timeline into a production-ready video prompt.** Arrange images, video clips, and text beats; set their timing; then build prompts for **MiniMax H3** or **LTX Video 2.3** without losing track of what happens when.
 
-This is the **Aurora 1.13.0a17 experimental build**. MiniMax and LTX share one workspace, so you can plan a sequence, adjust its beats, and refine the wording in the same window. The app prepares prompts and exports; video rendering happens in your video workflow.
+This is the **Aurora 1.13.0a18 experimental build**. MiniMax and LTX share one workspace, so you can plan a sequence, adjust its beats, and refine the wording in the same window. The app prepares prompts and exports; video rendering happens in your video workflow.
 
 ![MiniMax production prompt, timed timeline, and reference image dock in the Aurora workspace](docs/images/ltx-director-director-overview.png)
 
@@ -55,7 +55,7 @@ Keep **Director’s Intent, total length, and prompt options** beside the editor
 ## Try the experimental wheel
 
 ```bash
-python3 -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/unified-project-workflows/dist/ltx_prompt_director-1.13.0a17-py3-none-any.whl'
+python3 -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/unified-project-workflows/dist/ltx_prompt_director-1.13.0a18-py3-none-any.whl'
 ltx-director-director
 ```
 

@@ -4731,11 +4731,42 @@ class MainWindow(QMainWindow):
 
     def add_text_segment(self) -> None:
         number = sum(segment.kind == "text" for segment in self.segments) + 1
-        self.segments.append(Segment(f"Text {number}", "", "", "text", "text", "", 5.0))
+        segment = Segment(f"Text {number}", "", "", "text", "text", "", 5.0)
+        self.segments.append(segment)
+        self._extend_timed_actions_for_added_segments([segment])
         self.mark_dirty()
         self.refresh_timeline(len(self.segments) - 1)
         self.segment_prompt.setFocus()
         self.statusBar().showMessage("Text-only segment added; enter its prompt or use Magic Build")
+
+    def _extend_timed_actions_for_added_segments(self, added: list[Segment]) -> bool:
+        """Insert blank, linked cue blocks for new timeline items when the existing plan is sound."""
+        if not added or not self.unified_workspace or not SECTION.search(self.minimax_prompt_text):
+            return False
+        added_ids = {item.id for item in added}
+        previous_segments = [item for item in self.segments if item.id not in added_ids]
+        descriptions, _ = split_actions(self.minimax_prompt_text)
+        plan = parse_timed_plan(self.minimax_prompt_text)
+        if (
+            len(descriptions) != len(previous_segments)
+            or len(plan) != len(previous_segments)
+            or not all(cue["valid"] for cue in plan)
+            or any(item.prompt_detached for item in previous_segments)
+            or any(abs((cue["end"] - cue["start"]) - item.duration) > .5 / FPS + 1e-6
+                   for cue, item in zip(plan, previous_segments))
+        ):
+            return False
+        tagged = cue_cells(self.minimax_panel.editor) if self.minimax_panel else {}
+        old_actions = [
+            tagged.get(item.id, self._action_descriptions.get(item.id, descriptions[index]))
+            for index, item in enumerate(previous_segments)
+        ]
+        old_by_id = dict(zip((item.id for item in previous_segments), old_actions))
+        actions = [old_by_id.get(item.id, item.prompt.strip()) for item in self.segments]
+        self.minimax_prompt_text = compose_actions(self.minimax_prompt_text, self.segments, actions)
+        for item in added:
+            self._action_descriptions[item.id] = item.prompt.strip()
+        return True
 
     def add_media_paths(self, paths: list[str], insert_index: int | None = None) -> None:
         paths = [path for path in paths if Path(path).is_file()]
@@ -4768,6 +4799,7 @@ class MainWindow(QMainWindow):
                 self.segments.insert(index, Segment(Path(path).name, path, preview, kind, "end" if index % 2 else "start", duration=duration, media_duration_frames=frames, trim_start=trim))
                 index += 1
             if prepared:
+                self._extend_timed_actions_for_added_segments(self.segments[max(0, index - len(prepared)):index])
                 self.mark_dirty()
                 self.refresh_timeline(max(0, index - 1))
             if errors:

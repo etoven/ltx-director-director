@@ -100,10 +100,19 @@ def _extract_minimax_h3_prompt(raw: str, segments: list[Segment] | None = None) 
     result = _parse_json(raw)
     if not isinstance(result, dict):
         raise AIResponseFormatError("The AI returned an invalid MiniMax H3 response. The operation will retry.")
-    prompt = result.get("prompt") or result.get("minimaxPrompt") or result.get("minimax_prompt")
-    if not isinstance(prompt, str) or not prompt.strip():
-        raise AIResponseFormatError("The AI returned no MiniMax H3 prompt. The operation will retry.")
-    actions = result.get("timed_actions")
+    actions = result.get("timed_actions", result.get("timedActions"))
+    prompt = next((result.get(key) for key in (
+        "prompt", "minimaxPrompt", "minimax_prompt", "productionPrompt", "production_prompt",
+        "productionBrief", "production_brief",
+    ) if isinstance(result.get(key), str) and result.get(key).strip()), None)
+    # Occasionally a provider follows the timed-action schema but omits the
+    # surrounding brief. Keep those generated actions usable instead of
+    # discarding the entire response as an empty generation.
+    if prompt is None and isinstance(actions, list) and actions and segments is not None:
+        prompt = "[TIMED ACTION]\n"
+    if prompt is None:
+        keys = ", ".join(sorted(str(key) for key in result)) or "none"
+        raise AIResponseFormatError(f"The AI response did not include a MiniMax prompt (fields returned: {keys}). The operation will retry.")
     if actions is not None and segments is not None:
         if not isinstance(actions, list) or not actions:
             raise AIResponseFormatError("MiniMax returned incomplete timed actions. The operation will retry.")

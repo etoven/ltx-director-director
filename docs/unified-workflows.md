@@ -1,4 +1,4 @@
-# Unified project workflows — 1.13.0a17
+# Unified project workflows — 1.13.0a18
 
 Experimental branch: `experimental/unified-project-workflows`. Stable `main` remains
 on 1.12.57. This experiment brings all MiniMax controls into the main timeline window.
@@ -68,7 +68,7 @@ editable during MiniMax generation. No live provider request was made for automa
 ## Install this experimental wheel
 
 ```bash
-python3 -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/unified-project-workflows/dist/ltx_prompt_director-1.13.0a17-py3-none-any.whl'
+python3 -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/unified-project-workflows/dist/ltx_prompt_director-1.13.0a18-py3-none-any.whl'
 ```
 
 To return to the stable build, install its wheel explicitly:
@@ -136,3 +136,8 @@ Shared intent and length controls, cue navigation, structured timing plans, prot
 ### Collapsible direction and Generic engine (1.13.0a17)
 
 The Director’s Intent checkbox collapses the direction panel in every workspace and preserves its state across mode changes, prompt refreshes, and app restarts. Generic is available in the workspace definition editor and supports unified or segmented layouts through neutral, editable generation and refinement templates.
+
+
+### MiniMax text and media cue repair (1.13.0a18)
+
+Adding a text or media timeline item to a valid MiniMax plan inserts a linked timed-action block at its timeline position. Empty action blocks remain distinct while editing. MiniMax generation accepts common production-prompt response fields and preserves valid timed actions if the provider omits the surrounding brief.

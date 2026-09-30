@@ -7,7 +7,7 @@ from .ai import _minimax_timestamp
 
 SECTION = re.compile(r'(?m)^\[TIMED ACTION\][ \t]*\n?')
 NEXT = re.compile(r'(?m)^\[[A-Z][A-Z ]+\][ \t]*$')
-CUE = re.compile(r'(?m)^\s*(\d{2}:\d{2}:\d{2}:\d{2})\s*-\s*(\d{2}:\d{2}:\d{2}:\d{2})\s*:\s*(.*?)(?=\n\s*\d{2}:\d{2}:\d{2}:\d{2}\s*-|\Z)', re.S)
+CUE = re.compile(r'(?m)^[ \t]*(\d{2}:\d{2}:\d{2}:\d{2})[ \t]*-[ \t]*(\d{2}:\d{2}:\d{2}:\d{2})[ \t]*:[ \t]*(.*?)(?=(?:\n[ \t]*)+\d{2}:\d{2}:\d{2}:\d{2}[ \t]*-|\Z)', re.S)
 
 
 def split_actions(prompt: str) -> tuple[list[str], str]:
