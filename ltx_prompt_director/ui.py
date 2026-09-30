@@ -18,7 +18,7 @@ from importlib.resources import files
 from pathlib import Path
 from uuid import uuid4
 
-from PySide6.QtCore import QDateTime, QEasingCurve, QEventLoop, QObject, QRunnable, QRectF, QSettings, QSize, QStandardPaths, Qt, QThreadPool, QTimer, QUrl, QVariantAnimation, Signal, Slot
+from PySide6.QtCore import QDateTime, QEasingCurve, QEvent, QEventLoop, QObject, QRunnable, QRectF, QSettings, QSize, QStandardPaths, Qt, QThreadPool, QTimer, QUrl, QVariantAnimation, Signal, Slot
 from PySide6.QtGui import QAction, QActionGroup, QBrush, QColor, QCursor, QIcon, QImageReader, QPainter, QPen, QPixmap, QTextCharFormat, QTextCursor, QTextOption
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
@@ -666,6 +666,9 @@ class ProjectTileDelegate(QStyledItemDelegate):
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         fill = QColor(color_value).darker(150) if color_value else QColor("#22282b")
+        if option.state & QStyle.StateFlag.State_MouseOver:
+            fill = fill.lighter(130)
+            border = QColor("#68b9ee")
         painter.setBrush(fill)
         painter.setPen(QPen(border, 2 if color_value else 1))
         painter.drawRoundedRect(card, 7, 7)
@@ -1224,6 +1227,135 @@ class ProjectPreviewPanel(QWidget):
         self.player.setVideoOutput(self.video)
         self.player.setPosition(position)
         self.fullscreen_changed(False)
+
+class CatalogMediaViewer(QDialog):
+    """Lightbox for originals with the same player as the project preview."""
+
+    def __init__(self, owner, entries, index=0):
+        super().__init__(owner)
+        self.owner, self.entries, self.index = owner, entries, index
+        self.setObjectName("catalogLightbox")
+        self.setWindowTitle("Media Catalog Viewer")
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        self.resize(1000, 720)
+        layout = QVBoxLayout(self)
+        tools = QHBoxLayout()
+        previous = QPushButton("← Previous")
+        previous.clicked.connect(lambda: self.navigate(-1))
+        following = QPushButton("Next →")
+        following.clicked.connect(lambda: self.navigate(1))
+        self.caption = QLabel()
+        self.caption.setTextFormat(Qt.TextFormat.PlainText)
+        tools.addWidget(previous)
+        tools.addWidget(self.caption, 1)
+        tools.addWidget(following)
+        close = QPushButton("✕ Close")
+        close.clicked.connect(self.close)
+        tools.addWidget(close)
+        layout.addLayout(tools)
+        self.image = QLabel()
+        self.image.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.image.setMinimumSize(1, 1)
+        self.image.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
+        self.image.installEventFilter(self)
+        self.image.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.image.customContextMenuRequested.connect(self.image_menu)
+        layout.addWidget(self.image, 1)
+        self.video = ProjectPreviewPanel(self)
+        self.video.choose.hide()
+        self.video.setAcceptDrops(False)
+        for output in (self.video.video, self.video.fullscreen_window.video):
+            output.setAcceptDrops(False)
+        self.video.export_requested.connect(self.export_original)
+        layout.addWidget(self.video, 1)
+        self.details = QLabel()
+        self.details.setTextFormat(Qt.TextFormat.PlainText)
+        self.details.setWordWrap(True)
+        layout.addWidget(self.details)
+        self.original = QPixmap()
+        self.show_entry()
+
+    def navigate(self, direction):
+        self.index = (self.index + direction) % len(self.entries)
+        self.show_entry()
+
+    def keyPressEvent(self, event):
+        if event.key() in {Qt.Key.Key_Left, Qt.Key.Key_Right}:
+            self.navigate(-1 if event.key() == Qt.Key.Key_Left else 1)
+            event.accept()
+        else:
+            super().keyPressEvent(event)
+
+    def eventFilter(self, watched, event):
+        if watched is self.image and event.type() == QEvent.Type.Resize:
+            QTimer.singleShot(0, self.update_image)
+        return super().eventFilter(watched, event)
+
+    def show_entry(self):
+        self.video.fullscreen_window.reject()
+        self.video.clear_project()
+        entry = self.entries[self.index]
+        self.caption.setText(f"{entry['name']} · {self.index + 1} / {len(self.entries)}")
+        self.details.setText(" · ".join(entry.get("tags", [])) + "\n" + entry.get("description", ""))
+        path = Path(entry['path'])
+        is_video = path.suffix.lower() in ProjectVideoWidget.VIDEO_SUFFIXES
+        self.image.setVisible(not is_video)
+        self.video.setVisible(is_video)
+        self.original = QPixmap()
+        if is_video:
+            self.video.set_project(entry['name'], str(path))
+            self.video.choose.setEnabled(False)
+            self.video.set_preview_visible(True)
+        else:
+            reader = QImageReader(str(path))
+            reader.setAutoTransform(True)
+            self.original = QPixmap.fromImage(reader.read())
+            self.update_image()
+
+    def update_image(self):
+        if self.original.isNull():
+            self.image.setText("Image unavailable")
+        else:
+            self.image.setPixmap(self.original.scaled(self.image.size(), Qt.AspectRatioMode.KeepAspectRatio,
+                                                     Qt.TransformationMode.SmoothTransformation))
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, "original"):
+            QTimer.singleShot(0, self.update_image)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.video.set_preview_visible(self.video.isVisible())
+        QTimer.singleShot(0, self.update_image)
+
+    def image_menu(self, point):
+        menu = QMenu(self)
+        menu.addAction("Export Image", self.export_original)
+        action = menu.addAction("Copy Image to Clipboard", lambda: QApplication.clipboard().setPixmap(self.original))
+        action.setEnabled(not self.original.isNull())
+        menu.exec(self.image.mapToGlobal(point))
+
+    def export_original(self):
+        source = Path(self.entries[self.index]['path'])
+        if not source.is_file():
+            QMessageBox.warning(self, "Export Media", "The original media file is unavailable.")
+            return
+        target = self.owner.next_export_path(source.name)
+        owner = self.owner
+        owner.start_disk_job(shutil.copy2, (source, target), lambda _result: owner.record_export(target),
+                             lambda message: owner.export_failed(target, message), serialized=True)
+
+    def done(self, result):
+        self.video.fullscreen_window.reject()
+        self.video.clear_project()
+        super().done(result)
+
+    def closeEvent(self, event):
+        self.video.fullscreen_window.reject()
+        self.video.clear_project()
+        super().closeEvent(event)
+
 
 class MagicSpinner(QWidget):
     def __init__(self, parent=None):
@@ -2719,6 +2851,15 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, self.restore_startup_workspace)
         self.update_window_title()
 
+    def open_catalog_viewer(self, entry):
+        entries = [self.media_catalog.tiles.item(i).data(Qt.ItemDataRole.UserRole)
+                   for i in range(self.media_catalog.tiles.count())]
+        index = next((i for i, value in enumerate(entries) if value['id'] == entry['id']), None)
+        if index is not None:
+            viewer = CatalogMediaViewer(self, entries, index)
+            viewer.setWindowModality(Qt.WindowModality.WindowModal)
+            viewer.show()
+
     def _build_ui(self) -> None:
         self._build_project_dock()
         self._build_project_preview_dock()
@@ -2728,6 +2869,7 @@ class MainWindow(QMainWindow):
         self.catalog_dock.setObjectName("mediaCatalogDock")
         self.media_catalog = MediaCatalog(self)
         self.media_catalog.add_to_timeline.connect(self.add_media_paths)
+        self.media_catalog.view_requested.connect(self.open_catalog_viewer)
         self.catalog_dock.setWidget(self.media_catalog)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.catalog_dock)
         self.catalog_dock.hide()
@@ -3341,6 +3483,7 @@ class MainWindow(QMainWindow):
 
         self.project_list = ProjectListWidget()
         self.project_list.setObjectName("projectList")
+        self.project_list.setMouseTracking(True)
         self.project_list.setItemDelegate(ProjectTileDelegate(self.project_list))
         self.project_list.setViewMode(QListWidget.ViewMode.IconMode)
         self.project_list.setFlow(QListWidget.Flow.LeftToRight)
@@ -3548,6 +3691,14 @@ class MainWindow(QMainWindow):
         #timelineSpin::up-button{width:__TIMELINE_SPIN_BUTTON__px;background:transparent;border:0;border-radius:2px;subcontrol-origin:border;subcontrol-position:top right} #timelineSpin::down-button{width:__TIMELINE_SPIN_BUTTON__px;background:transparent;border:0;border-radius:2px;subcontrol-origin:border;subcontrol-position:bottom right} #timelineSpin::up-button:hover,#timelineSpin::down-button:hover{background:#344b57} #timelineSpin::up-button:pressed,#timelineSpin::down-button:pressed{background:#1f668b} #timelineSpin::up-arrow{image:url("__SPIN_UP_IMAGE__");width:__TIMELINE_ARROW__px;height:__TIMELINE_ARROW__px} #timelineSpin::down-arrow{image:url("__SPIN_DOWN_IMAGE__");width:__TIMELINE_ARROW__px;height:__TIMELINE_ARROW__px}
         #resolutionSeparator{background:transparent;color:#60717a;border:0;padding:0 3px;font-weight:bold} #timelineButton{background:transparent;color:#acd8ef;border:1px solid #3f6679;border-radius:5px;padding:4px 10px;font-weight:bold} #timelineButton:hover{background:#243b46;color:#e0f5ff;border-color:#65a7c7} #timelineButton:pressed{background:#172b35;color:#85c9eb;border-color:#347898}
         QListWidget{background:#0d0f10;border:0;padding:0} QListWidget::item{border:1px solid #696b6c;background:#252728;margin:0} QListWidget::item:selected{border:2px solid #f1f1f1;background:#293034}
+        #catalogLightbox{background:#0b1014} #catalogLightbox QLabel{background:transparent}
+        #referenceImageSlot{background:#191d1f;border:1px solid #323638;border-radius:4px}
+        #referenceImagePreview{background:#10171c;border:1px solid #40515b;border-radius:4px}
+        #referenceImagePreview:hover{background:#20343f;border-color:#68b9ee}
+        #referenceImageSlot[dropActive="true"]{border:3px solid #68b9ee;background:#13232c}
+        #catalogTiles::item{background:#22282b;border:1px solid #3b464b;border-radius:6px}
+        #catalogTiles::item:hover{background:#2d3d47;border-color:#68b9ee}
+        #catalogTiles::item:selected{background:#294356;border:2px solid #69a5d0}
         #mediaCatalogPanel{border:1px solid transparent} #mediaCatalogPanel[dropActive="true"]{border:3px solid #68b9ee;background:#13232c}
         #timeline{padding:3px;background:#0d0f10;outline:0} #timeline::item,#timeline::item:selected,#timeline::item:focus{background:#0d0f10;border:0;outline:0} #timeline[dropActive="true"]{border:3px solid #68b9ee;background:#13232c} #timeline[dropActive="false"]{border:1px solid #323638}
         #segmentCard{background:transparent;border:1px solid transparent} #segmentCard[selected="true"]{background:#17262e;border:1px solid #73a9c4} #segmentCardBody{background:#252728;border:0} #mediaBadge{background:#e5e5e5;color:#262626;font-weight:bold;padding:2px} #roleBadge{background:#36393a;color:#eee;padding:2px}

@@ -14,14 +14,14 @@ def test_reference_export_preserves_resolution_uses_actual_format_and_records_hi
         window.download_directory = str(tmp_path / 'exports')
         window.set_project_type('minimax_references')
         first, second = window.minimax_panel.reference_targets
-        assert not first.export_button.isEnabled()
-        assert not second.export_button.isEnabled()
+        assert not first.export_action.isEnabled()
+        assert not second.export_action.isEnabled()
         image = QImage(1024, 768, QImage.Format.Format_RGB32)
         image.fill(QColor('#336699'))
         first.load_image(image, 'Reference.jpg')
-        assert first.export_button.isEnabled()
-        first.export_button.click()
-        first.export_button.click()
+        assert first.export_action.isEnabled()
+        first.export_action.trigger()
+        first.export_action.trigger()
         deadline = time.monotonic() + 10
         while window._pending_disk_jobs and time.monotonic() < deadline:
             app.processEvents()
@@ -35,7 +35,7 @@ def test_reference_export_preserves_resolution_uses_actual_format_and_records_hi
         assert len(window.download_tray.history) >= 2
         assert window.download_tray.history[0]['path'] == str(tmp_path / 'exports' / 'Reference (1).png')
         first.clear()
-        assert not first.export_button.isEnabled()
+        assert not first.export_action.isEnabled()
     finally:
         window._close_saves_queued = True
         window.project_dirty = False

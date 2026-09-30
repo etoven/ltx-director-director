@@ -23,7 +23,7 @@ Open **Reference images** in either MiniMax workspace. Drop a local still into a
 
 For the Aurora scene, choose **Visual style** and write “Use the cool sky, warm lanterns and luminous atmosphere.” That gives the picture a clear job while the timeline continues to describe when the traveler moves and arrives.
 
-References keep their original resolution in the saved project. AI analysis uses a size-limited copy. Roles and notes travel with the .LTXD project. **Export** saves the full-resolution stored image into the project’s export folder and adds it to Recent exports. Automatic filenames avoid overwriting earlier exports. **Clear** removes only that slot’s reference; it does not remove timeline media or change the sequence’s duration.
+References keep their original resolution in the saved project. AI analysis uses a size-limited copy. Roles and notes travel with the .LTXD project. Right-click the reference image and choose **Export Image** to save the full-resolution stored image into the project’s export folder. It also appears in Recent exports. Automatic filenames avoid overwriting earlier exports. **Clear** in the same context menu removes only that slot’s reference; it does not remove timeline media or change the sequence’s duration.
 
 ## Choose the right source pattern
 
@@ -53,3 +53,5 @@ Write your intent, then select **Generate Prompt**. Review how the resulting bri
 Image labels and video labels are assigned consistently within the asset inventory. Changing a reference remains a preparation step; you choose when to submit another generation or refinement request.
 
 **Continue:** [Prompt workflows](unified-workflows.md) · [Refinement](refinement-and-audio.md) · [Complete feature guide](../usage.md)
+
+Drag a reference image into your file manager or the timeline to use its full-resolution image. Drop a still image from your file manager onto a reference slot to replace it. The image highlights on hover, and a blue border marks an accepted drop.

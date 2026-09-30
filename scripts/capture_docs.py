@@ -193,6 +193,7 @@ for name,content in [('Aurora - Director.json','{"demo":true}'),('Aurora - Revie
     target.write_bytes((video if name.endswith('.mp4') else backdrop).read_bytes() if content is None else content.encode())
     w.record_export(target)
 w.toggle_downloads()
+settle(1)
 shot('export-history',w.download_tray)
 w.download_tray.hide()
 # Global catalog with actual demonstration image and video sources.
@@ -215,6 +216,20 @@ QThreadPool.globalInstance().waitForDone(10000)
 settle()
 w.media_catalog.tiles.setCurrentRow(0)
 shot('media-catalog', w.catalog_dock)
+viewer = ui.CatalogMediaViewer(w, w.media_catalog.store.entries)
+viewer.show()
+shot('catalog-image-viewer', viewer)
+viewer.navigate(1)
+settle(1)
+# Qt's native video surface is not included by QWidget.grab offscreen.
+# Paint the actual decoded player frame for the documentation capture.
+if viewer.video.current_frame is not None:
+    captured_frame = viewer.video.current_frame.copy()
+    catalog_surface = DecodedFrameSurface(viewer.video.video)
+    catalog_surface.setGeometry(viewer.video.video.rect())
+    catalog_surface.show()
+shot('catalog-video-viewer', viewer)
+viewer.close()
 w.catalog_dock.hide()
 # Current settings and workspace editor.
 settings=ui.SettingsDialog(w.settings,w)

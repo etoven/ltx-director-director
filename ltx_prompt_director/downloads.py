@@ -5,10 +5,11 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QMimeData, QUrl, QSize
+from PySide6.QtCore import Qt, QEvent, QMimeData, QUrl, QSize, QThreadPool
 from PySide6.QtGui import QDesktopServices, QDrag, QColor, QFont, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-                              QListWidget, QListWidgetItem, QAbstractItemView, QMenu)
+                              QApplication, QWidget, QListWidget, QListWidgetItem, QAbstractItemView, QMenu)
+from .catalog import PreviewJob, MEDIA_SUFFIXES
 
 
 class DownloadList(QListWidget):
@@ -47,8 +48,9 @@ class DownloadList(QListWidget):
 
 class DownloadTray(QFrame):
     def __init__(self, settings, parent=None):
-        super().__init__(parent, Qt.WindowType.Popup)
+        super().__init__(parent, Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint)
         self.settings = settings
+        self.previews, self.pending = {}, set()
         self.setObjectName("downloadTray")
         self.setFixedSize(430, 470)
         self.setStyleSheet("#downloadTray {background:#20272b; border:1px solid #52636d; border-radius:10px;} QListWidget {border:0; background:transparent;} QListWidget::item {padding:12px; border-radius:6px;} QListWidget::item:selected {background:#354954;}")
@@ -56,13 +58,21 @@ class DownloadTray(QFrame):
         outer.setContentsMargins(16, 12, 16, 12)
         header = QHBoxLayout()
         header.addWidget(QLabel("Recent exports"), 1)
+        self.sweep_button = QPushButton()
+        fallback = QIcon(str(Path(__file__).parent / "assets" / "broom.svg"))
+        self.sweep_button.setIcon(QIcon.fromTheme("edit-clear", fallback))
+        self.sweep_button.setToolTip("Clear recent exports (keep files)")
+        self.sweep_button.setAccessibleName("Clear recent exports")
+        self.sweep_button.setFixedSize(28, 28)
+        self.sweep_button.clicked.connect(self.clear_history)
+        header.addWidget(self.sweep_button)
         close = QPushButton("×")
         close.setFixedSize(28, 28)
         close.clicked.connect(self.hide)
         header.addWidget(close)
         outer.addLayout(header)
         self.list = DownloadList(self)
-        self.list.setIconSize(QSize(30, 30))
+        self.list.setIconSize(QSize(56, 42))
         self.list.setStyleSheet("QListWidget {border:0; background:transparent; color:#e7edf0; font-size:12px;} QListWidget::item {border:0; padding:12px 8px; border-radius:6px; background:transparent;} QListWidget::item:selected {background:#354954; border:1px solid #5b8a9b;} QListWidget::item:hover {background:#2b383f;}")
         outer.addWidget(self.list, 1)
         self.empty = QLabel("Your exports will appear here.\nDrag a file into another application, or double-click to open it.")
@@ -76,6 +86,50 @@ class DownloadTray(QFrame):
         except (TypeError, ValueError):
             self.history = []
         self.refresh()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        QApplication.instance().installEventFilter(self)
+        self.refresh()
+
+    def hideEvent(self, event):
+        QApplication.instance().removeEventFilter(self)
+        super().hideEvent(event)
+
+    def eventFilter(self, watched, event):
+        owner = self.parentWidget()
+        if self.isVisible() and owner is not None:
+            if watched is owner and event.type() in {QEvent.Type.Hide, QEvent.Type.Close}:
+                self.hide()
+            elif event.type() == QEvent.Type.MouseButtonPress and isinstance(watched, QWidget):
+                inside_tray = watched is self or self.isAncestorOf(watched)
+                toggle = getattr(owner, "downloads_button", None)
+                on_toggle = watched is toggle or (toggle is not None and toggle.isAncestorOf(watched))
+                if not inside_tray and not on_toggle and (watched is owner or owner.isAncestorOf(watched)):
+                    self.hide()
+        return super().eventFilter(watched, event)
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Escape:
+            self.hide()
+            event.accept()
+        else:
+            super().keyPressEvent(event)
+
+    def clear_history(self):
+        self.history = []
+        self.settings.setValue("download_history", "[]")
+        self.refresh()
+
+    def preview_ready(self, path, preview):
+        self.pending.discard(path)
+        self.previews[path] = preview
+        if preview:
+            icon = QIcon(preview)
+            for index in range(self.list.count()):
+                item = self.list.item(index)
+                if item.data(Qt.ItemDataRole.UserRole) == path:
+                    item.setIcon(icon)
 
     def add(self, path: Path):
         path = path.resolve()
@@ -109,9 +163,19 @@ class DownloadTray(QFrame):
             item = QListWidgetItem(QIcon(pixmap), f"{path.name}\n{detail} · {created}")
             item.setData(Qt.ItemDataRole.UserRole, str(path))
             item.setToolTip(str(path))
+            if exists and suffix in MEDIA_SUFFIXES:
+                preview = self.previews.get(str(path))
+                if preview:
+                    item.setIcon(QIcon(preview))
+                elif self.isVisible() and str(path) not in self.pending and str(path) not in self.previews:
+                    self.pending.add(str(path))
+                    job = PreviewJob(str(path), str(path))
+                    job.signals.ready.connect(self.preview_ready)
+                    QThreadPool.globalInstance().start(job)
             if not exists:
                 item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEnabled)
             self.list.addItem(item)
         self.empty.setVisible(not self.history)
+        self.sweep_button.setEnabled(bool(self.history))
         if self.list.count():
             self.list.setCurrentRow(0)

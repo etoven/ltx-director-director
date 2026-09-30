@@ -6,7 +6,7 @@ Start with an image, a video clip or a written beat. Arrange the sequence, descr
 
 ![A complete MiniMax plan in the Aurora workspace](docs/images/ltx-director-director-overview.png)
 
-*The examples throughout this guide use the current 1.13.0a24 native interface with a locally authored Aurora demonstration project.*
+*The examples throughout this guide use the current 1.13.0a25 native interface with a locally authored Aurora demonstration project.*
 
 ## Your first sequence
 
@@ -106,3 +106,13 @@ The app ships with one **LTX Video** workspace and one **MiniMax** workspace. LT
 Media tags appear as pills on each thumbnail, matching the project cards. Press **F2** to rename a selected tile directly below its image; Enter saves and Escape cancels. Press **Delete** to remove selected catalog entries after confirmation. The managed media files remain available on disk.
 
 The reference-image panel remembers whether you opened or closed it across workspaces and restarts. Reopen it with **Reference images**. The project library retains its chosen dock size when changing workspaces or dock tabs. Media Catalog and video preview use the same blue border as the timeline while accepting a drop.
+
+Double-click a catalog tile, or choose **View media** from its context menu, to open the lightbox. Browse the current folder and search results with **Previous**, **Next**, or the arrow keys; press **Esc** to close. Images fit the viewer while retaining their original resolution for clipboard copy and export. Right-click an image for those actions. Videos use the project preview controls: play/pause, click-to-seek, fullscreen, video export, and right-click frame export or copy. Closing the viewer stops playback.
+
+Reference images have **Export Image** and **Clear** in their context menu. Drag an image out to the filesystem or timeline, and drop a still image into a slot to replace it. Reference images, project tiles, and catalog tiles highlight on hover.
+
+Recent exports show small image and video previews. Use the broom button to clear the history while keeping your exported files. The panel stays open when you switch to another application, making file drags easier; clicking elsewhere in LTX Director closes it.
+
+![Full-resolution image lightbox](docs/images/catalog-image-viewer.png)
+
+![Catalog video viewer with playback and frame tools](docs/images/catalog-video-viewer.png)

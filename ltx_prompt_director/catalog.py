@@ -157,6 +157,8 @@ class CatalogTiles(QListWidget):
     remove_requested = Signal()
     def __init__(self):
         super().__init__()
+        self.setObjectName('catalogTiles')
+        self.setMouseTracking(True)
         self.setViewMode(QListWidget.ViewMode.IconMode)
         self.setResizeMode(QListWidget.ResizeMode.Adjust)
         self.setMovement(QListWidget.Movement.Static)
@@ -226,6 +228,7 @@ class FolderTree(QTreeWidget):
 
 class MediaCatalog(QWidget):
     add_to_timeline = Signal(list)
+    view_requested = Signal(dict)
     def __init__(self, parent=None, store=None):
         super().__init__(parent)
         self.setObjectName("mediaCatalogPanel")
@@ -273,7 +276,7 @@ class MediaCatalog(QWidget):
         self.tiles.remove_requested.connect(self.remove_selected)
         self.tiles.itemChanged.connect(self.save_inline_name)
         self.tiles.itemSelectionChanged.connect(self.show_description)
-        self.tiles.itemDoubleClicked.connect(lambda item: QDesktopServices.openUrl(QUrl.fromLocalFile(item.data(ROLE)['path'])))
+        self.tiles.itemDoubleClicked.connect(lambda item: self.view_requested.emit(item.data(ROLE)))
         self.tiles.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tiles.customContextMenuRequested.connect(self.context_menu)
         self.folders.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -499,6 +502,7 @@ class MediaCatalog(QWidget):
         menu = QMenu(self)
         menu.addAction('Add to timeline', lambda: self.add_to_timeline.emit([e['path'] for e in entries if Path(e['path']).is_file()]))
         if len(entries) == 1:
+            menu.addAction('View media', lambda: self.view_requested.emit(entries[0]))
             menu.addAction('Rename (F2)', lambda: self.rename_entries(entries))
         menu.addAction('Edit details…', lambda: self.edit_details(entries))
         move = menu.addMenu('Move to folder')
