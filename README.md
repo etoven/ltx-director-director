@@ -1,74 +1,97 @@
-# LTX Director - Director
+# LTX Director — Director
 
-**Turn a visual timeline into a production-ready video prompt.** Arrange images, video clips, and text beats; set their timing; then build prompts for **MiniMax H3** or **LTX Video 2.3** without losing track of what happens when.
+## Shape the moment. Direct the sequence.
 
-This is the **Aurora 1.13.0a19 experimental build**. MiniMax and LTX share one workspace, so you can plan a sequence, adjust its beats, and refine the wording in the same window. The app prepares prompts and exports; video rendering happens in your video workflow.
+**Your images, your story, your timing—brought together in one creative workspace.**
 
-![MiniMax production prompt, timed timeline, and reference image dock in the Aurora workspace](docs/images/ltx-director-director-overview.png)
+Build a visual plan for AI video, turn it into a detailed production prompt, and refine every beat while the timeline stays in view. LTX Director — Director gives you a hands-on way to direct **MiniMax H3** and **LTX Video 2.3**, with **Gemini or OpenAI** helping you develop the words behind the motion.
 
-## Choose the way you want to direct
+![The Aurora workspace: a visual timeline, creative direction and one continuous MiniMax production brief](docs/images/ltx-director-director-overview.png)
 
-| Workflow | What Director builds | What you edit |
+*Current release: Aurora 1.13.0a19 on `experimental`. Screenshots show the current native app with an authored demonstration project.*
+
+## See the story before you generate
+
+Put images, MP4 and WebM clips, and text beats on a timeline that shows how long each moment lasts. Drag to reorder. Pull a segment’s edge to change its duration. Zoom in to shape a transition or fit the whole sequence into view. Start times, frame roles and resolution badges keep the important details close at hand.
+
+Replace a frame without rebuilding the beat. Copy an original image to the clipboard, paste a new image into its place, or turn a text idea into an image segment when your next reference is ready. The workspace grows with the sequence, without a fixed segment-count or total-length cap.
+
+![Image checkpoints and a text action beat arranged on a duration-scaled timeline](docs/images/timeline-and-magic-build.png)
+
+**[Explore the timeline and media tools →](docs/media-and-timeline.md)**
+
+## Direct a complete film—or one precise beat
+
+| Your creative approach | Your workspace | Your result |
 | --- | --- | --- |
-| **MiniMax H3 · Frames** | One continuous production brief with timed actions grounded in the timeline's conditioning frames | The entire brief in the shared editor |
-| **MiniMax H3 · References** | A production brief that identifies timed video or frame sources and untimed image references | The entire brief, with two optional reference image slots |
-| **LTX Video 2.3** | A prompt for each segment plus a global continuity prompt | The selected segment or global prompt in the same editor |
+| Connect a sequence of visual checkpoints | **MiniMax · Frames** | One production brief with timed action, continuity, scene and sound direction |
+| Combine opening and closing frames, source video and visual references | **MiniMax · References** | A brief shaped around the roles of your supplied assets |
+| Develop the movement of each timeline segment | **LTX Video** | Individual segment prompts and a shared global prompt, ready for Director JSON export |
+| Bring your own prompting style | **Generic workspace** | A unified or segmented editor with your own generation and refinement instructions |
 
-Use **Gemini or OpenAI** for prompt generation and refinement. Generation is manual: changing a workflow, moving a frame, or adding a reference does not call the provider.
+MiniMax action cues and timeline segments stay connected. Select a beat to focus its action. Change its timing and the cue boundaries follow. Paste a timed production brief to reshape the timeline around the new plan.
 
-## MiniMax: direct the whole sequence
+In LTX, **Magic Build** develops the whole sequence; **Refine Prompt** and **Refine Timing** let you concentrate on the selected beat. You can switch between workflows while keeping their stored drafts with the project.
 
-Choose **Frames** when your images are timed conditioning checkpoints. Choose **References** when you are working with first and last frames, source video, mixed media, or untimed identity and style references. Director detects the available input pattern and writes a structured brief with reference roles, continuity, scene direction, timed action, sound, and avoid instructions where appropriate.
+![LTX’s selected-segment editor, Magic Build and focused refinement controls](docs/images/ltx-workspace.png)
 
-The production prompt is one editable document. Its **timed action cues stay linked to the timeline segments**: retiming a segment updates the cue timecodes, and editing cue text updates its linked segment. Click a timeline segment to jump to its action. Paste a timed brief to resize existing segments and add new beats; incomplete matches turn gray until corrected. Timecode cells are protected from accidental deletion. Two optional image drop targets let you guide identity, body details, or another selected attribute without pretending those references occur at a particular second.
+**[Choose your workflow →](docs/unified-workflows.md)**
 
-Refine the full prompt after a timeline change, or refine your own edits and inline instructions. Type `/` and press Tab for **Refinement**, **Global refinement**, **Keep**, **Avoid**, or **Focus** notes. The complete instruction stays editable inside the outlined note; a completed global refinement is consumed after a successful pass. The editor also offers inline spelling suggestions from your installed system dictionary.
+## Give the AI a direction worth following
 
-![Editable inline refinement notes in the shared prompt editor](docs/images/inline-refinement-notes.png)
+Describe the performance, camera movement, continuity and mood in **Director’s Intent**. Set a target duration, add sound-effect direction or spoken-dialog guidance, and keep these choices as you move between modes. Collapse the panel whenever you want more writing space.
 
-## LTX: build every beat
+Keep your editing requests beside the passage they affect. Inline **Refinement, Global refinement, Keep, Avoid and Focus** notes make your intentions visible and editable inside the prompt. Refine the draft, review the result, and copy the text when it is ready.
 
-Lay out start and end frames, text beats, WebM clips, or MP4 clips on the duration-scaled timeline. **Magic Build** uses the ordered media and Director's Intent to draft segment motion prompts and a global continuity prompt. Add SFX or spoken-dialog direction, adjust a single segment's timing or wording, and keep the rest of the sequence intact. Refinement can lengthen a beat when the action needs more room; its tile grows with it.
+![Editable inline direction notes within the production prompt](docs/images/inline-refinement-notes.png)
 
-The shared editor switches to the segment you select or to the global prompt. When the sequence is ready, **LTX Director Export** produces JSON for the [LTXDirector ComfyUI node](https://github.com/WhatDreamsCost/WhatDreamsCost-ComfyUI), with timing, media references, prompt text, and frame roles.
+**[Explore refinement, sound and dialogue →](docs/refinement-and-audio.md)**
 
-![LTX timeline, frame roles, duration controls, and Magic Build](docs/images/timeline-and-magic-build.png)
+## Keep identity, atmosphere and composition in view
 
-![An LTX segment prompt with inline direction](docs/images/generated-prompts.png)
+Two untimed reference-image slots in the MiniMax workspaces let you guide **Identity, Wardrobe, Setting, Visual style, Object / prop or Composition**. Add a picture by dropping it, browsing or pasting; explain the attributes you want in its notes. Timeline media sets the chronology. These image slots supply visual guidance.
 
-## Keep the project moving
+![Reference images with explicit visual roles alongside the timed production brief](docs/images/minimax-references.png)
 
-Save a project to the library, switch between open workspaces, and return to its timeline and independent MiniMax drafts later. The dockable **Project Properties** panel keeps status, tags, and tasks beside the work. **Project Export** creates a portable `.LTXD` archive with original-resolution media; low-resolution timeline thumbnails live in the operating system cache to keep the editor responsive. Use the toolbar save action or close the app to write pending library changes.
+**[Make the most of reference images →](docs/minimax-references.md)**
 
-![Project library, timeline, and Project Properties dock](docs/images/project-properties.png)
+## Build a library of work you can return to
 
-## Make the workspace yours
+Keep projects in a searchable visual gallery. Organize them into collections, sort by name or drag them into your preferred order, and use colored status and tag labels to see where each project stands. Add dated tasks and notes in the **Project Properties** dock. Pick a cover that makes each project easy to recognize.
 
-Keep **Director’s Intent, total length, and prompt options** beside the editor in every mode. In **Settings → Workspaces**, edit the stock generation templates or create your own definition with the prompt layout, reference types, and audio support your project needs. Import and export definitions to reuse the same setup; restore the stock templates without losing custom workspaces.
+Save to the local project library or export a portable **.LTXD** archive with original-resolution media, prompts and project context. Keep several projects open, switch between them, and return to each working draft.
 
-![Editable workspace templates and generation instructions](docs/images/workspace-definitions.png)
+![A visual project library with status colors, editable properties and a task checklist](docs/images/project-properties.png)
 
-**Export without the file-dialog shuffle.** Images, videos, portable projects, and Director JSON go to one project download folder with automatic names. The download button lights up when a file is ready. Open its recent-export tray to find the result or drag it straight into another application.
+**[Explore projects and organization →](docs/performance-and-properties.md)**
 
-![Recent exports with native file dragging](docs/images/export-history.png)
+## Review the render. Reuse the moment.
 
-## Try the experimental wheel
+Bring your rendered video back into the project. Play it in a dockable preview, click the playback bar to seek, or open fullscreen for a closer look. Export a frame or copy it to the clipboard to use in your next pass. Attach the ComfyUI workflow JSON alongside the project so the creative plan and rendering setup travel together.
+
+![A rendered demonstration clip playing in the project’s native video preview](docs/images/video-review.png)
+
+**[Explore video review and project files →](docs/video-review-and-files.md)**
+
+## Move from planning to production
+
+Copy a MiniMax brief straight from the editor. Export LTX Director JSON for your ComfyUI workflow. Save original media, captured video frames and portable projects into a consistent download folder. The export button signals when a file is ready; **Recent exports** lets you open it, reveal its folder or drag it into another application.
+
+![Recent exports with file types, filenames and direct access to the download folder](docs/images/export-history.png)
+
+Customize the workspace itself in **Settings → Workspaces**: choose the editor layout, reference support and AI instructions. Save a setup you like, export it for reuse, or build a Generic workspace around your own style of direction.
+
+**[Explore exports and custom workspaces →](docs/workspace-definitions-and-exports.md)**
+
+## Start directing
+
+Install the current experimental wheel:
 
 ```bash
 python3 -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a19-py3-none-any.whl'
 ltx-director-director
 ```
 
-For a Linux application-menu shortcut, run `ltx-director-director-install-desktop`. The stable `main` branch remains on 1.12.57; see [installation details](install.md) if you prefer that release or want to run from source.
+**[Installation and desktop setup →](install.md)** · **[Complete feature and usage guide →](usage.md)**
 
-## Learn more
-
-- [Workspace definitions, timed paste, and export history](docs/workspace-definitions-and-exports.md)
-- [Unified workflow behavior and prompt controls](docs/unified-workflows.md)
-- [MiniMax References and detected workflows](docs/minimax-references.md)
-- [Project performance, storage, and properties](docs/performance-and-properties.md)
-- [Aurora splash and inline directive details](docs/aurora-splash.md)
-
-**Local-first workspace.** Media preparation, previews, and project storage run on your machine. Prompt generation and refinement send the selected context to your configured AI provider; the app does not render video or require an app account.
-
-MIT licensed.
+Timeline editing, project storage and media preparation run locally. AI generation and refinement use your configured provider and API key. Director prepares the plan and prompts; your video workflow renders the final video. MIT licensed.

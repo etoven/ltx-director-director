@@ -1,105 +1,77 @@
-# Installation
+# Start directing with Aurora.
 
-## Requirements
+## Your desktop workspace for AI video planning
 
-- Python 3.10 or newer
-- A desktop environment supported by Qt 6
-- Internet access only when using Magic Build
-- A Gemini or OpenAI API key for AI generation
+Install Director, open a project and start arranging your sequence. Timeline editing and project organization work locally. Connect Gemini or OpenAI when you want help generating or refining prompts.
 
-WebM decoding is supplied by `imageio-ffmpeg`; a separate system FFmpeg installation is normally unnecessary.
+![The Aurora startup screen](docs/images/aurora-startup.png)
 
-`QtWidgets` is supplied by the `PySide6-Essentials` wheel, which is installed directly by this project.
+## Install the current experimental build
 
-## Linux
+You need **Python 3.10 or newer** and a desktop environment supported by Qt 6. A virtual environment keeps Director’s dependencies separate from other Python applications.
+
+### Linux and macOS
 
 ```bash
-git clone https://github.com/etoven/ltx-director-director.git
-cd ltx-director-director
-python3 -m venv .venv
-source .venv/bin/activate
+python3 -m venv ~/.venvs/ltx-director
+source ~/.venvs/ltx-director/bin/activate
 python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
-python -m ltx_prompt_director
-```
-
-If Qt reports a missing XCB library on Ubuntu/Debian:
-
-```bash
-sudo apt install libxcb-cursor0 libxkbcommon-x11-0
-```
-
-If Qt reports `libEGL.so.1` is missing:
-
-```bash
-sudo apt install libegl1
-```
-
-## Windows
-
-```powershell
-git clone https://github.com/etoven/ltx-director-director.git
-cd ltx-director-director
-py -m venv .venv
-.venv\Scripts\activate
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
-python -m ltx_prompt_director
-```
-
-## macOS
-
-```bash
-git clone https://github.com/etoven/ltx-director-director.git
-cd ltx-director-director
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
-python -m ltx_prompt_director
-```
-
-## Install as a command
-
-```bash
-python -m pip install .
+python -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a19-py3-none-any.whl'
 ltx-director-director
 ```
 
-On Linux, the first launch automatically installs:
+### Windows PowerShell
 
-- `~/.local/share/applications/ltx-director-director.desktop`
-- `~/.local/share/icons/hicolor/256x256/apps/ltx-director-director.png`
+```powershell
+py -m venv "$env:USERPROFILE\ltx-director-venv"
+& "$env:USERPROFILE\ltx-director-venv\Scripts\Activate.ps1"
+python -m pip install --upgrade pip
+python -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a19-py3-none-any.whl'
+ltx-director-director
+```
 
-No root access is required. To install or refresh it manually:
+The package installs Qt components, image handling and the bundled FFmpeg helper. Review-video playback also depends on codec availability on the system.
+
+## Connect your prompt-writing provider
+
+Open **Settings → Application**, select **Gemini** or **OpenAI**, and enter the corresponding API key. Choose a Gemini model when using Gemini. Set the request timeout, additional retry attempts and cooldown to fit your provider.
+
+![Application Settings with provider selection, request controls, display scale and folders](docs/images/application-settings.png)
+
+API keys can be retained for the session or stored through the app’s persistent-key option. Use persistent storage on a computer you trust. Keys are excluded from portable project exports. AI requests send the selected project context to the provider; local editing and project storage do not require an AI call.
+
+## Set up your working space
+
+Set a default download folder for exports and a ComfyUI working directory for LTX JSON handoff. Customize status tags and other labels. Adjust text scale from 75% to 200%, either here or from the main toolbar. Open **Workspaces** when you want to customize prompt layouts and master instructions.
+
+On Linux, the first launch installs an application-menu shortcut for the current installation. Refresh it manually with:
 
 ```bash
 ltx-director-director-install-desktop
 ```
 
-To remove the launcher and icon:
+Remove that shortcut with `ltx-director-director-uninstall-desktop`. Keep the virtual environment in place while its launcher is in use.
+
+## Run from source
 
 ```bash
-ltx-director-director-uninstall-desktop
+git clone --branch experimental https://github.com/etoven/ltx-director-director.git
+cd ltx-director-director
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install .
+ltx-director-director
 ```
 
-## Build distributable Python packages
+On Windows, use `py -m venv .venv` and activate `.venv\Scripts\Activate.ps1`. Use the `main` branch for the stable line and `experimental` for Aurora development.
 
-```bash
-python -m pip install build
-python -m build
-```
+## When a desktop dependency needs attention
 
-The wheel and source archive will be written to `dist/`.
+On Ubuntu or Debian, an error naming a missing XCB component can be resolved with `sudo apt install libxcb-cursor0 libxkbcommon-x11-0`. If the named missing library is `libEGL.so.1`, install `libegl1`.
 
-## Repair an incomplete PySide6 installation
+For inline spelling suggestions, install an Enchant provider and a dictionary for your language. The editors remain usable without a matching dictionary.
 
-If startup reports `No module named 'PySide6.QtWidgets'`, activate the same virtual environment used to run the application and reinstall Qt Essentials:
+If startup reports missing PySide6 modules, activate the environment used to run Director and reinstall the wheel with `python -m pip install --force-reinstall` followed by the wheel URL above. For a provider error, check the selected model, API key, quota and connection in Settings.
 
-```bash
-python -m pip uninstall -y PySide6 PySide6-Addons PySide6-Essentials shiboken6
-python -m pip install --upgrade --force-reinstall -r requirements.txt
-python -c "from PySide6.QtWidgets import QApplication; print('QtWidgets OK')"
-```
-
-Also make sure the repository does not contain a local file or directory named `PySide6`, which would shadow the installed package.
+**Ready for the first sequence? [Open the complete feature and usage guide →](usage.md)**

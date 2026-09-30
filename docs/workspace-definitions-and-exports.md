@@ -1,74 +1,64 @@
-# Workspace definitions and export history
+# Make the workspace yours. Take the result with you.
 
-Aurora 1.13.0a16 adds editable workspace templates, timecode-driven timeline reconciliation, and one destination for exports.
+## Give every output a clear destination
 
-## Define the workspace
+Director brings prompts, source media and portable projects into your production workflow with distinct actions for each purpose.
 
-Open **Settings → Workspaces**. Every stock workspace is an editable JSON definition: **LTX Video**, **MiniMax Frames**, and **MiniMax References**. Definitions load at startup from the application's data folder, under `workspaces/`. The wheel includes the original templates under `ltx_prompt_director/workspace_templates/`.
+| What you want to take out | Action | Result |
+| --- | --- | --- |
+| Visible prompt text | Copy in the editor | Clipboard text for your generation workflow |
+| Editable project and media | Export Project | Portable .LTXD archive |
+| LTX timeline, prompts and media references | Export in LTX Video | Director JSON for ComfyUI |
+| Original segment image or clip | Export image / Export video on a timeline card | Original source media file |
+| Attached rendered video | Export Video in Preview | Copy of the project render |
+| Current video frame | Video context menu → Export Current Frame | PNG captured from the decoded frame |
+| Attached workflow JSON | Export in Project Files | The selected attachment |
+| Custom workspace setup | Export in Settings → Workspaces | Reusable workspace-definition JSON |
 
-![Workspace definition editor in Settings](images/workspace-definitions.png)
+## One folder. A visible handoff.
 
-| Field | Purpose |
+Set **Download folder** in project Properties for a project-specific destination. Leave it blank to use **Settings → Application → Default download folder**. Exports receive descriptive automatic names; repeated names get numbered suffixes so an earlier output remains available.
+
+The download button signals completion with a pulse and badge. Click it for **Recent exports**. Open a file with a double-click, use the context menu for **Open folder**, or drag selected files into another application. Click outside the tray to dismiss it. History remains available after restarting the app; moved or deleted files are marked unavailable.
+
+![Recent exports grouped in a native tray with direct folder access](images/export-history.png)
+
+**Save to Library** stores the editable project inside Director’s local gallery. **Export Project** creates the portable copy in your download folder. Use both when you want a working library project and a handoff archive.
+
+## Connect the LTX plan to ComfyUI
+
+Set the desired output width and height in LTX’s timeline header, then choose **Export**. Configure the **ComfyUI working directory** in Application Settings so Director can place media in the workflow’s input area.
+
+Director JSON includes segment timing at 24 fps, prompt text, frame roles, supported video metadata and global direction. Text-only segments retain their type. When an imported video contains audio, export can extract and include its soundtrack as an audio segment for the receiving workflow. Export defaults include crop resizing and audio inpainting.
+
+Use **Import** to reopen a supported LTX Director JSON timeline. It restores supported image, video and text segments and global context; it is not an editor for every ComfyUI node or specialized track. For the complete native working project, use .LTXD.
+
+## Design a workspace around your process
+
+Open **Settings → Workspaces**. Stock and custom definitions let you choose the editor structure and the instructions used for prompt generation and refinement.
+
+![A custom cinematic workspace with a Generic engine, unified prompt and editable instructions](images/workspace-definitions.png)
+
+| Setting | Creative control |
 | --- | --- |
-| ID and name | Stable project identity and the label in the workspace selector |
-| Generation engine | LTX, MiniMax Frames, MiniMax References, or Generic input handling and response validation |
-| Prompt layout | One unified production prompt or per-segment prompts |
-| Global prompt | Whether a segmented workspace exposes a global prompt |
-| Audio generation | Whether audio generation controls are available |
-| Reference media and kinds | Permitted timeline media and untimed image attributes |
-| Untimed image slots | Zero, one, or two image targets; available to MiniMax and Generic engines |
-| Generation and refinement instructions | Full editable master templates used by the AI worker |
+| Name and ID | Recognizable selector name and reusable workspace identity |
+| Generation engine | LTX, MiniMax Frames, MiniMax References or Generic |
+| Prompt layout | One unified production prompt or individual segment prompts |
+| Global prompt | Shared direction where supported by the segmented setup |
+| Audio generation | Availability of audio-direction controls |
+| Reference media and kinds | Which source types and reference attributes the workspace accepts |
+| Untimed image slots | Up to two visual-reference targets where supported |
+| Generation instructions | Your master direction for creating a first draft |
+| Refinement instructions | Your rules for developing the edited draft |
 
-Select a workspace and edit it, including a stock workspace, then choose **Save / rename**. **New** creates a definition you can customize. **Delete** removes the selected definition. **Import** reads a definition JSON file; a matching ID is overwritten. **Export** writes the edited definition to the project's download folder and adds it to Recent exports.
+Choose **New**, set the name, engine and layout, then write the generation and refinement instructions. **Generic** supports a unified or segmented layout for your own prompting approach. Its templates configure prompt authoring; they do not install or run a video model.
 
-**Restore stock** overwrites the three stock IDs with the installed templates. It preserves every other custom definition. Deleted stock definitions stay deleted across restarts until restored.
+## Reuse the direction you like
 
-Templates use data substitutions such as `${director_intent}`, `${current_prompt}`, `${intervals}`, and `${asset_map}`. The editor lists the fields for the selected definition. These substitutions cannot run code. The generation engine still enforces its JSON response contract and validates returned durations. A new definition configures the available engines; it does not install a new video model or renderer. **Generic** uses your templates without model-specific prompting rules and supports either unified or segmented layouts. LTX uses segmented prompts and timeline frames; MiniMax uses unified prompts and can also use untimed images.
+Templates can include the supported fields listed in the editor, such as Director’s Intent, the current prompt, ordered plan and total duration. Use these fields to blend project context with your preferred camera, continuity or writing rules.
 
-Projects store their workspace ID and a portable copy of the definition. When importing a project whose definition is missing locally, the embedded definition is installed. An existing local definition with that ID is preserved.
+Choose **Save / rename** to keep the definition, **Export** to share or reuse it, and **Import** to load a definition JSON. An import with a matching ID replaces that local definition. **Restore stock** brings back the included definitions while preserving custom definitions with other IDs. **Delete** removes the selected definition.
 
-## Keep prompt and timeline connected
+Native projects carry their workspace identity and a portable definition. Opening a project can install its definition when it is missing locally; an existing local definition with the same ID takes precedence. This lets you carry a setup with the project while continuing to manage your local templates.
 
-The **Director’s Intent** checkbox expands or collapses the shared intent and generation controls in every workspace. Its state persists across mode changes and app restarts; collapsing it retains the entered intent and options. Clicking a connected segment in a unified workspace focuses its inline action cell and highlights the whole action, including wrapped lines.
-
-Paste a production brief or a `[TIMED ACTION]` block containing lines such as:
-
-```text
-00:00:00:00 - 00:00:03:00: Opening action.
-
-00:00:03:00 - 00:00:07:12: Following action.
-```
-
-Ranges use non-drop-frame SMPTE `HH:MM:SS:FF` at **24 fps**, with frame values `00–23`. The client matches cues to existing segments in ascending order, preserving segment IDs and media. Durations conform to the ranges, and extra valid cues at the end create text segments. Resizing uses the same sliding animation as Magic Build. Frame precision survives project saves.
-
-A complete timed brief paste replaces the production brief. A cue-only paste replaces the timed-action section while retaining other sections. This replacement route can cross protected cue tables; normal typing, cutting, and deleting still cannot remove the timecodes or cue table itself.
-
-Ranges must begin at zero and remain contiguous, ascending, and nonempty. A malformed range, gap, overlap, or missing cue detaches that segment and the subsequent unmatched portion. The connected prefix remains usable. Detached timeline tiles appear gray and cannot be edited through timeline controls; their media stays intact. Correct the timed block with another paste or use **Refine prompt** to reconnect it.
-
-![Partially conformed timeline with disabled unmatched segments](images/timeline-conformance.png)
-
-MiniMax generation and refinement return a structured plan alongside the production brief:
-
-```json
-{
-  "prompt": "[SCENE]\nA continuous shot.\n\n[TIMED ACTION]\n\n[SOUND]\nWind.",
-  "timed_actions": [
-    {"start": "00:00:00:00", "end": "00:00:03:00", "action": "Opening action."},
-    {"start": "00:00:03:00", "end": "00:00:07:12", "action": "Following action."}
-  ]
-}
-```
-
-The client reparses successful results, applies duration changes, and adds extra action segments. Legacy string arrays remain supported when they match the existing segment count. Invalid model responses retain the existing retry and failure behavior.
-
-## Export once, find it in one place
-
-Set **Download folder** in Project Properties, either in the dock or the context-menu dialog. Leave it blank to use **Settings → Application → Default download folder**.
-
-Image and video exports, captured video frames, portable `.LTXD` projects, LTX Director JSON, attached project files, and workspace definitions all use this destination. No export filename dialog is required. Names derive from the project, segment, or source file; duplicates become `Name (1).ext`, `Name (2).ext`, and so on.
-
-![Recent exports popup](images/export-history.png)
-
-When an export completes, the toolbar download button pulses, gains a badge, and briefly shows the exported filename. Click it to open **Recent exports**. Click outside to dismiss the popup. The newest file is highlighted. Double-click a file to open it, right-click for Open/Open folder, or drag it into another application using native file URLs. History persists across app restarts; entries whose files were moved or deleted are disabled.
-
-Library saves still keep projects in the internal project library. **Export Project** creates the portable copy in the download folder.
+**Continue:** [Prompt workflows](unified-workflows.md) · [Application setup](../install.md) · [Complete feature guide](../usage.md)

@@ -1,60 +1,55 @@
-# MiniMax References — experimental unified workspace
+# Give every reference a purpose.
 
-The MiniMax References project type uses a compact production brief adapted from the
-[PromptSama MiniMax H3 guide](https://www.promptsama.ai/models/minimax-h3.html#overview).
-References receive explicit roles, followed by scene direction, timed action and sound.
-The previous reference generator, refiner and master instructions are preserved verbatim
-in [the inactive 1.12.56 archive](archive/minimax_reference_1_12_56.py.txt).
+## More control over what the AI takes from an image
 
-## Detected workflow
+Use a picture to guide a face, wardrobe, atmosphere, prop or composition without placing that picture at a particular second. MiniMax’s two reference-image slots keep these visual instructions beside the timeline and the production brief.
 
-Detection is ordinary client code and requires no model call.
+![A visual-style reference with notes in the MiniMax References workspace](images/minimax-references.png)
 
-| Inputs | Workflow |
+## Add the image. Define the role.
+
+Open **Reference images** in either MiniMax workspace. Drop a local still into a slot, click **Browse**, or use **Paste** for clipboard image pixels or a local image file. Choose the role and add notes describing exactly what to use.
+
+| Role | Guide the generation toward |
 | --- | --- |
-| Text timeline only | T2V |
-| One timeline image | I2V |
-| Two timeline images, start then end roles | FL2V |
-| Other multiple-image timelines | Multiple keyframes |
-| Timeline video(s), no images | V2V |
-| Images and video, or any untimed reference slot | R2V |
+| Identity | A subject’s recognizable features |
+| Wardrobe | Clothing, accessories and their details |
+| Setting | Environmental or location attributes |
+| Visual style | Lighting, palette, atmosphere or treatment |
+| Object / prop | A particular item and its appearance |
+| Composition | Framing and spatial arrangement |
 
-V2V describes the available source type. Director's Intent determines whether the source
-is being edited, continued or used for performance guidance; media presence alone never
-authorizes an identity swap or a scene replacement.
+![Two reference slots with role selectors, notes and image controls](images/reference-images.png)
 
-Start/end roles are respected in References mode: a start image belongs to the start of
-its segment, an end image to its end. Hover over the detected workflow to see image labels
-and checkpoint times. This is distinct from the existing Frames mode cue convention.
-Video source ranges respect the timeline trim. Text-only segments supply action and duration.
+For the Aurora scene, choose **Visual style** and write “Use the cool sky, warm lanterns and luminous atmosphere.” That gives the picture a clear job while the timeline continues to describe when the traveler moves and arrives.
 
-## Two reference images
+References keep their original resolution in the saved project. AI analysis uses a size-limited copy. Roles and notes travel with the .LTXD project. **Clear** removes only that slot’s reference; it does not remove timeline media or change the sequence’s duration.
 
-In the experimental unified UI, select **MiniMax · References** and use the **Reference images** dock inside the main window.
+## Choose the right source pattern
 
-![Unified MiniMax editor, timeline, and untimed reference slots](images/ltx-director-director-overview.png)
+**MiniMax · References** recognizes the supplied combination and prepares the prompt around it:
 
-Drop a local still image into either slot, use Browse, or paste image pixels or a local file
-from the clipboard. Choose Identity, Wardrobe, Setting, Visual style, Object / prop, or
-Composition. Notes can specify the subject and exactly which attributes to use.
+| Your inputs | Recognized workflow | How to direct it |
+| --- | --- | --- |
+| Text segments | Text to video | Describe the scene and action; use segment durations for pacing |
+| One timeline image | Image to video | Describe movement from or toward the image, using its frame role |
+| Two timeline images with start and end roles | First / last frame | Describe the visible path from the opening state to the destination |
+| Other multiple-image timelines | Multiple keyframes | Describe the progression through the ordered visual checkpoints |
+| Timeline video without images | Video to video | State whether to edit, continue or draw movement guidance from the source |
+| Images and video, or an untimed reference slot | Mixed references | Explain each asset’s role and which attributes to preserve |
 
-Each image is embedded at full resolution in the project. Its role and notes survive project
-switching and .LTXD export/import. Image analysis uses a copy capped at 1024 pixels on its longest
-edge. Clearing a slot removes only that reference. An untimed reference does not create a
-timeline segment, move any checkpoint, or extend the duration.
+A start image anchors the beginning of its segment; an end image is reached at the segment’s end. Hover over the detected workflow label to inspect asset labels and checkpoint times. Video ranges follow the source metadata retained with the segment.
 
-Images are numbered independently from videos: timeline images first, then occupied reference
-slots. The slot heading shows its generated ImageN label. The workflow tooltip lists the full
-asset mapping. No AudioN reference is fabricated from video audio.
+## References and Frames work together
 
-Generation and refinement both receive these images. Editing them marks the project dirty,
-invalidates the source cache, and prevents an older running request from overwriting the editor.
-Generation remains a manual button action. A timeline item is needed to define duration; use a
-text segment for generation driven entirely by the two untimed images.
+Choose **Frames** when the sequence is organized around conditioning checkpoints. Choose **References** when opening/closing roles and the combination of sources drive the plan. Both support the two untimed image slots.
 
-## Verification
+An untimed image supplies attributes rather than chronology: it does not add a segment, move a checkpoint or extend the plan. For a sequence guided entirely by the reference slots, add a text segment to establish the action and duration.
 
-Tests cover classification, reference numbering, start/end timing, drag/drop, original-image
-persistence, session isolation, old projects, both provider payloads, reference-aware refinement,
-and rejection of a response generated from stale references. Model responses in automated tests
-are mocked; output quality still requires a real generation.
+## Generate, review and refine
+
+Write your intent, then select **Generate Prompt**. Review how the resulting brief assigns reference roles and describes the scene. Edit the draft directly, add inline notes, and use **Refine Prompt** to develop it with the same references.
+
+Image labels and video labels are assigned consistently within the asset inventory. Changing a reference remains a preparation step; you choose when to submit another generation or refinement request.
+
+**Continue:** [Prompt workflows](unified-workflows.md) · [Refinement](refinement-and-audio.md) · [Complete feature guide](../usage.md)
