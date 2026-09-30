@@ -8,12 +8,13 @@ from pathlib import Path
 from uuid import uuid4
 
 from PySide6.QtCore import QEvent, Qt, QSize, QMimeData, QUrl, Signal, QObject, QRunnable, QThreadPool, QStandardPaths
-from PySide6.QtGui import QDrag, QIcon, QDesktopServices
+from PySide6.QtGui import QDrag, QIcon, QDesktopServices, QPixmap, QPainter, QColor
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton,
     QTreeWidget, QTreeWidgetItem, QListWidget, QListWidgetItem, QAbstractItemView,
     QSplitter, QMenu, QInputDialog, QFileDialog, QDialog, QFormLayout, QTextEdit,
-    QDialogButtonBox, QMessageBox, QStyle, QLabel)
+    QDialogButtonBox, QMessageBox, QStyle, QLabel, QSizePolicy)
 from .media import prepare_media, TIMELINE_VIDEO_SUFFIXES
+from .media_labels import add_thumbnail_labels
 
 MEDIA_SUFFIXES = {'.png', '.jpg', '.jpeg', '.webp', '.bmp', '.tif', '.tiff'} | TIMELINE_VIDEO_SUFFIXES
 ROLE = Qt.ItemDataRole.UserRole
@@ -152,6 +153,8 @@ def local_paths(mime):
 
 class CatalogTiles(QListWidget):
     dropped = Signal(list)
+    rename_requested = Signal()
+    remove_requested = Signal()
     def __init__(self):
         super().__init__()
         self.setViewMode(QListWidget.ViewMode.IconMode)
@@ -160,11 +163,22 @@ class CatalogTiles(QListWidget):
         self.setIconSize(QSize(156, 112))
         self.setGridSize(QSize(184, 160))
         self.setWordWrap(True)
+        self.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.setSpacing(8)
         self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.setDragEnabled(True)
         self.setAcceptDrops(True)
         self.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_F2:
+            self.rename_requested.emit()
+            event.accept()
+        elif event.key() == Qt.Key.Key_Delete:
+            self.remove_requested.emit()
+            event.accept()
+        else:
+            super().keyPressEvent(event)
 
     def startDrag(self, actions):
         paths = [item.data(ROLE)['path'] for item in self.selectedItems() if Path(item.data(ROLE)['path']).is_file()]
@@ -214,6 +228,9 @@ class MediaCatalog(QWidget):
     add_to_timeline = Signal(list)
     def __init__(self, parent=None, store=None):
         super().__init__(parent)
+        self.setObjectName("mediaCatalogPanel")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setProperty("dropActive", False)
         self.store = store or CatalogStore()
         self.current_folder = None
         self.import_queue = deque()
@@ -238,8 +255,10 @@ class MediaCatalog(QWidget):
         split.addWidget(self.tiles)
         split.setStretchFactor(1, 1)
         split.setSizes([160, 480])
-        layout.addWidget(split)
+        layout.addWidget(split, 1)
         self.import_status = QLabel()
+        self.import_status.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        self.import_status.hide()
         layout.addWidget(self.import_status)
         self.description = QTextEdit()
         self.description.setReadOnly(True)
@@ -250,6 +269,9 @@ class MediaCatalog(QWidget):
         self.folders.currentItemChanged.connect(self.select_folder)
         self.folders.dropped.connect(self.drop_into_folder)
         self.tiles.dropped.connect(lambda paths: self.import_paths(paths, self.current_folder or ''))
+        self.tiles.rename_requested.connect(self.rename_selected)
+        self.tiles.remove_requested.connect(self.remove_selected)
+        self.tiles.itemChanged.connect(self.save_inline_name)
         self.tiles.itemSelectionChanged.connect(self.show_description)
         self.tiles.itemDoubleClicked.connect(lambda item: QDesktopServices.openUrl(QUrl.fromLocalFile(item.data(ROLE)['path'])))
         self.tiles.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -273,8 +295,10 @@ class MediaCatalog(QWidget):
 
     def handle_file_event(self, watched, event):
         if not self.accepts_files(event.mimeData()):
+            self.set_drop_active(False)
             event.ignore()
             return True
+        self.set_drop_active(event.type() != QEvent.Type.Drop)
         if event.type() == QEvent.Type.Drop:
             folder = self.current_folder or ''
             if watched is self.folders.viewport():
@@ -287,9 +311,21 @@ class MediaCatalog(QWidget):
         return True
 
     def eventFilter(self, watched, event):
+        if event.type() == QEvent.Type.DragLeave:
+            self.set_drop_active(False)
         if event.type() in {QEvent.Type.DragEnter, QEvent.Type.DragMove, QEvent.Type.Drop}:
             return self.handle_file_event(watched, event)
         return super().eventFilter(watched, event)
+
+    def set_drop_active(self, active):
+        self.setProperty('dropActive', bool(active))
+        self.style().unpolish(self)
+        self.style().polish(self)
+        self.update()
+
+    def dragLeaveEvent(self, event):
+        self.set_drop_active(False)
+        super().dragLeaveEvent(event)
 
     def dragEnterEvent(self, event):
         self.handle_file_event(self, event)
@@ -336,9 +372,10 @@ class MediaCatalog(QWidget):
                 continue
             if query and query not in ' '.join([entry['name'], entry['description'], *entry['tags']]).casefold():
                 continue
-            icon = QIcon(self.previews[entry['id']]) if self.previews.get(entry['id']) else self.style().standardIcon(QStyle.StandardPixmap.SP_FileIcon)
+            icon = self.tile_icon(entry)
             missing = not Path(entry['path']).is_file()
-            item = QListWidgetItem(icon, entry['name'] + ('\nMissing file' if missing else ''))
+            item = QListWidgetItem(icon, entry['name'])
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
             item.setData(ROLE, entry)
             item.setToolTip('\n'.join([entry['path'], ', '.join(entry['tags']), entry['description']]))
             self.tiles.addItem(item)
@@ -348,13 +385,28 @@ class MediaCatalog(QWidget):
                 job.signals.ready.connect(self.preview_ready)
                 QThreadPool.globalInstance().start(job)
 
+    def tile_icon(self, entry):
+        preview = self.previews.get(entry['id'])
+        source = QPixmap(preview) if preview else self.style().standardIcon(QStyle.StandardPixmap.SP_FileIcon).pixmap(64, 64)
+        canvas = QPixmap(156, 112)
+        canvas.fill(QColor('#172127'))
+        painter = QPainter(canvas)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        if not source.isNull():
+            source = source.scaled(canvas.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            painter.drawPixmap((canvas.width() - source.width()) // 2, (canvas.height() - source.height()) // 2, source)
+        painter.end()
+        tags = entry.get('tags', [])
+        shown = tags if len(tags) <= 4 else [*tags[:3], f'+{len(tags) - 3}']
+        return QIcon(add_thumbnail_labels(canvas, [(tag, '#567a94') for tag in shown]))
+
     def preview_ready(self, entry_id, preview):
         self.pending.discard(entry_id)
         self.previews[entry_id] = preview
         for index in range(self.tiles.count()):
             item = self.tiles.item(index)
             if item.data(ROLE)['id'] == entry_id and preview:
-                item.setIcon(QIcon(preview))
+                item.setIcon(self.tile_icon(item.data(ROLE)))
 
     def show_description(self):
         selected = self.tiles.selectedItems()
@@ -375,6 +427,7 @@ class MediaCatalog(QWidget):
         paths, folder = self.import_queue.popleft()
         self.import_busy = True
         self.import_status.setText('Copying media into the working folder…')
+        self.import_status.show()
         self.setEnabled(False)
         job = ImportJob(self.store, paths, folder)
         job.signals.ready.connect(self.import_finished)
@@ -384,6 +437,7 @@ class MediaCatalog(QWidget):
         self.import_busy = False
         self.setEnabled(True)
         self.import_status.setText('')
+        self.import_status.hide()
         self.refresh_folders()
         self.refresh_tiles()
         if error:
@@ -444,19 +498,63 @@ class MediaCatalog(QWidget):
             return
         menu = QMenu(self)
         menu.addAction('Add to timeline', lambda: self.add_to_timeline.emit([e['path'] for e in entries if Path(e['path']).is_file()]))
+        if len(entries) == 1:
+            menu.addAction('Rename (F2)', lambda: self.rename_entries(entries))
         menu.addAction('Edit details…', lambda: self.edit_details(entries))
         move = menu.addMenu('Move to folder')
         for folder in ['', *sorted(self.store.folders)]:
             move.addAction(folder or 'Unfiled', lambda checked=False, f=folder: self.move_entries(entries, f))
         menu.addAction('Open containing folder', lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(Path(entries[0]['path']).parent))))
-        menu.addAction('Remove from catalog', lambda: self.remove_entries(entries))
+        menu.addAction('Remove from catalog (Delete)', lambda: self.remove_entries(entries))
         menu.exec(self.tiles.mapToGlobal(point))
 
     def move_entries(self, entries, folder):
         self.store.move([e['path'] for e in entries], folder)
         self.refresh_tiles()
 
+    def rename_selected(self):
+        self.rename_entries([item.data(ROLE) for item in self.tiles.selectedItems()])
+
+    def rename_entries(self, entries):
+        if len(entries) != 1:
+            return
+        item = next((self.tiles.item(i) for i in range(self.tiles.count())
+                     if self.tiles.item(i).data(ROLE)['id'] == entries[0]['id']), None)
+        if item:
+            self.tiles.setCurrentItem(item)
+            self.tiles.editItem(item)
+
+    def save_inline_name(self, item):
+        data = item.data(ROLE)
+        if not isinstance(data, dict):
+            return
+        entry = next((entry for entry in self.store.entries if entry['id'] == data['id']), None)
+        if not entry or item.text() == entry['name']:
+            return
+        name = item.text().strip()
+        self.tiles.blockSignals(True)
+        try:
+            if name:
+                entry['name'] = name
+                self.store.save()
+                item.setData(ROLE, entry)
+            item.setText(entry['name'])
+        finally:
+            self.tiles.blockSignals(False)
+
+    def remove_selected(self):
+        self.remove_entries([item.data(ROLE) for item in self.tiles.selectedItems()])
+
     def remove_entries(self, entries):
+        if not entries:
+            return
+        label = entries[0]['name'] if len(entries) == 1 else f'{len(entries)} selected items'
+        answer = QMessageBox.question(self, 'Remove media from catalog',
+                                      f'Remove {label} from the catalog?\nMedia files will remain in the working folder.',
+                                      QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                      QMessageBox.StandardButton.No)
+        if answer != QMessageBox.StandardButton.Yes:
+            return
         ids = {e['id'] for e in entries}
         self.store.entries = [e for e in self.store.entries if e['id'] not in ids]
         self.store.save()

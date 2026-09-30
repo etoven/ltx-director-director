@@ -6,7 +6,7 @@ Start with an image, a video clip or a written beat. Arrange the sequence, descr
 
 ![A complete MiniMax plan in the Aurora workspace](docs/images/ltx-director-director-overview.png)
 
-*The examples throughout this guide use the current 1.13.0a22 native interface with a locally authored Aurora demonstration project.*
+*The examples throughout this guide use the current 1.13.0a23 native interface with a locally authored Aurora demonstration project.*
 
 ## Your first sequence
 
@@ -102,3 +102,7 @@ Import files or drop files and folders from your file manager. Browse large prev
 Imports copy full-resolution images and videos into LTX Director’s working folder. Catalog tiles and timeline drags use these managed copies, so moving or deleting the original source does not break your imported media. Same-named files remain separate. Removing a catalog entry or folder keeps the media on disk.
 
 The app ships with one **LTX Video** workspace and one **MiniMax** workspace. LTX generation and refinement return video prompts and timing without requiring a separate still-image prompt. The **Director’s Intent** checkbox is in the prompt box header; its collapsed state is shared across modes and remembered after restart.
+
+Media tags appear as pills on each thumbnail, matching the project cards. Press **F2** to rename a selected tile directly below its image; Enter saves and Escape cancels. Press **Delete** to remove selected catalog entries after confirmation. The managed media files remain available on disk.
+
+The reference-image panel remembers whether you opened or closed it across workspaces and restarts. Reopen it with **Reference images**. The project library retains its chosen dock size when changing workspaces or dock tabs. Media Catalog and video preview use the same blue border as the timeline while accepting a drop.

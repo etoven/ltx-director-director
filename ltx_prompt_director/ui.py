@@ -19,13 +19,13 @@ from pathlib import Path
 from uuid import uuid4
 
 from PySide6.QtCore import QDateTime, QEasingCurve, QEventLoop, QObject, QRunnable, QRectF, QSettings, QSize, QStandardPaths, Qt, QThreadPool, QTimer, QUrl, QVariantAnimation, Signal, Slot
-from PySide6.QtGui import QAction, QActionGroup, QBrush, QColor, QIcon, QImageReader, QPainter, QPen, QPixmap, QTextCharFormat, QTextCursor, QTextOption
+from PySide6.QtGui import QAction, QActionGroup, QBrush, QColor, QCursor, QIcon, QImageReader, QPainter, QPen, QPixmap, QTextCharFormat, QTextCursor, QTextOption
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
     QColorDialog, QDateTimeEdit, QDockWidget, QGraphicsOpacityEffect, QFileDialog, QFormLayout, QFrame, QHBoxLayout, QLabel, QLayout, QLineEdit,
-    QListWidget, QListWidgetItem, QTabWidget, QMainWindow, QMenu, QMessageBox, QPushButton, QScrollArea,
+    QListWidget, QListWidgetItem, QTabBar, QTabWidget, QMainWindow, QMenu, QMessageBox, QPushButton, QScrollArea,
     QSizePolicy, QSlider, QSpinBox, QProgressBar, QStatusBar, QStyle, QStyledItemDelegate, QStyleOptionSlider, QStyleOptionViewItem, QTextEdit, QToolBar, QToolTip, QVBoxLayout, QWidget,
 )
 
@@ -39,6 +39,7 @@ from .minimax_reference_widgets import MiniMaxReferenceSlot
 from .generic_ai import build_generic_prompt, refine_generic_prompt, build_generic_segments, refine_generic_segment
 from .downloads import DownloadTray
 from .catalog import MediaCatalog
+from .media_labels import add_thumbnail_labels
 from .workspaces import WorkspaceStore
 from .workspace_editor import WorkspaceEditor
 from .models import Segment, order_segments_by_ids, text_segment_from_ltx
@@ -296,8 +297,7 @@ def _prepare_media_batch(paths: list[str]) -> tuple[list[tuple[str, str, str, in
 
 
 def _persist_library_archive(meta: dict, metadata_path: Path) -> None:
-    """Serialize metadata writes after archive saves to avoid concurrent ZIP mutations."""
-    metadata_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    """Update the archive in order; the UI already saved current gallery metadata."""
     project_path = Path(meta.get("projectPath", ""))
     if project_path.is_file() and zipfile.is_zipfile(project_path):
         with zipfile.ZipFile(project_path, "a") as archive:
@@ -764,6 +764,9 @@ class ProjectVideoWidget(QVideoWidget):
             return
         event.ignore()
 
+    def dragMoveEvent(self, event) -> None:
+        self.dragEnterEvent(event)
+
     def dragLeaveEvent(self, event) -> None:
         self.drag_active_changed.emit(False)
         super().dragLeaveEvent(event)
@@ -936,6 +939,8 @@ class ProjectPreviewPanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("projectPreviewPanel")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setProperty("dropActive", False)
         self.setAcceptDrops(True)
         self.duration = 0
         self._source_generation = 0
@@ -1051,6 +1056,9 @@ class ProjectPreviewPanel(QWidget):
             event.acceptProposedAction()
             return
         event.ignore()
+
+    def dragMoveEvent(self, event) -> None:
+        self.dragEnterEvent(event)
 
     def dragLeaveEvent(self, event) -> None:
         self.set_drop_active(False)
@@ -2475,6 +2483,24 @@ class ProjectPropertiesPanel(QWidget):
         self.commit_fields()
 
 
+class ReferenceImageDock(QDockWidget):
+    closed_by_user = Signal()
+
+    def closeEvent(self, event):
+        self.closed_by_user.emit()
+        super().closeEvent(event)
+
+
+class ProjectLibraryDock(QDockWidget):
+    user_resized = Signal(int, int)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        on_separator = QApplication.widgetAt(QCursor.pos()) is self.parentWidget()
+        if QApplication.mouseButtons() & Qt.MouseButton.LeftButton and (on_separator or self.isFloating()):
+            self.user_resized.emit(self.width(), self.height())
+
+
 class MiniMaxPromptPanel(QFrame):
     """Inline MiniMax controls. The production editor belongs to MainWindow."""
 
@@ -2512,7 +2538,7 @@ class MiniMaxPromptPanel(QFrame):
         self.clear_message()
 
         # Untimed project references can accompany either MiniMax workflow.
-        self.reference_dock = QDockWidget("REFERENCE IMAGES", owner)
+        self.reference_dock = ReferenceImageDock("REFERENCE IMAGES", owner)
         self.reference_dock.setObjectName("minimaxReferenceDock")
         self.reference_dock.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea)
         self.reference_dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetClosable | QDockWidget.DockWidgetFeature.DockWidgetMovable)
@@ -2529,6 +2555,8 @@ class MiniMaxPromptPanel(QFrame):
         self.reference_dock.setWidget(content)
         owner.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.reference_dock)
         self.reference_dock.hide()
+        self.reference_dock.closed_by_user.connect(lambda: owner.set_reference_panel_open(False))
+        self.reference_dock.toggleViewAction().triggered.connect(owner.set_reference_panel_open)
         self.workflow_label = owner.workflow_label
 
     def set_project(self, project_name: str, prompt: str, instructions: str, cache_state: str) -> None:
@@ -2626,6 +2654,7 @@ class MainWindow(QMainWindow):
         self.timeline_fit_mode = False
         self._restoring_layout = True
         self.project_panel_width = max(280, self.settings.value("project_panel_width", 330, int))
+        self.project_panel_height = max(160, self.settings.value("project_panel_height", 300, int))
         saved_icon_size = self.settings.value("project_icon_size", 230, int)
         self.project_icon_size = min((96, 156, 230), key=lambda size: abs(size - saved_icon_size))
         self.pixels_per_second = 65
@@ -2684,6 +2713,8 @@ class MainWindow(QMainWindow):
             self.restoreGeometry(geometry)
         if state:
             self.restoreState(state)
+        self.sync_reference_panel_visibility()
+        self.tabifiedDockWidgetActivated.connect(lambda *_: self.queue_project_panel_width_restore())
         QTimer.singleShot(0, self.restore_startup_workspace)
         self.update_window_title()
 
@@ -3235,7 +3266,8 @@ class MainWindow(QMainWindow):
         self.project_properties_dock.hide()
 
     def _build_project_dock(self) -> None:
-        self.project_dock = QDockWidget("PROJECT LIBRARY", self)
+        self.project_dock = ProjectLibraryDock("PROJECT LIBRARY", self)
+        self.project_dock.user_resized.connect(self.remember_project_panel_width)
         self.project_dock.setObjectName("projectDock")
         self.project_dock.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea)
         self.project_dock.setFeatures(
@@ -3384,11 +3416,41 @@ class MainWindow(QMainWindow):
 
     def project_dock_visibility_changed(self, visible: bool) -> None:
         if visible:
-            QTimer.singleShot(0, lambda: self.set_project_panel_width(self.project_panel_width, persist=False))
+            QTimer.singleShot(0, self.restore_project_panel_width)
+
+    def remember_project_panel_width(self, width: int, height: int) -> None:
+        if self._restoring_layout or self._loading:
+            return
+        bottom = self.dockWidgetArea(self.project_dock) in {Qt.DockWidgetArea.TopDockWidgetArea, Qt.DockWidgetArea.BottomDockWidgetArea}
+        if bottom and not self.project_dock.isFloating():
+            self.project_panel_height = max(160, height)
+            self.settings.setValue("project_panel_height", self.project_panel_height)
+        else:
+            self.project_panel_width = max(280, width)
+            self.settings.setValue("project_panel_width", self.project_panel_width)
+        self.queue_settings_sync()
+
+    def queue_project_panel_width_restore(self) -> None:
+        if self._restoring_layout or self.project_dock.isHidden():
+            return
+        QTimer.singleShot(0, self.restore_project_panel_width)
 
     def restore_project_panel_width(self) -> None:
-        """Restore the saved dock width without startup resize events overwriting it."""
-        self.set_project_panel_width(self.project_panel_width, persist=False)
+        """Preserve the user's extent for side or bottom dock layouts."""
+        if self.project_dock.isFloating():
+            return
+        area = self.dockWidgetArea(self.project_dock)
+        if area in {Qt.DockWidgetArea.TopDockWidgetArea, Qt.DockWidgetArea.BottomDockWidgetArea}:
+            tab_height = 0
+            if self.tabifiedDockWidgets(self.project_dock):
+                title = self.project_dock.windowTitle().replace('&', '')
+                for bar in self.findChildren(QTabBar):
+                    if any(bar.tabText(index).replace('&', '') == title for index in range(bar.count())):
+                        tab_height = bar.height()
+                        break
+            self.resizeDocks([self.project_dock], [self.project_panel_height + tab_height], Qt.Orientation.Vertical)
+        else:
+            self.set_project_panel_width(self.project_panel_width, persist=False)
 
     def restore_startup_workspace(self) -> None:
         """Settle saved geometry before loading the previous project's media timeline."""
@@ -3485,6 +3547,7 @@ class MainWindow(QMainWindow):
         #timelineSpin::up-button{width:__TIMELINE_SPIN_BUTTON__px;background:transparent;border:0;border-radius:2px;subcontrol-origin:border;subcontrol-position:top right} #timelineSpin::down-button{width:__TIMELINE_SPIN_BUTTON__px;background:transparent;border:0;border-radius:2px;subcontrol-origin:border;subcontrol-position:bottom right} #timelineSpin::up-button:hover,#timelineSpin::down-button:hover{background:#344b57} #timelineSpin::up-button:pressed,#timelineSpin::down-button:pressed{background:#1f668b} #timelineSpin::up-arrow{image:url("__SPIN_UP_IMAGE__");width:__TIMELINE_ARROW__px;height:__TIMELINE_ARROW__px} #timelineSpin::down-arrow{image:url("__SPIN_DOWN_IMAGE__");width:__TIMELINE_ARROW__px;height:__TIMELINE_ARROW__px}
         #resolutionSeparator{background:transparent;color:#60717a;border:0;padding:0 3px;font-weight:bold} #timelineButton{background:transparent;color:#acd8ef;border:1px solid #3f6679;border-radius:5px;padding:4px 10px;font-weight:bold} #timelineButton:hover{background:#243b46;color:#e0f5ff;border-color:#65a7c7} #timelineButton:pressed{background:#172b35;color:#85c9eb;border-color:#347898}
         QListWidget{background:#0d0f10;border:0;padding:0} QListWidget::item{border:1px solid #696b6c;background:#252728;margin:0} QListWidget::item:selected{border:2px solid #f1f1f1;background:#293034}
+        #mediaCatalogPanel{border:1px solid transparent} #mediaCatalogPanel[dropActive="true"]{border:3px solid #68b9ee;background:#13232c}
         #timeline{padding:3px;background:#0d0f10;outline:0} #timeline::item,#timeline::item:selected,#timeline::item:focus{background:#0d0f10;border:0;outline:0} #timeline[dropActive="true"]{border:3px solid #68b9ee;background:#13232c} #timeline[dropActive="false"]{border:1px solid #323638}
         #segmentCard{background:transparent;border:1px solid transparent} #segmentCard[selected="true"]{background:#17262e;border:1px solid #73a9c4} #segmentCardBody{background:#252728;border:0} #mediaBadge{background:#e5e5e5;color:#262626;font-weight:bold;padding:2px} #roleBadge{background:#36393a;color:#eee;padding:2px}
         #tileDelete{padding:0;min-height:0;max-height:20px;background:#454849;color:#ddd;border:0} #tileDelete:hover{background:#a94444;color:#fff;border:1px solid #e07878} #tileTitle{background:#242627;padding:3px;font-size:9px} #tileStartTime{color:#79b8d7;font-size:8px;font-weight:bold} #tileDuration{color:#a2a7a9;font-size:8px}
@@ -3670,32 +3733,7 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def add_thumbnail_labels(pixmap: QPixmap, labels: list[tuple[str, str]]) -> QPixmap:
-        result = pixmap.copy()
-        painter = QPainter(result)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        font = painter.font()
-        font.setBold(True)
-        font.setPixelSize(max(9, round(result.height() * .075)))
-        painter.setFont(font)
-        metrics = painter.fontMetrics()
-        margin = max(4, round(result.width() * .03))
-        pad_x = max(6, round(result.width() * .035))
-        height = metrics.height() + max(4, round(result.height() * .025))
-        bottom = result.height() - margin
-        for label, color in reversed(labels):
-            display = metrics.elidedText(label, Qt.TextElideMode.ElideRight, max(30, result.width() - margin * 2 - pad_x * 2))
-            width = min(result.width() - margin * 2, metrics.horizontalAdvance(display) + pad_x * 2)
-            rect = QRectF(result.width() - margin - width, bottom - height, width, height)
-            background = QColor(color)
-            background.setAlpha(235)
-            painter.setPen(QPen(background.lighter(145), 1))
-            painter.setBrush(background)
-            painter.drawRoundedRect(rect, height / 2, height / 2)
-            painter.setPen(QColor("#111416") if background.lightness() > 150 else QColor("#ffffff"))
-            painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, display)
-            bottom -= height + max(3, round(result.height() * .02))
-        painter.end()
-        return result
+        return add_thumbnail_labels(pixmap, labels)
 
     def custom_order_settings_key(self) -> str:
         return f"project_custom_order/{self.current_collection or '__root__'}"
@@ -4164,6 +4202,7 @@ class MainWindow(QMainWindow):
         self.refresh_timeline()
         if auto_fit:
             self.apply_timeline_fit()
+        self.queue_project_panel_width_restore()
 
     def leave_collection(self) -> None:
         self.current_collection = None
@@ -4530,9 +4569,9 @@ class MainWindow(QMainWindow):
             self.project_preview_panel.player.stop()
             if self.project_preview_panel.fullscreen_window.isVisible():
                 self.project_preview_panel.fullscreen_window.reject()
-        if hasattr(self, "project_dock") and self.project_dock.width() >= 280:
-            self.project_panel_width = self.project_dock.width()
+        if hasattr(self, "project_dock"):
             self.settings.setValue("project_panel_width", self.project_panel_width)
+            self.settings.setValue("project_panel_height", self.project_panel_height)
         if self.current_project_id:
             self.settings.setValue("last_project_id", self.current_project_id)
         else:
@@ -5564,7 +5603,7 @@ class MainWindow(QMainWindow):
         if self.unified_workspace:
             self.load_minimax_draft(("frames" if self.workspace_engine == "generic" else self.workspace_engine.removeprefix("minimax_")))
         self.prompt_scope.setCurrentIndex(0)
-        self.minimax_panel.reference_dock.setVisible(self.unified_workspace)
+        self.sync_reference_panel_visibility()
 
     def load_minimax_draft(self, mode: str) -> None:
         self.minimax_prompt_mode = mode
@@ -5636,7 +5675,7 @@ class MainWindow(QMainWindow):
         self.prompt_scope.blockSignals(False)
         self.minimax_panel.clear_message()
         self.sync_minimax_panel()
-        self.minimax_panel.reference_dock.setVisible(self.unified_workspace and self.workspace_definition.get("references", {}).get("enabled", False))
+        self.sync_reference_panel_visibility()
         self.sync_timed_actions()
         self.mark_dirty()
 
@@ -5655,8 +5694,7 @@ class MainWindow(QMainWindow):
         self.minimax_panel.setVisible(not ltx)
         self.references_button.setVisible(refs)
         self.minimax_panel.reference_dock.toggleViewAction().setVisible(refs)
-        if not refs:
-            self.minimax_panel.reference_dock.hide()
+        self.sync_reference_panel_visibility()
         audio = self.workspace_definition.get("audio_generation", True)
         for control in (self.sfx, self.spoken_dialog, self.reduce_music):
             control.setVisible(audio)
@@ -5684,6 +5722,8 @@ class MainWindow(QMainWindow):
             for row in range(target.role.count()):
                 target.role.model().item(row).setEnabled(target.role.itemData(row) in reference_options.get("kinds", []))
         self.refresh_shared_editor()
+
+        self.queue_project_panel_width_restore()
 
     def prompt_scope_changed(self, _index: int) -> None:
         self.refresh_shared_editor()
@@ -5727,8 +5767,22 @@ class MainWindow(QMainWindow):
         for widget in (self.speaker_language, self.speaker_accent, self.language_label, self.accent_label):
             widget.setVisible(self.spoken_dialog.isChecked())
 
+    def set_reference_panel_open(self, opened: bool) -> None:
+        self.settings.setValue("reference_panel_open", bool(opened))
+        self.queue_settings_sync()
+        self.sync_reference_panel_visibility()
+
+    def sync_reference_panel_visibility(self) -> None:
+        references = self.workspace_definition.get("references", {})
+        available = (self.unified_workspace or self.workspace_engine == "generic") and references.get("enabled", False) and references.get("untimed_slots", 0) > 0
+        opened = self.settings.value("reference_panel_open", False, bool)
+        dock = self.minimax_panel.reference_dock
+        if dock.isHidden() == bool(available and opened):
+            dock.setVisible(bool(available and opened))
+            self.queue_project_panel_width_restore()
+
     def show_reference_images(self) -> None:
-        self.minimax_panel.reference_dock.show()
+        self.set_reference_panel_open(True)
         self.minimax_panel.reference_dock.raise_()
 
     def generate_project_prompt(self) -> None:

@@ -182,6 +182,7 @@ class MiniMaxReferenceTests(unittest.TestCase):
     def test_frames_dock_accepts_both_references_and_passes_snapshot_to_worker(self):
         window = self.make_window()
         window.set_project_type('minimax_frames')
+        window.show_reference_images()
         first = self.add_reference(window, 0)
         second = self.add_reference(window, 1)
         self.assertFalse(window.references_button.isHidden())

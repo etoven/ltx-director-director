@@ -103,6 +103,7 @@ class UnifiedEditorTests(unittest.TestCase):
             self.assertTrue(w.prompt_scope.isHidden())
             self.assertFalse(hasattr(w, "copy_image_prompt"))
             self.assertFalse(w.references_button.isHidden())
+            w.show_reference_images()
             self.assertFalse(w.minimax_panel.reference_dock.isHidden())
             w.project_type_combo.setCurrentIndex(1)
             self.assertFalse(w.minimax_panel.reference_dock.isHidden())
