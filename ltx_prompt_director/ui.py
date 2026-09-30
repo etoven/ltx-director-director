@@ -2549,6 +2549,7 @@ class MiniMaxPromptPanel(QFrame):
             target = MiniMaxReferenceSlot(index + 1)
             target.changed.connect(lambda value, slot=index: owner.set_minimax_reference_image(slot, value))
             target.error.connect(lambda message: self.show_message(message, "warning"))
+            target.export_requested.connect(lambda slot=index: owner.export_reference_image(slot))
             refs_layout.addWidget(target)
             self.reference_targets.append(target)
         refs_layout.addStretch()
@@ -5856,6 +5857,22 @@ class MainWindow(QMainWindow):
         kinds = options.get("kinds", [])
         return [value if index < count and value and value.get("role", "identity") in kinds else None
                 for index, value in enumerate(reference_slots(self.minimax_reference_images))]
+
+    def export_reference_image(self, slot: int) -> None:
+        references = reference_slots(self.minimax_reference_images)
+        if not 0 <= slot < len(references) or not references[slot]:
+            return
+        reference = references[slot]
+        image = str(reference.get("image", ""))
+        if not image:
+            return
+        mime = image.split(";", 1)[0].removeprefix("data:").lower()
+        suffix = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp",
+                  "image/bmp": ".bmp", "image/tiff": ".tiff"}.get(mime, ".png")
+        stem = Path(str(reference.get("name") or f"Reference {slot + 1}")).stem
+        target = self.next_export_path(stem + suffix)
+        self.start_disk_job(write_data_url, (image, target), lambda _result: self.record_export(target),
+                            lambda message: self.export_failed(target, message), serialized=True)
 
     def set_minimax_reference_image(self, slot: int, value: dict | None) -> None:
         if self._loading:

@@ -14,6 +14,7 @@ from .minimax_reference import REFERENCE_ROLES
 class MiniMaxReferenceSlot(QFrame):
     changed = Signal(object)
     error = Signal(str)
+    export_requested = Signal()
 
     def __init__(self, number: int):
         super().__init__()
@@ -32,6 +33,12 @@ class MiniMaxReferenceSlot(QFrame):
             button.setObjectName("copyButton")
             button.clicked.connect(callback)
             row.addWidget(button)
+        self.export_button = QPushButton("Export")
+        self.export_button.setObjectName("copyButton")
+        self.export_button.setToolTip("Export the original-resolution reference image")
+        self.export_button.setEnabled(False)
+        self.export_button.clicked.connect(lambda: self.export_requested.emit())
+        row.insertWidget(row.count() - 1, self.export_button)
         layout.addLayout(row)
         body = QHBoxLayout()
         self.preview = QLabel("Drop image here")
@@ -62,6 +69,7 @@ class MiniMaxReferenceSlot(QFrame):
         if value == self.value:
             return
         self.value = dict(value) if value else None
+        self.export_button.setEnabled(bool(value and value.get("image")))
         self.role.blockSignals(True)
         self.notes.blockSignals(True)
         self.role.setCurrentIndex(max(0, self.role.findData(value.get("role", "identity") if value else "identity")))

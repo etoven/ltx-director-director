@@ -23,7 +23,7 @@ Open **Reference images** in either MiniMax workspace. Drop a local still into a
 
 For the Aurora scene, choose **Visual style** and write “Use the cool sky, warm lanterns and luminous atmosphere.” That gives the picture a clear job while the timeline continues to describe when the traveler moves and arrives.
 
-References keep their original resolution in the saved project. AI analysis uses a size-limited copy. Roles and notes travel with the .LTXD project. **Clear** removes only that slot’s reference; it does not remove timeline media or change the sequence’s duration.
+References keep their original resolution in the saved project. AI analysis uses a size-limited copy. Roles and notes travel with the .LTXD project. **Export** saves the full-resolution stored image into the project’s export folder and adds it to Recent exports. Automatic filenames avoid overwriting earlier exports. **Clear** removes only that slot’s reference; it does not remove timeline media or change the sequence’s duration.
 
 ## Choose the right source pattern
 
