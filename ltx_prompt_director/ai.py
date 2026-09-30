@@ -101,10 +101,30 @@ def _extract_minimax_h3_prompt(raw: str, segments: list[Segment] | None = None) 
     if not isinstance(result, dict):
         raise AIResponseFormatError("The AI returned an invalid MiniMax H3 response. The operation will retry.")
     actions = result.get("timed_actions", result.get("timedActions"))
+    if actions is None and isinstance(result.get("timed_action"), list) and any(
+        isinstance(action, dict) for action in result["timed_action"]
+    ):
+        actions = result["timed_action"]
     prompt = next((result.get(key) for key in (
         "prompt", "minimaxPrompt", "minimax_prompt", "productionPrompt", "production_prompt",
         "productionBrief", "production_brief",
     ) if isinstance(result.get(key), str) and result.get(key).strip()), None)
+    # Some providers return the requested brief sections as JSON fields instead
+    # of wrapping the entire brief in prompt. Preserve their prose and timing.
+    if prompt is None:
+        sections = []
+        for key, heading in (
+            ("frame_use", "FRAME USE"), ("reference_use", "REFERENCE USE"),
+            ("continuity", "CONTINUITY"), ("scene", "SCENE"),
+            ("timed_action", "TIMED ACTION"), ("sound", "SOUND"), ("avoid", "AVOID"),
+        ):
+            value = result.get(key)
+            if isinstance(value, list) and all(isinstance(item, str) for item in value):
+                value = "\n".join(value)
+            if isinstance(value, str) and value.strip():
+                sections.append(f"[{heading}]\n{value.strip()}")
+        if sections and (actions is not None or any(section.startswith("[TIMED ACTION]") for section in sections)):
+            prompt = "\n\n".join(sections)
     # Occasionally a provider follows the timed-action schema but omits the
     # surrounding brief. Keep those generated actions usable instead of
     # discarding the entire response as an empty generation.
