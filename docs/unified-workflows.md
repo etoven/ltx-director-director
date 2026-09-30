@@ -1,6 +1,6 @@
-# Unified project workflows — 1.13.0a18
+# Unified project workflows — 1.13.0a19
 
-Experimental branch: `experimental/unified-project-workflows`. Stable `main` remains
+Experimental branch: `experimental`. Stable `main` remains
 on 1.12.57. This experiment brings all MiniMax controls into the main timeline window.
 
 ![Current MiniMax timeline, shared prompt editor, and reference image dock](images/ltx-director-director-overview.png)
@@ -68,7 +68,7 @@ editable during MiniMax generation. No live provider request was made for automa
 ## Install this experimental wheel
 
 ```bash
-python3 -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/unified-project-workflows/dist/ltx_prompt_director-1.13.0a18-py3-none-any.whl'
+python3 -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a19-py3-none-any.whl'
 ```
 
 To return to the stable build, install its wheel explicitly:
@@ -141,3 +141,8 @@ The Director’s Intent checkbox collapses the direction panel in every workspac
 ### MiniMax text and media cue repair (1.13.0a18)
 
 Adding a text or media timeline item to a valid MiniMax plan inserts a linked timed-action block at its timeline position. Empty action blocks remain distinct while editing. MiniMax generation accepts common production-prompt response fields and preserves valid timed actions if the provider omits the surrounding brief.
+
+
+### MiniMax section-based response parsing (1.13.0a19)
+
+MiniMax generation accepts AI responses that return reference use, continuity, scene, timed action, sound, and avoid as separate JSON fields. It preserves prose and timecodes, supports section lists and structured timed actions, and retains existing prompt precedence and timing validation.
