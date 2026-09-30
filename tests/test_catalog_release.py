@@ -74,6 +74,7 @@ def test_catalog_folder_import_filter_and_batch_move(tmp_path):
     store = CatalogStore(tmp_path / 'catalog.json')
     catalog = MediaCatalog(store=store)
     catalog.import_paths([str(source)], '')
+    finish_catalog_import(catalog)
     assert set(store.folders) == {'Shots', 'Shots/Night'}
     assert len(store.entries) == 2
     catalog.current_folder = 'Shots/Night'
@@ -138,7 +139,11 @@ def test_native_filesystem_drop_on_every_catalog_surface(tmp_path):
                           QDropEvent(QPointF(5, 5), Qt.DropAction.CopyAction, mime, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)]:
                 app.sendEvent(target, event)
                 assert event.isAccepted()
-            assert str(path) in [entry['path'] for entry in catalog.store.entries]
+            finish_catalog_import(catalog)
+            assert str(path) in [entry['source_path'] for entry in catalog.store.entries]
+            imported = catalog.store.entries[-1]
+            assert Path(imported['path']).read_bytes() == path.read_bytes()
+            assert Path(imported['path']).is_relative_to(catalog.store.media_root)
         assert len(catalog.store.entries) == 4
         assert catalog.search.text() == ''
         assert len(CatalogStore(catalog.store.path).entries) == 4
@@ -164,8 +169,136 @@ def test_native_directory_drop_uses_target_folder(tmp_path):
     event = QDropEvent(QPointF(5, 5), Qt.DropAction.CopyAction, mime, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
     catalog.dropEvent(event)
     assert event.isAccepted()
+    finish_catalog_import(catalog)
     assert catalog.store.entries[0]['folder'] == 'Selected/Incoming'
     assert catalog.current_folder == 'Selected'
+    QThreadPool.globalInstance().waitForDone(10000)
+    app.processEvents()
+    catalog.close()
+
+
+def test_catalog_copies_full_media_survives_source_removal_and_reuses_copy(tmp_path):
+    source = tmp_path / 'source' / 'frame.png'
+    source.parent.mkdir()
+    Image.new('RGB', (64, 64), 'red').save(source)
+    original = source.read_bytes()
+    store = CatalogStore(tmp_path / 'director' / 'media-catalog.json')
+    entry = store.add([str(source)], 'First')[0]
+    managed = Path(entry['path'])
+    assert managed != source
+    assert managed.is_relative_to(store.media_root)
+    assert managed.read_bytes() == original
+    assert source.read_bytes() == original
+    assert store.add([str(source)], 'Second')[0]['id'] == entry['id']
+    assert len(store.entries) == 1
+    source.unlink()
+    assert managed.read_bytes() == original
+    assert store.add([str(managed)], 'Third')[0]['id'] == entry['id']
+    assert entry['folder'] == 'Third'
+    assert len(store.entries) == 1
+    assert Path(CatalogStore(store.path).entries[0]['path']).read_bytes() == original
+
+
+def test_same_named_files_and_video_bytes_stay_distinct(tmp_path):
+    store = CatalogStore(tmp_path / 'director' / 'media-catalog.json')
+    files = []
+    for index in range(2):
+        path = tmp_path / str(index) / 'clip.mp4'
+        path.parent.mkdir()
+        path.write_bytes(bytes([index]) * 1024)
+        files.append(path)
+    entries = store.add([str(p) for p in files])
+    assert entries[0]['path'] != entries[1]['path']
+    for entry, original in zip(entries, files):
+        assert Path(entry['path']).read_bytes() == original.read_bytes()
+
+
+def test_copy_failure_does_not_register_incomplete_import(tmp_path):
+    source = tmp_path / 'frame.png'
+    Image.new('RGB', (16, 16), 'blue').save(source)
+    store = CatalogStore(tmp_path / 'director' / 'media-catalog.json')
+    import pytest
+    with patch('ltx_prompt_director.catalog.shutil.copy2', side_effect=OSError('Disk full')):
+        with pytest.raises(OSError):
+            store.add([str(source)])
+    assert store.entries == []
+    assert not list(store.media_root.rglob('*.tmp'))
+    assert source.is_file()
+
+
+def finish_catalog_import(catalog):
+    from PySide6.QtCore import QThreadPool
+    app = QApplication.instance()
+    QThreadPool.globalInstance().waitForDone(10000)
+    app.processEvents()
+    assert not catalog.import_busy
+
+
+def test_directory_import_does_not_reimport_its_managed_copies(tmp_path):
+    from ltx_prompt_director.catalog import import_catalog_paths
+    source = tmp_path / 'Collection'
+    source.mkdir()
+    Image.new('RGB', (16, 16), 'red').save(source / 'image.png')
+    store = CatalogStore(source / 'Director' / 'media-catalog.json')
+    import_catalog_paths(store, [str(source)], '')
+    assert len(store.entries) == 1
+    import_catalog_paths(store, [str(source)], '')
+    assert len(store.entries) == 1
+    assert len(list(store.media_root.rglob('*.png'))) == 1
+
+
+def test_context_edit_updates_canonical_name_tags_description_and_search(tmp_path):
+    from PySide6.QtCore import QThreadPool
+    from PySide6.QtWidgets import QDialog, QLineEdit, QTextEdit
+    app = QApplication.instance() or QApplication([])
+    source = tmp_path / 'frame.png'
+    Image.new('RGB', (16, 16), 'red').save(source)
+    store = CatalogStore(tmp_path / 'director' / 'media-catalog.json')
+    store.add([str(source)])
+    catalog = MediaCatalog(store=store)
+    detached = catalog.tiles.item(0).data(Qt.ItemDataRole.UserRole)
+    def accept(dialog):
+        name, tags = dialog.findChildren(QLineEdit)
+        name.setText('Opening portrait')
+        tags.setText('hero, night, hero')
+        dialog.findChild(QTextEdit).setPlainText('The opening frame')
+        return QDialog.DialogCode.Accepted
+    with patch.object(QDialog, 'exec', accept):
+        catalog.edit_details([detached])
+    assert store.entries[0]['name'] == 'Opening portrait'
+    assert store.entries[0]['tags'] == ['hero', 'night']
+    assert store.entries[0]['description'] == 'The opening frame'
+    assert catalog.tiles.item(0).text() == 'Opening portrait'
+    assert catalog.description.toPlainText() == 'The opening frame'
+    assert CatalogStore(store.path).entries[0]['tags'] == ['hero', 'night']
+    catalog.search.setText('hero')
+    assert catalog.tiles.count() == 1
+    QThreadPool.globalInstance().waitForDone(10000)
+    app.processEvents()
+    catalog.close()
+
+
+def test_context_batch_tag_edit_updates_every_selected_entry(tmp_path):
+    from PySide6.QtCore import QThreadPool
+    from PySide6.QtWidgets import QDialog, QLineEdit
+    app = QApplication.instance() or QApplication([])
+    store = CatalogStore(tmp_path / 'director' / 'media-catalog.json')
+    paths = []
+    for index in range(2):
+        path = tmp_path / f'frame{index}.png'
+        Image.new('RGB', (16, 16), 'red').save(path)
+        paths.append(str(path))
+    store.add(paths)
+    catalog = MediaCatalog(store=store)
+    detached = [catalog.tiles.item(i).data(Qt.ItemDataRole.UserRole) for i in range(2)]
+    def accept(dialog):
+        dialog.findChildren(QLineEdit)[-1].setText('review, actor')
+        return QDialog.DialogCode.Accepted
+    with patch.object(QDialog, 'exec', accept):
+        catalog.edit_details(detached)
+    assert all(entry['tags'] == ['review', 'actor'] for entry in store.entries)
+    assert [entry['name'] for entry in store.entries] == ['frame0.png', 'frame1.png']
+    assert all(entry['tags'] == ['review', 'actor'] for entry in CatalogStore(store.path).entries)
     QThreadPool.globalInstance().waitForDone(10000)
     app.processEvents()
     catalog.close()

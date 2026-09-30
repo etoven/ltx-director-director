@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import shutil
+from collections import deque
 from pathlib import Path
 from uuid import uuid4
 
@@ -10,7 +12,7 @@ from PySide6.QtGui import QDrag, QIcon, QDesktopServices
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton,
     QTreeWidget, QTreeWidgetItem, QListWidget, QListWidgetItem, QAbstractItemView,
     QSplitter, QMenu, QInputDialog, QFileDialog, QDialog, QFormLayout, QTextEdit,
-    QDialogButtonBox, QMessageBox, QStyle)
+    QDialogButtonBox, QMessageBox, QStyle, QLabel)
 from .media import prepare_media, TIMELINE_VIDEO_SUFFIXES
 
 MEDIA_SUFFIXES = {'.png', '.jpg', '.jpeg', '.webp', '.bmp', '.tif', '.tiff'} | TIMELINE_VIDEO_SUFFIXES
@@ -20,6 +22,7 @@ ROLE = Qt.ItemDataRole.UserRole
 class CatalogStore:
     def __init__(self, path=None):
         self.path = Path(path) if path else Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppDataLocation)) / 'media-catalog.json'
+        self.media_root = self.path.parent / 'media'
         self.entries = []
         self.folders = []
         if self.path.exists():
@@ -39,12 +42,28 @@ class CatalogStore:
             source = Path(path).resolve()
             if not source.is_file() or source.suffix.lower() not in MEDIA_SUFFIXES:
                 continue
-            entry = next((e for e in self.entries if e['path'] == str(source)), None)
-            if entry:
-                entry['folder'] = folder
+            entry = next((e for e in self.entries if e['path'] == str(source)
+                          or e.get('source_path') == str(source)), None)
+            entry_id = entry['id'] if entry else uuid4().hex
+            current = Path(entry['path']) if entry else None
+            # Dragging an owned file between catalog folders reuses its copy.
+            if current and current.is_file() and current.is_relative_to(self.media_root.resolve()):
+                destination = current
             else:
-                entry = {'id': uuid4().hex, 'path': str(source), 'name': source.name,
-                         'folder': folder, 'tags': [], 'description': ''}
+                destination = self.media_root.resolve() / entry_id / source.name
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                temporary = destination.with_name(destination.name + '.' + uuid4().hex + '.tmp')
+                try:
+                    shutil.copy2(source, temporary)
+                    temporary.replace(destination)
+                finally:
+                    temporary.unlink(missing_ok=True)
+            if entry:
+                entry.update(path=str(destination), folder=folder)
+                entry.setdefault('source_path', str(source))
+            else:
+                entry = {'id': entry_id, 'path': str(destination), 'source_path': str(source),
+                         'name': source.name, 'folder': folder, 'tags': [], 'description': ''}
                 self.entries.append(entry)
             added.append(entry)
         self.save()
@@ -53,9 +72,60 @@ class CatalogStore:
     def move(self, paths, folder):
         resolved = {str(Path(p).resolve()) for p in paths}
         for entry in self.entries:
-            if entry['path'] in resolved:
+            if entry['path'] in resolved or entry.get('source_path') in resolved:
                 entry['folder'] = folder
         self.save()
+
+
+class ImportSignals(QObject):
+    ready = Signal(str)
+
+
+class ImportJob(QRunnable):
+    def __init__(self, store, paths, folder):
+        super().__init__()
+        self.store, self.paths, self.folder = store, paths, folder
+        self.signals = ImportSignals()
+
+    def run(self):
+        error = ''
+        try:
+            import_catalog_paths(self.store, self.paths, self.folder)
+        except Exception as failure:
+            error = str(failure)
+            try:
+                self.store.save()
+            except OSError:
+                pass
+        self.signals.ready.emit(error)
+
+
+def import_catalog_paths(store, paths, folder):
+    expanded = []
+    for path in paths:
+        source = Path(path)
+        if source.is_dir():
+            prefix = '/'.join(filter(None, [folder, source.name]))
+            if prefix not in store.folders:
+                store.folders.append(prefix)
+            # Snapshot before copying: a source folder can contain the app's
+            # working directory, whose managed copies must not recurse back in.
+            files = [file for file in source.rglob('*')
+                     if file.is_file() and file.suffix.lower() in MEDIA_SUFFIXES
+                     and not file.resolve().is_relative_to(store.media_root.resolve())]
+            for file in files:
+                if file.is_file():
+                    relative = file.parent.relative_to(source).as_posix()
+                    destination = prefix if relative == '.' else prefix + '/' + relative
+                    parts = destination.split('/')
+                    for index in range(1, len(parts) + 1):
+                        name = '/'.join(parts[:index])
+                        if name not in store.folders:
+                            store.folders.append(name)
+                    store.add([str(file)], destination)
+        else:
+            expanded.append(path)
+    store.add(expanded, folder)
 
 
 class PreviewSignals(QObject):
@@ -146,6 +216,8 @@ class MediaCatalog(QWidget):
         super().__init__(parent)
         self.store = store or CatalogStore()
         self.current_folder = None
+        self.import_queue = deque()
+        self.import_busy = False
         self.previews, self.pending = {}, set()
         layout = QVBoxLayout(self)
         tools = QHBoxLayout()
@@ -167,6 +239,8 @@ class MediaCatalog(QWidget):
         split.setStretchFactor(1, 1)
         split.setSizes([160, 480])
         layout.addWidget(split)
+        self.import_status = QLabel()
+        layout.addWidget(self.import_status)
         self.description = QTextEdit()
         self.description.setReadOnly(True)
         self.description.setMaximumHeight(80)
@@ -292,28 +366,29 @@ class MediaCatalog(QWidget):
             self.import_paths(paths, self.current_folder or '')
 
     def import_paths(self, paths, folder):
-        expanded = []
-        for path in paths:
-            source = Path(path)
-            if source.is_dir():
-                prefix = '/'.join(filter(None, [folder, source.name]))
-                if prefix not in self.store.folders:
-                    self.store.folders.append(prefix)
-                for file in source.rglob('*'):
-                    if file.is_file() and file.suffix.lower() in MEDIA_SUFFIXES:
-                        relative = file.parent.relative_to(source).as_posix()
-                        destination = prefix if relative == '.' else prefix + '/' + relative
-                        parts = destination.split('/')
-                        for index in range(1, len(parts) + 1):
-                            name = '/'.join(parts[:index])
-                            if name not in self.store.folders:
-                                self.store.folders.append(name)
-                        self.store.add([str(file)], destination)
-            else:
-                expanded.append(path)
-        self.store.add(expanded, folder)
+        self.import_queue.append((list(paths), folder))
+        self.start_next_import()
+
+    def start_next_import(self):
+        if self.import_busy or not self.import_queue:
+            return
+        paths, folder = self.import_queue.popleft()
+        self.import_busy = True
+        self.import_status.setText('Copying media into the working folder…')
+        self.setEnabled(False)
+        job = ImportJob(self.store, paths, folder)
+        job.signals.ready.connect(self.import_finished)
+        QThreadPool.globalInstance().start(job)
+
+    def import_finished(self, error):
+        self.import_busy = False
+        self.setEnabled(True)
+        self.import_status.setText('')
         self.refresh_folders()
         self.refresh_tiles()
+        if error:
+            QMessageBox.warning(self, 'Media import failed', f'Could not copy media into the working folder:\n{error}')
+        self.start_next_import()
 
     def drop_into_folder(self, paths, folder):
         self.import_paths(paths, folder)
@@ -388,6 +463,12 @@ class MediaCatalog(QWidget):
         self.refresh_tiles()
 
     def edit_details(self, entries):
+        # Qt item data returns detached dictionaries; edits must target the
+        # authoritative entries, resolved by their stable catalog IDs.
+        ids = {entry['id'] for entry in entries}
+        entries = [entry for entry in self.store.entries if entry['id'] in ids]
+        if not entries:
+            return
         dialog = QDialog(self)
         dialog.setWindowTitle('Edit media details' if len(entries) == 1 else 'Edit selected media')
         form = QFormLayout(dialog)
@@ -415,3 +496,8 @@ class MediaCatalog(QWidget):
                     entry['description'] = description.toPlainText().strip()
             self.store.save()
             self.refresh_tiles()
+            for index in range(self.tiles.count()):
+                item = self.tiles.item(index)
+                if item.data(ROLE)['id'] in ids:
+                    item.setSelected(True)
+            self.show_description()

@@ -6,7 +6,7 @@ Start with an image, a video clip or a written beat. Arrange the sequence, descr
 
 ![A complete MiniMax plan in the Aurora workspace](docs/images/ltx-director-director-overview.png)
 
-*The examples throughout this guide use the current 1.13.0a21 native interface with a locally authored Aurora demonstration project.*
+*The examples throughout this guide use the current 1.13.0a22 native interface with a locally authored Aurora demonstration project.*
 
 ## Your first sequence
 
@@ -99,6 +99,6 @@ Open **Media Catalog** from the top toolbar. Dock it beside the timeline or floa
 
 Import files or drop files and folders from your file manager. Browse large preview tiles, select several with Ctrl/Shift, and search names, tags, or descriptions. Right-click a selection to edit its tags and short description, move it into a catalog folder, or add it to the timeline. Create folders with **New folder**; select a folder first to create a subfolder. Drag tiles onto a folder to organize them, onto the timeline to insert them, or into a file manager using native file URLs.
 
-Catalog folders organize references to your original files. Removing a catalog entry or folder keeps the source media on disk. A missing source stays visible with a **Missing file** label.
+Imports copy full-resolution images and videos into LTX Director’s working folder. Catalog tiles and timeline drags use these managed copies, so moving or deleting the original source does not break your imported media. Same-named files remain separate. Removing a catalog entry or folder keeps the media on disk.
 
 The app ships with one **LTX Video** workspace and one **MiniMax** workspace. LTX generation and refinement return video prompts and timing without requiring a separate still-image prompt. The **Director’s Intent** checkbox is in the prompt box header; its collapsed state is shared across modes and remembered after restart.
