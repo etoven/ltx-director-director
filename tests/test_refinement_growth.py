@@ -140,14 +140,14 @@ class RefinementGrowthTests(unittest.TestCase):
         window.refresh_timeline(0)
         window.set_project_type('minimax_frames')
         original = '/refine-global Keep framing\n\n[SCENE]\nWalk.'
-        window.segment_prompt.setPlainText(original)
+        window.unified_prompt.setPlainText(original)
         window.minimax_editor_changed()
         window.minimax_operation_kind = 'refine_frames'
         window.minimax_operation_signature = window.current_minimax_cache_key()
         window.minimax_operation_editor_snapshot = (original, '')
         window.minimax_h3_finished('/refine-global Keep framing\n\n[SCENE]\nWalk steadily.\n/keep Wet hair')
         self.assertEqual(window.minimax_prompt_text, '[SCENE]\nWalk steadily.\n/keep Wet hair')
-        self.assertEqual(window.segment_prompt.toPlainText(), window.minimax_prompt_text)
+        self.assertEqual(window.unified_prompt.toPlainText(), window.minimax_prompt_text)
 
 
 if __name__ == '__main__':

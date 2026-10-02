@@ -43,92 +43,12 @@ class WorkspaceConformanceTests(unittest.TestCase):
         window.duration_animation.setCurrentTime(window.duration_animation.duration())
         self.app.processEvents()
 
-    def test_paste_retimes_preserves_media_ids_and_adds_extra_segment(self):
-        w = self.window()
-        ids = [segment.id for segment in w.segments]
-        prompt = PROMPT.replace('\n\n[SOUND]', '\n\n00:00:07:12 - 00:00:09:00: Third action.\n\n[SOUND]')
-        mime = QMimeData()
-        mime.setText(prompt)
-        w.segment_prompt.selectAll()
-        w.segment_prompt.insertFromMimeData(mime)
-        self.settle(w)
-        self.assertEqual([segment.id for segment in w.segments[:2]], ids)
-        self.assertEqual(w.segments[0].media_path, '/preserved/first.png')
-        self.assertEqual([segment.duration for segment in w.segments], [3, 4.5, 1.5])
-        self.assertEqual(w.segments[2].kind, 'text')
-        self.assertEqual(len(cue_cells(w.segment_prompt)), 3)
-        self.assertIn('[SOUND]\nRain.', w.segment_prompt.toPlainText())
-        self.assertEqual(w.duration_animation.duration(), 950)
 
-    def test_keyboard_paste_can_replace_entire_protected_document(self):
-        w = self.window()
-        w.conform_timed_prompt(PROMPT)
-        w.segment_prompt.selectAll()
-        QApplication.clipboard().setText(PROMPT.replace('03:00', '04:00'))
-        event = QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_V, Qt.KeyboardModifier.ControlModifier)
-        w.segment_prompt.keyPressEvent(event)
-        self.settle(w)
-        self.assertEqual(w.segments[0].duration, 4)
-        self.assertEqual(len(cue_cells(w.segment_prompt)), 2)
 
-    def test_partial_match_disables_only_unmatched_segments_then_reconnects(self):
-        w = self.window()
-        bad = PROMPT.replace('00:00:03:00 - 00:00:07:12', '00:00:04:00 - 00:00:07:12')
-        w.conform_timed_prompt(bad)
-        self.settle(w)
-        self.assertFalse(w.segments[0].prompt_detached)
-        self.assertTrue(w.segments[1].prompt_detached)
-        self.assertFalse(w.timeline.item(1).flags() & Qt.ItemFlag.ItemIsEnabled)
-        self.assertEqual(w.timeline.itemWidget(w.timeline.item(1)).graphicsEffect().opacity(), 0.4)
-        self.assertEqual(set(cue_cells(w.segment_prompt)), {w.segments[0].id})
-        w.conform_timed_prompt(PROMPT)
-        self.settle(w)
-        self.assertFalse(any(segment.prompt_detached for segment in w.segments))
-        self.assertTrue(w.timeline.item(1).flags() & Qt.ItemFlag.ItemIsEnabled)
-        self.assertEqual(len(cue_cells(w.segment_prompt)), 2)
 
-    def test_missing_or_malformed_cues_detach_without_discarding_media(self):
-        w = self.window()
-        malformed = PROMPT.replace('00:00:03:00 - 00:00:07:12', '00:00:03:99 - 00:00:07:12')
-        w.conform_timed_prompt(malformed)
-        self.assertTrue(w.segments[1].prompt_detached)
-        w.conform_timed_prompt('[SCENE]\nNo timed section.')
-        self.assertTrue(all(segment.prompt_detached for segment in w.segments))
-        self.assertEqual(w.segments[0].media_path, '/preserved/first.png')
 
-    def test_click_focuses_and_highlights_complete_multiline_action(self):
-        w = self.window()
-        w.conform_timed_prompt(PROMPT.replace('Second action.', 'Second action.\nA second line.'))
-        self.settle(w)
-        w.timeline.setCurrentRow(1)
-        w.reload_clicked_segment(w.timeline.item(1))
-        self.assertEqual(w.segment_prompt.textCursor().currentTable().format().property(CUE_ID), w.segments[1].id)
-        selections = w.segment_prompt.extraSelections()
-        self.assertIn('A second line.', selections[0].cursor.selectedText())
 
-    def test_refinement_result_reparses_new_timed_segments(self):
-        w = self.window()
-        w.minimax_operation_signature = w.current_minimax_cache_key()
-        w.minimax_operation_editor_snapshot = ('', '')
-        w.minimax_operation_kind = 'refine_frames'
-        prompt = PROMPT.replace('\n\n[SOUND]', '\n\n00:00:07:12 - 00:00:08:00: Finish.\n\n[SOUND]')
-        w.minimax_h3_finished(prompt)
-        self.settle(w)
-        self.assertEqual(len(w.segments), 3)
-        self.assertEqual(w.segments[-1].duration, .5)
-        self.assertFalse(w.ai_busy)
-        self.assertEqual(len(cue_cells(w.segment_prompt)), 3)
 
-    def test_structured_ai_times_accept_new_intervals_and_reject_bad_frames(self):
-        w = self.window()
-        response = {'prompt': '[SCENE]\nShot.\n\n[TIMED ACTION]\n\n[SOUND]\nRain.', 'timed_actions': [
-            {'start': '00:00:00:00', 'end': '00:00:03:00', 'action': 'First'},
-            {'start': 3, 'end': 6, 'action': 'Second'}, {'start': 6, 'end': 8, 'action': 'Third'}]}
-        result = ai._extract_minimax_h3_prompt(json.dumps(response), w.segments)
-        self.assertEqual(len(parse_timed_plan(result)), 3)
-        response['timed_actions'][0]['end'] = '00:00:03:24'
-        with self.assertRaises(ai.AIResponseFormatError):
-            ai._extract_minimax_h3_prompt(json.dumps(response), w.segments)
 
     def test_definitions_restore_preserves_custom_and_respects_deleted_stock(self):
         w = self.window()
@@ -145,7 +65,7 @@ class WorkspaceConformanceTests(unittest.TestCase):
         values = store.load()
         self.assertIn('custom', values)
         self.assertEqual(values['ltx']['name'], 'LTX Video')
-        self.assertIn('minimax_references', values)
+        self.assertIn('minimax_full_reference_guide', values)
 
     def test_custom_definition_routes_layout_and_prompt_instructions(self):
         w = self.window()
@@ -179,10 +99,10 @@ class WorkspaceConformanceTests(unittest.TestCase):
         editor.mode.setCurrentIndex(editor.mode.findData('unified'))
         editor.save()
         w.set_project_type('custom_ref')
-        w.segment_prompt.setPlainText('Custom draft')
+        w.unified_prompt.setPlainText('Custom draft')
         w.set_project_type('ltx')
         w.set_project_type('custom_ref')
-        self.assertEqual(w.segment_prompt.toPlainText(), 'Custom draft')
+        self.assertEqual(w.unified_prompt.toPlainText(), 'Custom draft')
         editor.name.setText('Renamed')
         editor.save()
         self.assertEqual(w.workspace_definitions['custom_ref']['name'], 'Renamed')
@@ -242,17 +162,6 @@ class WorkspaceConformanceTests(unittest.TestCase):
         self.assertEqual(w.download_tray.history[0]['path'], str(path.resolve()))
 
 
-    def test_frame_precision_survives_conformance_and_project_roundtrip(self):
-        w = self.window()
-        lines = [f"00:00:00:{index:02d} - 00:00:00:{index + 1:02d}: Action {index}." for index in range(20)]
-        w.conform_timed_prompt('[TIMED ACTION]\n' + '\n\n'.join(lines))
-        self.settle(w)
-        self.assertAlmostEqual(w.total_duration(), 20 / 24, places=4)
-        payload = w.project_payload(include_media=False)
-        value = Segment.from_dict(payload['frames'][0])
-        self.assertAlmostEqual(value.duration, 1 / 24, places=5)
-        w.change_duration(w.segments[-1].id, 1)
-        self.assertIn('00:00:00:19 -', w.minimax_prompt_text)
 
     def test_active_definition_id_rename_keeps_its_draft(self):
         w = self.window()
@@ -261,18 +170,9 @@ class WorkspaceConformanceTests(unittest.TestCase):
         w.workspace_store.save(value)
         w.reload_workspace_definitions()
         w.set_project_type('before')
-        w.segment_prompt.setPlainText('Retain this draft')
+        w.unified_prompt.setPlainText('Retain this draft')
         value.update(id='after', name='After')
         w.workspace_store.save(value, 'before')
         w.reload_workspace_definitions(previous_id='before', new_id='after')
         self.assertEqual(w.project_type, 'after')
-        self.assertEqual(w.segment_prompt.toPlainText(), 'Retain this draft')
-
-    def test_conformed_cue_tables_remain_non_deletable(self):
-        w = self.window()
-        w.conform_timed_prompt(PROMPT)
-        before = w.segment_prompt.toPlainText()
-        w.segment_prompt.selectAll()
-        w.segment_prompt.keyPressEvent(QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_Delete, Qt.KeyboardModifier.NoModifier))
-        self.assertEqual(w.segment_prompt.toPlainText(), before)
-        self.assertEqual(len(cue_cells(w.segment_prompt)), 2)
+        self.assertEqual(w.unified_prompt.toPlainText(), 'Retain this draft')

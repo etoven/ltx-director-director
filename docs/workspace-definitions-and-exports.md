@@ -19,7 +19,7 @@ Director brings prompts, source media and portable projects into your production
 
 Set **Download folder** in project Properties for a project-specific destination. Leave it blank to use **Settings → Application → Default download folder**. Exports receive descriptive automatic names; repeated names get numbered suffixes so an earlier output remains available.
 
-The download button signals completion with a pulse and badge. Click it for **Recent exports**. Open a file with a double-click, use the context menu for **Open folder**, or drag selected files into another application. Click outside the tray to dismiss it. History remains available after restarting the app; moved or deleted files are marked unavailable.
+The download button signals completion with a pulse and badge. Click it for **Recent exports**. Open a file with a double-click, use the context menu for **Open folder**, or drag selected files into another application. Click inside the app outside the tray to dismiss it; switching to another window keeps it open. Use the broom to clear history. History remains available after restarting the app; moved or deleted files are marked unavailable.
 
 ![Recent exports grouped in a native tray with direct folder access](images/export-history.png)
 
@@ -62,3 +62,5 @@ Choose **Save / rename** to keep the definition, **Export** to share or reuse it
 Native projects carry their workspace identity and a portable definition. Opening a project can install its definition when it is missing locally; an existing local definition with the same ID takes precedence. This lets you carry a setup with the project while continuing to manage your local templates.
 
 **Continue:** [Prompt workflows](unified-workflows.md) · [Application setup](../install.md) · [Complete feature guide](../usage.md)
+
+The shipped defaults are LTX Video and the two guide-based MiniMax templates: Standard / Keyframes and Full Reference. Upgrades replace untouched old MiniMax factory definitions and preserve custom definitions. Unified workspaces share the segment editor and keep a separate production draft below it.

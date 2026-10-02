@@ -25,13 +25,13 @@ from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
     QColorDialog, QDateTimeEdit, QDockWidget, QGraphicsOpacityEffect, QFileDialog, QFormLayout, QFrame, QHBoxLayout, QLabel, QLayout, QLineEdit,
-    QListWidget, QListWidgetItem, QTabBar, QTabWidget, QMainWindow, QMenu, QMessageBox, QPushButton, QScrollArea,
+    QListWidget, QListWidgetItem, QSplitter, QTabBar, QTabWidget, QMainWindow, QMenu, QMessageBox, QPushButton, QScrollArea,
     QSizePolicy, QSlider, QSpinBox, QProgressBar, QStatusBar, QStyle, QStyledItemDelegate, QStyleOptionSlider, QStyleOptionViewItem, QTextEdit, QToolBar, QToolTip, QVBoxLayout, QWidget,
 )
 
 from . import __version__
 from .cache_maintenance import cover_path, mark_ready, needs_refresh, warm_metadata
-from .ai import AIResponseFormatError, GEMINI_MODELS, build_minimax_h3_prompt, build_minimax_h3_reference_prompt, build_prompts, minimax_h3_cache_key, provider_error_message, WORKSPACE_INSTRUCTIONS, refine_minimax_h3_prompt, refine_minimax_h3_reference_prompt, refine_segment_prompt, refine_timing, retryable_connection_error
+from .ai import AIResponseFormatError, GEMINI_MODELS, build_minimax_h3_prompt, build_minimax_h3_reference_prompt, build_prompts, minimax_h3_cache_key, provider_error_message, WORKSPACE_INSTRUCTIONS, refine_minimax_h3_prompt, refine_minimax_h3_reference_prompt, refine_segment_prompt, refine_global_prompt, refine_timing, retryable_connection_error
 from .media import APP_CACHE, TIMELINE_VIDEO_SUFFIXES, comfy_input_references, copy_media_for_export, data_url, extract_audio_for_export, prepare_media, safe_media_filename, thumbnail_for_image, unique_media_filename, video_source_dimensions, write_data_url
 from .project_archive import materialize_source, project_thumbnail_data, read_project, save_project_archive
 from .minimax_reference import WORKFLOW_NAMES, detect_workflow, reference_inventory, reference_slots
@@ -40,14 +40,13 @@ from .generic_ai import build_generic_prompt, refine_generic_prompt, build_gener
 from .downloads import DownloadTray
 from .catalog import MediaCatalog
 from .media_labels import add_thumbnail_labels
-from .workspaces import WorkspaceStore
+from .workspaces import is_obsolete_stock_definition, WorkspaceStore
 from .workspace_editor import WorkspaceEditor
 from .models import Segment, order_segments_by_ids, text_segment_from_ltx
 from .project_data import ARCHIVE_COLOR, load_other_tags, load_project_tags, new_note, normalize_notes, normalize_project_labels
 from .spellcheck import install_spellcheck
 from .prompt_tags import consume_global_refinements, install_prompt_tags, render_prompt_notes
-from .inline_cues import PromptTextEdit, cue_cells, insert_cue_cells, focus_cue
-from .timed_action import CUE, NEXT, SECTION, compose_actions, split_actions, parse_timed_plan
+from .inline_cues import PromptTextEdit
 
 FPS = 24
 MIN_DURATION = 0.01
@@ -2639,17 +2638,29 @@ class MiniMaxPromptPanel(QFrame):
     def __init__(self, owner):
         super().__init__(owner)
         self.owner = owner
-        self.editor = owner.segment_prompt
-        self.refine_button = owner.refine_prompt_button
-        self.copy_button = owner.copy_segment
+        self.editor = owner.unified_prompt
+        self.refine_button = QPushButton("✎ Refine Unified Prompt")
+        self.refine_button.setObjectName("refineButton")
+        self.refine_button.clicked.connect(owner.refine_minimax_prompt)
+        self.generate_button = QPushButton("✦ Generate Unified Prompt")
+        self.generate_button.setObjectName("refineButton")
+        self.generate_button.clicked.connect(lambda: owner._generate_minimax_prompt(owner.minimax_prompt_mode))
+        self.copy_button = QPushButton("□ Copy")
+        self.copy_button.setObjectName("copyButton")
+        self.copy_button.clicked.connect(owner.copy_minimax_prompt)
         self.busy = False
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         header = QHBoxLayout()
         self.cache_state = QLabel("Not generated")
         self.cache_state.setObjectName("minimaxCacheState")
+        label = QLabel("UNIFIED PROMPT")
+        label.setObjectName("sectionLabel")
+        header.addWidget(label)
         header.addWidget(self.cache_state)
         header.addStretch()
+        header.addWidget(self.generate_button)
+        header.addWidget(self.refine_button)
         layout.addLayout(header)
         self.message_panel = QFrame()
         self.message_panel.setObjectName("minimaxMessagePanel")
@@ -2663,8 +2674,8 @@ class MiniMaxPromptPanel(QFrame):
         self.retry_button = QPushButton("↻ Retry")
         self.retry_button.clicked.connect(owner.retry_minimax_operation)
         message_layout.addWidget(self.retry_button)
-        self.timeline_refine_button = QPushButton("✎ Refine prompt")
-        self.timeline_refine_button.clicked.connect(owner.refine_minimax_prompt)
+        self.timeline_refine_button = QPushButton("✦ Regenerate")
+        self.timeline_refine_button.clicked.connect(lambda: owner._generate_minimax_prompt(owner.minimax_prompt_mode))
         message_layout.addWidget(self.timeline_refine_button)
         layout.addWidget(self.message_panel)
         self.clear_message()
@@ -2742,7 +2753,9 @@ class MiniMaxPromptPanel(QFrame):
 
     def update_actions(self) -> None:
         if self.owner.unified_workspace:
-            self.refine_button.setEnabled(not self.busy and bool(self.editor.toPlainText().strip()))
+            self.refine_button.setEnabled(not self.owner.ai_busy and bool(self.editor.toPlainText().strip()))
+        self.generate_button.setEnabled(not self.owner.ai_busy)
+        self.copy_button.setEnabled(bool(self.editor.toPlainText().strip()))
         self.retry_button.setEnabled(not self.busy)
         self.timeline_refine_button.setEnabled(not self.busy)
 
@@ -2814,14 +2827,7 @@ class MainWindow(QMainWindow):
         self._closing_progress = None
         self._closing_total = 0
         self._open_serial = 0
-        self._action_segment_ids = []
-        self._action_descriptions = {}
-        self._changed_action_sources = set()
         self._timeline_signature = ()
-        self._actions_refresh_timer = QTimer(self)
-        self._actions_refresh_timer.setSingleShot(True)
-        self._actions_refresh_timer.setInterval(280)
-        self._actions_refresh_timer.timeout.connect(self.sync_timed_actions)
         self._loading = True
         self.setDockNestingEnabled(True)
         splash = getattr(QApplication.instance(), '_director_splash', None)
@@ -3103,6 +3109,17 @@ class MainWindow(QMainWindow):
         self.timeline_height_handle.finished.connect(self.finish_timeline_height_resize)
         timeline_layout.addWidget(self.timeline_height_handle)
         outer.addWidget(timeline_shell)
+        self.conditioning_guide = QScrollArea()
+        self.conditioning_guide.setObjectName("conditioningGuide")
+        self.conditioning_guide.setWidgetResizable(True)
+        self.conditioning_guide.setFixedHeight(68)
+        self.conditioning_guide.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.conditioning_content = QWidget()
+        self.conditioning_row = QHBoxLayout(self.conditioning_content)
+        self.conditioning_row.setContentsMargins(7, 3, 7, 3)
+        self.conditioning_row.setSpacing(7)
+        self.conditioning_guide.setWidget(self.conditioning_content)
+        outer.addWidget(self.conditioning_guide)
 
         self.sequence_bar = QLabel()
         self.sequence_bar.setObjectName("sequenceBar")
@@ -3305,7 +3322,6 @@ class MainWindow(QMainWindow):
         self.segment_prompt.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
         self.segment_prompt.setWordWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
         self.segment_prompt.textChanged.connect(self.save_prompt)
-        self.segment_prompt.timedPasteRequested.connect(self.paste_timed_prompt)
         segment_layout.addWidget(self.segment_prompt)
         segment_footer = QHBoxLayout()
         segment_footer.setContentsMargins(0, 0, 0, 0)
@@ -3330,9 +3346,32 @@ class MainWindow(QMainWindow):
         self.applied_label.hide()
         self.global_count = QLabel(self)
         self.global_count.hide()
+        self.unified_panel = QFrame()
+        self.unified_panel.setObjectName("promptPanel")
+        unified_layout = QVBoxLayout(self.unified_panel)
+        unified_layout.setContentsMargins(9, 6, 9, 5)
+        self.unified_prompt = PromptTextEdit()
+        self.unified_prompt.setObjectName("promptEditor")
+        self.unified_prompt.setAcceptRichText(False)
+        self.unified_prompt.setPlaceholderText("Generate the unified prompt from your segments, or write and refine your own…")
+        self.unified_prompt.textChanged.connect(self.minimax_editor_changed)
         self.minimax_panel = MiniMaxPromptPanel(self)
-        segment_layout.insertWidget(1, self.minimax_panel)
-        outer.addWidget(segment_panel, 1)
+        unified_layout.addWidget(self.minimax_panel)
+        unified_layout.addWidget(self.unified_prompt, 1)
+        self.unified_count = QLabel("0 characters")
+        self.unified_count.setObjectName("muted")
+        footer = QHBoxLayout()
+        footer.addWidget(self.unified_count)
+        footer.addStretch()
+        footer.addWidget(self.minimax_panel.copy_button)
+        unified_layout.addLayout(footer)
+        self.prompt_splitter = QSplitter(Qt.Orientation.Vertical)
+        self.prompt_splitter.setObjectName("promptEditorSplitter")
+        self.prompt_splitter.addWidget(segment_panel)
+        self.prompt_splitter.addWidget(self.unified_panel)
+        self.prompt_splitter.setStretchFactor(0, 1)
+        self.prompt_splitter.setStretchFactor(1, 1)
+        outer.addWidget(self.prompt_splitter, 1)
         self.setCentralWidget(root)
         self.setStatusBar(QStatusBar())
         self.apply_project_type_ui()
@@ -3691,6 +3730,12 @@ class MainWindow(QMainWindow):
         #timelineSpin::up-button{width:__TIMELINE_SPIN_BUTTON__px;background:transparent;border:0;border-radius:2px;subcontrol-origin:border;subcontrol-position:top right} #timelineSpin::down-button{width:__TIMELINE_SPIN_BUTTON__px;background:transparent;border:0;border-radius:2px;subcontrol-origin:border;subcontrol-position:bottom right} #timelineSpin::up-button:hover,#timelineSpin::down-button:hover{background:#344b57} #timelineSpin::up-button:pressed,#timelineSpin::down-button:pressed{background:#1f668b} #timelineSpin::up-arrow{image:url("__SPIN_UP_IMAGE__");width:__TIMELINE_ARROW__px;height:__TIMELINE_ARROW__px} #timelineSpin::down-arrow{image:url("__SPIN_DOWN_IMAGE__");width:__TIMELINE_ARROW__px;height:__TIMELINE_ARROW__px}
         #resolutionSeparator{background:transparent;color:#60717a;border:0;padding:0 3px;font-weight:bold} #timelineButton{background:transparent;color:#acd8ef;border:1px solid #3f6679;border-radius:5px;padding:4px 10px;font-weight:bold} #timelineButton:hover{background:#243b46;color:#e0f5ff;border-color:#65a7c7} #timelineButton:pressed{background:#172b35;color:#85c9eb;border-color:#347898}
         QListWidget{background:#0d0f10;border:0;padding:0} QListWidget::item{border:1px solid #696b6c;background:#252728;margin:0} QListWidget::item:selected{border:2px solid #f1f1f1;background:#293034}
+        #conditioningGuide{background:#141b1f;border:1px solid #354047;border-radius:4px}
+        #conditioningGuide QWidget{background:transparent}
+        #conditioningHeading{color:#8ebbd1;font-size:9px;font-weight:bold}
+        #conditioningTile{border:1px solid #354047;border-radius:4px}
+        #conditioningLabel{color:#d7e9f3;font-size:10px}
+        #conditioningFix{color:#f2cd86;font-size:10px}
         #catalogLightbox{background:#0b1014} #catalogLightbox QLabel{background:transparent}
         #referenceImageSlot{background:#191d1f;border:1px solid #323638;border-radius:4px}
         #referenceImagePreview{background:#10171c;border:1px solid #40515b;border-radius:4px}
@@ -4275,7 +4320,6 @@ class MainWindow(QMainWindow):
             "workspaceDefinition": copy.deepcopy(self.workspace_definition),
             "downloadDirectory": self.download_directory,
             "minimaxDrafts": {key: dict(value) for key, value in self.minimax_drafts.items()},
-            "minimaxCueActions": dict(self._action_descriptions),
             "segments": self.segments,
             "globalPrompt": self.global_prompt.toPlainText(),
             "directorIntent": self.intent.toPlainText(),
@@ -4345,11 +4389,6 @@ class MainWindow(QMainWindow):
         self.ruler.set_scale(scale)
         self._loading = False
         self._timeline_signature = tuple((item.id, item.duration, item.prompt, item.kind, item.role, item.name) for item in self.segments)
-        self._action_segment_ids = [item.id for item in self.segments]
-        self._action_descriptions = {str(key): str(value) for key, value in (state.get("minimaxCueActions") or self._action_descriptions or {}).items()}
-        if self._action_descriptions and "[TIMED ACTION]" in self.minimax_prompt_text:
-            self.minimax_prompt_text = compose_actions(self.minimax_prompt_text, self.segments,
-                                                      [self._action_descriptions.get(segment.id, segment.prompt) for segment in self.segments])
         self.sync_minimax_panel()
         self.refresh_timeline()
         if auto_fit:
@@ -4741,26 +4780,23 @@ class MainWindow(QMainWindow):
             self._timeline_fit_timer.start()
 
     def mark_dirty(self, *_args) -> None:
-        if not self._loading:
-            self._edit_serial += 1
-            was_dirty = self.project_dirty
-            self.project_dirty = True
-            signature = tuple((item.id, item.duration, item.prompt, item.kind, item.role, item.name) for item in self.segments)
-            timeline_changed = signature != self._timeline_signature
-            if timeline_changed:
-                previous = {item[0]: item[2] for item in self._timeline_signature}
-                for item in self.segments:
-                    if item.id in previous and item.prompt != previous[item.id]:
-                        self._changed_action_sources.add(item.id)
-                        self._action_descriptions[item.id] = item.prompt.strip()
-            self._timeline_signature = signature
-            if timeline_changed and self.unified_workspace and self.minimax_prompt_text.strip():
-                self.sync_timed_actions(timeline_changed=True)
-            if self.current_project_id:
-                session = self.project_sessions.setdefault(self.current_project_id, {"name": self.current_project_name})
-                session["dirty"] = True
-                if not was_dirty and hasattr(self, "project_list"):
-                    self.refresh_project_library(self.current_project_id)
+        if self._loading:
+            return
+        self._edit_serial += 1
+        was_dirty = self.project_dirty
+        self.project_dirty = True
+        signature = tuple((item.id, item.duration, item.prompt, item.kind, item.role, item.name) for item in self.segments)
+        changed = signature != self._timeline_signature
+        self._timeline_signature = signature
+        self.update_conditioning_guide()
+        if changed and self.unified_workspace and self.minimax_prompt_text.strip() and self.minimax_panel:
+            self.minimax_panel.set_cache_state("Segment changes available")
+            self.minimax_panel.show_message("Segment changes available. Generate Unified Prompt to rebuild from the timeline, or refine your edited draft.", "timeline")
+        if self.current_project_id:
+            session = self.project_sessions.setdefault(self.current_project_id, {"name": self.current_project_name})
+            session["dirty"] = True
+            if not was_dirty and hasattr(self, "project_list"):
+                self.refresh_project_library(self.current_project_id)
 
     def new_project(self) -> None:
         self.download_directory = ""
@@ -4937,40 +4973,11 @@ class MainWindow(QMainWindow):
         number = sum(segment.kind == "text" for segment in self.segments) + 1
         segment = Segment(f"Text {number}", "", "", "text", "text", "", 5.0)
         self.segments.append(segment)
-        self._extend_timed_actions_for_added_segments([segment])
         self.mark_dirty()
         self.refresh_timeline(len(self.segments) - 1)
         self.segment_prompt.setFocus()
         self.statusBar().showMessage("Text-only segment added; enter its prompt or use Magic Build")
 
-    def _extend_timed_actions_for_added_segments(self, added: list[Segment]) -> bool:
-        """Insert blank, linked cue blocks for new timeline items when the existing plan is sound."""
-        if not added or not self.unified_workspace or not SECTION.search(self.minimax_prompt_text):
-            return False
-        added_ids = {item.id for item in added}
-        previous_segments = [item for item in self.segments if item.id not in added_ids]
-        descriptions, _ = split_actions(self.minimax_prompt_text)
-        plan = parse_timed_plan(self.minimax_prompt_text)
-        if (
-            len(descriptions) != len(previous_segments)
-            or len(plan) != len(previous_segments)
-            or not all(cue["valid"] for cue in plan)
-            or any(item.prompt_detached for item in previous_segments)
-            or any(abs((cue["end"] - cue["start"]) - item.duration) > .5 / FPS + 1e-6
-                   for cue, item in zip(plan, previous_segments))
-        ):
-            return False
-        tagged = cue_cells(self.minimax_panel.editor) if self.minimax_panel else {}
-        old_actions = [
-            tagged.get(item.id, self._action_descriptions.get(item.id, descriptions[index]))
-            for index, item in enumerate(previous_segments)
-        ]
-        old_by_id = dict(zip((item.id for item in previous_segments), old_actions))
-        actions = [old_by_id.get(item.id, item.prompt.strip()) for item in self.segments]
-        self.minimax_prompt_text = compose_actions(self.minimax_prompt_text, self.segments, actions)
-        for item in added:
-            self._action_descriptions[item.id] = item.prompt.strip()
-        return True
 
     def add_media_paths(self, paths: list[str], insert_index: int | None = None) -> None:
         paths = [path for path in paths if Path(path).is_file()]
@@ -5003,7 +5010,6 @@ class MainWindow(QMainWindow):
                 self.segments.insert(index, Segment(Path(path).name, path, preview, kind, "end" if index % 2 else "start", duration=duration, media_duration_frames=frames, trim_start=trim))
                 index += 1
             if prepared:
-                self._extend_timed_actions_for_added_segments(self.segments[max(0, index - len(prepared)):index])
                 self.mark_dirty()
                 self.refresh_timeline(max(0, index - 1))
             if errors:
@@ -5014,6 +5020,9 @@ class MainWindow(QMainWindow):
                             lambda message: QMessageBox.warning(self, "Media error", message))
 
     def refresh_timeline(self, selected: int = 0) -> None:
+        self.update_conditioning_guide()
+        for segment in self.segments:
+            segment.prompt_detached = False
         self.autofit_tail_extension = 0
         indicator = getattr(self, "timeline_loading", None) if self.segments else None
         if indicator:
@@ -5079,24 +5088,12 @@ class MainWindow(QMainWindow):
             self._loading = previous_loading
 
     def update_timeline_selection_style(self, selected_row: int) -> None:
-        """Render selection on the card, not the QListWidget item beneath it."""
+        """Use the same enabled, editable segment cards in every workspace."""
         for row in range(self.timeline.count()):
             card = self.timeline.itemWidget(self.timeline.item(row))
             if not isinstance(card, SegmentCard):
                 continue
-            detached = self.unified_workspace and self.segments[row].prompt_detached
-            card.setEnabled(not detached)
-            if detached and card.graphicsEffect() is None:
-                effect = QGraphicsOpacityEffect(card)
-                effect.setOpacity(0.4)
-                card.setGraphicsEffect(effect)
-            elif not detached and card.graphicsEffect() is not None:
-                card.setGraphicsEffect(None)
-            self.timeline.item(row).setFlags(self.timeline.item(row).flags() & ~Qt.ItemFlag.ItemIsEnabled if detached else self.timeline.item(row).flags() | Qt.ItemFlag.ItemIsEnabled)
-            card.setToolTip("Detached from prompt: correct or refine the timed ranges to reconnect." if detached else "")
             selected = row == selected_row
-            if card.property("selected") == selected:
-                continue
             card.setProperty("selected", selected)
             card.style().unpolish(card)
             card.style().polish(card)
@@ -5132,15 +5129,15 @@ class MainWindow(QMainWindow):
         segment = self.current_segment()
         self.duration_spin.setMaximum(sys.float_info.max)
         self.duration_spin.setToolTip("Segment duration in seconds")
-        self.duration_spin.setEnabled(bool(segment) and not (self.unified_workspace and segment.prompt_detached))
+        self.duration_spin.setEnabled(bool(segment))
         self.refresh_shared_editor()
         visual = bool(segment and segment.kind != "text")
         self.start_button.setEnabled(visual)
         self.end_button.setEnabled(visual)
-        self.start_button.setVisible(visual and self.workspace_engine != "minimax_frames")
-        self.end_button.setVisible(visual and self.workspace_engine != "minimax_frames")
+        self.start_button.setVisible(visual)
+        self.end_button.setVisible(visual)
         self.refine_timing_button.setEnabled(not self.ai_busy and bool(segment))
-        self.refine_prompt_button.setEnabled(not self.ai_busy and bool(self.segment_prompt.toPlainText().strip()) and (self.unified_workspace or self.prompt_scope.currentData() == "segment"))
+        self.refine_prompt_button.setEnabled(not self.ai_busy and bool(self.segment_prompt.toPlainText().strip()) and bool(self.segments))
         if segment:
             self.start_button.setChecked(segment.role == "start" if visual else False)
             self.end_button.setChecked(segment.role == "end" if visual else False)
@@ -5150,14 +5147,10 @@ class MainWindow(QMainWindow):
             self.frame_number.setText("Frame —")
         self._loading = False
         self.update_counts()
-        if segment and self.unified_workspace:
-            focus_cue(self.segment_prompt, segment.id)
 
     def reload_clicked_segment(self, item: QListWidgetItem) -> None:
         """Refresh prompt text when the clicked segment is already selected."""
         self.refresh_segment_prompt_box(self.timeline.row(item))
-        if self.unified_workspace and self.current_segment():
-            focus_cue(self.segment_prompt, self.current_segment().id)
 
     def refresh_segment_prompt_box(self, row: int) -> None:
         """Update only the segment prompt box, preserving all other editor state."""
@@ -5185,20 +5178,17 @@ class MainWindow(QMainWindow):
     def save_prompt(self) -> None:
         if self._loading:
             return
-        if self.unified_workspace:
-            self.minimax_editor_changed()
-            self.update_counts()
-            return
         if self.prompt_scope.currentData() == "global":
             self.global_prompt.blockSignals(True)
             self.global_prompt.setPlainText(self.segment_prompt.toPlainText())
             self.global_prompt.blockSignals(False)
+            self.refine_prompt_button.setEnabled(not self.ai_busy and bool(self.segment_prompt.toPlainText().strip()) and bool(self.segments))
             self.mark_dirty()
             self.update_counts()
             return
         if self.current_segment():
             self.current_segment().prompt = self.segment_prompt.toPlainText()
-            self.refine_prompt_button.setEnabled(bool(self.current_segment().prompt.strip()))
+            self.refine_prompt_button.setEnabled(not self.ai_busy and bool(self.current_segment().prompt.strip()))
             if self.current_segment().kind == "text":
                 item = self.timeline.currentItem()
                 card = self.timeline.itemWidget(item) if item else None
@@ -5283,6 +5273,7 @@ class MainWindow(QMainWindow):
 
     def update_counts(self) -> None:
         self.segment_count.setText(f"{len(self.segment_prompt.toPlainText())} characters")
+        self.unified_count.setText(f"{len(self.minimax_prompt_text)} characters")
         self.global_count.setText(f"{len(self.global_prompt.toPlainText())} characters")
 
     def update_provider_button(self) -> None:
@@ -5294,20 +5285,11 @@ class MainWindow(QMainWindow):
         item = self.timeline.itemAt(point)
         if not item:
             return
-        target = self.segments[self.timeline.row(item)]
-        if self.unified_workspace and target.prompt_detached:
-            menu = QMenu(self)
-            message = menu.addAction("Detached — correct the timed prompt to reconnect")
-            message.setEnabled(False)
-            menu.addAction("Refine prompt", self.refine_minimax_prompt)
-            menu.exec(self.timeline.mapToGlobal(point))
-            return
         self.timeline.setCurrentItem(item)
         segment = self.current_segment()
         menu = QMenu(self)
         if segment and segment.kind == "text":
-            if not self.unified_workspace:
-                menu.addAction("Edit text prompt", self.focus_segment_prompt)
+            menu.addAction("Edit text prompt", self.focus_segment_prompt)
             menu.addAction("Convert to image segment…", self.convert_text_segment_to_image)
         else:
             menu.addAction("Replace media", self.replace_selected)
@@ -5531,7 +5513,7 @@ class MainWindow(QMainWindow):
         self.ai_busy = not enabled
         segment = self.current_segment()
         self.refine_timing_button.setEnabled(enabled and bool(segment))
-        self.refine_prompt_button.setEnabled(enabled and bool(self.segment_prompt.toPlainText().strip()) and (self.unified_workspace or self.prompt_scope.currentData() == "segment"))
+        self.refine_prompt_button.setEnabled(enabled and bool(self.segment_prompt.toPlainText().strip()) and bool(self.segments))
         if self.minimax_panel:
             self.minimax_panel.set_busy(not enabled)
 
@@ -5556,7 +5538,8 @@ class MainWindow(QMainWindow):
         if show_main_overlay:
             self.magic_overlay.update_attempt(1, retries + 1, activity)
             self.magic_overlay.show_overlay()
-        instructions = copy.deepcopy(self.workspace_definition.get("generation_prompts", {}))
+        instructions = (None if self.unified_workspace and operation in {build_prompts, refine_segment_prompt, refine_global_prompt, refine_timing}
+                        else copy.deepcopy(self.workspace_definition.get("generation_prompts", {})))
         def workspace_operation(*values):
             token = WORKSPACE_INSTRUCTIONS.set(instructions)
             try:
@@ -5621,6 +5604,9 @@ class MainWindow(QMainWindow):
         )
 
     def refine_selected_prompt(self) -> None:
+        if self.prompt_scope.currentData() == "global":
+            self.refine_global_direction()
+            return
         segment = self.current_segment()
         if not segment:
             return
@@ -5644,6 +5630,36 @@ class MainWindow(QMainWindow):
             "Refining the selected prompt with adjacent-frame context…",
             self.refine_prompt_finished,
         )
+
+    def refine_global_direction(self) -> None:
+        if self.ai_busy or not self.segments:
+            return
+        current = self.global_prompt.toPlainText()
+        if not current.strip():
+            return
+        credentials = self.ai_credentials()
+        if not credentials:
+            return
+        provider, model, key = credentials
+        self.global_refinement_snapshot = (current, tuple((s.id, s.duration, s.prompt) for s in self.segments))
+        self.start_ai_worker(refine_global_prompt,
+                             (copy.deepcopy(self.segments), provider, model, key,
+                              self.build_refinement_request(), current,
+                              self.settings.value("api_timeout", 400, int)),
+                             "Refining global direction and requested sequence timing…",
+                             self.refine_global_finished)
+
+    def refine_global_finished(self, result: dict) -> None:
+        current = (self.global_prompt.toPlainText(), tuple((s.id, s.duration, s.prompt) for s in self.segments))
+        if current != getattr(self, 'global_refinement_snapshot', None):
+            self.statusBar().showMessage("Global refinement was not applied because the prompt or timeline changed")
+        else:
+            self.global_prompt.setPlainText(consume_global_refinements(result['globalPrompt']))
+            self.animate_timeline_durations(result['durations'])
+            self.refresh_shared_editor()
+            self.statusBar().showMessage("Global direction and requested sequence timing refined")
+        self.set_ai_controls_enabled(True)
+        self.magic_overlay.hide_overlay()
 
     def refinement_target(self) -> tuple[int, Segment] | None:
         segment_id = getattr(self, "refinement_segment_id", "")
@@ -5739,19 +5755,26 @@ class MainWindow(QMainWindow):
             "instructions": self.minimax_refinement_instructions,
             "sourceHash": self.minimax_prompt_cache_key,
             "updatedAt": self.minimax_prompt_updated_at,
-            "cueActions": dict(self._action_descriptions),
         }
 
     def restore_project_type(self, value, drafts) -> None:
         self.minimax_drafts = {
-            key: {**{field: str(item.get(field, "")) for field in ("prompt", "instructions", "sourceHash", "updatedAt")},
-                  "cueActions": dict(item.get("cueActions") or {})}
+            key: {**{field: str(item.get(field, "")) for field in ("prompt", "instructions", "sourceHash", "updatedAt")}}
             for key, item in (drafts.items() if isinstance(drafts, dict) else [])
             if isinstance(item, dict)
         }
-        self.store_minimax_draft()
+        aliases = {'minimax_frames': 'minimax_base_guide', 'minimax_references': 'minimax_full_reference_guide'}
+        for old, new in aliases.items():
+            old_key = old.removeprefix('minimax_')
+            if new not in self.minimax_drafts and old_key in self.minimax_drafts:
+                self.minimax_drafts[new] = dict(self.minimax_drafts[old_key])
         legacy = "minimax_" + self.minimax_prompt_mode if self.minimax_prompt_text else "ltx"
-        self.project_type = value if value in self.workspace_definitions else (legacy if legacy in self.workspace_definitions else next(iter(self.workspace_definitions), ""))
+        requested = value or legacy
+        if requested not in self.workspace_definitions:
+            requested = aliases.get(requested, requested)
+        self.project_type = requested if requested in self.workspace_definitions else next(iter(self.workspace_definitions), "")
+        if self.minimax_prompt_text:
+            self.store_minimax_draft()
         if self.unified_workspace:
             self.load_minimax_draft(("frames" if self.workspace_engine == "generic" else self.workspace_engine.removeprefix("minimax_")))
         self.prompt_scope.setCurrentIndex(0)
@@ -5764,7 +5787,6 @@ class MainWindow(QMainWindow):
         self.minimax_refinement_instructions = draft.get("instructions", "")
         self.minimax_prompt_cache_key = draft.get("sourceHash", "")
         self.minimax_prompt_updated_at = draft.get("updatedAt", "")
-        self._action_descriptions = dict(draft.get("cueActions") or {})
 
     def project_type_changed(self, _index: int) -> None:
         if not self._loading:
@@ -5810,6 +5832,8 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("Some workspace definitions could not be loaded. Review Settings → Workspaces.")
 
     def set_project_type(self, project_type: str) -> None:
+        if project_type not in self.workspace_definitions:
+            project_type = {'minimax_frames': 'minimax_base_guide', 'minimax_references': 'minimax_full_reference_guide'}.get(project_type, project_type)
         if project_type not in self.workspace_definitions or project_type == self.project_type:
             return
         if getattr(self, "duration_animation", None):
@@ -5819,16 +5843,12 @@ class MainWindow(QMainWindow):
         self.workspace_revision += 1
         if self.unified_workspace:
             self.load_minimax_draft(("frames" if self.workspace_engine == "generic" else self.workspace_engine.removeprefix("minimax_")))
-        self._action_segment_ids = []
-        self._action_descriptions = {}
-        self._changed_action_sources.clear()
         self.prompt_scope.blockSignals(True)
         self.prompt_scope.setCurrentIndex(0)
         self.prompt_scope.blockSignals(False)
         self.minimax_panel.clear_message()
         self.sync_minimax_panel()
         self.sync_reference_panel_visibility()
-        self.sync_timed_actions()
         self.mark_dirty()
 
     def apply_project_type_ui(self) -> None:
@@ -5838,12 +5858,12 @@ class MainWindow(QMainWindow):
         self.project_type_combo.blockSignals(True)
         self.project_type_combo.setCurrentIndex(self.project_type_combo.findData(self.project_type))
         self.project_type_combo.blockSignals(False)
-        self.prompt_label.setText(self.workspace_definition.get("name", "Workspace").upper() + " PROMPT")
-        self.segment_prompt.inline_cue_mode = not ltx
-        self.prompt_scope.setVisible(ltx and self.workspace_definition.get("global_prompt", False))
+        self.prompt_label.setText("SEGMENT PROMPT")
+        self.segment_prompt.inline_cue_mode = False
+        self.prompt_scope.setVisible(self.workspace_definition.get("global_prompt", False))
         if not self.workspace_definition.get("global_prompt", False):
             self.prompt_scope.setCurrentIndex(0)
-        self.minimax_panel.setVisible(not ltx)
+        self.unified_panel.setVisible(not ltx)
         self.references_button.setVisible(refs)
         self.minimax_panel.reference_dock.toggleViewAction().setVisible(refs)
         self.sync_reference_panel_visibility()
@@ -5856,16 +5876,16 @@ class MainWindow(QMainWindow):
         self.hdr.setVisible(True)
         self.requested_length.setVisible(True)
         self.length_label.setVisible(True)
-        self.output_size_control.setVisible(ltx)
-        self.output_label.setVisible(ltx)
-        self.refine_timing_button.setVisible(ltx)
-        self.magic_button.setText("✦ Magic Build" if ltx else "✦ Generate Prompt")
-        self.magic_button.setToolTip("Build all LTX segment prompts" if ltx else "Generate the full MiniMax production prompt for this workflow")
+        self.output_size_control.setVisible(True)
+        self.output_label.setVisible(True)
+        self.refine_timing_button.setVisible(True)
+        self.magic_button.setText("✦ Magic Build")
+        self.magic_button.setToolTip("Build all segment prompts from the timeline")
         self.workflow_export_action.setVisible(ltx)
         self.magic_button.setEnabled(not self.ai_busy and bool(self.workspace_definition))
         visual = bool(self.current_segment() and self.current_segment().kind != "text")
-        self.start_button.setVisible(visual and self.workspace_engine != "minimax_frames")
-        self.end_button.setVisible(visual and self.workspace_engine != "minimax_frames")
+        self.start_button.setVisible(visual)
+        self.end_button.setVisible(visual)
         self.update_spoken_dialog_visibility()
         self.minimax_panel.refresh_references()
         reference_options = self.workspace_definition.get("references", {})
@@ -5874,48 +5894,118 @@ class MainWindow(QMainWindow):
             for row in range(target.role.count()):
                 target.role.model().item(row).setEnabled(target.role.itemData(row) in reference_options.get("kinds", []))
         self.refresh_shared_editor()
+        self.update_conditioning_guide()
 
         self.queue_project_panel_width_restore()
+
+    def update_conditioning_guide(self) -> None:
+        if not hasattr(self, "conditioning_guide"):
+            return
+        self.conditioning_guide.setVisible(self.unified_workspace)
+        signature = (self.unified_workspace, self.project_type,
+                     tuple((s.id, s.name, s.kind, s.role, s.duration, s.preview_path, s.trim_start) for s in self.segments),
+                     tuple(str(r) for r in self.active_reference_images()))
+        if signature == getattr(self, '_conditioning_signature', None):
+            return
+        self._conditioning_signature = signature
+        while self.conditioning_row.count():
+            item = self.conditioning_row.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        if not self.unified_workspace:
+            return
+        inventory = reference_inventory(self.segments, self.active_reference_images())
+        timed_images = [r for r in inventory if r['kind'] == 'image' and 'checkpoint_time' in r]
+        videos = [r for r in inventory if r['kind'] == 'video']
+        total = sum(segment.duration for segment in self.segments)
+        mode = ('V2V' if videos else 'T2V' if not timed_images else
+                'L2V' if len(timed_images) == 1 and timed_images[0]['role'] == 'end' else
+                'I2V' if len(timed_images) == 1 else
+                'FL2V' if len(timed_images) == 2 and timed_images[0]['role'] == 'start' and timed_images[1]['role'] == 'end'
+                else 'Keyframes')
+        self.conditioning_records = inventory
+        self.conditioning_fixes = []
+        heading = QLabel(f"{mode} · {total:.2f}s\nCONDITIONING SETUP")
+        heading.setObjectName("conditioningHeading")
+        self.conditioning_row.addWidget(heading)
+        for record in inventory:
+            if not record['label']:
+                continue
+            tile = QFrame()
+            tile.setObjectName("conditioningTile")
+            row = QHBoxLayout(tile)
+            row.setContentsMargins(4, 2, 6, 2)
+            row.setSpacing(5)
+            thumbnail = QLabel()
+            thumbnail.setFixedSize(44, 32)
+            if 'timeline_index' in record:
+                segment = self.segments[record['timeline_index']]
+                preview = QPixmap(segment.preview_path)
+            else:
+                reference = reference_slots(self.minimax_reference_images)[record['reference_slot']]
+                preview = pixmap_from_data_url(reference['image'])
+            if not preview.isNull():
+                thumbnail.setPixmap(preview.scaled(thumbnail.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+            else:
+                thumbnail.setPixmap(toolbar_icon('preview' if record['kind'] == 'video' else 'import').pixmap(28, 28))
+            row.addWidget(thumbnail)
+            fix = ''
+            if 'checkpoint_time' in record:
+                time = record['checkpoint_time']
+                role = 'End' if record['role'] == 'end' else 'Start'
+                detail = f"{role} · {time:.2f}s"
+                if mode in {'I2V', 'FL2V'} and record is timed_images[0] and abs(time) > .5 / FPS:
+                    fix = 'Move opening to 0.00s'
+                if mode in {'L2V', 'FL2V'} and record is timed_images[-1] and abs(time - total) > .5 / FPS:
+                    fix = f'Move ending to {total:.2f}s'
+            elif record['kind'] == 'video':
+                detail = f"Source {record['source_start']:.2f}–{record['source_end']:.2f}s"
+            else:
+                detail = f"{record['role'].title()} · untimed"
+            label = QLabel(f"{record['label']} · {detail}" + (f"\n⚠ {fix}" if fix else ''))
+            label.setObjectName("conditioningFix" if fix else "conditioningLabel")
+            row.addWidget(label)
+            tile.setToolTip(f"{record['name']}\n{detail}" + (f"\n{fix}. Change the segment order or duration above." if fix else ''))
+            self.conditioning_row.addWidget(tile)
+            if fix:
+                self.conditioning_fixes.append(fix)
+        if not inventory or not any(record['label'] for record in inventory):
+            self.conditioning_row.addWidget(QLabel("Text only · no conditioning images" if self.segments else "Add a timeline segment to begin"))
+        self.conditioning_row.addStretch()
 
     def prompt_scope_changed(self, _index: int) -> None:
         self.refresh_shared_editor()
 
     def refresh_shared_editor(self) -> None:
-        if self.unified_workspace:
-            value = self.minimax_prompt_text
-        elif self.prompt_scope.currentData() == "global":
+        if self.prompt_scope.currentData() == "global":
             value = self.global_prompt.toPlainText()
         else:
             segment = self.current_segment()
             value = segment.prompt if segment else ""
         if self.segment_prompt.toPlainText() != value:
-            caret = self.segment_prompt.textCursor().position()
-            scroll = self.segment_prompt.verticalScrollBar().value()
             self.segment_prompt.blockSignals(True)
             self.segment_prompt.setPlainText(value)
-            if self.unified_workspace:
-                insert_cue_cells(self.segment_prompt, value, self.segments)
             render_prompt_notes(self.segment_prompt)
-            if self.unified_workspace:
-                cursor = self.segment_prompt.textCursor()
-                cursor.setPosition(min(caret, len(value)))
-                self.segment_prompt.setTextCursor(cursor)
-                self.segment_prompt.verticalScrollBar().setValue(scroll)
             self.segment_prompt.blockSignals(False)
-        self.segment_prompt.setPlaceholderText("Select a timeline segment to edit its prompt…" if not self.unified_workspace else "Generate a production prompt or write your own…")
-        self.highlight_inline_actions()
-        self.refine_prompt_button.setEnabled(not self.ai_busy and bool(value.strip()) and (self.unified_workspace or self.prompt_scope.currentData() == "segment"))
+        self.segment_prompt.setPlaceholderText("Select a timeline segment to edit its prompt…")
+        self.refine_prompt_button.setEnabled(not self.ai_busy and bool(value.strip()) and bool(self.segments))
+        if self.unified_prompt.toPlainText() != self.minimax_prompt_text:
+            self.unified_prompt.blockSignals(True)
+            self.unified_prompt.setPlainText(self.minimax_prompt_text)
+            render_prompt_notes(self.unified_prompt)
+            self.unified_prompt.blockSignals(False)
+        self.minimax_panel.update_actions()
         self.update_counts()
 
     def global_prompt_changed(self) -> None:
         self.mark_dirty()
-        if not self.unified_workspace and self.prompt_scope.currentData() == "global":
+        if self.prompt_scope.currentData() == "global":
             self.refresh_shared_editor()
 
     def update_spoken_dialog_visibility(self) -> None:
         if not hasattr(self, "language_label"):
             return
-        self.planning_label.setVisible(not self.unified_workspace or self.spoken_dialog.isChecked())
+        self.planning_label.setVisible(True)
         for widget in (self.speaker_language, self.speaker_accent, self.language_label, self.accent_label):
             widget.setVisible(self.spoken_dialog.isChecked())
 
@@ -5938,21 +6028,12 @@ class MainWindow(QMainWindow):
         self.minimax_panel.reference_dock.raise_()
 
     def generate_project_prompt(self) -> None:
-        if self.ai_busy:
-            return
-        if not self.unified_workspace:
+        if not self.ai_busy:
             self.magic_build()
-        else:
-            self._generate_minimax_prompt(self.minimax_prompt_mode)
 
     def refine_project_prompt(self) -> None:
-        if self.ai_busy:
-            return
-        if not self.unified_workspace:
-            if self.prompt_scope.currentData() == "segment":
-                self.refine_selected_prompt()
-        else:
-            self.refine_minimax_prompt()
+        if not self.ai_busy:
+            self.refine_selected_prompt()
 
     def export_workflow(self) -> None:
         if not self.unified_workspace:
@@ -5978,7 +6059,6 @@ class MainWindow(QMainWindow):
         state = cache_state or (f"Saved {mode_name} prompt" if self.minimax_prompt_text else "Not generated")
         self.minimax_panel.set_project(self.current_project_name, self.minimax_prompt_text,
                                        self.minimax_refinement_instructions, state)
-        self.sync_timed_actions()
 
     def show_minimax_panel(self, cache_state: str | None = None) -> MiniMaxPromptPanel:
         if not self.unified_workspace:
@@ -5990,14 +6070,13 @@ class MainWindow(QMainWindow):
     def minimax_editor_changed(self) -> None:
         if self._loading or not self.minimax_panel or not self.unified_workspace:
             return
-        self.minimax_prompt_text = self.minimax_panel.editor.toPlainText()
-        tagged = cue_cells(self.minimax_panel.editor)
-        if tagged:
-            self._action_descriptions.update(tagged)
-        self._actions_refresh_timer.start()
-        self.highlight_inline_actions()
+        value = self.unified_prompt.toPlainText()
+        if value == self.minimax_prompt_text:
+            return
+        self.minimax_prompt_text = value
         self.minimax_prompt_updated_at = datetime.now(timezone.utc).isoformat()
         self.minimax_panel.update_actions()
+        self.unified_count.setText(f"{len(value)} characters")
         self.mark_dirty()
 
     def active_reference_images(self) -> list:
@@ -6039,118 +6118,9 @@ class MainWindow(QMainWindow):
             if not self.minimax_panel.busy:
                 self.minimax_panel.set_cache_state("References changed · generate when ready")
 
-    def paste_timed_prompt(self, text: str) -> None:
-        if SECTION.search(text) or re.search(r"(?m)^\[[A-Z ]+\]", text):
-            prompt = text
-        else:
-            section = SECTION.search(self.minimax_prompt_text)
-            following = NEXT.search(self.minimax_prompt_text, section.end()) if section else None
-            prefix = self.minimax_prompt_text[:section.end()] if section else self.minimax_prompt_text.rstrip() + "\n\n[TIMED ACTION]\n"
-            suffix = self.minimax_prompt_text[following.start():] if following else ""
-            prompt = prefix.rstrip() + "\n" + text.strip() + ("\n\n" + suffix if suffix else "")
-        self.conform_timed_prompt(prompt)
 
-    def conform_timed_prompt(self, prompt: str) -> None:
-        """Apply a prompt plan in order, retaining media and IDs of existing segments."""
-        if not SECTION.search(prompt):
-            first = re.search(r"(?m)^[ \t]*\d{2}:\d{2}:", prompt)
-            if first:
-                prompt = prompt[:first.start()].rstrip() + "\n\n[TIMED ACTION]\n" + prompt[first.start():]
-        plan = parse_timed_plan(prompt)
-        previous_loading = self._loading
-        self._loading = True
-        targets = [segment.duration for segment in self.segments]
-        self.minimax_prompt_text = prompt
-        for index, cue in enumerate(plan):
-            if index >= len(self.segments):
-                if not cue["valid"]:
-                    break
-                self.segments.append(Segment(f"Text {index + 1}", "", "", "text", "text"))
-                targets.append(self.segments[-1].duration)
-            segment = self.segments[index]
-            segment.prompt_detached = not cue["valid"]
-            if cue["valid"]:
-                segment.prompt = cue["description"]
-                targets[index] = round(cue["end"] - cue["start"], 6)
-        for segment in self.segments[len(plan):]:
-            segment.prompt_detached = True
-        self._action_segment_ids = [segment.id for segment in self.segments]
-        self._action_descriptions = {segment.id: segment.prompt for segment in self.segments if not segment.prompt_detached}
-        self.refresh_shared_editor()
-        # Force re-render even when serialized text compares equal to the new source.
-        self.segment_prompt.blockSignals(True)
-        self.segment_prompt.setPlainText(prompt)
-        self.segment_prompt.blockSignals(False)
-        self.refresh_timeline(max(0, self.timeline.currentRow()))
-        self._loading = previous_loading
-        self.update_timeline_selection_style(self.timeline.currentRow())
-        self._conforming_prompt = True
-        try:
-            self.animate_timeline_durations(targets)
-        finally:
-            self._conforming_prompt = False
-        self.segment_prompt.blockSignals(True)
-        insert_cue_cells(self.segment_prompt, prompt, self.segments)
-        render_prompt_notes(self.segment_prompt)
-        self.segment_prompt.blockSignals(False)
-        self.highlight_inline_actions()
-        detached = sum(segment.prompt_detached for segment in self.segments)
-        self.minimax_panel.show_message(
-            f"{detached} segment(s) detached. Use contiguous SMPTE ranges beginning at 00:00:00:00 to reconnect them." if detached else "Timed prompt and timeline are connected.",
-            "timeline" if detached else "success")
 
-    def sync_timed_actions(self, timeline_changed: bool = False) -> None:
-        panel = self.minimax_panel
-        if not panel or not self.unified_workspace:
-            if panel:
-                panel.editor.setExtraSelections([])
-            return
-        ids = [item.id for item in self.segments]
-        tagged = cue_cells(panel.editor)
-        if tagged:
-            self._action_descriptions.update(tagged)
-        descriptions, _ = split_actions(self.minimax_prompt_text)
-        if not tagged and len(descriptions) == len(self._action_segment_ids):
-            self._action_descriptions.update((sid, description) for sid, description in zip(self._action_segment_ids, descriptions)
-                                             if sid not in self._changed_action_sources)
-        elif not tagged and not timeline_changed and len(descriptions) == len(ids):
-            self._action_descriptions.update(zip(ids, descriptions))
-        if timeline_changed and not getattr(self, "_conforming_prompt", False) and not any(segment.prompt_detached for segment in self.segments) and "[TIMED ACTION]" in self.minimax_prompt_text:
-            if len(descriptions) != len(ids):
-                panel.show_message("Timeline and timed cue counts differ. Review the extra cues before refining; none were removed.", "timeline")
-            else:
-                values = [self._action_descriptions.get(item.id, item.prompt.strip()) for item in self.segments]
-                updated = compose_actions(self.minimax_prompt_text, self.segments, values)
-                if updated != self.minimax_prompt_text:
-                    self.minimax_prompt_text = updated
-                    self.refresh_shared_editor()
-                    panel.show_message("Timeline changed. Cue times are synced; refine the prompt to review the action and continuity.", "timeline")
-        if not timeline_changed and (tagged or len(descriptions) == len(ids)):
-            if not tagged and self.minimax_prompt_text.strip():
-                editor = panel.editor
-                caret, scroll = editor.textCursor().position(), editor.verticalScrollBar().value()
-                editor.blockSignals(True)
-                insert_cue_cells(editor, self.minimax_prompt_text, self.segments)
-                cursor = editor.textCursor()
-                cursor.setPosition(min(caret, editor.document().characterCount() - 1))
-                editor.setTextCursor(cursor)
-                editor.verticalScrollBar().setValue(scroll)
-                editor.blockSignals(False)
-            for index, segment in enumerate(self.segments):
-                description = tagged.get(segment.id) if tagged else descriptions[index]
-                if description is not None and not segment.prompt_detached and segment.prompt != description:
-                    segment.prompt = description
-            self._timeline_signature = tuple((item.id, item.duration, item.prompt, item.kind, item.role, item.name) for item in self.segments)
-            self.refresh_text_segment_previews()
-        self._action_segment_ids = ids
-        self._changed_action_sources.clear()
-        self.highlight_inline_actions()
 
-    def highlight_inline_actions(self) -> None:
-        """Only native timed-action cells have background shading."""
-        segment = self.current_segment()
-        if not self.unified_workspace or not segment or not focus_cue(self.segment_prompt, segment.id, focus=False):
-            self.segment_prompt.setExtraSelections([])
 
     def replace_timeline_media(self, paths: list[str], index: int) -> None:
         paths = [path for path in paths if Path(path).is_file()]
@@ -6167,7 +6137,7 @@ class MainWindow(QMainWindow):
                 old = self.segments[location]
                 path, kind, preview, frames, trim = prepared[0]
                 self.segments[location] = Segment(Path(path).name, path, preview, kind, old.role, old.prompt,
-                                                   old.duration, frames, trim, old.id, old.image_prompt, old.prompt_detached)
+                                                   old.duration, frames, trim, old.id, old.image_prompt, False)
                 self.mark_dirty()
                 self.refresh_timeline(location)
                 if len(prepared) > 1:
@@ -6255,7 +6225,7 @@ class MainWindow(QMainWindow):
         self.start_ai_worker(
             operation,
             (
-                self.segments.copy(), provider, model, key, self.build_director_request(),
+                self.segments.copy(), provider, model, key, self.build_director_request(include_requested_length=False),
                 self.global_prompt.toPlainText(), self.sfx.isChecked(), self.spoken_dialog.isChecked(),
                 self.reduce_music.isChecked(), timeout,
             ) + (self.active_reference_images(),),
@@ -6290,12 +6260,7 @@ class MainWindow(QMainWindow):
         operation = str(getattr(self, "minimax_operation_kind", "generate_frames"))
         if operation.startswith("refine_"):
             prompt = consume_global_refinements(prompt)
-        self.conform_timed_prompt(prompt)
-        self._action_segment_ids = [item.id for item in self.segments]
-        descriptions, _ = split_actions(prompt)
-        if len(descriptions) == len(self.segments):
-            self._action_descriptions = dict(zip(self._action_segment_ids, descriptions))
-        self.minimax_prompt_cache_key = signature
+        self.minimax_prompt_text = prompt
         self.minimax_prompt_updated_at = datetime.now(timezone.utc).isoformat()
         self.set_ai_controls_enabled(True)
         self.magic_overlay.hide_overlay()
@@ -6309,9 +6274,6 @@ class MainWindow(QMainWindow):
         state = f"Cached • {mode_label} {'refined' if operation.startswith('refine_') else 'generated'}"
         window = self.show_minimax_panel(state)
         self.mark_dirty()
-        if any(segment.prompt_detached for segment in self.segments):
-            window.show_message("Some timeline segments could not be conformed. Correct the timed ranges or refine again to reconnect them.", "timeline")
-            return
         window.show_message(
             f"{self.workspace_definition.get('name', 'Production')} prompt refined. Save it from the toolbar or when closing."
             if operation.startswith("refine_") else
@@ -6348,7 +6310,7 @@ class MainWindow(QMainWindow):
         self.start_ai_worker(
             operation,
             (
-                self.segments.copy(), provider, model, key, self.build_director_request(),
+                self.segments.copy(), provider, model, key, self.build_director_request(include_requested_length=False),
                 self.global_prompt.toPlainText(), self.sfx.isChecked(), self.spoken_dialog.isChecked(),
                 self.reduce_music.isChecked(), self.minimax_prompt_text,
                 self.minimax_refinement_instructions, timeout,
@@ -6599,7 +6561,6 @@ class MainWindow(QMainWindow):
                 "updatedAt": self.minimax_prompt_updated_at,
                 "mode": self.minimax_prompt_mode,
                 "referenceImages": reference_slots(self.minimax_reference_images),
-                "cueActions": dict(self._action_descriptions),
                 "drafts": {key: dict(value) for key, value in self.minimax_drafts.items()},
             },
             "output": {"width": self.output_width.value(), "height": self.output_height.value()},
@@ -6611,7 +6572,7 @@ class MainWindow(QMainWindow):
         if payload.get("app") not in {"ltx-director-director", "ltx-prompt-director-python"}:
             raise ValueError("This is not an LTX Director - Director project file.")
         definition = payload.get("workspaceDefinition")
-        if isinstance(definition, dict) and definition.get("id") not in self.workspace_definitions:
+        if isinstance(definition, dict) and definition.get("id") not in self.workspace_definitions and not is_obsolete_stock_definition(definition):
             self.workspace_store.save(definition)
             self.reload_workspace_definitions()
         self._loading = True
@@ -6677,10 +6638,6 @@ class MainWindow(QMainWindow):
         self.minimax_reference_images = reference_slots(minimax.get("referenceImages"))
         self.workspace_revision += 1
         self.restore_project_type(payload.get("projectType"), minimax.get("drafts"))
-        self._action_descriptions = {str(key): str(value) for key, value in (minimax.get("cueActions") or self._action_descriptions or {}).items()}
-        if self._action_descriptions and "[TIMED ACTION]" in self.minimax_prompt_text:
-            self.minimax_prompt_text = compose_actions(self.minimax_prompt_text, self.segments,
-                                                      [self._action_descriptions.get(segment.id, segment.prompt) for segment in self.segments])
         output = payload.get("output", {})
         self.output_width.setValue(int(output.get("width", 1280)))
         self.output_height.setValue(int(output.get("height", 704)))

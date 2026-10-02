@@ -27,15 +27,10 @@ class MiniMaxStructuredResponseTests(unittest.TestCase):
         self.assertIn('[FRAME USE]\nImage1 starts the sequence.\nImage2 ends it.', output)
         self.assertIn('00:00:03:00 - 00:00:06:00: Stop.', output)
 
-    def test_singular_structured_actions_use_existing_timing_validation(self):
-        output = _extract_minimax_h3_prompt(json.dumps({
-            'scene': 'A shower.',
-            'timed_action': [{'start': '00:00:00:00', 'end': '00:00:03:00', 'action': 'Move.'}],
-            'sound': 'Water.',
-        }), [])
-        self.assertIn('[SCENE]\nA shower.', output)
-        self.assertIn('[TIMED ACTION]\n00:00:00:00 - 00:00:03:00: Move.', output)
-        self.assertIn('[SOUND]\nWater.', output)
+    def test_extra_timing_metadata_never_rewrites_production_text(self):
+        source = 'A complete production prompt.'
+        output = _extract_minimax_h3_prompt(json.dumps({'prompt': source, 'timed_actions': [{'start': 3, 'end': 1, 'action': 'Move'}]}), [])
+        self.assertEqual(output, source)
 
     def test_existing_prompt_takes_precedence(self):
         self.assertEqual(_extract_minimax_h3_prompt(json.dumps({
@@ -43,8 +38,7 @@ class MiniMaxStructuredResponseTests(unittest.TestCase):
         })), 'Existing brief')
 
     def test_missing_or_invalid_actions_are_rejected(self):
-        for fields in ({'scene': 'Only a scene'}, {'timed_action': []},
-                       {'scene': 'Shower', 'timed_action': [{'start': 3, 'end': 1, 'action': 'Move'}]}):
+        for fields in ({'prompt': ''}, {'timed_action': []}, {'timed_actions': [{'start': 3, 'end': 1, 'action': 'Move'}]}):
             with self.subTest(fields=fields), self.assertRaises(AIResponseFormatError):
                 _extract_minimax_h3_prompt(json.dumps(fields), [])
 

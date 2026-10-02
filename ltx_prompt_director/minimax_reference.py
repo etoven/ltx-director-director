@@ -22,6 +22,7 @@ WORKFLOW_NAMES = {
     "t2v": "Text to video (T2V)",
     "i2v": "Image to video (I2V)",
     "fl2v": "First / last frame (FL2V)",
+    "l2v": "Last frame to video (L2V)",
     "keyframes": "Multiple keyframes",
     "v2v": "Video to video (V2V)",
     "r2v": "Mixed references (R2V)",
@@ -29,6 +30,7 @@ WORKFLOW_NAMES = {
 WORKFLOW_DIRECTIONS = {
     "t2v": "Stage the requested action from text. There are no visual assets to cite.",
     "i2v": "Animate the timeline image according to its start/end role. Describe movement away from a start image or toward an end image.",
+    "l2v": "Infer a plausible earlier state and converge to the supplied last frame at its assigned end time. The last frame is not the opening.",
     "fl2v": "Connect the supplied opening and ending states through visible intermediate movement, reaching the ending image at its assigned time.",
     "keyframes": "Connect the ordered image checkpoints. Preserve the assigned image times while motion spans their boundaries.",
     "v2v": "Use the video as the source for the requested sequence. For an edit, identify the editing master and requested changes; for continuation, start from its ending state. Do not invent an editing or continuation request.",
@@ -59,7 +61,7 @@ def detect_workflow(segments: list[Segment], references: list | None = None) -> 
     if videos:
         return "v2v"
     if len(images) == 1:
-        return "i2v"
+        return "l2v" if images[0].role == "end" else "i2v"
     if len(images) == 2 and images[0].role == "start" and images[1].role == "end":
         return "fl2v"
     return "keyframes" if images else "t2v"
@@ -125,6 +127,6 @@ def reference_rules(segments: list[Segment], intent: str, global_prompt: str,
         'director_intent': intent.strip() or 'Not supplied.',
         'global_direction': global_prompt.strip() or 'Not supplied.',
         'sound_effects': 'Describe supported physical sounds and ambience.' if sfx else 'Only explicitly supplied or clearly audible source sounds; otherwise none specified.',
-        'dialogue': 'Use supplied exact words, speakers and delivery.' if spoken_dialog else 'Do not add dialogue; retain explicitly supplied words only.',
+        'dialogue': 'Spoken dialogue is requested: preserve supplied exact lines; if none are supplied, write suitable original spoken lines with speakers, language and delivery.' if spoken_dialog else 'Do not add dialogue; retain explicitly supplied words only.',
         'music': 'No background music unless explicitly requested.' if reduce_music else 'Use music only if the supplied direction calls for it.',
     })

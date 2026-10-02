@@ -23,20 +23,14 @@ def _rules(segments, intent, global_prompt, sfx, spoken_dialog, reduce_music, re
     })
 
 
-TIMED_CONTRACT = '''
-Required response transport: return JSON with "prompt" containing the production brief and a
-[TIMED ACTION] heading without action lines, and "timed_actions" containing objects with
-"start", "end" (non-drop-frame SMPTE HH:MM:SS:FF at 24 fps) and "action".
-Intervals must be contiguous and ascending from zero. Respect explicit requested timing.
-Preserve media order and identities; additional action intervals may be added at the end.
-'''
+UNIFIED_CONTRACT = ai.UNIFIED_PROMPT_TRANSPORT
 
 
 def build_generic_prompt(segments, provider, model, api_key, intent, global_prompt, sfx,
                          spoken_dialog, reduce_music, timeout=400, reference_images=None):
     inputs = ai._minimax_reference_inputs(segments, provider, reference_images)
     rules = _rules(segments, intent, global_prompt, sfx, spoken_dialog, reduce_music, reference_images)
-    raw = ai._provider_raw(inputs, provider, model, api_key, rules + TIMED_CONTRACT, timeout)
+    raw = ai._provider_raw(inputs, provider, model, api_key, rules + UNIFIED_CONTRACT, timeout)
     return ai._extract_minimax_h3_prompt(raw, segments)
 
 
@@ -46,7 +40,7 @@ def refine_generic_prompt(segments, provider, model, api_key, intent, global_pro
     inputs = ai._minimax_reference_inputs(segments, provider, reference_images, refinement=True)
     rules = _rules(segments, intent, global_prompt, sfx, spoken_dialog, reduce_music, reference_images,
                    current_prompt, refinement_instructions, refine=True)
-    raw = ai._provider_raw(inputs, provider, model, api_key, rules + TIMED_CONTRACT, timeout)
+    raw = ai._provider_raw(inputs, provider, model, api_key, rules + UNIFIED_CONTRACT, timeout)
     return ai._extract_minimax_h3_prompt(raw, segments)
 
 

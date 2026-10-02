@@ -30,9 +30,9 @@ There is no fixed segment-count or total-length cap in the editor. The renderer 
 
 **Start frame** tells a compatible workflow to begin a segment from its supplied image. **End frame** describes the image it should reach by that segment’s end. These controls are available in LTX and MiniMax.
 
-Select a card in LTX to edit its segment prompt. Select a connected card in MiniMax to focus and highlight its timed action in the unified editor.
+Select a card in any workspace to edit its segment prompt. MiniMax keeps an independently editable unified production prompt below it. Refining a segment can update its duration and the timeline; typing in the unified box preserves segment timing.
 
-![A selected MiniMax action with its protected time range beside the editable description](images/linked-timed-actions.png)
+![Shared segment editing with the full production prompt below](images/shared-segment-editors.png)
 
 ## Update the image without rebuilding the beat
 

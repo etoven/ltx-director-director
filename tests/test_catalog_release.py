@@ -12,8 +12,8 @@ from ltx_prompt_director import ai, ui
 
 def test_factory_workspaces_and_audio_only_ltx_response(tmp_path):
     store = WorkspaceStore(tmp_path / 'workspaces')
-    assert set(store.load()) == {'ltx', 'minimax_references'}
-    assert store.load()['minimax_references']['name'] == 'MiniMax'
+    assert set(store.load()) == {'ltx', 'minimax_base_guide', 'minimax_full_reference_guide'}
+    assert store.load()['minimax_full_reference_guide']['name'] == 'MiniMax · Full Reference'
     for kind in ['generate', 'refine']:
         text = stock_prompt('ltx', kind)
         assert 'imagePrompt' not in text
@@ -114,9 +114,9 @@ def test_untouched_factory_workspace_upgrade_and_custom_preservation(tmp_path):
     custom.update(id='my_custom', name='Personal workspace')
     (root / 'my_custom.json').write_text(json.dumps(custom))
     values = WorkspaceStore(root).load()
-    assert set(values) == {'ltx', 'minimax_references', 'my_custom'}
+    assert set(values) == {'ltx', 'minimax_base_guide', 'minimax_full_reference_guide', 'my_custom'}
     assert 'imagePrompt' not in values['ltx']['generation_prompts']['generate']
-    assert values['minimax_references']['name'] == 'MiniMax'
+    assert values['minimax_full_reference_guide']['engine'] == 'minimax_references'
     assert values['my_custom'] == custom
 
 

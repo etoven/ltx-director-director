@@ -37,24 +37,6 @@ class InlineCuesCloseSpellcheckTests(unittest.TestCase):
         except RuntimeError:
             pass
 
-    def test_inline_cells_keep_ids_when_surrounding_prose_changes(self):
-        window = self.make_window()
-        window.segments = [Segment('A', '', '', kind='text', prompt='First', duration=2),
-                           Segment('B', '', '', kind='text', prompt='Second', duration=3)]
-        window.refresh_timeline(0)
-        window.set_project_type('minimax_frames')
-        window.segment_prompt.setPlainText(compose_actions('[SCENE]\nKitchen.\n\n[SOUND]\nRain.', window.segments, ['Walk', 'Turn']))
-        window.sync_timed_actions()
-        self.assertEqual(cue_cells(window.segment_prompt), {window.segments[0].id: 'Walk', window.segments[1].id: 'Turn'})
-        cursor = window.segment_prompt.textCursor()
-        cursor.setPosition(0)
-        cursor.insertText('Prelude.\n')
-        window.sync_timed_actions()
-        self.assertEqual(cue_cells(window.segment_prompt)[window.segments[1].id], 'Turn')
-        window.change_duration(window.segments[0].id, 4)
-        self.assertIn('00:00:04:00 - 00:00:07:00: Turn', window.segment_prompt.toPlainText())
-        self.assertEqual(cue_cells(window.segment_prompt)[window.segments[1].id], 'Turn')
-
     def test_wrapped_cue_background_covers_all_visual_lines(self):
         editor = QTextEdit()
         editor.setStyleSheet('QTextEdit{background:#202527;color:#e3e3e3;font:14px Monospace}')
@@ -90,20 +72,6 @@ class InlineCuesCloseSpellcheckTests(unittest.TestCase):
             block = block.next()
         self.assertEqual(len(tables), 3)
 
-    def test_extra_cue_is_preserved_when_timeline_length_changes(self):
-        window = self.make_window()
-        window.segments = [Segment('A', '', '', kind='text', duration=2), Segment('B', '', '', kind='text', duration=3)]
-        window.refresh_timeline(0)
-        window.set_project_type('minimax_frames')
-        window.segment_prompt.setPlainText(
-            '[TIMED ACTION]\n00:00:00:00 - 00:00:02:00: First\n\n'
-            '00:00:02:00 - 00:00:05:00: Second\n\n'
-            '00:00:05:00 - 00:00:08:00: Extra')
-        window.sync_timed_actions()
-        window.change_duration(window.segments[0].id, 4)
-        self.assertIn('Extra', window.segment_prompt.toPlainText())
-        self.assertIn('counts differ', window.minimax_panel.message_banner.text())
-
     def test_timecode_and_inline_cell_cannot_be_deleted(self):
         editor = PromptTextEdit()
         editor.inline_cue_mode = True
@@ -128,21 +96,6 @@ class InlineCuesCloseSpellcheckTests(unittest.TestCase):
         self.assertEqual(cue_cells(editor)[segment.id], 'Walk forward')
         self.assertIn('00:00:00:00 - 00:00:02:00', editor.toPlainText())
         editor.close()
-
-    def test_saved_cue_ids_restore_action_to_original_segment(self):
-        window = self.make_window()
-        window.segments = [Segment('A', '', '', kind='text', prompt='Start', duration=2),
-                           Segment('B', '', '', kind='text', prompt='End', duration=3)]
-        window.refresh_timeline(0)
-        window.set_project_type('minimax_frames')
-        window.segment_prompt.setPlainText(compose_actions('[SCENE]\nStudio.', window.segments, ['Walk', 'Turn']))
-        window.sync_timed_actions()
-        expected = cue_cells(window.segment_prompt)
-        payload = window.project_payload(include_media=False)
-        self.assertEqual(payload['minimaxH3']['cueActions'], expected)
-        restored = self.make_window()
-        restored.load_project_payload(payload)
-        self.assertEqual(cue_cells(restored.segment_prompt), expected)
 
     def test_spelling_suggestions_are_top_level_and_replace_word(self):
         if system_dictionary() is None:

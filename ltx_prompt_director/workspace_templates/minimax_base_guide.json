@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "id": "minimax_frames",
+  "id": "minimax_base_guide",
   "name": "MiniMax · Standard and Keyframes",
   "engine": "minimax_frames",
   "prompt_mode": "unified",

@@ -72,11 +72,11 @@ class IntentGenericTests(unittest.TestCase):
                                         ('segmented', generic_ai.build_generic_segments, generic_ai.refine_generic_segment)]:
             self.generic(w, mode)
             if mode == 'unified':
-                w.segment_prompt.setPlainText('[SCENE]\nAction.')
+                w.unified_prompt.setPlainText('[SCENE]\nAction.')
             with patch.object(w, 'ai_credentials', return_value=('gemini', 'model', 'key')), patch.object(w, 'start_ai_worker') as worker:
-                w.generate_project_prompt()
+                w._generate_minimax_prompt("frames") if mode == "unified" else w.generate_project_prompt()
                 self.assertIs(worker.call_args.args[0], generate)
-                w.refine_project_prompt()
+                w.refine_minimax_prompt() if mode == "unified" else w.refine_project_prompt()
                 self.assertIs(worker.call_args.args[0], refine)
                 if mode == 'unified':
                     w.retry_minimax_operation()
@@ -92,7 +92,7 @@ class IntentGenericTests(unittest.TestCase):
             self.assertIn('Keep the camera still', rules)
             self.assertNotIn('LTXDirector', rules)
             self.assertNotIn('MiniMax H3', rules)
-            self.assertIn('00:00:00:00 - 00:00:03:00: Move.', prompt)
+            self.assertEqual(prompt, response['prompt'])
         with patch.object(ai, '_provider_raw', return_value=json.dumps({'segments': [{'duration': 4, 'prompt': 'Move.'}], 'globalPrompt': ''})):
             result = generic_ai.build_generic_segments(segments, 'gemini', 'model', 'key', '', False, False, False, False)
             self.assertEqual(result['segments'][0]['duration'], 4)

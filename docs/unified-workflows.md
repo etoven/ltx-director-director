@@ -1,49 +1,39 @@
-# One creative workspace. Several ways to direct.
+# Direct every segment. Keep the full prompt in view.
 
-## Choose the prompt that fits the production
+All shipped workspaces use the same segment editor. Select a timeline card to edit its prompt, change its frame role or refine its wording and duration. **Magic Build** develops the segment prompts and shared global direction.
 
-Director keeps the visual timeline and writing space together whether you are developing a continuous production brief or a collection of segment prompts. Choose the approach in **Project type**, then use the same timeline, intent and refinement tools to work through the sequence.
+![The shared segment editor above an independently editable MiniMax production prompt](images/ltx-director-director-overview.png)
 
-![The continuous MiniMax production prompt and its linked timeline](images/ltx-director-director-overview.png)
+| Workspace | Production format |
+| --- | --- |
+| LTX Video | Segment prompts and shared global direction for LTX Director export |
+| MiniMax Standard / Keyframes | Guide-based integrated description, soundscape and music sections |
+| MiniMax Full Reference | Guide-based subject definitions, summary, retention analysis, detailed description, soundscape and music |
 
-| Workspace | Best suited to | What you develop |
-| --- | --- | --- |
-| MiniMax | Opening/closing frames, source clips or attribute references | A production brief with explicit asset roles |
-| LTX Video | Individual motion beats with shared continuity | Segment prompts plus a global prompt |
-| Generic | A custom prompting process | Unified or segmented prompts using your templates |
+## Edit the beats, then develop the full prompt
 
-## MiniMax: direct the whole sequence
+MiniMax adds an editable **Unified Prompt** below the segment editor. **Generate Unified Prompt** combines the current segments, reference roles and creative direction using the selected template. **Refine Unified Prompt** develops the draft you have edited, preserving untouched content and applying your inline requests.
 
-Select **MiniMax**, add your checkpoints and describe the movement between them in **Director’s Intent**. **Generate Prompt** develops a brief that can include frame or reference use, continuity, scene, timed action, sound and avoid instructions.
+The two editors retain separate text. Pasting or editing the unified prompt does not change the timeline. Changing segments marks the production draft as needing an update; regenerate when you want to incorporate those changes. Your manual draft remains available until you choose to replace it.
 
-The **[TIMED ACTION]** section presents each range beside its editable action. The timecode column is protected during ordinary editing. Select a timeline card to focus the corresponding action; edit the action’s words or change the card’s duration to develop the same connected plan.
+![A selected segment prompt with the full production draft below](images/shared-segment-editors.png)
 
-Choose **MiniMax** when the role of each source matters: an opening image, a destination frame, source footage or an untimed style or identity guide. Add up to two untimed images in **Reference images** and specify the attributes to draw from each one.
+## Adjust timing through the shared editor
 
-![MiniMax References with an untimed atmosphere image and an editable production brief](images/minimax-references.png)
+**Refine Prompt** above the segment editor improves the selected beat and can resize that segment when the requested action or dialogue needs a different duration. **Refine Timing** changes its duration while preserving its wording. Both update the timeline in LTX and MiniMax.
 
-**Refine Prompt** works on the complete edited brief, your inline instructions and the available references. You can also write or paste your own prompt and refine that draft. Use **Copy** to take the visible brief into your video workflow.
+Select **Global** in the segment editor to edit shared direction. Add an instruction such as `/refine-global Resize the segments proportionally to 15 seconds`, then choose **Refine Prompt**. Director scales the current segment durations to the requested total while preserving their proportions and individual prompt text. Other explicit global timing edits can change multiple segment durations. The unified production draft remains intact and is marked for an update.
 
-LTX and MiniMax retain their prompt drafts in the project. Custom workspace definitions can provide additional prompting approaches.
+## Check conditioning at a glance
 
-## LTX: give every moment its own direction
+The compact strip under the MiniMax timeline shows image thumbnails, start/end checkpoint times, source-video trim ranges and untimed reference roles. It flags an opening that needs to move to zero or an ending that needs to reach the sequence total. It describes your setup; it does not move media automatically.
 
-Select **LTX Video**, arrange the visual and text beats, set your creative direction and choose **Magic Build**. Director develops one prompt per segment and a global prompt for shared scene continuity.
+![Compact conditioning frame and timing guide](images/conditioning-guide.png)
 
-![LTX segment editing with Magic Build, output dimensions and focused refinement](images/ltx-workspace.png)
+Both MiniMax templates receive `${workflow_name}` and `${workflow_direction}` from the current asset setup, including I2V, FL2V and last-frame L2V. Asset labels, subjects and speakers remain distinct. Dialogue requests can add original spoken lines when none are supplied.
 
-Select a card to edit that segment’s prompt. Use the prompt-scope selector to open **Global** in the same editor and describe the setting, lighting, quality or continuity that should apply throughout.
+## Keep your direction and drafts
 
-**Refine Prompt** improves the selected beat while considering neighboring frames and prompts. It may adjust that beat’s duration when the action or dialogue needs more room. **Refine Timing** adjusts the selected duration while preserving its wording. Other segment durations remain fixed during these focused refinements, and the selected beat can grow beyond the requested sequence target when necessary.
+**Director’s Intent**, prompt options and inline refinement notes remain available across modes. Its collapse checkbox is in the segment prompt header and the collapsed state persists. Switching workspaces does not submit an AI request. Projects retain segment prompts, global direction and each workspace’s unified draft.
 
-Set the output width and height above the timeline. Director normalizes them to 32-pixel increments for export. When the plan is ready, **Export** creates LTX Director JSON for your ComfyUI workflow.
-
-## Keep the creative throughline
-
-**Director’s Intent**, total length and prompt options remain available across modes. Collapsing the intent panel preserves your choices. Generation and refinement happen when you request them; preparing media or switching workspaces does not submit an AI request.
-
-You can keep writing in the MiniMax editor while a request runs. If you change the project, prompt or references in a way that makes that response obsolete, Director protects the current draft from being overwritten by the outdated result.
-
-Projects retain their workspace and saved drafts. **Save to Library** commits the current work; **Export Project** makes a portable copy. For a personalized layout and prompting style, create a [custom workspace](workspace-definitions-and-exports.md).
-
-**Continue:** [Refinement and audio](refinement-and-audio.md) · [Reference images](minimax-references.md) · [Complete feature guide](../usage.md)
+**Continue:** [Reference images](minimax-references.md) · [Custom workspaces and exports](workspace-definitions-and-exports.md) · [Complete feature guide](../usage.md)

@@ -26,9 +26,8 @@ class MiniMaxH3PromptTests(unittest.TestCase):
 
     def test_frames_rules_use_reference_style_sections_and_exact_ranges(self):
         rules = ai._minimax_h3_rules(self.segments(), 'Intent', 'Global', True, False, True)
-        for section in ('[FRAME USE]', '[CONTINUITY]', '[SCENE]', '[TIMED ACTION]', '[SOUND]', '[AVOID]'):
+        for section in ('integrated_multimodal_description', 'overall_soundscape', 'non_diegetic_music'):
             self.assertIn(section, rules)
-        self.assertLess(rules.index('[FRAME USE]'), rules.index('[TIMED ACTION]'))
         for interval in ('00:00:00:00 - 00:00:03:00', '00:00:03:00 - 00:00:06:00',
                          '00:00:06:00 - 00:00:09:00', '00:00:09:00 - 00:00:12:21'):
             self.assertIn(interval, rules)
@@ -37,7 +36,7 @@ class MiniMaxH3PromptTests(unittest.TestCase):
         self.assertIn('end frame reached at 00:00:12:21', rules)
         self.assertIn('start frame at 00:00:00:00', rules)
         self.assertIn('Video1 (motion.mp4)', rules)
-        self.assertIn('Frame images are conditioning checkpoints', rules)
+        self.assertIn('I2V', rules)
         self.assertNotIn('exactly one timed Frame bridge', rules)
         self.assertNotIn('sentence quota', rules.split('Use only facts')[0])
 
@@ -61,7 +60,7 @@ class MiniMaxH3PromptTests(unittest.TestCase):
         with patch.object(ai, '_provider_raw', return_value=json.dumps({'prompt': result})) as provider:
             output = ai.build_minimax_h3_prompt(self.segments(), 'gemini', 'model', '', '', '', False, False, True)
         self.assertEqual(output, result.strip())
-        self.assertIn('[FRAME USE]', provider.call_args.args[4])
+        self.assertIn('integrated_multimodal_description', provider.call_args.args[4])
         self.assertTrue(provider.call_args.args[0][0]['frame_mode_checkpoint'])
 
     def test_two_untimed_references_follow_timed_frames_with_distinct_roles(self):
@@ -73,8 +72,8 @@ class MiniMaxH3PromptTests(unittest.TestCase):
         rules = ai._minimax_h3_rules(self.segments(), '', '', False, False, True, refs)
         self.assertIn('Image3 (face.png): untimed identity reference; notes: face only', rules)
         self.assertIn('Image4 (claws.png): untimed object reference; notes: claw shape', rules)
-        self.assertIn('one blank line between sections', rules)
-        self.assertIn('each range on its own line', rules)
+        self.assertIn('non_diegetic_music', rules)
+        self.assertIn('single', rules)
         self.assertEqual(rules.split('UNTIMED REFERENCE IMAGES', 1)[0].count('00:00:00:00 - 00:00:03:00'), 1)
         with patch.object(ai, '_provider_raw', return_value='{"prompt":"[FRAME USE] Done."}') as provider:
             ai.build_minimax_h3_prompt(self.segments(), 'gemini', 'model', '', '', '', False, False, True,
@@ -99,7 +98,7 @@ class MiniMaxH3PromptTests(unittest.TestCase):
 
     def test_reference_workflow_remains_untimed_reference_brief(self):
         rules = ai._minimax_h3_reference_rules(self.segments(), '', '', False, False, True)
-        self.assertIn('[REFERENCE USE]', rules)
+        self.assertIn('subject_definitions', rules)
         self.assertIn('Mixed references (R2V)', rules)
         self.assertNotIn('[FRAME USE]', rules)
 
@@ -108,9 +107,9 @@ class MiniMaxH3PromptTests(unittest.TestCase):
             result = ai.refine_minimax_h3_prompt(self.segments(), 'gemini', 'model', '', '', '',
                                                   False, False, True, '[FRAME USE] Current.', 'Preserve my camera.')
         self.assertEqual(result, '[FRAME USE] Edited.')
-        self.assertIn('INLINE SLASH DIRECTIVES in CURRENT EDITOR PROMPT', provider.call_args.args[4])
+        self.assertIn('/refine-global', provider.call_args.args[4])
         self.assertIn('Preserve my camera.', provider.call_args.args[4])
-        self.assertIn('production-brief sections', provider.call_args.args[4])
+        self.assertIn('Preserve untouched content', provider.call_args.args[4])
 
     def test_cache_key_tracks_prompt_duration_and_original_bytes(self):
         with tempfile.TemporaryDirectory() as directory:

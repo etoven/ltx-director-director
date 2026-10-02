@@ -12,6 +12,17 @@ SCHEMA_VERSION = 1
 KINDS = {"image", "video", "start", "end", "identity", "style", "scene", "object", "composition", "wardrobe"}
 
 
+def is_obsolete_stock_definition(value: dict) -> bool:
+    """Recognize untouched legacy defaults embedded in portable projects."""
+    import hashlib
+    hashes = {
+        'minimax_frames': {'79aa0f7a834319d465bfb61fe49eb4ce09572b326bc2a31d8e9f5483c2241b9e'},
+        'minimax_references': {'76e1e3d0b159bb5a64620f9e5e15ebee3f052a5fcafd7e6f72424caea643015d',
+                               '62ca3a9db6b3284289493f88ae031912f3161ddf2a83fb64973d94aba6908599'},
+    }
+    return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest() in hashes.get(value.get('id'), set())
+
+
 def definition_root() -> Path:
     root = Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppDataLocation)) / "workspaces"
     root.mkdir(parents=True, exist_ok=True)
@@ -74,12 +85,27 @@ class WorkspaceStore:
                     if unchanged:
                         if workspace_id == "minimax_frames":
                             path.unlink()
+                        elif workspace_id == "minimax_references":
+                            path.unlink()
                         else:
                             stock = files("ltx_prompt_director").joinpath(f"workspace_templates/{workspace_id}.json")
                             self.save(json.loads(stock.read_text(encoding="utf-8")))
                 except (OSError, ValueError):
                     pass
             marker.touch()
+        guide_marker = self.root / ".stock-minimax-guides"
+        if not guide_marker.exists():
+            import hashlib
+            previous = self.root / "minimax_references.json"
+            if previous.exists():
+                try:
+                    value = json.loads(previous.read_text(encoding="utf-8"))
+                    if hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest() == "62ca3a9db6b3284289493f88ae031912f3161ddf2a83fb64973d94aba6908599":
+                        previous.unlink()
+                except (OSError, ValueError):
+                    pass
+            self.restore_stock(overwrite=False)
+            guide_marker.touch()
         self.errors: list[str] = []
 
     def load(self) -> dict[str, dict]:

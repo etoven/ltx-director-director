@@ -8,7 +8,7 @@ Use a picture to guide a face, wardrobe, atmosphere, prop or composition without
 
 ## Add the image. Define the role.
 
-Open **Reference images** in either MiniMax workspace. Drop a local still into a slot, click **Browse**, or use **Paste** for clipboard image pixels or a local image file. Choose the role and add notes describing exactly what to use.
+Open **Reference images** in **MiniMax Full Reference**. Drop a local still into a slot, click **Browse**, or use **Paste** for clipboard image pixels or a local image file. Choose the role and add notes describing exactly what to use.
 
 | Role | Guide the generation toward |
 | --- | --- |
@@ -42,13 +42,13 @@ A start image anchors the beginning of its segment; an end image is reached at t
 
 ## References and timeline frames work together
 
-Use the **MiniMax** workspace to combine timeline checkpoints, source video, and two untimed image references in one production brief.
+Use **MiniMax Full Reference** to combine timeline checkpoints, source video, and two untimed image references in one production brief.
 
 An untimed image supplies attributes rather than chronology: it does not add a segment, move a checkpoint or extend the plan. For a sequence guided entirely by the reference slots, add a text segment to establish the action and duration.
 
 ## Generate, review and refine
 
-Write your intent, then select **Generate Prompt**. Review how the resulting brief assigns reference roles and describes the scene. Edit the draft directly, add inline notes, and use **Refine Prompt** to develop it with the same references.
+Write your intent, then select **Generate Unified Prompt**. Review how the resulting brief assigns reference roles and describes the scene. Edit the draft directly, add inline notes, and use **Refine Unified Prompt** to develop it with the same references.
 
 Image labels and video labels are assigned consistently within the asset inventory. Changing a reference remains a preparation step; you choose when to submit another generation or refinement request.
 

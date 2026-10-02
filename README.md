@@ -8,7 +8,7 @@ Build a visual plan for AI video, turn it into a detailed production prompt, and
 
 ![The Aurora workspace: a visual timeline, creative direction and one continuous MiniMax production brief](docs/images/ltx-director-director-overview.png)
 
-*Current release: Aurora 1.13.0a25 on `experimental`. Screenshots show the current native app with an authored demonstration project.*
+*Current release: Aurora 1.13.0a26 on `experimental`. Screenshots show the current native app with an authored demonstration project.*
 
 ## See the story before you generate
 
@@ -36,6 +36,8 @@ In LTX, **Magic Build** develops the whole sequence; **Refine Prompt** and **Ref
 
 **[Choose your workflow →](docs/unified-workflows.md)**
 
+Every workspace shares the LTX segment editor. MiniMax adds a separate editable unified prompt below it, plus a compact conditioning guide beneath the timeline. The shipped defaults are LTX Video, MiniMax Standard / Keyframes and MiniMax Full Reference; the two MiniMax templates follow the supplied guides.
+
 ## Give the AI a direction worth following
 
 Describe the performance, camera movement, continuity and mood in **Director’s Intent**. Set a target duration, add sound-effect direction or spoken-dialog guidance, and keep these choices as you move between modes. Collapse the panel whenever you want more writing space.
@@ -48,7 +50,7 @@ Keep your editing requests beside the passage they affect. Inline **Refinement, 
 
 ## Keep identity, atmosphere and composition in view
 
-Two untimed reference-image slots in the MiniMax workspace let you guide **Identity, Wardrobe, Setting, Visual style, Object / prop or Composition**. Add a picture by dropping it, browsing or pasting; explain the attributes you want in its notes. Timeline media sets the chronology. These image slots supply visual guidance.
+Two untimed reference-image slots in MiniMax Full Reference let you guide **Identity, Wardrobe, Setting, Visual style, Object / prop or Composition**. Add a picture by dropping it, browsing or pasting; explain the attributes you want in its notes. Timeline media sets the chronology. These image slots supply visual guidance.
 
 ![Reference images with explicit visual roles alongside the timed production brief](docs/images/minimax-references.png)
 
@@ -93,7 +95,7 @@ Customize the workspace itself in **Settings → Workspaces**: choose the editor
 Install the current experimental wheel:
 
 ```bash
-python3 -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a25-py3-none-any.whl'
+python3 -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a26-py3-none-any.whl'
 ltx-director-director
 ```
 

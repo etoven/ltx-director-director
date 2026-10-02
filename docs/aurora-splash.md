@@ -12,7 +12,7 @@ The startup screen shows progress while Director prepares the panels, text tools
 
 Your timeline shows the sequence. The shared editor shows the selected LTX prompt or the full MiniMax brief. Director’s Intent expands when you need to establish the creative throughline and collapses when you want more room to write.
 
-![The Aurora workspace with visual beats and linked timed-action writing](images/ltx-director-director-overview.png)
+![The Aurora workspace with visual beats and shared segment and unified prompt editing](images/ltx-director-director-overview.png)
 
 Use the toolbar text-scale control to make the interface comfortable on your screen. Your panel arrangement, timeline view and intent-panel state are retained across sessions.
 

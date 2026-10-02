@@ -13,7 +13,7 @@ import requests
 from .media import data_url, video_storyboard_data_urls
 from .project_archive import materialize_source
 from .models import Segment
-from .minimax_reference import reference_image_for_provider, reference_inventory, reference_rules, reference_slots
+from .minimax_reference import reference_image_for_provider, reference_inventory, reference_rules, reference_slots, WORKFLOW_NAMES, WORKFLOW_DIRECTIONS, detect_workflow
 
 
 GEMINI_MODELS = [
@@ -39,13 +39,16 @@ def build_prompts(segments: list[Segment], provider: str, model: str, api_key: s
     return _gemini(images, api_key, model, rules, timeout, sfx, spoken_dialog)
 
 
+UNIFIED_PROMPT_TRANSPORT = '\n\nRESPONSE TRANSPORT: Return strict JSON with a single nonempty "prompt" string containing the complete editable production prompt in the workspace format. Do not return timed_actions, segment records or a timing reconciliation plan. The timeline is authoritative; describe its existing timing without changing segment count, duration, order or identity. Prompt editing never rebuilds the timeline. This response contract supersedes older structured timed-plan instructions.'
+
+
 def build_minimax_h3_prompt(segments: list[Segment], provider: str, model: str, api_key: str, intent: str, global_prompt: str, sfx: bool, spoken_dialog: bool, reduce_music: bool, timeout: int = 400, reference_images: list | None = None) -> str:
     """Synthesize the complete ordered timeline into one MiniMax H3 prompt."""
     if not segments:
         raise ValueError("Add at least one timeline item before exporting a MiniMax H3 prompt.")
     inputs = _minimax_frames_inputs(segments, provider, reference_images)
     rules = _minimax_h3_rules(segments, intent, global_prompt, sfx, spoken_dialog, reduce_music, reference_images)
-    rules += "\n\nTIMED PLAN TRANSPORT: Return timed_actions as objects with start, end (SMPTE HH:MM:SS:FF at 24 fps), and action. Use contiguous ascending intervals beginning at zero. Respect the requested total duration when supplied. You may retime intervals and add action intervals at the end when direction requires it. Preserve the ordered existing conditioning states and media; do not remove intervals containing media. The client reconciles your explicit timing plan with the timeline. Keep [TIMED ACTION] in prompt prose with no action lines. This structured timing contract supersedes earlier string-array or fixed-time instructions."
+    rules += UNIFIED_PROMPT_TRANSPORT
     raw = _provider_raw(inputs, provider, model, api_key, rules, timeout)
     return _extract_minimax_h3_prompt(raw, segments)
 
@@ -56,7 +59,7 @@ def build_minimax_h3_reference_prompt(segments: list[Segment], provider: str, mo
         raise ValueError("Add at least one timeline item before generating a MiniMax H3 reference prompt.")
     inputs = _minimax_reference_inputs(segments, provider, reference_images)
     rules = _minimax_h3_reference_rules(segments, intent, global_prompt, sfx, spoken_dialog, reduce_music, reference_images)
-    rules += "\n\nTIMED PLAN TRANSPORT: Return timed_actions as objects with start, end (SMPTE HH:MM:SS:FF at 24 fps), and action. Use contiguous ascending intervals beginning at zero. Respect the requested total duration when supplied. You may retime intervals and add action intervals at the end when direction requires it. Preserve the ordered existing conditioning states and media; do not remove intervals containing media. The client reconciles your explicit timing plan with the timeline. Keep [TIMED ACTION] in prompt prose with no action lines. This structured timing contract supersedes earlier string-array or fixed-time instructions."
+    rules += UNIFIED_PROMPT_TRANSPORT
     raw = _provider_raw(inputs, provider, model, api_key, rules, timeout)
     return _extract_minimax_h3_prompt(raw, segments)
 
@@ -73,7 +76,7 @@ def refine_minimax_h3_prompt(segments: list[Segment], provider: str, model: str,
         'current_prompt': current_prompt.strip(),
         'refinement_instructions': refinement_instructions.strip() or 'Improve clarity, motion continuity, causal flow, and production readiness without changing the creative intent.',
     })
-    rules += "\n\nTIMED PLAN TRANSPORT: Return timed_actions as objects with start, end (SMPTE HH:MM:SS:FF at 24 fps), and action. Use contiguous ascending intervals beginning at zero. Respect the requested total duration when supplied. You may retime intervals and add action intervals at the end when direction requires it. Preserve the ordered existing conditioning states and media; do not remove intervals containing media. The client reconciles your explicit timing plan with the timeline. Keep [TIMED ACTION] in prompt prose with no action lines. This structured timing contract supersedes earlier string-array or fixed-time instructions."
+    rules += UNIFIED_PROMPT_TRANSPORT
     raw = _provider_raw(inputs, provider, model, api_key, rules, timeout)
     return _extract_minimax_h3_prompt(raw, segments)
 
@@ -90,78 +93,40 @@ def refine_minimax_h3_reference_prompt(segments: list[Segment], provider: str, m
         'current_prompt': current_prompt.strip(),
         'refinement_instructions': refinement_instructions.strip() or 'Improve reference clarity, action continuity, camera direction, and production detail without changing creative intent.',
     })
-    rules += "\n\nTIMED PLAN TRANSPORT: Return timed_actions as objects with start, end (SMPTE HH:MM:SS:FF at 24 fps), and action. Use contiguous ascending intervals beginning at zero. Respect the requested total duration when supplied. You may retime intervals and add action intervals at the end when direction requires it. Preserve the ordered existing conditioning states and media; do not remove intervals containing media. The client reconciles your explicit timing plan with the timeline. Keep [TIMED ACTION] in prompt prose with no action lines. This structured timing contract supersedes earlier string-array or fixed-time instructions."
+    rules += UNIFIED_PROMPT_TRANSPORT
     raw = _provider_raw(inputs, provider, model, api_key, rules, timeout)
     return _extract_minimax_h3_prompt(raw, segments)
 
 
 def _extract_minimax_h3_prompt(raw: str, segments: list[Segment] | None = None) -> str:
-    """Extract the MiniMax prompt without second-guessing its creative content."""
+    """Read production text without converting it into a timeline plan."""
     result = _parse_json(raw)
     if not isinstance(result, dict):
-        raise AIResponseFormatError("The AI returned an invalid MiniMax H3 response. The operation will retry.")
-    actions = result.get("timed_actions", result.get("timedActions"))
-    if actions is None and isinstance(result.get("timed_action"), list) and any(
-        isinstance(action, dict) for action in result["timed_action"]
+        raise AIResponseFormatError("The AI returned an invalid production-prompt response. The operation will retry.")
+    for key in ("prompt", "minimaxPrompt", "minimax_prompt", "productionPrompt", "production_prompt", "productionBrief", "production_brief"):
+        value = result.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    # Accept providers returning named prose sections; never interpret their
+    # contents or extra metadata as instructions to mutate the timeline.
+    sections = []
+    for key, heading in (
+        ("subject_definitions", "subject_definitions:"), ("summary", "summary:"),
+        ("retention_analysis", "retention_analysis:"), ("detailed_description", "detailed_description:"),
+        ("integrated_multimodal_description", "integrated_multimodal_description:"),
+        ("frame_use", "[FRAME USE]"), ("reference_use", "[REFERENCE USE]"),
+        ("continuity", "[CONTINUITY]"), ("scene", "[SCENE]"),
+        ("timed_action", "[TIMED ACTION]"), ("sound", "[SOUND]"), ("avoid", "[AVOID]"),
+        ("overall_soundscape", "overall_soundscape:"), ("non_diegetic_music", "non_diegetic_music:"),
     ):
-        actions = result["timed_action"]
-    prompt = next((result.get(key) for key in (
-        "prompt", "minimaxPrompt", "minimax_prompt", "productionPrompt", "production_prompt",
-        "productionBrief", "production_brief",
-    ) if isinstance(result.get(key), str) and result.get(key).strip()), None)
-    # Some providers return the requested brief sections as JSON fields instead
-    # of wrapping the entire brief in prompt. Preserve their prose and timing.
-    if prompt is None:
-        sections = []
-        for key, heading in (
-            ("frame_use", "FRAME USE"), ("reference_use", "REFERENCE USE"),
-            ("continuity", "CONTINUITY"), ("scene", "SCENE"),
-            ("timed_action", "TIMED ACTION"), ("sound", "SOUND"), ("avoid", "AVOID"),
-        ):
-            value = result.get(key)
-            if isinstance(value, list) and all(isinstance(item, str) for item in value):
-                value = "\n".join(value)
-            if isinstance(value, str) and value.strip():
-                sections.append(f"[{heading}]\n{value.strip()}")
-        if sections and (actions is not None or any(section.startswith("[TIMED ACTION]") for section in sections)):
-            prompt = "\n\n".join(sections)
-    # Occasionally a provider follows the timed-action schema but omits the
-    # surrounding brief. Keep those generated actions usable instead of
-    # discarding the entire response as an empty generation.
-    if prompt is None and isinstance(actions, list) and actions and segments is not None:
-        prompt = "[TIMED ACTION]\n"
-    if prompt is None:
-        keys = ", ".join(sorted(str(key) for key in result)) or "none"
-        raise AIResponseFormatError(f"The AI response did not include a MiniMax prompt (fields returned: {keys}). The operation will retry.")
-    if actions is not None and segments is not None:
-        if not isinstance(actions, list) or not actions:
-            raise AIResponseFormatError("MiniMax returned incomplete timed actions. The operation will retry.")
-        from .timed_action import compose_actions, SECTION, NEXT, timecode_seconds
-        if all(isinstance(action, str) and action.strip() for action in actions):
-            if len(actions) != len(segments):
-                raise AIResponseFormatError("New timed actions require explicit start and end timecodes.")
-            return compose_actions(prompt.strip(), segments, [action.strip() for action in actions]).strip()
-        cues = []
-        for action in actions:
-            if not isinstance(action, dict):
-                raise AIResponseFormatError("Invalid timed action record.")
-            description = action.get("action") or action.get("description")
-            try:
-                start, end = action["start"], action["end"]
-                a = timecode_seconds(start) if isinstance(start, str) else float(start)
-                b = timecode_seconds(end) if isinstance(end, str) else float(end)
-                if not math.isfinite(a) or not math.isfinite(b) or a < 0 or b <= a or not isinstance(description, str) or not description.strip():
-                    raise ValueError("Invalid interval")
-            except (KeyError, ValueError, TypeError):
-                raise AIResponseFormatError("Invalid timed action interval. The operation will retry.") from None
-            cues.append(f"{_minimax_timestamp(a)} - {_minimax_timestamp(b)}: {description.strip()}")
-        section = SECTION.search(prompt)
-        if not section:
-            prompt = prompt.rstrip() + "\n\n[TIMED ACTION]\n"
-            section = SECTION.search(prompt)
-        following = NEXT.search(prompt, section.end())
-        return prompt[:section.end()].rstrip() + "\n" + "\n\n".join(cues) + ("\n\n" + prompt[following.start():] if following else "")
-    return prompt.strip()
+        value = result.get(key)
+        if isinstance(value, list) and all(isinstance(item, str) for item in value):
+            value = "\n".join(value)
+        if isinstance(value, str) and value.strip():
+            sections.append(f"{heading}\n{value.strip()}")
+    if sections:
+        return "\n\n".join(sections)
+    raise AIResponseFormatError("The AI response did not include a production prompt. The operation will retry.")
 
 
 @lru_cache(maxsize=256)
@@ -251,6 +216,53 @@ def refine_segment_prompt(segments: list[Segment], selected_index: int, provider
     duration = _strict_duration(result.get("duration"))
     return {"prompt": prompt.strip(), "imagePrompt": image_prompt, "duration": duration}
 
+
+
+def refine_global_prompt(segments: list[Segment], provider: str, model: str, api_key: str,
+                         intent: str, current_prompt: str, timeout: int = 400) -> dict:
+    """Refine shared direction and explicitly requested timeline timing only."""
+    if not segments or not current_prompt.strip():
+        raise ValueError("Write a global prompt and add segments before refining.")
+    plan = [{"name": s.name, "duration": s.duration, "prompt": s.prompt, "role": s.role} for s in segments]
+    rules = (
+        'Refine the CURRENT GLOBAL PROMPT. Inline /refine and /refine-global requests take priority; '
+        'preserve /keep, /avoid and /focus constraints. Keep all other authored content. '
+        'Remove a completed /refine-global directive from the returned globalPrompt. '
+        'Apply explicit timing instructions in the global prompt to the timeline. '
+        'For a request to resize or conform the whole sequence proportionally to a total, '
+        'return that total in proportionalTotal; the client calculates each duration from the current ratios. '
+        'For other explicit retiming requests return one positive duration per segment in input order. '
+        'Without a timing request, preserve every duration. Never rewrite segment prompts, reorder, add or delete segments. '
+        'The requested-length UI preference must not override the edit request. '
+        'Return strict JSON: {"globalPrompt":"refined global direction", "durations":[2,3], "proportionalTotal":null}. '
+        '\nDIRECTOR CONTEXT:\n' + intent + '\nCURRENT GLOBAL PROMPT:\n' + current_prompt +
+        '\nCURRENT TIMELINE:\n' + json.dumps(plan, ensure_ascii=False)
+    )
+    result = _parse_json(_provider_raw([_segment_input(s) for s in segments], provider, model, api_key, rules, timeout))
+    if not isinstance(result, dict) or not isinstance(result.get('globalPrompt'), str) or not result['globalPrompt'].strip():
+        raise AIResponseFormatError("The AI returned no global prompt. The operation will retry.")
+    total = result.get('proportionalTotal')
+    if total is not None:
+        total = _strict_duration(total)
+        units = round(total * 100)
+        if units < len(segments):
+            raise AIResponseFormatError("The requested total is too short for the supplied segments.")
+        weights = [s.duration for s in segments]
+        allocated = [max(1, int(units * weight / sum(weights))) for weight in weights]
+        while sum(allocated) < units:
+            index = max(range(len(weights)), key=lambda i: units * weights[i] / sum(weights) - allocated[i])
+            allocated[index] += 1
+        while sum(allocated) > units:
+            candidates = [i for i in range(len(weights)) if allocated[i] > 1]
+            index = min(candidates, key=lambda i: units * weights[i] / sum(weights) - allocated[i])
+            allocated[index] -= 1
+        durations = [n / 100 for n in allocated]
+    else:
+        values = result.get('durations')
+        if not isinstance(values, list) or len(values) != len(segments):
+            raise AIResponseFormatError("Global refinement must preserve the segment count. The operation will retry.")
+        durations = [_strict_duration(value) for value in values]
+    return {'globalPrompt': result['globalPrompt'].strip(), 'durations': durations}
 
 def _segment_input(item: Segment) -> dict:
     value = {"name": item.name, "role": item.role, "kind": item.kind}
@@ -386,13 +398,15 @@ def _minimax_h3_rules(segments: list[Segment], intent: str, global_prompt: str, 
         for record in references
     ) or "No untimed reference images supplied."
     return render_workspace_prompt('minimax_frames', 'generate', {
+        'workflow_name': WORKFLOW_NAMES[detect_workflow(segments, reference_images)],
+        'workflow_direction': WORKFLOW_DIRECTIONS[detect_workflow(segments, reference_images)],
         'intervals': intervals,
         'reference_map': reference_map,
         'total_duration': format(sum((item.duration for item in segments)), '.3f'),
         'director_intent': intent.strip() or 'Not supplied.',
         'global_direction': global_prompt.strip() or 'Not supplied.',
         'sound_effects': 'Describe supported physical sounds and ambience.' if sfx else 'Only explicitly supplied or clearly audible source sounds; otherwise none specified.',
-        'dialogue': 'Use supplied exact words, speakers and delivery.' if spoken_dialog else 'Do not add dialogue; retain explicitly supplied words only.',
+        'dialogue': 'Spoken dialogue is requested: preserve supplied exact lines; if none are supplied, write suitable original spoken lines with speakers, language and delivery.' if spoken_dialog else 'Do not add dialogue; retain explicitly supplied words only.',
         'music': 'No background music unless explicitly requested.' if reduce_music else 'Use music only if supplied direction calls for it.',
     })
 
