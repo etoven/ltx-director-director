@@ -40,19 +40,19 @@ class IntentGenericTests(unittest.TestCase):
         w.set_project_type(value['id'])
         return value
 
-    def test_intent_checkbox_stays_collapsed_across_all_modes_and_refreshes(self):
+    def test_intent_splitter_stays_collapsed_across_all_modes_and_refreshes(self):
         w = self.window()
-        self.assertIsInstance(w.direction_toggle, QCheckBox)
+        self.assertIsInstance(w.intent_prompt_splitter, ui.QSplitter)
         w.intent.setPlainText('Preserve this intent')
-        w.direction_toggle.setChecked(False)
+        w.set_director_intent_expanded(False)
         for mode in ['minimax_frames', 'minimax_references', 'ltx']:
             w.set_project_type(mode)
             w.apply_project_type_ui()
             w.sync_minimax_panel()
-            self.assertFalse(w.direction_toggle.isChecked())
-            self.assertTrue(w.director_panel.isHidden())
+            self.assertEqual(w.intent_prompt_splitter.sizes()[0], 0)
+            self.assertEqual(w.director_panel.height(), 0)
             self.assertEqual(w.intent.toPlainText(), 'Preserve this intent')
-        w.direction_toggle.setChecked(True)
+        w.set_director_intent_expanded(True)
         self.assertFalse(w.director_panel.isHidden())
         self.assertTrue(w.settings.value('director_intent_expanded', False, bool))
 

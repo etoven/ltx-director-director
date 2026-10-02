@@ -146,7 +146,7 @@ class UnifiedEditorTests(unittest.TestCase):
             w = self.make_window(kind)
             w.unified_prompt.setPlainText('/refine-global Preserve my ending\nUser-edited production prompt')
             with patch.object(w, 'ai_credentials', return_value=(w.settings.value('provider', 'gemini'), w.settings.value('gemini_model', ai.GEMINI_MODELS[0]), 'unused')), patch.object(w, 'start_ai_worker') as worker:
-                w.minimax_panel.refine_button.click()
+                w.refine_minimax_prompt()
             self.assertIs(worker.call_args.args[0], expected)
             self.assertIn('User-edited production prompt', worker.call_args.args[1][9])
             self.assertIn('/refine-global Preserve my ending', worker.call_args.args[1][9])

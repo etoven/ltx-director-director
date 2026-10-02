@@ -48,7 +48,7 @@ An untimed image supplies attributes rather than chronology: it does not add a s
 
 ## Generate, review and refine
 
-Write your intent, then select **Generate Unified Prompt**. Review how the resulting brief assigns reference roles and describes the scene. Edit the draft directly, add inline notes, and use **Refine Unified Prompt** to develop it with the same references.
+Write your intent and develop the segment prompts with **Magic Build**. Review reference roles in the full production draft and edit it directly. After segment changes, the **Regenerate** action in the change notice can rebuild an existing draft using the selected template.
 
 Image labels and video labels are assigned consistently within the asset inventory. Changing a reference remains a preparation step; you choose when to submit another generation or refinement request.
 

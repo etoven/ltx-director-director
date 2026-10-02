@@ -16,7 +16,7 @@ You need **Python 3.10 or newer** and a desktop environment supported by Qt 6. A
 python3 -m venv ~/.venvs/ltx-director
 source ~/.venvs/ltx-director/bin/activate
 python -m pip install --upgrade pip
-python -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a27-py3-none-any.whl'
+python -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a29-py3-none-any.whl'
 ltx-director-director
 ```
 
@@ -26,7 +26,7 @@ ltx-director-director
 py -m venv "$env:USERPROFILE\ltx-director-venv"
 & "$env:USERPROFILE\ltx-director-venv\Scripts\Activate.ps1"
 python -m pip install --upgrade pip
-python -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a27-py3-none-any.whl'
+python -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a29-py3-none-any.whl'
 ltx-director-director
 ```
 

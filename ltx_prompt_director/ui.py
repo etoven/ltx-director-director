@@ -2639,12 +2639,6 @@ class MiniMaxPromptPanel(QFrame):
         super().__init__(owner)
         self.owner = owner
         self.editor = owner.unified_prompt
-        self.refine_button = QPushButton("✎ Refine Unified Prompt")
-        self.refine_button.setObjectName("refineButton")
-        self.refine_button.clicked.connect(owner.refine_minimax_prompt)
-        self.generate_button = QPushButton("✦ Generate Unified Prompt")
-        self.generate_button.setObjectName("refineButton")
-        self.generate_button.clicked.connect(lambda: owner._generate_minimax_prompt(owner.minimax_prompt_mode))
         self.copy_button = QPushButton("□ Copy")
         self.copy_button.setObjectName("copyButton")
         self.copy_button.clicked.connect(owner.copy_minimax_prompt)
@@ -2659,8 +2653,6 @@ class MiniMaxPromptPanel(QFrame):
         header.addWidget(label)
         header.addWidget(self.cache_state)
         header.addStretch()
-        header.addWidget(self.generate_button)
-        header.addWidget(self.refine_button)
         layout.addLayout(header)
         self.message_panel = QFrame()
         self.message_panel.setObjectName("minimaxMessagePanel")
@@ -2752,9 +2744,6 @@ class MiniMaxPromptPanel(QFrame):
         self.update_actions()
 
     def update_actions(self) -> None:
-        if self.owner.unified_workspace:
-            self.refine_button.setEnabled(not self.owner.ai_busy and bool(self.editor.toPlainText().strip()))
-        self.generate_button.setEnabled(not self.owner.ai_busy)
         self.copy_button.setEnabled(bool(self.editor.toPlainText().strip()))
         self.retry_button.setEnabled(not self.busy)
         self.timeline_refine_button.setEnabled(not self.busy)
@@ -2976,9 +2965,6 @@ class MainWindow(QMainWindow):
         self.workflow_label.setObjectName("muted")
         workflow_row.addWidget(self.workflow_label)
         workflow_row.addStretch()
-        self.direction_toggle = QCheckBox("Director’s Intent")
-        self.direction_toggle.setChecked(self.settings.value("director_intent_expanded", True, bool))
-        self.direction_toggle.setToolTip("Show Director's Intent and the options used for generation")
         self.references_button = QPushButton("Reference images")
         self.references_button.clicked.connect(self.show_reference_images)
         workflow_row.addWidget(self.references_button)
@@ -3130,9 +3116,6 @@ class MainWindow(QMainWindow):
 
         director_panel = QFrame()
         self.director_panel = director_panel
-        self.direction_toggle.toggled.connect(director_panel.setVisible)
-        self.direction_toggle.toggled.connect(lambda expanded: self.settings.setValue("director_intent_expanded", expanded))
-        director_panel.setVisible(self.direction_toggle.isChecked())
         director_panel.setObjectName("directorPanel")
         self.director_controls = QVBoxLayout(director_panel)
         self.director_controls.setContentsMargins(10, 8, 10, 8)
@@ -3145,7 +3128,6 @@ class MainWindow(QMainWindow):
         intent_row.addWidget(intent_label)
         self.intent = PromptTextEdit()
         self.intent.setAcceptRichText(False)
-        self.intent.setMaximumHeight(82)
         intent_example = (
             "Example: A lost courier discovers a glowing map, crosses the storm, and reaches the beacon at sunrise. "
             "Describe the narrative, action, pacing, camera, dialogue wording, and ending you want."
@@ -3180,7 +3162,7 @@ class MainWindow(QMainWindow):
             button.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         intent_row.addWidget(self.intent, 1)
         workflow_row.addWidget(self.magic_button)
-        self.director_controls.addLayout(intent_row)
+        self.director_controls.addLayout(intent_row, 1)
         planning_row = QHBoxLayout()
         planning_row.setContentsMargins(0, 0, 0, 0)
         planning_row.setSpacing(6)
@@ -3247,7 +3229,6 @@ class MainWindow(QMainWindow):
         options_row.addWidget(self.reduce_music)
         options_row.addStretch()
         self.director_controls.addLayout(options_row)
-        outer.addWidget(director_panel)
 
         segment_panel = QFrame()
         segment_panel.setObjectName("promptPanel")
@@ -3259,7 +3240,6 @@ class MainWindow(QMainWindow):
         segment_label = self.prompt_label
         segment_label.setObjectName("sectionLabel")
         self.segment_header.addWidget(segment_label)
-        self.segment_header.addWidget(self.direction_toggle)
         self.prompt_scope = QComboBox()
         self.prompt_scope.addItem("Selected segment", "segment")
         self.prompt_scope.addItem("Global prompt", "global")
@@ -3267,12 +3247,12 @@ class MainWindow(QMainWindow):
         self.segment_header.addWidget(self.prompt_scope)
         self.refine_timing_button = QPushButton("⏱ Refine Timing")
         self.refine_timing_button.setObjectName("refineButton")
-        self.refine_timing_button.setToolTip("Analyze the existing sequence and retime only the selected segment; prompt wording is never changed")
+        self.refine_timing_button.setToolTip("Analyze the existing sequence and retime only the selected segment; MiniMax then generates the unified prompt")
         self.refine_timing_button.clicked.connect(self.refine_selected_timing)
         self.refine_timing_button.setEnabled(False)
         self.refine_prompt_button = QPushButton("✎ Refine Prompt")
         self.refine_prompt_button.setObjectName("refineButton")
-        self.refine_prompt_button.setToolTip("Refine only the selected segment prompt using adjacent frames for continuity; may also adjust its duration")
+        self.refine_prompt_button.setToolTip("Refine only the selected segment prompt using adjacent frames for continuity; may also adjust its duration; MiniMax then generates the unified prompt")
         self.refine_prompt_button.clicked.connect(self.refine_project_prompt)
         self.refine_prompt_button.setEnabled(False)
         self.segment_header.addWidget(self.refine_timing_button)
@@ -3371,7 +3351,20 @@ class MainWindow(QMainWindow):
         self.prompt_splitter.addWidget(self.unified_panel)
         self.prompt_splitter.setStretchFactor(0, 1)
         self.prompt_splitter.setStretchFactor(1, 1)
-        outer.addWidget(self.prompt_splitter, 1)
+        self.intent_prompt_splitter = QSplitter(Qt.Orientation.Vertical)
+        self.intent_prompt_splitter.setObjectName("intentPromptSplitter")
+        self.intent_prompt_splitter.addWidget(director_panel)
+        self.intent_prompt_splitter.addWidget(self.prompt_splitter)
+        self.intent_prompt_splitter.setCollapsible(0, True)
+        self.intent_prompt_splitter.setCollapsible(1, False)
+        self.intent_prompt_splitter.setStretchFactor(0, 0)
+        self.intent_prompt_splitter.setStretchFactor(1, 1)
+        self.intent_prompt_splitter.handle(1).setToolTip("Drag to resize Director's Intent; drag up to collapse, down to reopen")
+        self.intent_prompt_splitter.handle(1).setAccessibleName("Resize or collapse Director's Intent")
+        self.intent_prompt_splitter.splitterMoved.connect(self.director_intent_splitter_moved)
+        outer.addWidget(self.intent_prompt_splitter, 1)
+        self.restore_director_intent_splitter()
+        QTimer.singleShot(0, self.restore_director_intent_splitter)
         self.setCentralWidget(root)
         self.setStatusBar(QStatusBar())
         self.apply_project_type_ui()
@@ -3795,7 +3788,8 @@ class MainWindow(QMainWindow):
         self.output_width.setFixedWidth(metric(104))
         self.output_height.setFixedWidth(metric(104))
         self.ui_scale_spin.setFixedWidth(metric(82))
-        self.intent.setFixedHeight(metric(72))
+        self.intent.setMinimumHeight(metric(40))
+        self.intent.setMaximumHeight(16777215)
         self.requested_length.setFixedWidth(metric(82))
         self.speaker_language.setMinimumWidth(metric(170))
         self.speaker_accent.setMinimumWidth(metric(170))
@@ -4791,7 +4785,7 @@ class MainWindow(QMainWindow):
         self.update_conditioning_guide()
         if changed and self.unified_workspace and self.minimax_prompt_text.strip() and self.minimax_panel:
             self.minimax_panel.set_cache_state("Segment changes available")
-            self.minimax_panel.show_message("Segment changes available. Generate Unified Prompt to rebuild from the timeline, or refine your edited draft.", "timeline")
+            self.minimax_panel.show_message("Segment changes available. Regenerate to rebuild the unified draft from the timeline, or keep editing your draft.", "timeline")
         if self.current_project_id:
             session = self.project_sessions.setdefault(self.current_project_id, {"name": self.current_project_name})
             session["dirty"] = True
@@ -5651,7 +5645,8 @@ class MainWindow(QMainWindow):
 
     def refine_global_finished(self, result: dict) -> None:
         current = (self.global_prompt.toPlainText(), tuple((s.id, s.duration, s.prompt) for s in self.segments))
-        if current != getattr(self, 'global_refinement_snapshot', None):
+        applied = current == getattr(self, 'global_refinement_snapshot', None)
+        if not applied:
             self.statusBar().showMessage("Global refinement was not applied because the prompt or timeline changed")
         else:
             self.global_prompt.setPlainText(consume_global_refinements(result['globalPrompt']))
@@ -5660,6 +5655,8 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("Global direction and requested sequence timing refined")
         self.set_ai_controls_enabled(True)
         self.magic_overlay.hide_overlay()
+        if applied and self.unified_workspace:
+            self._generate_minimax_prompt(self.minimax_prompt_mode)
 
     def refinement_target(self) -> tuple[int, Segment] | None:
         segment_id = getattr(self, "refinement_segment_id", "")
@@ -5678,6 +5675,8 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"Segment {index + 1} timing refined to {durations[index]:.2f}s; prompt text unchanged")
         self.set_ai_controls_enabled(True)
         self.magic_overlay.hide_overlay()
+        if target and self.unified_workspace:
+            self._generate_minimax_prompt(self.minimax_prompt_mode)
 
     def refine_prompt_finished(self, result: dict) -> None:
         target = self.refinement_target()
@@ -5694,6 +5693,8 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"Segment {index + 1} prompt refined")
         self.set_ai_controls_enabled(True)
         self.magic_overlay.hide_overlay()
+        if target and self.unified_workspace:
+            self._generate_minimax_prompt(self.minimax_prompt_mode)
 
     def magic_build(self) -> None:
         if not self.segments:
@@ -5895,6 +5896,7 @@ class MainWindow(QMainWindow):
                 target.role.model().item(row).setEnabled(target.role.itemData(row) in reference_options.get("kinds", []))
         self.refresh_shared_editor()
         self.update_conditioning_guide()
+        QTimer.singleShot(0, self.restore_director_intent_splitter)
 
         self.queue_project_panel_width_restore()
 
@@ -5962,16 +5964,36 @@ class MainWindow(QMainWindow):
                 detail = f"Source {record['source_start']:.2f}–{record['source_end']:.2f}s"
             else:
                 detail = f"{record['role'].title()} · untimed"
-            label = QLabel(f"{record['label']} · {detail}" + (f"\n⚠ {fix}" if fix else ''))
+            value_text = f" · value {record['checkpoint_time']:.2f}" if 'checkpoint_time' in record else ''
+            label = QLabel(f"{record['label']}{value_text}\n{detail}" + (f" · ⚠ {fix}" if fix else ''))
             label.setObjectName("conditioningFix" if fix else "conditioningLabel")
             row.addWidget(label)
-            tile.setToolTip(f"{record['name']}\n{detail}" + (f"\n{fix}. Change the segment order or duration above." if fix else ''))
+            tile.setToolTip(f"{record['name']}\n{detail}" +
+                            (f"\nMiniMaxCondFrame value: {record['checkpoint_time']:.2f} seconds" if 'checkpoint_time' in record else '') + (f"\n{fix}. Change the segment order or duration above." if fix else ''))
             self.conditioning_row.addWidget(tile)
             if fix:
                 self.conditioning_fixes.append(fix)
         if not inventory or not any(record['label'] for record in inventory):
             self.conditioning_row.addWidget(QLabel("Text only · no conditioning images" if self.segments else "Add a timeline segment to begin"))
         self.conditioning_row.addStretch()
+
+    def restore_director_intent_splitter(self) -> None:
+        self.set_director_intent_expanded(self.settings.value("director_intent_expanded", True, bool), persist=False)
+
+    def set_director_intent_expanded(self, expanded: bool, *, persist: bool = True) -> None:
+        sizes = self.intent_prompt_splitter.sizes()
+        total = max(sum(sizes), self.intent_prompt_splitter.height(), 500)
+        height = self.settings.value("director_intent_height", 164, int)
+        self.intent_prompt_splitter.setSizes([height if expanded else 0, max(1, total - height if expanded else total)])
+        if persist:
+            self.director_intent_splitter_moved()
+
+    def director_intent_splitter_moved(self, *_args) -> None:
+        height = self.intent_prompt_splitter.sizes()[0]
+        self.settings.setValue("director_intent_expanded", height > 0)
+        if height > 0:
+            self.settings.setValue("director_intent_height", height)
+        self.queue_settings_sync()
 
     def prompt_scope_changed(self, _index: int) -> None:
         self.refresh_shared_editor()

@@ -14,7 +14,7 @@ All shipped workspaces use the same segment editor. Select a timeline card to ed
 
 ## Edit the beats, then develop the full prompt
 
-MiniMax adds an editable **Unified Prompt** below the segment editor. **Generate Unified Prompt** combines the current segments, reference roles and creative direction using the selected template. **Refine Unified Prompt** develops the draft you have edited, preserving untouched content and applying your inline requests.
+MiniMax adds an editable **Unified Prompt** below the segment editor. Write or paste the production draft directly. After segment changes, **Regenerate** in the change notice rebuilds it from the current segments, reference roles and creative direction using the selected template. The unified box keeps a clear writing space; segment refinement and timing remain in the upper controls.
 
 The two editors retain separate text. Pasting or editing the unified prompt does not change the timeline. Changing segments marks the production draft as needing an update; regenerate when you want to incorporate those changes. Your manual draft remains available until you choose to replace it.
 
@@ -22,13 +22,13 @@ The two editors retain separate text. Pasting or editing the unified prompt does
 
 ## Adjust timing through the shared editor
 
-**Refine Prompt** above the segment editor improves the selected beat and can resize that segment when the requested action or dialogue needs a different duration. **Refine Timing** changes its duration while preserving its wording. Both update the timeline in LTX and MiniMax.
+**Refine Prompt** above the segment editor improves the selected beat and can resize that segment when the requested action or dialogue needs a different duration. **Refine Timing** changes its duration while preserving its wording. Both update the timeline in LTX and MiniMax. In MiniMax, each button then generates the unified production prompt from the updated segment prompts, timing, references and creative direction.
 
-Select **Global** in the segment editor to edit shared direction. Add an instruction such as `/refine-global Resize the segments proportionally to 15 seconds`, then choose **Refine Prompt**. Director scales the current segment durations to the requested total while preserving their proportions and individual prompt text. Other explicit global timing edits can change multiple segment durations. The unified production draft remains intact and is marked for an update.
+Select **Global** in the segment editor to edit shared direction. Add an instruction such as `/refine-global Resize the segments proportionally to 15 seconds`, then choose **Refine Prompt**. Director scales the current segment durations to the requested total while preserving their proportions and individual prompt text. Other explicit global timing edits can change multiple segment durations. In MiniMax, the unified production prompt is then generated from the updated sequence. Manual segment edits preserve the draft until you request generation or refinement.
 
 ## Check conditioning at a glance
 
-The compact strip under the MiniMax timeline shows image thumbnails, start/end checkpoint times, source-video trim ranges and untimed reference roles. It flags an opening that needs to move to zero or an ending that needs to reach the sequence total. It describes your setup; it does not move media automatically.
+The compact strip under the MiniMax timeline shows image thumbnails, explicit MiniMaxCondFrame **value** settings in seconds, start/end checkpoint times, source-video trim ranges and untimed reference roles. It flags an opening that needs to move to zero or an ending that needs to reach the sequence total. It describes your setup; it does not move media automatically.
 
 ![Compact conditioning frame and timing guide](images/conditioning-guide.png)
 
@@ -36,8 +36,10 @@ Both MiniMax templates receive `${workflow_name}` and `${workflow_direction}` fr
 
 ## Keep your direction and drafts
 
-**Director’s Intent**, prompt options and inline refinement notes remain available across modes. Its collapse checkbox is in the segment prompt header and the collapsed state persists. Switching workspaces does not submit an AI request. Projects retain segment prompts, global direction and each workspace’s unified draft.
+**Director’s Intent**, prompt options and inline refinement notes remain available across modes. The native splitter below it uses the same handle as the split between the segment and unified prompts. Drag up to collapse and down to reopen; its height and collapsed state persist. Switching workspaces does not submit an AI request. Projects retain segment prompts, global direction and each workspace’s unified draft.
 
 **Continue:** [Reference images](minimax-references.md) · [Custom workspaces and exports](workspace-definitions-and-exports.md) · [Complete feature guide](../usage.md)
 
 The Official Skill variants are additional defaults. They receive the detected workflow, duration, asset map, Director’s Intent, global direction, sound/dialogue/music options, and current prompt and instructions during refinement. Their worked-example subjects and timings are format illustrations, never preset content for your scene.
+
+For two end-frame segments lasting 3.0 and 7.5 seconds, the condition values are **3.0** and **10.5**. End frames use the cumulative segment ending time; start frames use the cumulative segment starting time. These are absolute target-video times, not each segment’s duration or a frame count. The strip is a setup guide; it does not modify external ComfyUI nodes.

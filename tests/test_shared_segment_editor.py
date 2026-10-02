@@ -147,7 +147,9 @@ def test_segment_refinement_resizes_timeline_in_every_mode(window, mode):
     window.set_project_type(mode)
     window.unified_prompt.setPlainText('Preserve production draft')
     window.refinement_segment_id = window.segments[0].id
-    window.refine_prompt_finished({'prompt':'Slower walk', 'duration':8.5})
+    with patch.object(window, '_generate_minimax_prompt') as generate:
+        window.refine_prompt_finished({'prompt':'Slower walk', 'duration':8.5})
+        assert generate.call_count == (mode != 'ltx')
     assert [s.duration for s in window.segments] == [8.5,3]
     assert window.duration_spin.value() == 8.5
     assert window.timeline.itemWidget(window.timeline.item(0)).resize_handle.duration == 8.5
@@ -168,7 +170,9 @@ def test_global_proportional_resize_routes_and_updates_timeline(window, mode):
     with patch.object(ai, '_provider_raw', return_value=json.dumps({'globalPrompt':'Preserve identity.', 'proportionalTotal':15})):
         result = ai.refine_global_prompt(*args)
     assert result['durations'] == [6,9]
-    window.refine_global_finished(result)
+    with patch.object(window, '_generate_minimax_prompt') as generate:
+        window.refine_global_finished(result)
+        assert generate.call_count == (mode != 'ltx')
     assert [s.duration for s in window.segments] == [6,9]
     assert [s.prompt for s in window.segments] == ['Walk','Turn']
     assert window.segment_prompt.toPlainText() == 'Preserve identity.'
@@ -183,7 +187,9 @@ def test_global_result_rejected_if_user_edits_during_request(window):
     with patch.object(window,'ai_credentials',return_value=('gemini','model','key')), patch.object(window,'start_ai_worker'):
         window.refine_project_prompt()
     window.segment_prompt.setPlainText('Changed my mind')
-    window.refine_global_finished({'globalPrompt':'Obsolete result','durations':[6,9]})
+    with patch.object(window, '_generate_minimax_prompt') as generate:
+        window.refine_global_finished({'globalPrompt':'Obsolete result','durations':[6,9]})
+        generate.assert_not_called()
     assert window.global_prompt.toPlainText() == 'Changed my mind'
     assert [s.duration for s in window.segments] == [2,3]
 
@@ -271,3 +277,147 @@ def test_official_reference_skill_includes_companion_conventions(window):
         assert phrase in rules
     assert 'Full-reference rules below take priority over companion base conventions' in rules
     assert '## 7. Complete Example' not in rules
+
+
+def test_shown_condition_frame_values_are_cumulative_end_times(window):
+    from PySide6.QtWidgets import QLabel
+    window.segments = [Segment('First','','','image','end','',3), Segment('Second','','','image','end','',7.5)]
+    window.refresh_timeline(0)
+    assert [r['checkpoint_time'] for r in window.conditioning_records] == [3,10.5]
+    text = ' '.join(label.text() for label in window.conditioning_content.findChildren(QLabel))
+    assert 'Image1 · value 3.00' in text
+    assert 'Image2 · value 10.50' in text
+    window.segments[0].role = 'start'
+    window.mark_dirty()
+    assert window.conditioning_records[0]['checkpoint_time'] == 0
+
+
+def test_intent_uses_same_native_splitter_and_resizes_text_area(window):
+    window.resize(1400,1400)
+    for dock in [window.project_dock,window.project_properties_dock,window.project_files_dock,window.project_preview_dock]:
+        dock.hide()
+    window.set_director_intent_expanded(True)
+    window.show()
+    QApplication.processEvents()
+    assert window.intent_prompt_splitter.handle(1).metaObject().className() == window.prompt_splitter.handle(1).metaObject().className()
+    before = window.intent.height()
+    total = sum(window.intent_prompt_splitter.sizes())
+    window.intent_prompt_splitter.setSizes([300,total-300])
+    window.intent_prompt_splitter.splitterMoved.emit(300,1)
+    QApplication.processEvents()
+    assert window.intent.height() > before
+    saved = window.intent_prompt_splitter.sizes()[0]
+    assert window.settings.value('director_intent_height',0,int) == saved
+    for mode in ['ltx','minimax_official_skill_reference','minimax_base_guide']:
+        window.set_project_type(mode)
+        QApplication.processEvents()
+        assert abs(window.intent_prompt_splitter.sizes()[0]-saved) < 3
+    window.set_director_intent_expanded(False)
+    assert window.intent_prompt_splitter.sizes()[0] == 0
+    assert window.intent_prompt_splitter.handle(1).isVisible()
+    window.set_director_intent_expanded(True)
+    assert window.intent_prompt_splitter.sizes()[0] == saved
+
+
+def test_intent_collapse_survives_new_window(window):
+    window.set_director_intent_expanded(False)
+    with patch.object(ui,'WorkspaceStore',return_value=window.workspace_store), patch.object(ui.MainWindow,'restore_startup_workspace'):
+        reopened = ui.MainWindow()
+    try:
+        reopened.show()
+        QApplication.processEvents()
+        assert reopened.intent_prompt_splitter.sizes()[0] == 0
+        assert not hasattr(reopened,'direction_toggle')
+    finally:
+        reopened._close_saves_queued=True
+        reopened.project_dirty=False
+        reopened.close()
+        window.set_director_intent_expanded(True)
+
+
+def test_redundant_lower_generation_and_refinement_buttons_are_removed(window):
+    from PySide6.QtWidgets import QPushButton
+    labels=[b.text() for b in window.minimax_panel.findChildren(QPushButton)]
+    assert not any('Generate Unified' in text or 'Refine Unified' in text for text in labels)
+    assert not hasattr(window.minimax_panel,'generate_button')
+    assert not hasattr(window.minimax_panel,'refine_button')
+    assert window.refine_prompt_button.text() == '✎ Refine Prompt'
+
+
+@pytest.mark.parametrize('mode', ['minimax_base_guide', 'minimax_full_reference_guide',
+                                  'minimax_official_skill_base', 'minimax_official_skill_reference'])
+@pytest.mark.parametrize('action', ['prompt', 'timing'])
+def test_refine_buttons_generate_unified_output_after_applying_segment_result(window, mode, action):
+    window.set_project_type(mode)
+    window.unified_prompt.setPlainText('Previous production draft')
+    window.segment_prompt.setPlainText('User edited motion')
+    window.settings.setValue('provider', 'gemini')
+    window.settings.setValue('gemini_model', 'model')
+    button = window.refine_prompt_button if action == 'prompt' else window.refine_timing_button
+    with patch.object(window, 'ai_credentials', return_value=('gemini', 'model', 'key')), patch.object(window, 'start_ai_worker') as worker:
+        button.click()
+        assert worker.call_args.args[0] is (ai.refine_segment_prompt if action == 'prompt' else ai.refine_timing)
+        callback = worker.call_args.args[3]
+        callback({'prompt': 'Refined motion', 'duration': 7})
+        expected = ai.build_minimax_h3_reference_prompt if window.minimax_prompt_mode == 'references' else ai.build_minimax_h3_prompt
+        assert worker.call_args.args[0] is expected
+        assert worker.call_args.args[1][0][0].duration == 7
+        assert worker.call_args.args[1][0][0].prompt == ('Refined motion' if action == 'prompt' else 'User edited motion')
+        before = [s.to_dict() for s in window.segments]
+        worker.call_args.args[3]('Generated unified output')
+    assert window.unified_prompt.toPlainText() == 'Generated unified output'
+    assert [s.to_dict() for s in window.segments] == before
+
+
+def test_missing_refinement_target_does_not_generate_unified_output(window):
+    window.refinement_segment_id = 'deleted-segment'
+    with patch.object(window, '_generate_minimax_prompt') as generate:
+        window.refine_prompt_finished({'prompt': 'Obsolete', 'duration': 4})
+        window.refine_timing_finished({'duration': 4})
+    generate.assert_not_called()
+
+
+@pytest.mark.parametrize('mode', ['ltx', 'minimax_base_guide', 'minimax_full_reference_guide',
+                                  'minimax_official_skill_base', 'minimax_official_skill_reference'])
+@pytest.mark.parametrize('kind', ['timing', 'prompt', 'global'])
+def test_refinement_buttons_generate_unified_from_updated_segments(window, mode, kind):
+    window.set_project_type(mode)
+    window.unified_prompt.setPlainText('Previous unified draft')
+    if kind == 'global':
+        window.prompt_scope.setCurrentIndex(1)
+        window.segment_prompt.setPlainText('Keep identity. /refine-global Resize to 15 seconds')
+    calls = []
+    def start(operation, args, activity, finished, **kwargs):
+        assert not window.ai_busy
+        window.set_ai_controls_enabled(False)
+        calls.append((operation, args, finished))
+    with patch.object(window, 'ai_credentials', return_value=('gemini', 'model', 'key')), patch.object(window, 'start_ai_worker', side_effect=start):
+        button = window.refine_timing_button if kind == 'timing' else window.refine_prompt_button
+        button.click()
+        assert len(calls) == 1
+        result = ({'duration':8.5} if kind == 'timing' else
+                  {'prompt':'Slower walk', 'duration':8.5} if kind == 'prompt' else
+                  {'globalPrompt':'Keep identity.', 'durations':[6,9]})
+        calls[0][2](result)
+        if mode == 'ltx':
+            assert len(calls) == 1
+            assert not window.ai_busy
+            return
+        assert len(calls) == 2
+        operation, args, finish = calls[1]
+        assert operation is (ai.build_minimax_h3_reference_prompt if 'reference' in mode else ai.build_minimax_h3_prompt)
+        assert [s.duration for s in args[0]] == ([6,9] if kind == 'global' else [8.5,3])
+        assert args[0][0].prompt == ('Slower walk' if kind == 'prompt' else 'Walk')
+        assert window.ai_busy
+        assert window.unified_prompt.toPlainText() == 'Previous unified draft'
+        finish('Fresh unified production prompt')
+        assert not window.ai_busy
+        assert window.unified_prompt.toPlainText() == 'Fresh unified production prompt'
+
+
+def test_missing_refinement_target_does_not_generate_unified(window):
+    window.refinement_segment_id = 'deleted-segment'
+    with patch.object(window, '_generate_minimax_prompt') as generate:
+        window.refine_timing_finished({'duration':5})
+        window.refine_prompt_finished({'duration':5, 'prompt':'Obsolete'})
+        generate.assert_not_called()

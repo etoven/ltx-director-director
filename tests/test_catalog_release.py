@@ -47,19 +47,19 @@ def test_dock_and_persistent_intent_toggle(tmp_path):
     store = WorkspaceStore(tmp_path / 'workspaces')
     with patch.object(ui, 'WorkspaceStore', return_value=store), patch.object(ui.MainWindow, 'restore_startup_workspace'):
         window = ui.MainWindow()
-    original = window.direction_toggle.isChecked()
+    original = window.settings.value("director_intent_expanded", True, bool)
     try:
-        window.direction_toggle.setChecked(False)
-        assert window.segment_header.indexOf(window.direction_toggle) >= 0
+        window.set_director_intent_expanded(False)
+        assert window.intent_prompt_splitter.widget(0) is window.director_panel
         for mode in ['minimax_references', 'ltx']:
             window.set_project_type(mode)
-            assert window.director_panel.isHidden()
-            assert not window.direction_toggle.isHidden()
+            assert window.intent_prompt_splitter.sizes()[0] == 0
+            assert not window.intent_prompt_splitter.handle(1).isHidden()
         assert window.catalog_dock.objectName() == 'mediaCatalogDock'
         assert not window.downloads_button.icon().isNull()
         assert not ui.toolbar_icon('export-project').isNull()
     finally:
-        window.direction_toggle.setChecked(original)
+        window.set_director_intent_expanded(original)
         window._close_saves_queued = True
         window.project_dirty = False
         window.close()
