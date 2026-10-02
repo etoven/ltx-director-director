@@ -106,6 +106,13 @@ class WorkspaceStore:
                     pass
             self.restore_stock(overwrite=False)
             guide_marker.touch()
+        skill_marker = self.root / ".stock-minimax-official-skills"
+        if not skill_marker.exists():
+            for workspace_id in ('minimax_official_skill_base', 'minimax_official_skill_reference'):
+                if not (self.root / f"{workspace_id}.json").exists():
+                    source = files("ltx_prompt_director").joinpath(f"workspace_templates/{workspace_id}.json")
+                    self.save(json.loads(source.read_text(encoding="utf-8")))
+            skill_marker.touch()
         self.errors: list[str] = []
 
     def load(self) -> dict[str, dict]:

@@ -9,6 +9,8 @@ All shipped workspaces use the same segment editor. Select a timeline card to ed
 | LTX Video | Segment prompts and shared global direction for LTX Director export |
 | MiniMax Standard / Keyframes | Guide-based integrated description, soundscape and music sections |
 | MiniMax Full Reference | Guide-based subject definitions, summary, retention analysis, detailed description, soundscape and music |
+| MiniMax Official Skill · Standard / Keyframes | Supplied skill conventions for T2VA, I2VA, FL2VA and L2VA, with project variables |
+| MiniMax Official Skill · Full Reference | Supplied six-section reference skill, including companion camera, speech and sound rules |
 
 ## Edit the beats, then develop the full prompt
 
@@ -37,3 +39,5 @@ Both MiniMax templates receive `${workflow_name}` and `${workflow_direction}` fr
 **Director’s Intent**, prompt options and inline refinement notes remain available across modes. Its collapse checkbox is in the segment prompt header and the collapsed state persists. Switching workspaces does not submit an AI request. Projects retain segment prompts, global direction and each workspace’s unified draft.
 
 **Continue:** [Reference images](minimax-references.md) · [Custom workspaces and exports](workspace-definitions-and-exports.md) · [Complete feature guide](../usage.md)
+
+The Official Skill variants are additional defaults. They receive the detected workflow, duration, asset map, Director’s Intent, global direction, sound/dialogue/music options, and current prompt and instructions during refinement. Their worked-example subjects and timings are format illustrations, never preset content for your scene.

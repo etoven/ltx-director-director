@@ -34,7 +34,7 @@ def test_unified_edit_never_conforms_or_mutates_segments(window, draft):
     assert not hasattr(window, 'conform_timed_prompt')
     assert not window.unified_prompt.inline_cue_mode
 
-@pytest.mark.parametrize('mode', ['minimax_base_guide', 'minimax_full_reference_guide'])
+@pytest.mark.parametrize('mode', ['minimax_base_guide', 'minimax_full_reference_guide', 'minimax_official_skill_base', 'minimax_official_skill_reference'])
 def test_segment_edits_and_duration_preserve_unified_draft(window, mode):
     window.set_project_type(mode)
     window.unified_prompt.setPlainText('My manually edited production draft')
@@ -44,7 +44,7 @@ def test_segment_edits_and_duration_preserve_unified_draft(window, mode):
     assert window.unified_prompt.toPlainText() == 'My manually edited production draft'
     assert 'Segment changes available' in window.minimax_panel.cache_state.text()
 
-@pytest.mark.parametrize('mode', ['minimax_base_guide', 'minimax_full_reference_guide'])
+@pytest.mark.parametrize('mode', ['minimax_base_guide', 'minimax_full_reference_guide', 'minimax_official_skill_base', 'minimax_official_skill_reference'])
 def test_generated_prompt_does_not_drive_timeline(window, mode):
     window.set_project_type(mode)
     before = [s.to_dict() for s in window.segments]
@@ -55,7 +55,7 @@ def test_generated_prompt_does_not_drive_timeline(window, mode):
     assert window.unified_prompt.toPlainText() == draft
     assert [s.to_dict() for s in window.segments] == before
 
-@pytest.mark.parametrize('mode', ['ltx', 'minimax_base_guide', 'minimax_full_reference_guide'])
+@pytest.mark.parametrize('mode', ['ltx', 'minimax_base_guide', 'minimax_full_reference_guide', 'minimax_official_skill_base', 'minimax_official_skill_reference'])
 def test_same_segment_operations_across_modes(window, mode):
     editor = window.segment_prompt
     window.set_project_type(mode)
@@ -67,7 +67,7 @@ def test_same_segment_operations_across_modes(window, mode):
         assert worker.call_args.args[0] is ai.refine_segment_prompt
     assert window.conditioning_guide.height() == 68
 
-@pytest.mark.parametrize('mode', ['minimax_base_guide', 'minimax_full_reference_guide'])
+@pytest.mark.parametrize('mode', ['minimax_base_guide', 'minimax_full_reference_guide', 'minimax_official_skill_base', 'minimax_official_skill_reference'])
 def test_project_roundtrip_keeps_both_editors(window, mode):
     window.set_project_type(mode)
     window.segment_prompt.setPlainText('Selected beat edited')
@@ -114,7 +114,7 @@ def test_conditioning_strip_tracks_real_checkpoints_and_source_trim(window):
 
 
 def test_new_defaults_and_mode_variables(window):
-    assert set(window.workspace_definitions) == {'ltx', 'minimax_base_guide', 'minimax_full_reference_guide'}
+    assert set(window.workspace_definitions) == {'ltx', 'minimax_official_skill_base', 'minimax_official_skill_reference', 'minimax_base_guide', 'minimax_full_reference_guide'}
     for mode in ['minimax_base_guide', 'minimax_full_reference_guide']:
         definition = window.workspace_definitions[mode]
         assert '${workflow_name}' in definition['generation_prompts']['generate']
@@ -142,7 +142,7 @@ def test_new_defaults_respect_deleted_stock_and_edited_legacy(window):
     store.restore_stock()
     assert 'minimax_full_reference_guide' in store.load()
 
-@pytest.mark.parametrize('mode', ['ltx','minimax_base_guide','minimax_full_reference_guide'])
+@pytest.mark.parametrize('mode', ['ltx','minimax_base_guide','minimax_full_reference_guide','minimax_official_skill_base','minimax_official_skill_reference'])
 def test_segment_refinement_resizes_timeline_in_every_mode(window, mode):
     window.set_project_type(mode)
     window.unified_prompt.setPlainText('Preserve production draft')
@@ -154,7 +154,7 @@ def test_segment_refinement_resizes_timeline_in_every_mode(window, mode):
     if mode != 'ltx':
         assert window.unified_prompt.toPlainText() == 'Preserve production draft'
 
-@pytest.mark.parametrize('mode', ['ltx','minimax_base_guide','minimax_full_reference_guide'])
+@pytest.mark.parametrize('mode', ['ltx','minimax_base_guide','minimax_full_reference_guide','minimax_official_skill_base','minimax_official_skill_reference'])
 def test_global_proportional_resize_routes_and_updates_timeline(window, mode):
     window.set_project_type(mode)
     window.unified_prompt.setPlainText('Keep unified production draft')
@@ -205,7 +205,7 @@ def test_old_factory_embedded_in_project_does_not_return_to_defaults(window):
     window.load_project_payload(payload)
     assert window.project_type == 'minimax_full_reference_guide'
     assert window.unified_prompt.toPlainText() == 'Retain my old draft'
-    assert set(window.workspace_store.load()) == {'ltx','minimax_base_guide','minimax_full_reference_guide'}
+    assert set(window.workspace_store.load()) == {'ltx','minimax_official_skill_base','minimax_official_skill_reference','minimax_base_guide','minimax_full_reference_guide'}
 
 
 def test_proportional_rounding_preserves_exact_total(window):
@@ -214,3 +214,60 @@ def test_proportional_rounding_preserves_exact_total(window):
         result = ai.refine_global_prompt(window.segments,'gemini','model','key','','Resize to 10 seconds proportionally')
     assert sum(result['durations']) == 10
     assert max(result['durations']) - min(result['durations']) < .011
+
+@pytest.mark.parametrize('mode,build,refine', [
+    ('minimax_official_skill_base', ai.build_minimax_h3_prompt, ai.refine_minimax_h3_prompt),
+    ('minimax_official_skill_reference', ai.build_minimax_h3_reference_prompt, ai.refine_minimax_h3_reference_prompt)])
+def test_official_skill_transport_resolves_variables_and_refinement(window, mode, build, refine):
+    window.set_project_type(mode)
+    definition = window.workspace_definition
+    token = ai.WORKSPACE_INSTRUCTIONS.set(definition['generation_prompts'])
+    try:
+        with patch.object(ai,'_provider_raw',return_value='{"prompt":"Finished production prompt"}') as provider:
+            assert build(window.segments, 'gemini','model','key','My creative direction','Shared identity',True,True,True) == 'Finished production prompt'
+            rules = provider.call_args.args[4]
+            assert '${' not in rules
+            assert 'First / last frame (FL2V)' in rules
+            assert 'Effective target duration: 5.000 seconds' in rules
+            assert 'Image1' in rules and 'Image2' in rules
+            assert 'My creative direction' in rules and 'Shared identity' in rules
+            assert 'non_diegetic_music: N/A' in rules
+            assert 'never copy their sample subjects' in rules
+            assert '"prompt" string' in rules
+            refine(window.segments,'gemini','model','key','','',True,True,True,
+                   'My manually edited scene\n/refine-global Add one spoken line','Keep the camera still')
+            rules = provider.call_args.args[4]
+            assert '${' not in rules
+            assert 'My manually edited scene' in rules
+            assert 'Keep the camera still' in rules
+            assert 'return actual spoken lines' in rules
+    finally:
+        ai.WORKSPACE_INSTRUCTIONS.reset(token)
+
+
+def test_official_skill_upgrade_is_additive_and_preserves_customizations(window):
+    store = window.workspace_store
+    # Simulate a26: its migration markers exist but the new skill release hasn't run.
+    store.delete('minimax_official_skill_base')
+    edited = copy.deepcopy(store.load()['minimax_official_skill_reference'])
+    edited['name'] = 'My edited skill'
+    store.save(edited)
+    store.delete('minimax_full_reference_guide')
+    (store.root / '.stock-minimax-official-skills').unlink()
+    values = WorkspaceStore(store.root).load()
+    assert 'minimax_official_skill_base' in values
+    assert values['minimax_official_skill_reference'] == edited
+    assert 'minimax_full_reference_guide' not in values
+    # Once installed, intentionally deleted skill defaults stay deleted too.
+    store.delete('minimax_official_skill_base')
+    assert 'minimax_official_skill_base' not in WorkspaceStore(store.root).load()
+
+
+def test_official_reference_skill_includes_companion_conventions(window):
+    rules = window.workspace_definitions['minimax_official_skill_reference']['generation_prompts']['generate']
+    for phrase in ['350-500 English words', 'attribute_transfer', 'partially_copy',
+                   'not independently assigned or renumbered', 'says in an off-screen voiceover',
+                   '<scenetrans>', '<cutoff>', 'Zoom In / Zoom Out', '[unclear]']:
+        assert phrase in rules
+    assert 'Full-reference rules below take priority over companion base conventions' in rules
+    assert '## 7. Complete Example' not in rules

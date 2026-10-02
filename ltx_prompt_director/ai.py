@@ -398,6 +398,7 @@ def _minimax_h3_rules(segments: list[Segment], intent: str, global_prompt: str, 
         for record in references
     ) or "No untimed reference images supplied."
     return render_workspace_prompt('minimax_frames', 'generate', {
+        'asset_map': json.dumps(inventory, ensure_ascii=False, indent=2),
         'workflow_name': WORKFLOW_NAMES[detect_workflow(segments, reference_images)],
         'workflow_direction': WORKFLOW_DIRECTIONS[detect_workflow(segments, reference_images)],
         'intervals': intervals,

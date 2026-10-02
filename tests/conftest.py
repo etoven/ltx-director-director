@@ -19,6 +19,8 @@ def install_legacy_workspace_for_existing_regressions(request, monkeypatch):
         if marker.exists():
             return
         marker.touch()
+        self.delete('minimax_official_skill_base')
+        self.delete('minimax_official_skill_reference')
         for stem, engine in [('minimax_base_guide', 'minimax_frames'), ('minimax_full_reference_guide', 'minimax_references')]:
             value = json.loads(files('ltx_prompt_director').joinpath(f'engine_templates/{engine}.json').read_text())
             value['id'] = engine

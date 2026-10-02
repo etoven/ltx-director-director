@@ -8,7 +8,7 @@ Build a visual plan for AI video, turn it into a detailed production prompt, and
 
 ![The Aurora workspace: a visual timeline, creative direction and one continuous MiniMax production brief](docs/images/ltx-director-director-overview.png)
 
-*Current release: Aurora 1.13.0a26 on `experimental`. Screenshots show the current native app with an authored demonstration project.*
+*Current release: Aurora 1.13.0a27 on `experimental`. Screenshots show the current native app with an authored demonstration project.*
 
 ## See the story before you generate
 
@@ -36,7 +36,7 @@ In LTX, **Magic Build** develops the whole sequence; **Refine Prompt** and **Ref
 
 **[Choose your workflow →](docs/unified-workflows.md)**
 
-Every workspace shares the LTX segment editor. MiniMax adds a separate editable unified prompt below it, plus a compact conditioning guide beneath the timeline. The shipped defaults are LTX Video, MiniMax Standard / Keyframes and MiniMax Full Reference; the two MiniMax templates follow the supplied guides.
+Every workspace shares the LTX segment editor. MiniMax adds a separate editable unified prompt below it, plus a compact conditioning guide beneath the timeline. The shipped defaults include LTX Video, the two guide-based MiniMax templates, and two **Official Skill** variants: Standard / Keyframes and Full Reference. The skill variants retain the supplied writing conventions and add variables for the detected workflow, asset map, timing, creative direction and audio options.
 
 ## Give the AI a direction worth following
 
@@ -95,7 +95,7 @@ Customize the workspace itself in **Settings → Workspaces**: choose the editor
 Install the current experimental wheel:
 
 ```bash
-python3 -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a26-py3-none-any.whl'
+python3 -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a27-py3-none-any.whl'
 ltx-director-director
 ```
 
