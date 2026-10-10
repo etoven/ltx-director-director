@@ -71,6 +71,10 @@ def refine_minimax_text_prompt(provider: str, model: str, api_key: str, current_
     rules = render_workspace_prompt('minimax_prompt_refinement', 'refine', {
         'current_prompt': current_prompt.strip(),
     })
+    from .prompt_tags import prompt_annotations
+    annotations = prompt_annotations(current_prompt)
+    rules += '\n\nEXPLICIT ANNOTATION EDIT REQUESTS (highest priority):\n' + (annotations or 'No annotations. Improve clarity, continuity and production readiness while preserving intent.')
+    rules += '\nApply every requested edit in the returned text, rather than merely retaining its instruction. A leading /refine annotation before the scene applies to the whole prompt unless it explicitly identifies a narrower passage. Requests such as "all this" refer to the complete prompt. Preservation rules do not block changes required by those requests. For a continuous-shot request, reconcile camera and action wording throughout the scene into one uninterrupted shot; remove contradictory cuts or shot transitions, and preserve reference alignment and sound unless explicitly asked to change them. Verify the resulting prose satisfies each request before returning.'
     rules += '\nRESPONSE TRANSPORT: Return strict JSON with one nonempty "prompt" string containing the complete refined text. No segment records, timed_actions or commentary.'
     raw = _provider_raw([], provider, model, api_key, rules, timeout)
     return _extract_minimax_h3_prompt(raw)

@@ -23,6 +23,26 @@ EXISTING = re.compile(r'(?<!\w)/(refine-global|refine|keep|avoid|focus)\b[ \t]*(
 GLOBAL_REFINEMENT_LINE = re.compile(r'(?im)^[ \t]*/refine-global\b[^\n]*(?:\n[ ]{4}[^\n]*)*\n?')
 
 
+ANNOTATION_LINES = re.compile(r'(?im)^[ \t]*(/(?:refine-global|refine|keep|avoid|focus))\b[ \t]*([^\n]*(?:\n[ ]{4}[^\n]*)*)')
+
+
+def prompt_annotations(prompt: str) -> str:
+    """Expose serialized native annotations as explicit edit requests."""
+    requests = []
+    for match in ANNOTATION_LINES.finditer(prompt):
+        tag, body = match.group(1).lower(), match.group(2).strip()
+        if body:
+            prefix = ANNOTATION_LINES.sub('', prompt[:match.start()]).strip()
+            scope = 'whole prompt (leading annotation)' if tag == '/refine' and not prefix else HINTS[tag]
+            requests.append(f'{tag} [{scope}]: {body}')
+    return '\n'.join(requests)
+
+
+def prompt_content(prompt: str) -> str:
+    """Compare prose separately from annotation retention and whitespace."""
+    return ' '.join(ANNOTATION_LINES.sub('', prompt).split())
+
+
 def consume_global_refinements(prompt: str) -> str:
     """Remove completed global edit instructions from a successful response."""
     return re.sub(r'\n{3,}', '\n\n', GLOBAL_REFINEMENT_LINE.sub('', prompt)).strip()

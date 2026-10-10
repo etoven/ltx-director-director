@@ -45,7 +45,7 @@ from .workspace_editor import WorkspaceEditor
 from .models import Segment, order_segments_by_ids, text_segment_from_ltx
 from .project_data import ARCHIVE_COLOR, load_other_tags, load_project_tags, new_note, normalize_notes, normalize_project_labels
 from .spellcheck import install_spellcheck
-from .prompt_tags import consume_global_refinements, install_prompt_tags, render_prompt_notes
+from .prompt_tags import prompt_content, consume_global_refinements, install_prompt_tags, render_prompt_notes
 from .inline_cues import PromptTextEdit
 
 FPS = 24
@@ -6365,6 +6365,10 @@ class MainWindow(QMainWindow):
         operation = str(getattr(self, "minimax_operation_kind", "generate_frames"))
         if operation.startswith("refine_"):
             prompt = consume_global_refinements(prompt)
+        unchanged = (self.prompt_only_workspace and operation.startswith("refine_") and
+                     prompt_content(prompt) == prompt_content(self.minimax_prompt_text))
+        if unchanged:
+            prompt = self.minimax_prompt_text
         self.minimax_prompt_text = prompt
         self.minimax_prompt_updated_at = datetime.now(timezone.utc).isoformat()
         self.set_ai_controls_enabled(True)
@@ -6377,8 +6381,13 @@ class MainWindow(QMainWindow):
             self.minimax_prompt_mode = "frames"
         mode_label = "annotated" if self.prompt_only_workspace else ("reference" if self.minimax_prompt_mode == "references" else "frame")
         state = f"Cached • {mode_label} {'refined' if operation.startswith('refine_') else 'generated'}"
+        if unchanged:
+            state = "Refinement completed • no text changes"
         window = self.show_minimax_panel(state)
         self.mark_dirty()
+        if unchanged:
+            window.show_message("The model returned the production text unchanged. Your annotations were sent, but no wording changes were made. The current draft is still editable.", "warning")
+            return
         window.show_message(
             f"{self.workspace_definition.get('name', 'Production')} prompt refined. Save it from the toolbar or when closing."
             if operation.startswith("refine_") else

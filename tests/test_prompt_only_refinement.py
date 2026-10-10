@@ -174,3 +174,54 @@ def test_prompt_only_project_exports_and_saves_without_segments(window, tmp_path
         assert disk.call_args.args[1][1]['frames'] == []
         assert disk.call_args.args[1][1]['minimaxH3']['prompt'] == window.unified_prompt.toPlainText()
         assert disk.call_args.args[1][2] == []
+
+
+def test_leading_annotation_is_sent_as_explicit_whole_prompt_request(window):
+    from ltx_prompt_director.prompt_tags import prompt_annotations
+    text = "/refine make all this one continuous shot.\nFor the target video, <Picture 1> aligns with 0 seconds.\nintegrated_multimodal_description: [Shot 1] A traveler enters. [Shot 2] Cut to the lantern."
+    window.unified_prompt.setPlainText(text)
+    render_prompt_notes(window.unified_prompt)
+    token = ai.WORKSPACE_INSTRUCTIONS.set(window.workspace_definition['generation_prompts'])
+    try:
+        with patch.object(ai,'_provider_raw',return_value='{"prompt":"One uninterrupted shot follows the traveler toward the lantern."}') as provider:
+            result = ai.refine_minimax_text_prompt('gemini','model','key',window.unified_prompt.toPlainText())
+            rules = provider.call_args.args[4]
+            assert 'EXPLICIT ANNOTATION EDIT REQUESTS' in rules
+            assert '/refine [whole prompt (leading annotation)]: make all this one continuous shot.' in rules
+            assert 'Preservation rules do not block changes' in rules
+            assert result.startswith('One uninterrupted shot')
+    finally:
+        ai.WORKSPACE_INSTRUCTIONS.reset(token)
+
+
+def test_unchanged_model_response_has_explicit_feedback(window):
+    window.unified_prompt.setPlainText('/refine-global Make the motion clearer\nOne continuous shot follows the traveler.')
+    with patch.object(window,'ai_credentials',return_value=('gemini','model','key')), patch.object(window,'start_ai_worker') as worker:
+        window.refine_prompt_button.click()
+        worker.call_args.args[3]('One continuous shot follows the traveler.')
+    assert '/refine-global Make the motion clearer' in window.unified_prompt.toPlainText()
+    assert 'no text changes' in window.minimax_panel.cache_state.text()
+    assert 'unchanged' in window.minimax_panel.message_banner.text()
+    assert window.minimax_panel.message_panel.property('level') == 'warning'
+
+
+def test_real_worker_and_gemini_transport_apply_refinement(window):
+    import time
+    from PySide6.QtCore import QEventLoop
+    window.unified_prompt.setPlainText('/refine Make this a continuous shot\nA traveler enters. Cut to the lantern.')
+    render_prompt_notes(window.unified_prompt)
+    response = {'candidates':[{'content':{'parts':[{'text':json.dumps({'prompt':'A continuous tracking shot follows the traveler toward the lantern.\n/refine Make this a continuous shot'})}]}}]}
+    with patch.object(window,'ai_credentials',return_value=('gemini','model','key')), patch.object(ai.requests,'post') as request:
+        request.return_value.json.return_value = response
+        window.refine_prompt_button.click()
+        deadline = time.monotonic() + 5
+        while window.ai_busy and time.monotonic() < deadline:
+            QApplication.processEvents(QEventLoop.ProcessEventsFlag.AllEvents, 20)
+            time.sleep(.01)
+        assert not window.ai_busy
+        assert request.call_count == 1
+        sent = request.call_args.kwargs['json']['contents'][0]['parts'][0]['text']
+        assert '/refine [whole prompt (leading annotation)]' in sent
+        assert 'A traveler enters. Cut to the lantern.' in sent
+        assert 'continuous tracking shot' in window.unified_prompt.toPlainText()
+        assert window.minimax_panel.message_panel.property('level') == 'success'

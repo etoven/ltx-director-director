@@ -16,7 +16,7 @@ All timeline workspaces use the same segment editor. The Prompt Refinement works
 
 Choose **MiniMax · Prompt Refinement · Annotations Only** from Project Type. Write or paste a production prompt, then click **Refine Prompt**. No media or segments are required. The editor fills the workspace; timeline, conditioning, segment timing, reference media and Director’s Intent controls are hidden.
 
-Type `/` and use the existing annotation suggestions: `/refine` edits a nearby passage, `/refine-global` applies across the prompt, `/keep` protects a detail, `/avoid` excludes a detail and `/focus` adds emphasis. These remain editable note boxes, with the same completion and spelling features as the other prompt editors. Completed global refinement notes are removed after a successful refinement; other annotations remain.
+Type `/` and use the existing annotation suggestions: `/refine` edits a nearby passage, `/refine-global` applies across the prompt, `/keep` protects a detail, `/avoid` excludes a detail and `/focus` adds emphasis. These remain editable note boxes, with the same completion and spelling features as the other prompt editors. A leading `/refine` note before the scene applies to the full prompt unless it identifies a narrower target. Completed global refinement notes are removed after a successful revision; other annotations remain. If the model returns the production text unchanged, the editor keeps your draft and annotations and reports **no text changes**.
 
 ![Standalone MiniMax prompt refinement with inline annotations](images/minimax-prompt-refinement.png)
 
