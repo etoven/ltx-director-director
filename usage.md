@@ -6,7 +6,13 @@ Start with an image, a video clip or a written beat. Arrange the sequence, descr
 
 ![A complete MiniMax plan in the Aurora workspace](docs/images/ltx-director-director-overview.png)
 
-*The examples throughout this guide use the current 1.13.0a29 native interface with a locally authored Aurora demonstration project.*
+*The examples throughout this guide use the current 1.13.0a30 native interface with a locally authored Aurora demonstration project.*
+
+## Refine an existing MiniMax prompt
+
+Choose **MiniMax · Prompt Refinement · Annotations Only** for a prompt-only workspace. Paste your text, use `/` to insert editable refinement and constraint notes, and choose **Refine Prompt**. The model receives only that text and its annotations. You can save the draft as a project and copy the result without creating timeline segments or importing media.
+
+![A full-size annotated MiniMax prompt editor](docs/images/minimax-prompt-refinement.png)
 
 ## Your first sequence
 

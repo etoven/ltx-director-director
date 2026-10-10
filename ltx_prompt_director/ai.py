@@ -64,6 +64,18 @@ def build_minimax_h3_reference_prompt(segments: list[Segment], provider: str, mo
     return _extract_minimax_h3_prompt(raw, segments)
 
 
+def refine_minimax_text_prompt(provider: str, model: str, api_key: str, current_prompt: str, timeout: int = 400) -> str:
+    """Refine annotated text without receiving any timeline or media context."""
+    if not current_prompt.strip():
+        raise ValueError("Write or paste a MiniMax prompt before refining it.")
+    rules = render_workspace_prompt('minimax_prompt_refinement', 'refine', {
+        'current_prompt': current_prompt.strip(),
+    })
+    rules += '\nRESPONSE TRANSPORT: Return strict JSON with one nonempty "prompt" string containing the complete refined text. No segment records, timed_actions or commentary.'
+    raw = _provider_raw([], provider, model, api_key, rules, timeout)
+    return _extract_minimax_h3_prompt(raw)
+
+
 def refine_minimax_h3_prompt(segments: list[Segment], provider: str, model: str, api_key: str, intent: str, global_prompt: str, sfx: bool, spoken_dialog: bool, reduce_music: bool, current_prompt: str, refinement_instructions: str, timeout: int = 400, reference_images: list | None = None) -> str:
     """Refine the user's edited MiniMax prompt without exposing private edit directions."""
     if not segments:

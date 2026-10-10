@@ -36,9 +36,11 @@ class WorkspaceEditor(QWidget):
         self.engine.addItem("MiniMax Frames", "minimax_frames")
         self.engine.addItem("MiniMax References", "minimax_references")
         self.engine.addItem("Generic", "generic")
+        self.engine.addItem("MiniMax Prompt Refinement", "minimax_prompt")
         self.mode = QComboBox()
         self.mode.addItem("One unified prompt", "unified")
         self.mode.addItem("Per-segment prompts", "segmented")
+        self.mode.addItem("Prompt refinement · annotations only", "prompt_only")
         self.global_prompt, self.audio = QCheckBox("Include global prompt"), QCheckBox("Supports audio generation")
         self.references = QCheckBox("Allow reference media")
         self.kinds = QLineEdit()
@@ -74,6 +76,19 @@ class WorkspaceEditor(QWidget):
         self.engine.currentIndexChanged.connect(self.engine_changed)
 
     def engine_changed(self):
+        if self.engine.currentData() == "minimax_prompt":
+            for kind, editor in (("generate", self.generate), ("refine", self.refine)):
+                if any(editor.toPlainText() == stock_prompt(engine, kind)
+                       for engine in ("ltx", "minimax_frames", "minimax_references", "generic")):
+                    editor.setPlainText(stock_prompt("minimax_prompt_refinement", kind))
+            self.mode.setCurrentIndex(self.mode.findData("prompt_only"))
+            self.global_prompt.setChecked(False)
+            self.audio.setChecked(False)
+            self.references.setChecked(False)
+            self.slots.setValue(0)
+            self.kinds.clear()
+            self.variables.setText("${current_prompt}")
+            return
         if self.engine.currentData() != "generic":
             return
         # Replace only untouched stock prompts; custom instructions remain authoritative.

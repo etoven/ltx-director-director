@@ -31,7 +31,7 @@ from PySide6.QtWidgets import (
 
 from . import __version__
 from .cache_maintenance import cover_path, mark_ready, needs_refresh, warm_metadata
-from .ai import AIResponseFormatError, GEMINI_MODELS, build_minimax_h3_prompt, build_minimax_h3_reference_prompt, build_prompts, minimax_h3_cache_key, provider_error_message, WORKSPACE_INSTRUCTIONS, refine_minimax_h3_prompt, refine_minimax_h3_reference_prompt, refine_segment_prompt, refine_global_prompt, refine_timing, retryable_connection_error
+from .ai import AIResponseFormatError, GEMINI_MODELS, build_minimax_h3_prompt, build_minimax_h3_reference_prompt, build_prompts, minimax_h3_cache_key, provider_error_message, WORKSPACE_INSTRUCTIONS, refine_minimax_text_prompt, refine_minimax_h3_prompt, refine_minimax_h3_reference_prompt, refine_segment_prompt, refine_global_prompt, refine_timing, retryable_connection_error
 from .media import APP_CACHE, TIMELINE_VIDEO_SUFFIXES, comfy_input_references, copy_media_for_export, data_url, extract_audio_for_export, prepare_media, safe_media_filename, thumbnail_for_image, unique_media_filename, video_source_dimensions, write_data_url
 from .project_archive import materialize_source, project_thumbnail_data, read_project, save_project_archive
 from .minimax_reference import WORKFLOW_NAMES, detect_workflow, reference_inventory, reference_slots
@@ -2646,9 +2646,11 @@ class MiniMaxPromptPanel(QFrame):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         header = QHBoxLayout()
+        self.header = header
         self.cache_state = QLabel("Not generated")
         self.cache_state.setObjectName("minimaxCacheState")
         label = QLabel("UNIFIED PROMPT")
+        self.prompt_label = label
         label.setObjectName("sectionLabel")
         header.addWidget(label)
         header.addWidget(self.cache_state)
@@ -2701,6 +2703,10 @@ class MiniMaxPromptPanel(QFrame):
         self.owner.refresh_shared_editor()
 
     def refresh_references(self, update_images: bool = True) -> None:
+        if self.owner.prompt_only_workspace:
+            self.workflow_label.setText("Annotations only")
+            self.workflow_label.setToolTip("Refine prompt text without segments or media context")
+            return
         segments = self.owner.segments
         refs = reference_slots(self.owner.minimax_reference_images)
         active_refs = self.owner.active_reference_images() if self.owner.unified_workspace or self.owner.workspace_engine == "generic" else []
@@ -2907,6 +2913,10 @@ class MainWindow(QMainWindow):
                 action.triggered.connect(callback)
                 if label == "Export":
                     self.workflow_export_action = action
+                elif label == "Import":
+                    self.timeline_import_action = action
+                elif label == "Delete selected":
+                    self.delete_segment_action = action
                 toolbar.addAction(action)
             if group_index < len(action_groups) - 1:
                 toolbar.addSeparator()
@@ -2970,6 +2980,7 @@ class MainWindow(QMainWindow):
         workflow_row.addWidget(self.references_button)
         outer.addLayout(workflow_row)
         timeline_shell = QFrame()
+        self.timeline_shell = timeline_shell
         timeline_shell.setObjectName("timelineShell")
         timeline_layout = QVBoxLayout(timeline_shell)
         timeline_layout.setContentsMargins(0, 0, 0, 0)
@@ -3231,6 +3242,7 @@ class MainWindow(QMainWindow):
         self.director_controls.addLayout(options_row)
 
         segment_panel = QFrame()
+        self.segment_panel = segment_panel
         segment_panel.setObjectName("promptPanel")
         segment_layout = QVBoxLayout(segment_panel)
         segment_layout.setContentsMargins(9, 6, 9, 5)
@@ -4394,9 +4406,9 @@ class MainWindow(QMainWindow):
         self.refresh_project_library(preserve_scroll=False)
 
     def save_library_project(self, automatic: bool = False, source_filename: str | None = None) -> None:
-        if not self.segments and not self.current_project_id:
+        if not self.has_project_content and not self.current_project_id:
             if not automatic:
-                QMessageBox.information(self, "Nothing to save", "Add at least one image, WebM, MP4, or text segment first.")
+                QMessageBox.information(self, "Nothing to save", "Write a prompt or add an image, video or text segment first.")
             return
         root = project_library_path()
         meta = None
@@ -4783,7 +4795,7 @@ class MainWindow(QMainWindow):
         changed = signature != self._timeline_signature
         self._timeline_signature = signature
         self.update_conditioning_guide()
-        if changed and self.unified_workspace and self.minimax_prompt_text.strip() and self.minimax_panel:
+        if changed and self.unified_workspace and not self.prompt_only_workspace and self.minimax_prompt_text.strip() and self.minimax_panel:
             self.minimax_panel.set_cache_state("Segment changes available")
             self.minimax_panel.show_message("Segment changes available. Regenerate to rebuild the unified draft from the timeline, or keep editing your draft.", "timeline")
         if self.current_project_id:
@@ -4958,12 +4970,16 @@ class MainWindow(QMainWindow):
                 field.setValue(normalized)
 
     def add_media(self) -> None:
+        if self.prompt_only_workspace:
+            return
         paths = choose_media_files(self, True, self.settings.value("last_media_dir", str(Path.home())))
         if not paths:
             return
         self.add_media_paths(paths)
 
     def add_text_segment(self) -> None:
+        if self.prompt_only_workspace:
+            return
         number = sum(segment.kind == "text" for segment in self.segments) + 1
         segment = Segment(f"Text {number}", "", "", "text", "text", "", 5.0)
         self.segments.append(segment)
@@ -4974,6 +4990,8 @@ class MainWindow(QMainWindow):
 
 
     def add_media_paths(self, paths: list[str], insert_index: int | None = None) -> None:
+        if self.prompt_only_workspace:
+            return
         paths = [path for path in paths if Path(path).is_file()]
         if not paths:
             return
@@ -5130,8 +5148,8 @@ class MainWindow(QMainWindow):
         self.end_button.setEnabled(visual)
         self.start_button.setVisible(visual)
         self.end_button.setVisible(visual)
-        self.refine_timing_button.setEnabled(not self.ai_busy and bool(segment))
-        self.refine_prompt_button.setEnabled(not self.ai_busy and bool(self.segment_prompt.toPlainText().strip()) and bool(self.segments))
+        self.refine_timing_button.setEnabled(not self.ai_busy and not self.prompt_only_workspace and bool(segment))
+        self.update_refine_prompt_enabled()
         if segment:
             self.start_button.setChecked(segment.role == "start" if visual else False)
             self.end_button.setChecked(segment.role == "end" if visual else False)
@@ -5170,13 +5188,13 @@ class MainWindow(QMainWindow):
         self.duration_spin.blockSignals(False)
 
     def save_prompt(self) -> None:
-        if self._loading:
+        if self._loading or self.prompt_only_workspace:
             return
         if self.prompt_scope.currentData() == "global":
             self.global_prompt.blockSignals(True)
             self.global_prompt.setPlainText(self.segment_prompt.toPlainText())
             self.global_prompt.blockSignals(False)
-            self.refine_prompt_button.setEnabled(not self.ai_busy and bool(self.segment_prompt.toPlainText().strip()) and bool(self.segments))
+            self.update_refine_prompt_enabled()
             self.mark_dirty()
             self.update_counts()
             return
@@ -5253,6 +5271,11 @@ class MainWindow(QMainWindow):
         self.update_timeline_layout()
 
     def update_summary(self) -> None:
+        if self.prompt_only_workspace:
+            self.add_tile.setEnabled(False)
+            self.add_text_tile.setEnabled(False)
+            self.statusBar().showMessage("Prompt refinement · annotations only")
+            return
         if self.minimax_panel:
             self.minimax_panel.refresh_references()
         total = self.total_duration()
@@ -5400,6 +5423,8 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Replace failed", str(error))
 
     def delete_selected(self) -> None:
+        if self.prompt_only_workspace:
+            return
         row = self.timeline.currentRow()
         if 0 <= row < len(self.segments):
             self.segments.pop(row)
@@ -5503,11 +5528,11 @@ class MainWindow(QMainWindow):
         return provider, self.settings.value("gemini_model", GEMINI_MODELS[0]), key
 
     def set_ai_controls_enabled(self, enabled: bool) -> None:
-        self.magic_button.setEnabled(enabled)
+        self.magic_button.setEnabled(enabled and not self.prompt_only_workspace)
         self.ai_busy = not enabled
         segment = self.current_segment()
-        self.refine_timing_button.setEnabled(enabled and bool(segment))
-        self.refine_prompt_button.setEnabled(enabled and bool(self.segment_prompt.toPlainText().strip()) and bool(self.segments))
+        self.refine_timing_button.setEnabled(enabled and not self.prompt_only_workspace and bool(segment))
+        self.update_refine_prompt_enabled()
         if self.minimax_panel:
             self.minimax_panel.set_busy(not enabled)
 
@@ -5525,6 +5550,7 @@ class MainWindow(QMainWindow):
             "MiniMax H3 Frame Generate" if operation is build_minimax_h3_prompt else
             "MiniMax H3 Reference Refine" if operation is refine_minimax_h3_reference_prompt else
             "MiniMax H3 Frame Refine" if operation is refine_minimax_h3_prompt else
+            "MiniMax Prompt Refinement" if operation is refine_minimax_text_prompt else
             "Refine Timing" if operation is refine_timing else
             "Refine Prompt"
         )
@@ -5579,6 +5605,8 @@ class MainWindow(QMainWindow):
         self.magic_failed(error)
 
     def refine_selected_timing(self) -> None:
+        if self.prompt_only_workspace:
+            return
         segment = self.current_segment()
         if not segment:
             return
@@ -5598,6 +5626,9 @@ class MainWindow(QMainWindow):
         )
 
     def refine_selected_prompt(self) -> None:
+        if self.prompt_only_workspace:
+            self.refine_minimax_prompt()
+            return
         if self.prompt_scope.currentData() == "global":
             self.refine_global_direction()
             return
@@ -5697,6 +5728,9 @@ class MainWindow(QMainWindow):
             self._generate_minimax_prompt(self.minimax_prompt_mode)
 
     def magic_build(self) -> None:
+        if self.prompt_only_workspace:
+            self.refine_minimax_prompt()
+            return
         if not self.segments:
             self.add_media()
             return
@@ -5803,7 +5837,15 @@ class MainWindow(QMainWindow):
 
     @property
     def unified_workspace(self) -> bool:
-        return self.workspace_definition.get("prompt_mode") == "unified"
+        return self.workspace_definition.get("prompt_mode") in {"unified", "prompt_only"}
+
+    @property
+    def prompt_only_workspace(self) -> bool:
+        return self.workspace_definition.get("prompt_mode") == "prompt_only"
+
+    @property
+    def has_project_content(self) -> bool:
+        return bool(self.segments) or (self.prompt_only_workspace and bool(self.minimax_prompt_text.strip()))
 
     @property
     def workspace_draft_key(self) -> str:
@@ -5853,6 +5895,7 @@ class MainWindow(QMainWindow):
         self.mark_dirty()
 
     def apply_project_type_ui(self) -> None:
+        prompt_only = self.prompt_only_workspace
         ltx = not self.unified_workspace
         references = self.workspace_definition.get("references", {})
         refs = (not ltx or self.workspace_engine == "generic") and references.get("enabled", False) and references.get("untimed_slots", 0) > 0
@@ -5865,13 +5908,31 @@ class MainWindow(QMainWindow):
         if not self.workspace_definition.get("global_prompt", False):
             self.prompt_scope.setCurrentIndex(0)
         self.unified_panel.setVisible(not ltx)
+        self.timeline_shell.setVisible(not prompt_only)
+        self.sequence_bar.setVisible(not prompt_only)
+        self.segment_meta.setVisible(not prompt_only)
+        self.segment_panel.setVisible(not prompt_only)
+        self.director_panel.setVisible(not prompt_only)
+        self.magic_button.setVisible(not prompt_only)
+        if prompt_only:
+            self.segment_header.removeWidget(self.refine_prompt_button)
+            self.minimax_panel.header.addWidget(self.refine_prompt_button)
+        else:
+            self.minimax_panel.header.removeWidget(self.refine_prompt_button)
+            self.segment_header.addWidget(self.refine_prompt_button)
+        self.refine_prompt_button.show()
+        self.refine_prompt_button.setToolTip("Refine the current prompt using its inline annotations" if prompt_only else
+            "Refine the selected segment or global direction; MiniMax then generates the unified prompt")
+        self.minimax_panel.prompt_label.setText("PROMPT REFINEMENT" if prompt_only else "UNIFIED PROMPT")
+        self.unified_prompt.setPlaceholderText("Write or paste a MiniMax prompt. Use / to add refinement annotations…" if prompt_only else
+            "Generate the unified prompt from your segments, or write and refine your own…")
         self.references_button.setVisible(refs)
         self.minimax_panel.reference_dock.toggleViewAction().setVisible(refs)
         self.sync_reference_panel_visibility()
         audio = self.workspace_definition.get("audio_generation", True)
         for control in (self.sfx, self.spoken_dialog, self.reduce_music):
             control.setVisible(audio)
-        if not audio:
+        if not audio and not prompt_only:
             for control in (self.sfx, self.spoken_dialog, self.reduce_music):
                 control.setChecked(False)
         self.hdr.setVisible(True)
@@ -5879,11 +5940,13 @@ class MainWindow(QMainWindow):
         self.length_label.setVisible(True)
         self.output_size_control.setVisible(True)
         self.output_label.setVisible(True)
-        self.refine_timing_button.setVisible(True)
+        self.refine_timing_button.setVisible(not prompt_only)
         self.magic_button.setText("✦ Magic Build")
         self.magic_button.setToolTip("Build all segment prompts from the timeline")
         self.workflow_export_action.setVisible(ltx)
-        self.magic_button.setEnabled(not self.ai_busy and bool(self.workspace_definition))
+        self.timeline_import_action.setVisible(not prompt_only)
+        self.delete_segment_action.setVisible(not prompt_only)
+        self.magic_button.setEnabled(not self.ai_busy and bool(self.workspace_definition) and not prompt_only)
         visual = bool(self.current_segment() and self.current_segment().kind != "text")
         self.start_button.setVisible(visual)
         self.end_button.setVisible(visual)
@@ -5899,11 +5962,14 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, self.restore_director_intent_splitter)
 
         self.queue_project_panel_width_restore()
+        self.update_summary()
 
     def update_conditioning_guide(self) -> None:
         if not hasattr(self, "conditioning_guide"):
             return
-        self.conditioning_guide.setVisible(self.unified_workspace)
+        self.conditioning_guide.setVisible(self.unified_workspace and not self.prompt_only_workspace)
+        if self.prompt_only_workspace:
+            return
         signature = (self.unified_workspace, self.project_type,
                      tuple((s.id, s.name, s.kind, s.role, s.duration, s.preview_path, s.trim_start) for s in self.segments),
                      tuple(str(r) for r in self.active_reference_images()))
@@ -5981,6 +6047,8 @@ class MainWindow(QMainWindow):
         self.set_director_intent_expanded(self.settings.value("director_intent_expanded", True, bool), persist=False)
 
     def set_director_intent_expanded(self, expanded: bool, *, persist: bool = True) -> None:
+        if self.prompt_only_workspace:
+            return
         sizes = self.intent_prompt_splitter.sizes()
         total = max(sum(sizes), self.intent_prompt_splitter.height(), 500)
         height = self.settings.value("director_intent_height", 164, int)
@@ -5989,6 +6057,8 @@ class MainWindow(QMainWindow):
             self.director_intent_splitter_moved()
 
     def director_intent_splitter_moved(self, *_args) -> None:
+        if self.prompt_only_workspace:
+            return
         height = self.intent_prompt_splitter.sizes()[0]
         self.settings.setValue("director_intent_expanded", height > 0)
         if height > 0:
@@ -5997,6 +6067,11 @@ class MainWindow(QMainWindow):
 
     def prompt_scope_changed(self, _index: int) -> None:
         self.refresh_shared_editor()
+
+    def update_refine_prompt_enabled(self) -> None:
+        text = self.unified_prompt.toPlainText() if self.prompt_only_workspace else self.segment_prompt.toPlainText()
+        self.refine_prompt_button.setEnabled(not self.ai_busy and bool(text.strip()) and
+                                            (self.prompt_only_workspace or bool(self.segments)))
 
     def refresh_shared_editor(self) -> None:
         if self.prompt_scope.currentData() == "global":
@@ -6010,13 +6085,14 @@ class MainWindow(QMainWindow):
             render_prompt_notes(self.segment_prompt)
             self.segment_prompt.blockSignals(False)
         self.segment_prompt.setPlaceholderText("Select a timeline segment to edit its prompt…")
-        self.refine_prompt_button.setEnabled(not self.ai_busy and bool(value.strip()) and bool(self.segments))
+        self.update_refine_prompt_enabled()
         if self.unified_prompt.toPlainText() != self.minimax_prompt_text:
             self.unified_prompt.blockSignals(True)
             self.unified_prompt.setPlainText(self.minimax_prompt_text)
             render_prompt_notes(self.unified_prompt)
             self.unified_prompt.blockSignals(False)
         self.minimax_panel.update_actions()
+        self.update_refine_prompt_enabled()
         self.update_counts()
 
     def global_prompt_changed(self) -> None:
@@ -6077,7 +6153,7 @@ class MainWindow(QMainWindow):
                 self.minimax_prompt_text = directive + '\n\n' + self.minimax_prompt_text
             self.minimax_refinement_instructions = ''
         self.apply_project_type_ui()
-        mode_name = "reference" if self.minimax_prompt_mode == "references" else "frame"
+        mode_name = "annotated" if self.prompt_only_workspace else ("reference" if self.minimax_prompt_mode == "references" else "frame")
         state = cache_state or (f"Saved {mode_name} prompt" if self.minimax_prompt_text else "Not generated")
         self.minimax_panel.set_project(self.current_project_name, self.minimax_prompt_text,
                                        self.minimax_refinement_instructions, state)
@@ -6099,6 +6175,7 @@ class MainWindow(QMainWindow):
         self.minimax_prompt_updated_at = datetime.now(timezone.utc).isoformat()
         self.minimax_panel.update_actions()
         self.unified_count.setText(f"{len(value)} characters")
+        self.update_refine_prompt_enabled()
         self.mark_dirty()
 
     def active_reference_images(self) -> list:
@@ -6171,12 +6248,15 @@ class MainWindow(QMainWindow):
 
     def stage_current_workspace(self) -> None:
         """Keep an unsaved project in memory when switching tabs or starting anew."""
-        if self.segments and self.project_dirty and not self.current_project_id:
+        if self.has_project_content and self.project_dirty and not self.current_project_id:
             self.current_project_id = uuid4().hex
-            self.current_project_name = Path(self.segments[0].name).stem or "Untitled"
+            self.current_project_name = (Path(self.segments[0].name).stem if self.segments else "MiniMax Prompt") or "Untitled"
             self.update_window_title()
 
     def current_minimax_cache_key(self, provider: str | None = None, model: str | None = None) -> str:
+        if self.prompt_only_workspace:
+            return f"{self.workspace_revision}:{self.current_project_id}:{self.project_type}:" + json.dumps(
+                self.workspace_definition.get("generation_prompts", {}), sort_keys=True)
         provider = provider or str(self.settings.value("provider", "gemini"))
         model = model or str(self.settings.value("gemini_model", GEMINI_MODELS[0]))
         return f"{self.workspace_revision}:{self.project_type}:" + minimax_h3_cache_key(
@@ -6218,6 +6298,9 @@ class MainWindow(QMainWindow):
         self._generate_minimax_prompt("references")
 
     def _generate_minimax_prompt(self, mode: str) -> None:
+        if self.prompt_only_workspace:
+            self.refine_minimax_prompt()
+            return
         if self.ai_busy:
             return
         self.minimax_editor_changed()
@@ -6292,7 +6375,7 @@ class MainWindow(QMainWindow):
             self.minimax_prompt_mode = "references"
         elif operation.endswith("frames"):
             self.minimax_prompt_mode = "frames"
-        mode_label = "reference" if self.minimax_prompt_mode == "references" else "frame"
+        mode_label = "annotated" if self.prompt_only_workspace else ("reference" if self.minimax_prompt_mode == "references" else "frame")
         state = f"Cached • {mode_label} {'refined' if operation.startswith('refine_') else 'generated'}"
         window = self.show_minimax_panel(state)
         self.mark_dirty()
@@ -6328,6 +6411,13 @@ class MainWindow(QMainWindow):
         timeout = self.settings.value("api_timeout", 400, int)
         if self.minimax_panel:
             self.minimax_panel.set_busy(True, "Refining edited prompt…")
+        if self.prompt_only_workspace:
+            self.minimax_operation_kind = "refine_prompt"
+            self.start_ai_worker(refine_minimax_text_prompt,
+                (provider, model, key, self.minimax_prompt_text, timeout),
+                "Refining the annotated MiniMax prompt…", self.minimax_h3_finished,
+                show_main_overlay=False)
+            return
         operation = refine_generic_prompt if self.workspace_engine == "generic" else (refine_minimax_h3_reference_prompt if reference_mode else refine_minimax_h3_prompt)
         self.start_ai_worker(
             operation,
@@ -6632,7 +6722,8 @@ class MainWindow(QMainWindow):
                 segment._media_digest = raw.get("mediaDigest", "")
                 segment._source_size = raw.get("sourceSize")
             loaded.append(segment)
-        if not loaded:
+        prompt_only = self.workspace_definitions.get(payload.get("projectType"), {}).get("prompt_mode") == "prompt_only"
+        if not loaded and not prompt_only:
             raise ValueError("Project contains no supported main-track segments.")
         self.segments = loaded
         self.global_prompt.setPlainText(payload.get("globalPrompt", ""))
@@ -6744,7 +6835,7 @@ class MainWindow(QMainWindow):
         self.downloads_button.setText("")
 
     def export_project(self) -> None:
-        if not self.segments:
+        if not self.has_project_content:
             return
         path = str(self.next_export_path(f"{self.current_project_name}.LTXD"))
         payload = self.project_payload(include_media=False)

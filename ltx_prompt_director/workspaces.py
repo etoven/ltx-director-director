@@ -36,11 +36,13 @@ def validate_definition(value: dict) -> dict:
         raise ValueError("ID must contain only letters, numbers, hyphens and underscores.")
     if not isinstance(value.get("name"), str) or not value["name"].strip():
         raise ValueError("A workspace name is required.")
-    if value.get("prompt_mode") not in {"unified", "segmented"}:
-        raise ValueError("Prompt mode must be unified or segmented.")
-    if value.get("engine") not in {"ltx", "minimax_frames", "minimax_references", "generic"}:
-        raise ValueError("Choose LTX, MiniMax Frames, MiniMax References or Generic.")
-    if value["engine"] != "generic" and (value["engine"] == "ltx") != (value["prompt_mode"] == "segmented"):
+    if value.get("prompt_mode") not in {"unified", "segmented", "prompt_only"}:
+        raise ValueError("Prompt mode must be unified, segmented or prompt_only.")
+    if value.get("engine") not in {"ltx", "minimax_frames", "minimax_references", "minimax_prompt", "generic"}:
+        raise ValueError("Choose LTX, MiniMax Frames, MiniMax References, MiniMax Prompt Refinement or Generic.")
+    if (value["engine"] == "minimax_prompt") != (value["prompt_mode"] == "prompt_only"):
+        raise ValueError("MiniMax Prompt Refinement requires prompt_only mode.")
+    if value["engine"] not in {"generic", "minimax_prompt"} and (value["engine"] == "ltx") != (value["prompt_mode"] == "segmented"):
         raise ValueError("The LTX engine requires segmented prompts; MiniMax engines require unified prompts.")
     for key in ("global_prompt", "audio_generation"):
         if not isinstance(value.get(key), bool):
@@ -55,11 +57,15 @@ def validate_definition(value: dict) -> dict:
         raise ValueError("Untimed reference slots must be 0, 1 or 2.")
     if value["engine"] == "ltx" and count:
         raise ValueError("LTX references are timeline frames; untimed image slots require a MiniMax engine.")
+    if value["prompt_mode"] == "prompt_only" and (refs["enabled"] or count or value["global_prompt"] or value["audio_generation"]):
+        raise ValueError("Prompt-only refinement supports annotations, without reference media, global direction or audio controls.")
     prompts = value.get("generation_prompts")
     if not isinstance(prompts, dict) or not isinstance(prompts.get("generate"), str) or not prompts["generate"].strip():
         raise ValueError("A generation instruction is required.")
     if not isinstance(prompts.get("refine", ""), str):
         raise ValueError("Refinement instruction must be text.")
+    if value["prompt_mode"] == "prompt_only" and not prompts.get("refine", "").strip():
+        raise ValueError("Prompt-only refinement requires a refinement instruction.")
     return value
 
 
@@ -113,6 +119,12 @@ class WorkspaceStore:
                     source = files("ltx_prompt_director").joinpath(f"workspace_templates/{workspace_id}.json")
                     self.save(json.loads(source.read_text(encoding="utf-8")))
             skill_marker.touch()
+        prompt_marker = self.root / ".stock-minimax-prompt-only"
+        if not prompt_marker.exists():
+            if not (self.root / "minimax_prompt_refinement.json").exists():
+                source = files("ltx_prompt_director").joinpath("workspace_templates/minimax_prompt_refinement.json")
+                self.save(json.loads(source.read_text(encoding="utf-8")))
+            prompt_marker.touch()
         self.errors: list[str] = []
 
     def load(self) -> dict[str, dict]:

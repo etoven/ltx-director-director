@@ -1,6 +1,6 @@
 # Direct every segment. Keep the full prompt in view.
 
-All shipped workspaces use the same segment editor. Select a timeline card to edit its prompt, change its frame role or refine its wording and duration. **Magic Build** develops the segment prompts and shared global direction.
+All timeline workspaces use the same segment editor. The Prompt Refinement workspace provides a standalone annotated text editor. Select a timeline card to edit its prompt, change its frame role or refine its wording and duration. **Magic Build** develops the segment prompts and shared global direction.
 
 ![The shared segment editor above an independently editable MiniMax production prompt](images/ltx-director-director-overview.png)
 
@@ -11,6 +11,16 @@ All shipped workspaces use the same segment editor. Select a timeline card to ed
 | MiniMax Full Reference | Guide-based subject definitions, summary, retention analysis, detailed description, soundscape and music |
 | MiniMax Official Skill · Standard / Keyframes | Supplied skill conventions for T2VA, I2VA, FL2VA and L2VA, with project variables |
 | MiniMax Official Skill · Full Reference | Supplied six-section reference skill, including companion camera, speech and sound rules |
+
+## Refine a prompt on its own
+
+Choose **MiniMax · Prompt Refinement · Annotations Only** from Project Type. Write or paste a production prompt, then click **Refine Prompt**. No media or segments are required. The editor fills the workspace; timeline, conditioning, segment timing, reference media and Director’s Intent controls are hidden.
+
+Type `/` and use the existing annotation suggestions: `/refine` edits a nearby passage, `/refine-global` applies across the prompt, `/keep` protects a detail, `/avoid` excludes a detail and `/focus` adds emphasis. These remain editable note boxes, with the same completion and spelling features as the other prompt editors. Completed global refinement notes are removed after a successful refinement; other annotations remain.
+
+![Standalone MiniMax prompt refinement with inline annotations](images/minimax-prompt-refinement.png)
+
+Refinement uses only your current prompt and its inline annotations. It preserves the existing MiniMax format, stated timing, identities, dialogue and audio direction unless you request a change. Use **Copy** to take the result into your generation workflow. Save and reopen it as a normal project; each workspace keeps its own draft. Switching back to a timeline workspace restores its segment controls and draft.
 
 ## Edit the beats, then develop the full prompt
 
@@ -36,7 +46,7 @@ Both MiniMax templates receive `${workflow_name}` and `${workflow_direction}` fr
 
 ## Keep your direction and drafts
 
-**Director’s Intent**, prompt options and inline refinement notes remain available across modes. The native splitter below it uses the same handle as the split between the segment and unified prompts. Drag up to collapse and down to reopen; its height and collapsed state persist. Switching workspaces does not submit an AI request. Projects retain segment prompts, global direction and each workspace’s unified draft.
+**Director’s Intent**, prompt options and inline refinement notes remain available across timeline workspaces. Prompt Refinement uses only its standalone prompt and annotations. The native splitter below it uses the same handle as the split between the segment and unified prompts. Drag up to collapse and down to reopen; its height and collapsed state persist. Switching workspaces does not submit an AI request. Projects retain segment prompts, global direction and each workspace’s unified draft.
 
 **Continue:** [Reference images](minimax-references.md) · [Custom workspaces and exports](workspace-definitions-and-exports.md) · [Complete feature guide](../usage.md)
 

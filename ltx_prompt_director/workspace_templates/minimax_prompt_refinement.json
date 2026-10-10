@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "id": "minimax_prompt_refinement",
+  "name": "MiniMax · Prompt Refinement · Annotations Only",
+  "engine": "minimax_prompt",
+  "prompt_mode": "prompt_only",
+  "global_prompt": false,
+  "audio_generation": false,
+  "references": {
+    "enabled": false,
+    "kinds": [],
+    "untimed_slots": 0
+  },
+  "template_variables": {
+    "generate": [
+      "current_prompt"
+    ],
+    "refine": [
+      "current_prompt"
+    ]
+  },
+  "generation_prompts": {
+    "generate": "Refine the supplied MiniMax video production prompt. This is a standalone text refinement task with annotations only. There is no timeline, no segment plan, no uploaded reference media and no hidden Director's Intent or audio-option state.\n\nPRIORITY AND ANNOTATIONS\n1. Apply inline /refine and /refine-global instructions as the highest-priority edit requests. /refine applies to the nearby passage; /refine-global applies throughout. Honor /keep, /avoid and /focus constraints. The more specific request governs its affected passage.\n2. CURRENT PROMPT is authoritative. Make the smallest complete edits that satisfy the annotations; otherwise improve clarity, causal motion continuity and production readiness while preserving the creative intent.\n3. Preserve characters, transformations, camera constraints, source labels, timing, speakers, dialogue and audio direction unless an annotation requests a change. Do not invent reference files, asset maps, source transcripts, frames, segment records or workflow evidence. Textual reference labels already in the prompt may be preserved, but do not claim to have inspected their media.\n4. When dialogue is requested, write actual suitable spoken lines with speakers and language, brief enough for any stated duration. Do not merely say to add dialogue later. An explicit request to add or revise dialogue overrides general preservation rules for that passage only.\n5. Preserve the existing MiniMax format, whether a compact production brief, the three-section Standard format, or the six-section Full Reference format. Do not rebuild or reformat the prompt unless requested. For <d> speech, put language and spoken words inside the tags, with speaker identity and delivery outside. Never copy example scenes.\n6. Remove completed /refine-global directives from the returned prompt. Retain /refine, /keep, /avoid and /focus annotations in place. Do not expose private reasoning or replace annotations with segment boxes.\n7. Return strict JSON with one nonempty \"prompt\" string containing the complete refined prompt. Do not return commentary, Markdown fences, segment records, timed_actions or a timing reconciliation plan.\n\nCURRENT PROMPT:\n${current_prompt}\n",
+    "refine": "Refine the supplied MiniMax video production prompt. This is a standalone text refinement task with annotations only. There is no timeline, no segment plan, no uploaded reference media and no hidden Director's Intent or audio-option state.\n\nPRIORITY AND ANNOTATIONS\n1. Apply inline /refine and /refine-global instructions as the highest-priority edit requests. /refine applies to the nearby passage; /refine-global applies throughout. Honor /keep, /avoid and /focus constraints. The more specific request governs its affected passage.\n2. CURRENT PROMPT is authoritative. Make the smallest complete edits that satisfy the annotations; otherwise improve clarity, causal motion continuity and production readiness while preserving the creative intent.\n3. Preserve characters, transformations, camera constraints, source labels, timing, speakers, dialogue and audio direction unless an annotation requests a change. Do not invent reference files, asset maps, source transcripts, frames, segment records or workflow evidence. Textual reference labels already in the prompt may be preserved, but do not claim to have inspected their media.\n4. When dialogue is requested, write actual suitable spoken lines with speakers and language, brief enough for any stated duration. Do not merely say to add dialogue later. An explicit request to add or revise dialogue overrides general preservation rules for that passage only.\n5. Preserve the existing MiniMax format, whether a compact production brief, the three-section Standard format, or the six-section Full Reference format. Do not rebuild or reformat the prompt unless requested. For <d> speech, put language and spoken words inside the tags, with speaker identity and delivery outside. Never copy example scenes.\n6. Remove completed /refine-global directives from the returned prompt. Retain /refine, /keep, /avoid and /focus annotations in place. Do not expose private reasoning or replace annotations with segment boxes.\n7. Return strict JSON with one nonempty \"prompt\" string containing the complete refined prompt. Do not return commentary, Markdown fences, segment records, timed_actions or a timing reconciliation plan.\n\nCURRENT PROMPT:\n${current_prompt}\n"
+  }
+}

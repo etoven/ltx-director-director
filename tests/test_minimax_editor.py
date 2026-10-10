@@ -91,7 +91,7 @@ class UnifiedEditorTests(unittest.TestCase):
     def test_switches_only_show_relevant_controls_and_never_generate(self):
         w = self.make_window()
         with patch.object(w, 'start_ai_worker') as worker:
-            w.project_type_combo.setCurrentIndex(2)
+            w.project_type_combo.setCurrentIndex(w.project_type_combo.findData('minimax_references'))
             self.assertEqual(w.project_type, 'minimax_references')
             self.assertFalse(w.hdr.isHidden())
             self.assertFalse(w.refine_timing_button.isHidden())

@@ -10,7 +10,7 @@ from ltx_prompt_director.workspaces import WorkspaceStore
 
 @pytest.fixture(autouse=True)
 def install_legacy_workspace_for_existing_regressions(request, monkeypatch):
-    if request.module.__name__.split('.')[-1] in {'test_catalog_release', 'test_shared_segment_editor'}:
+    if request.module.__name__.split('.')[-1] in {'test_catalog_release', 'test_shared_segment_editor', 'test_prompt_only_refinement'}:
         return
     original = WorkspaceStore.__init__
     def initialize(self, *args, **kwargs):

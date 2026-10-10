@@ -114,7 +114,7 @@ def test_conditioning_strip_tracks_real_checkpoints_and_source_trim(window):
 
 
 def test_new_defaults_and_mode_variables(window):
-    assert set(window.workspace_definitions) == {'ltx', 'minimax_official_skill_base', 'minimax_official_skill_reference', 'minimax_base_guide', 'minimax_full_reference_guide'}
+    assert set(window.workspace_definitions) == {'minimax_prompt_refinement', 'ltx', 'minimax_official_skill_base', 'minimax_official_skill_reference', 'minimax_base_guide', 'minimax_full_reference_guide'}
     for mode in ['minimax_base_guide', 'minimax_full_reference_guide']:
         definition = window.workspace_definitions[mode]
         assert '${workflow_name}' in definition['generation_prompts']['generate']
@@ -211,7 +211,7 @@ def test_old_factory_embedded_in_project_does_not_return_to_defaults(window):
     window.load_project_payload(payload)
     assert window.project_type == 'minimax_full_reference_guide'
     assert window.unified_prompt.toPlainText() == 'Retain my old draft'
-    assert set(window.workspace_store.load()) == {'ltx','minimax_official_skill_base','minimax_official_skill_reference','minimax_base_guide','minimax_full_reference_guide'}
+    assert set(window.workspace_store.load()) == {'minimax_prompt_refinement','ltx','minimax_official_skill_base','minimax_official_skill_reference','minimax_base_guide','minimax_full_reference_guide'}
 
 
 def test_proportional_rounding_preserves_exact_total(window):
