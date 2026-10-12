@@ -66,6 +66,7 @@ def export_minimax_workflow(path, segments, prompt, references, comfy_root, widt
     refs=reference_slots(references)
     inventory=reference_inventory(segments,refs)
     counts={kind:sum(r['kind']==kind for r in inventory) for kind in ('image','video','audio')}
+    counts['video']=sum(r['kind']=='video' and 'reference_slot' in r for r in inventory)
     if counts['image']>9 or counts['video']>3 or counts['audio']>3:
         raise ValueError('This ComfyUI node supports at most 9 image inputs, 3 video inputs and 3 standalone audio inputs. Reduce that media type before exporting.')
     for r in inventory:
@@ -186,7 +187,6 @@ def export_minimax_workflow(path, segments, prompt, references, comfy_root, widt
             vals=loader['widgets_values'];vals.update(video=filename,force_rate=24,custom_width=0,custom_height=0,
                 frame_load_cap=round(segment.duration*24) if segment else frame_count,skip_first_frames=segment.trim_start or 0 if segment else 0)
             vals.pop('videopreview',None);loader['widgets_values_named']=copy.deepcopy(vals)
-            reference_port(loader,0,'ref_videos.ref_video_'+str(video_index))
             if segment:
                 # The full trimmed clip and its soundtrack share the timeline start anchor.
                 loaded[r['timeline_index']]=(loader,0,(loader,2),r)
@@ -197,9 +197,11 @@ def export_minimax_workflow(path, segments, prompt, references, comfy_root, widt
                     loader['inputs'].append({'name':name,'type':'INT','widget':{'name':name},'link':None})
                     g.connect(getter,0,loader,name,'INT');helpers.append(getter['id'])
                 media_helpers[loader['id']]=helpers
-            elif ref.get('audio_path'):
-                reference_port(loader,2,'ref_video_audios.ref_video_audio_'+str(video_index))
-            video_index+=1
+            else:
+                reference_port(loader,0,'ref_videos.ref_video_'+str(video_index))
+                if ref.get('audio_path'):
+                    reference_port(loader,2,'ref_video_audios.ref_video_audio_'+str(video_index))
+                video_index+=1
         else:
             filename=copy_file(ref['audio_path'],Path(ref['name']).stem+'.wav')
             node={'type':'LoadAudio','pos':[x,y],'size':[300,150],'flags':{},'order':0,'mode':0,'inputs':[],
@@ -226,6 +228,7 @@ def export_minimax_workflow(path, segments, prompt, references, comfy_root, widt
         guide['type']=guide_def['id']
         guide['properties'].pop('previewExposures',None)
         guide['inputs'].append({'name':'audio','type':'AUDIO','shape':7,'link':None})
+        guide['size']=[288,120]
         _set_widget(guide,seconds,'value')
         # If a checkpoint lands exactly outside the AV tensor, anchor the actual final frame.
         if round(seconds*24)>=frame_count:_set_widget(guide,(frame_count-1)/24,'value')
@@ -345,7 +348,7 @@ def export_minimax_workflow(path, segments, prompt, references, comfy_root, widt
     workflow['id']=str(uuid.uuid4());workflow['revision']=0
     workflow['extra']['ltxDirector']={'format':'MiniMax H3 / ComfyUI','duration_seconds':total,'fps':24,'frame_count':frame_count,'guides':guides,
         'source_template':'Supplied final b rub workflow','asset_map':inventory,
-        'video_policy':'full-batch timed audiovisual guides',
+        'video_policy':'timeline clips use MiniMaxH3AddGuide only; full frame batch and audio at start index',
         'audio_policy':'timed source guidance; generate continuous sound across clip boundaries'}
     Path(path).parent.mkdir(parents=True,exist_ok=True)
     Path(path).write_text(json.dumps(workflow,indent=2,ensure_ascii=False)+'\n')

@@ -45,7 +45,11 @@ UNIFIED_PROMPT_TRANSPORT = '\n\nRESPONSE TRANSPORT: Return strict JSON with a si
 MINIMAX_VIDEO_CONTINUITY = """
 TIMELINE VIDEO / EXTENSION CONTRACT: Every timeline video is a source clip occupying its exact
 start_time/end_time range, with its source trim retained. Its frames and soundtrack are timed
-AV guides. Preserve these intervals,
+AV guides through MiniMaxH3AddGuide only, not ref_video or ref_audio inputs.
+ClipN labels identify timed source clips in prose, not native <Video N> reference tags.
+Only untimed video reference slots use native <Video N> tags, numbered independently.
+When refining an older prompt, replace timeline-video reference tags with timed clip descriptions
+while preserving tags belonging to actual untimed references. Preserve these intervals,
 subject identity, pose, framing, lighting, camera trajectory, motion speed and event order.
 Describe generated material outside them as a continuous extension of the adjacent source state.
 For an opening video, continue from its last visible state and ongoing motion without replaying
@@ -389,6 +393,8 @@ def _minimax_h3_inputs(segments: list[Segment], provider: str = "gemini", refine
         if item.kind == "video" and source and source.is_file():
             value["source_duration"] = round((item.media_duration_frames or 0) / 24, 3) or None
             value["trim_start_frame"] = item.trim_start
+            value["label"] = f"Clip{video_number}"
+            value["video_conditioning_mode"] = "timed AV guide, not a native video reference"
             value["export_conditioning"] = "full-batch timed video/audio guide at this interval start"
             value["audio_timeline_start"] = start
             value["audio_continuity_requirement"] = "carry ongoing source sounds and ambience smoothly into adjacent generated material; preserve source speech timing"
@@ -496,7 +502,7 @@ def _minimax_reference_inputs(segments: list[Segment], provider: str, reference_
         item = {**record, "reference_mode_input": True}
         if "timeline_index" in record:
             media = timeline_media[record["timeline_index"]]
-            for key in ("image", "video", "video_frames", "video_analysis_mode", "video_number", "export_conditioning", "audio_timeline_start", "audio_continuity_requirement"):
+            for key in ("image", "video", "video_frames", "video_analysis_mode", "video_number", "export_conditioning", "audio_timeline_start", "audio_continuity_requirement", "video_conditioning_mode"):
                 if key in media:
                     item[key] = media[key]
         else:

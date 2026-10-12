@@ -91,7 +91,8 @@ def test_opening_switch_guides_and_media_are_wired_like_reference(media,tmp_path
         assert connection(w,579,'on_false')[0]['type']=='LoadImage'
     else:
         assert not {451,579,580,581,585} & nodes.keys()
-        video_loader=connection(w,136,'ref_videos.ref_video_0')[0]
+        video_loader=next(n for n in nodes.values() if n['type']=='VHS_LoadVideo')
+        assert not any(x['name'].startswith(('ref_videos.','ref_video_audios.')) for x in native['inputs'])
         assert video_loader['type']=='VHS_LoadVideo'
         assert not any(x['name'].startswith('ref_audios.') for x in native['inputs'])
         assert not any(n.get('title') in {'Conditioning video sample','Video opening still (fallback)'} for n in nodes.values())

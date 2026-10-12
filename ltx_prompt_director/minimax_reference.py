@@ -104,18 +104,21 @@ def reference_inventory(segments: list[Segment], references: list | None = None)
             label = f"Image{image_count}"
         elif item.kind == "video":
             video_count += 1
-            label = f"Video{video_count}"
+            label = f"Clip{video_count}"
         record = {"label": label, "name": item.name, "kind": item.kind,
                   "timeline_index": index, "start_time": start, "end_time": end,
                   "role": item.role, "prompt": item.prompt, "image_prompt": item.image_prompt}
         if item.kind == "image":
             record["checkpoint_time"] = end if item.role == "end" else start
         elif item.kind == "video":
+            record["conditioning"] = "MiniMaxH3AddGuide: frames and audio at timeline start"
             record["source_start"] = max(0, item.trim_start or 0) / 24
             record["source_end"] = record["source_start"] + item.duration
         records.append(record)
         cursor = end
     slots = reference_slots(references)
+    # Timed clips consume guide positions, not native video-reference ordinals.
+    video_count = 0
     audio_count = 0
     # Native reference ordering is images, videos with paired audio, then standalone audio.
     for slot, item in enumerate(slots):
