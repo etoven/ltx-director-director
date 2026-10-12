@@ -234,36 +234,96 @@ def export_minimax_workflow(path, segments, prompt, references, comfy_root, widt
         reachable.add(key)
         pending.extend(n['type'] for n in definitions[key]['nodes'] if n['type'] in definitions)
     w['definitions']['subgraphs']=[d for d in definitions.values() if d['id'] in reachable]
-    # Arrange the retained graph in separate media, guide, settings and sampling lanes.
-    positions={138:[-1000,0],283:[-1000,300],452:[-1000,450],
-        516:[-600,450],515:[-600,530],517:[-600,610],513:[-600,690],514:[-600,770],
-        518:[0,1700],271:[400+420*len(timed),1700],579:[0,1300],580:[0,1510],581:[400,1510],
-        136:[0,2300],282:[-700,2300],217:[-700,2380],582:[-700,2460],284:[-700,2540],
-        223:[-700,2620],224:[-700,2700],537:[-700,2780],273:[440,2300],213:[440,2380],
-        381:[900,2300],125:[1200,2300],382:[1550,2300],output['id']:[1900,2300],
-        285:[-1000,4000],207:[-600,4000],206:[-600,4080],281:[-600,4160],229:[-600,4240],228:[-600,4320],
-        143:[0,4000],144:[0,4080],226:[0,4160],142:[350,4000],238:[700,4000],
-        237:[0,4350],236:[0,4430],227:[0,4510],331:[0,4590],141:[350,4350],356:[700,4350],333:[1100,4350],334:[1100,4430]}
+    # Layout uses actual node sizes and explicit membership, never coordinate ranges.
     g.remove({116,117,140})
-    for key,pos in positions.items():
-        if key in g.nodes:g.nodes[key]['pos']=pos
     g.nodes[138]['size']=[480,260]
     g.nodes[125]['size']=[310,310]
-    for i,node in enumerate(reference_getters):node['pos']=[-360,2900+80*i]
-    # Replace sample groups, reroutes and link geometry with bounds of actual retained nodes.
-    def group(title,nodes,color):
-        if not nodes:return None
-        left=min(n['pos'][0] for n in nodes)-40;top=min(n['pos'][1] for n in nodes)-80
-        right=max(n['pos'][0]+n.get('size',[300,200])[0] for n in nodes)+40
-        bottom=max(n['pos'][1]+n.get('size',[300,200])[1] for n in nodes)+40
-        return {'title':title,'bounding':[left,top,right-left,bottom-top],'color':color,'flags':{}}
-    lanes=[('Prompt and settings',lambda n:n['pos'][0]<0 and n['pos'][1]<1000),
-           ('Reference media',lambda n:n['pos'][0]>=0 and 400<=n['pos'][1]<1100),
-           ('Conditioning frames',lambda n:1100<=n['pos'][1]<2200),
-           ('Conditioning and sampling',lambda n:2200<=n['pos'][1]<4000),
-           ('Models and sampler settings',lambda n:n['pos'][1]>=4000)]
-    w['groups']=[item for title,predicate in lanes if (item:=group(title,[n for n in g.nodes.values() if predicate(n)],'#3f789e'))]
-    for i,item in enumerate(w['groups'],1):item['id']=i
+    native['size']=[368,max(416,80+24*len(native['inputs'])+120)]
+    arranged=set()
+    sections=[]
+    def section(title):
+        nodes=[]
+        sections.append((title,nodes))
+        return nodes
+    def put(nodes,key,x,y):
+        if key not in g.nodes:return 0
+        node=g.nodes[key]
+        node['pos']=[x,y]
+        nodes.append(node);arranged.add(key)
+        return node.get('size',[300,200])[1]
+    def stack(nodes,keys,x,y,gap=16):
+        for key in keys:
+            if key in g.nodes:y+=put(nodes,key,x,y)+gap
+        return y-gap
+    settings_nodes=section('Prompt and settings')
+    y=stack(settings_nodes,[138,283],0,0)
+    put(settings_nodes,452,0,y+24)
+    stack(settings_nodes,[516,515,517,513,514],420,y+24)
+    model_nodes=section('Models and sampler settings')
+    put(model_nodes,285,0,0)
+    stack(model_nodes,[207,206,281,229,228],280,0)
+    end=stack(model_nodes,[143,144,226],560,0)
+    stack(model_nodes,[142,238],840,0)
+    second_row=max(end,max(n['pos'][1]+n['size'][1] for n in model_nodes))+32
+    stack(model_nodes,[237,236,227,331],0,second_row)
+    put(model_nodes,141,280,second_row)
+    bottom=put(model_nodes,356,560,second_row)+second_row+24
+    stack(model_nodes,[333,334],560,bottom)
+    media_nodes=section('Media inputs')
+    loaders=[n for n in g.nodes.values() if n['type'] in {'LoadImage','VHS_LoadVideo','LoadAudio'}]
+    row_y=0
+    for offset in range(0,len(loaders),4):
+        row_bottom=row_y
+        for column,loader in enumerate(loaders[offset:offset+4]):
+            x=column*340
+            bottom=row_y+put(media_nodes,loader['id'],x,row_y)
+            setters=[l[3] for l in w['links'] if l[1]==loader['id'] and g.nodes[l[3]]['type']=='SetNode']
+            if setters:bottom=stack(media_nodes,setters,x,bottom+16)
+            row_bottom=max(row_bottom,bottom)
+        row_y=row_bottom+32
+    guide_nodes=section('Conditioning frames')
+    opening_bottom=0
+    if 579 in g.nodes:
+        put(guide_nodes,579,0,0)
+        put(guide_nodes,580,310,0)
+        put(guide_nodes,581,600,0)
+        opening_bottom=max(n['size'][1] for n in guide_nodes)+24
+    chain=[518]+[item['node_id'] for item in guides]+[271]
+    for i,key in enumerate(chain):
+        put(guide_nodes,key,(i%4)*320,opening_bottom+(i//4)*120)
+    sampling_nodes=section('Conditioning and sampling')
+    getters=[282,217,582,284,223,224,537]+[n['id'] for n in reference_getters]
+    stack(sampling_nodes,getters,0,0)
+    put(sampling_nodes,136,280,0)
+    stack(sampling_nodes,[273,213],690,0)
+    sampling_y=max(n['pos'][1]+n['size'][1] for n in sampling_nodes)+32
+    put(sampling_nodes,381,0,sampling_y)
+    put(sampling_nodes,125,200,sampling_y)
+    put(sampling_nodes,382,550,sampling_y)
+    put(sampling_nodes,output['id'],750,sampling_y)
+    # Include every retained node in exactly one group, including future base additions.
+    remaining=[key for key in g.nodes if key not in arranged]
+    if remaining:
+        bottom=max(n['pos'][1]+n['size'][1] for n in sampling_nodes)+24
+        stack(sampling_nodes,remaining,0,bottom)
+    # Pack complete group rectangles into adjacent rows, leaving only a small gutter.
+    boxes=[]
+    for title,nodes in sections:
+        if not nodes:continue
+        right=max(n['pos'][0]+n['size'][0] for n in nodes)
+        bottom=max(n['pos'][1]+n['size'][1] for n in nodes)
+        boxes.append((title,nodes,right+48,bottom+72))
+    limit=max(2000,max(box[2] for box in boxes))
+    x=y=row_height=0
+    w['groups']=[]
+    for title,nodes,width,height in boxes:
+        if x and x+width>limit:
+            x=0;y+=row_height+32;row_height=0
+        for node in nodes:
+            node['pos'][0]+=x+24;node['pos'][1]+=y+48
+        w['groups'].append({'id':len(w['groups'])+1,'title':title,
+            'bounding':[x,y,width,height],'color':'#3f789e','flags':{}})
+        x+=width+32;row_height=max(row_height,height)
     w.pop('reroutes',None)
     for key in ('reroutes','linkExtensions'):w.get('extra',{}).pop(key,None)
     workflow=g.finish()
