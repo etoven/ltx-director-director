@@ -66,8 +66,6 @@ def export_minimax_workflow(path, segments, prompt, references, comfy_root, widt
     refs=reference_slots(references)
     inventory=reference_inventory(segments,refs)
     counts={kind:sum(r['kind']==kind for r in inventory) for kind in ('image','video','audio')}
-    # Timeline clips contribute their soundtrack directly to standalone ref_audio ports.
-    counts['audio'] += sum(r['kind']=='video' and 'timeline_index' in r for r in inventory)
     if counts['image']>9 or counts['video']>3 or counts['audio']>3:
         raise ValueError('This ComfyUI node supports at most 9 image inputs, 3 video inputs and 3 standalone audio inputs. Reduce that media type before exporting.')
     for r in inventory:
@@ -158,12 +156,19 @@ def export_minimax_workflow(path, segments, prompt, references, comfy_root, widt
         setter['pos']=[source['pos'][0],source['pos'][1]+source.get('size',[300,500])[1]+30+(90 if slot==2 else 0)]
         reference_getters.append(getter)
         g.connect(source,slot,setter,kind,kind);g.connect(getter,0,136,name,kind)
-    # Only still-image checkpoints need frame conditioning. Videos are native references.
+    # Expose soundtrack anchoring on the supplied timed guide subgraph.
     guide_def=copy.deepcopy(next(d for d in w['definitions']['subgraphs'] if d['id']==original[541]['type']))
     guide_def['id']=str(uuid.uuid4())
+    inner=next(n for n in guide_def['nodes'] if n['type']=='MiniMaxH3AddGuide')
+    audio_link=max(l['id'] for l in guide_def['links'])+1
+    inner['inputs'][5]['link']=audio_link
+    guide_def['inputs'].append({'id':str(uuid.uuid4()),'name':'audio','type':'AUDIO','shape':7,'linkIds':[audio_link]})
+    guide_def['links'].append({'id':audio_link,'origin_id':-10,'origin_slot':3,'target_id':inner['id'],'target_slot':5,'type':'AUDIO'})
+    guide_def['state']['lastLinkId']=max(guide_def['state']['lastLinkId'],audio_link)
     w['definitions']['subgraphs'].append(guide_def)
     image_index=video_index=audio_index=0
     loaded={}
+    media_helpers={}
     for media_index,r in enumerate(inventory):
         kind=r['kind']
         ref=refs[r['reference_slot']] if 'reference_slot' in r else None
@@ -181,25 +186,28 @@ def export_minimax_workflow(path, segments, prompt, references, comfy_root, widt
             vals=loader['widgets_values'];vals.update(video=filename,force_rate=24,custom_width=0,custom_height=0,
                 frame_load_cap=round(segment.duration*24) if segment else frame_count,skip_first_frames=segment.trim_start or 0 if segment else 0)
             vals.pop('videopreview',None);loader['widgets_values_named']=copy.deepcopy(vals)
+            reference_port(loader,0,'ref_videos.ref_video_'+str(video_index))
             if segment:
-                # Exactly the requested native hookup: no sampling or first-frame detour.
-                g.connect(loader,0,136,'ref_videos.ref_video_'+str(video_index),'IMAGE')
-                g.connect(loader,2,136,'ref_audios.ref_audio_'+str(audio_index),'AUDIO')
-                audio_index+=1
-                loader['pos']=[-1100+420*video_index,1800]
-            else:
-                reference_port(loader,0,'ref_videos.ref_video_'+str(video_index))
-                if ref.get('audio_path'):
-                    reference_port(loader,2,'ref_video_audios.ref_video_audio_'+str(video_index))
+                # The full trimmed clip and its soundtrack share the timeline start anchor.
+                loaded[r['timeline_index']]=(loader,0,(loader,2),r)
+                # Match the generation canvas for full-batch audiovisual conditioning.
+                helpers=[]
+                for source_id,name in [(223,'custom_width'),(224,'custom_height')]:
+                    getter=g.add(original[source_id])
+                    loader['inputs'].append({'name':name,'type':'INT','widget':{'name':name},'link':None})
+                    g.connect(getter,0,loader,name,'INT');helpers.append(getter['id'])
+                media_helpers[loader['id']]=helpers
+            elif ref.get('audio_path'):
+                reference_port(loader,2,'ref_video_audios.ref_video_audio_'+str(video_index))
             video_index+=1
         else:
             filename=copy_file(ref['audio_path'],Path(ref['name']).stem+'.wav')
             node={'type':'LoadAudio','pos':[x,y],'size':[300,150],'flags':{},'order':0,'mode':0,'inputs':[],
                 'outputs':[{'name':'AUDIO','type':'AUDIO','links':[]}],'properties':{'Node name for S&R':'LoadAudio'},'widgets_values':[filename]}
             loader=g.add(node,r['label']);reference_port(loader,0,'ref_audios.ref_audio_'+str(audio_index));audio_index+=1
-    # Still images retain their timed guides; timeline videos never create guides.
-    timed=[r for r in inventory if 'timeline_index' in r and r['kind']=='image']
-    opening=next((r for r in timed if abs(r.get('checkpoint_time',r['start_time']))<1e-6),None)
+    # Every visual timeline item gets a timed guide; video soundtracks anchor with the clip.
+    timed=[r for r in inventory if 'timeline_index' in r and r['kind'] in {'image','video'}]
+    opening=next((r for r in timed if r['kind']=='image' and abs(r.get('checkpoint_time',r['start_time']))<1e-6),None)
     if not opening:
         g.remove({451,579,580,581,585})
     previous=518
@@ -217,10 +225,12 @@ def export_minimax_workflow(path, segments, prompt, references, comfy_root, widt
         guide=g.add(original[541],f"Condition {r['label']} · {seconds:.3f}s",[400+420*i,1700])
         guide['type']=guide_def['id']
         guide['properties'].pop('previewExposures',None)
+        guide['inputs'].append({'name':'audio','type':'AUDIO','shape':7,'link':None})
         _set_widget(guide,seconds,'value')
         # If a checkpoint lands exactly outside the AV tensor, anchor the actual final frame.
         if round(seconds*24)>=frame_count:_set_widget(guide,(frame_count-1)/24,'value')
         g.connect(source,slot,guide,'image','IMAGE');g.connect(previous,0,guide,'positive_1','CONDITIONING')
+        if audio:g.connect(audio[0],audio[1],guide,'audio','AUDIO')
         previous=guide['id'];guides.append({'label':r['label'],'seconds':seconds,'node_id':guide['id']})
     g.connect(previous,0,271,'CONDITIONING','CONDITIONING')
     # Remove unused definitions recursively, including all old frame-guide variants.
@@ -279,6 +289,7 @@ def export_minimax_workflow(path, segments, prompt, references, comfy_root, widt
             bottom=row_y+put(media_nodes,loader['id'],x,row_y)
             setters=[l[3] for l in w['links'] if l[1]==loader['id'] and g.nodes[l[3]]['type']=='SetNode']
             if setters:bottom=stack(media_nodes,setters,x,bottom+16)
+            if media_helpers.get(loader['id']):bottom=stack(media_nodes,media_helpers[loader['id']],x,bottom+16)
             row_bottom=max(row_bottom,bottom)
         row_y=row_bottom+32
     guide_nodes=section('Conditioning frames')
@@ -289,8 +300,12 @@ def export_minimax_workflow(path, segments, prompt, references, comfy_root, widt
         put(guide_nodes,581,600,0)
         opening_bottom=max(n['size'][1] for n in guide_nodes)+24
     chain=[518]+[item['node_id'] for item in guides]+[271]
-    for i,key in enumerate(chain):
-        put(guide_nodes,key,(i%4)*320,opening_bottom+(i//4)*120)
+    row_y=opening_bottom
+    for offset in range(0,len(chain),4):
+        row_bottom=row_y
+        for column,key in enumerate(chain[offset:offset+4]):
+            row_bottom=max(row_bottom,row_y+put(guide_nodes,key,column*380,row_y))
+        row_y=row_bottom+24
     sampling_nodes=section('Conditioning and sampling')
     getters=[282,217,582,284,223,224,537]+[n['id'] for n in reference_getters]
     stack(sampling_nodes,getters,0,0)
@@ -329,7 +344,9 @@ def export_minimax_workflow(path, segments, prompt, references, comfy_root, widt
     workflow=g.finish()
     workflow['id']=str(uuid.uuid4());workflow['revision']=0
     workflow['extra']['ltxDirector']={'format':'MiniMax H3 / ComfyUI','duration_seconds':total,'fps':24,'frame_count':frame_count,'guides':guides,
-        'source_template':'Supplied final b rub workflow','asset_map':inventory}
+        'source_template':'Supplied final b rub workflow','asset_map':inventory,
+        'video_policy':'full-batch timed audiovisual guides',
+        'audio_policy':'timed source guidance; generate continuous sound across clip boundaries'}
     Path(path).parent.mkdir(parents=True,exist_ok=True)
     Path(path).write_text(json.dumps(workflow,indent=2,ensure_ascii=False)+'\n')
     return str(path)

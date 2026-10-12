@@ -93,15 +93,18 @@ def test_opening_switch_guides_and_media_are_wired_like_reference(media,tmp_path
         assert not {451,579,580,581,585} & nodes.keys()
         video_loader=connection(w,136,'ref_videos.ref_video_0')[0]
         assert video_loader['type']=='VHS_LoadVideo'
-        assert connection(w,136,'ref_audios.ref_audio_0')==(video_loader,2)
+        assert not any(x['name'].startswith('ref_audios.') for x in native['inputs'])
         assert not any(n.get('title') in {'Conditioning video sample','Video opening still (fallback)'} for n in nodes.values())
     guides=w['extra']['ltxDirector']['guides']
-    assert [x['seconds'] for x in guides]==([0,10.5] if kind=='image' else [10.5])
+    assert [x['seconds'] for x in guides]==[0,10.5]
     if kind=='image':
         assert connection(w,guides[0]['node_id'],'image')[0]['id']==581
         assert connection(w,guides[1]['node_id'],'positive_1')[0]['id']==guides[0]['node_id']
     else:
         assert connection(w,guides[0]['node_id'],'positive_1')[0]['id']==518
+        assert connection(w,guides[0]['node_id'],'image')==(video_loader,0)
+        assert connection(w,guides[0]['node_id'],'audio')==(video_loader,2)
+        assert connection(w,guides[1]['node_id'],'positive_1')[0]['id']==guides[0]['node_id']
     assert connection(w,271,'CONDITIONING')[0]['id']==guides[-1]['node_id']
     assert nodes[138]['widgets_values']==['My actual production prompt']
     for node in nodes.values():

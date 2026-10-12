@@ -42,6 +42,27 @@ def build_prompts(segments: list[Segment], provider: str, model: str, api_key: s
 UNIFIED_PROMPT_TRANSPORT = '\n\nRESPONSE TRANSPORT: Return strict JSON with a single nonempty "prompt" string containing the complete editable production prompt in the workspace format. Do not return timed_actions, segment records or a timing reconciliation plan. The timeline is authoritative; describe its existing timing without changing segment count, duration, order or identity. Prompt editing never rebuilds the timeline. This response contract supersedes older structured timed-plan instructions.'
 
 
+MINIMAX_VIDEO_CONTINUITY = """
+TIMELINE VIDEO / EXTENSION CONTRACT: Every timeline video is a source clip occupying its exact
+start_time/end_time range, with its source trim retained. Its frames and soundtrack are timed
+AV guides. Preserve these intervals,
+subject identity, pose, framing, lighting, camera trajectory, motion speed and event order.
+Describe generated material outside them as a continuous extension of the adjacent source state.
+For an opening video, continue from its last visible state and ongoing motion without replaying
+its action, restarting the scene, changing camera angle, jumping pose, or introducing a cut.
+For a middle clip, approach its first state smoothly and depart from its last state smoothly.
+Its audio guides sound at the same timeline position; it is not an untimed voice/style reference.
+Continue audible room tone, ambience, voice timbre, acoustic space and ongoing physical sounds
+across the boundary. Do not abruptly mute, restart speech, change voices, add music or invent a
+new transient at the join. Leave a natural sustained sound bed suitable for a short crossfade.
+Keep source dialogue in its original interval; do not repeat completed words in the extension.
+Use these sound requirements only when audio was actually auditioned or explicit notes supply
+it. Sampled-image providers must not claim to have heard the soundtrack. Prompt wording is
+continuity guidance, not a claim of automatic crossfading, waveform copying or pixel identity.
+This contract supersedes legacy template wording treating timeline video as untimed reference.
+"""
+
+
 def build_minimax_h3_prompt(segments: list[Segment], provider: str, model: str, api_key: str, intent: str, global_prompt: str, sfx: bool, spoken_dialog: bool, reduce_music: bool, timeout: int = 400, reference_images: list | None = None) -> str:
     """Synthesize the complete ordered timeline into one MiniMax H3 prompt."""
     if not segments:
@@ -49,6 +70,7 @@ def build_minimax_h3_prompt(segments: list[Segment], provider: str, model: str, 
     inputs = _minimax_frames_inputs(segments, provider, reference_images)
     rules = _minimax_h3_rules(segments, intent, global_prompt, sfx, spoken_dialog, reduce_music, reference_images)
     rules += "\nCURRENT MEDIA CONTRACT: The asset map may include uploaded reference audio and video soundtracks. Audio-only video samples condition sound only. Follow the supplied labels and observation availability; never invent unheard audio or visual observations. This overrides legacy template text saying audio references are unavailable."
+    rules += MINIMAX_VIDEO_CONTINUITY if any(s.kind == "video" for s in segments) else ""
     rules += UNIFIED_PROMPT_TRANSPORT
     raw = _provider_raw(inputs, provider, model, api_key, rules, timeout)
     return _extract_minimax_h3_prompt(raw, segments)
@@ -61,6 +83,7 @@ def build_minimax_h3_reference_prompt(segments: list[Segment], provider: str, mo
     inputs = _minimax_reference_inputs(segments, provider, reference_images)
     rules = _minimax_h3_reference_rules(segments, intent, global_prompt, sfx, spoken_dialog, reduce_music, reference_images)
     rules += "\nCURRENT MEDIA CONTRACT: The asset map may include uploaded reference audio and video soundtracks. Audio-only video samples condition sound only. Follow the supplied labels and observation availability; never invent unheard audio or visual observations. This overrides legacy template text saying audio references are unavailable."
+    rules += MINIMAX_VIDEO_CONTINUITY if any(s.kind == "video" for s in segments) else ""
     rules += UNIFIED_PROMPT_TRANSPORT
     raw = _provider_raw(inputs, provider, model, api_key, rules, timeout)
     return _extract_minimax_h3_prompt(raw, segments)
@@ -95,6 +118,7 @@ def refine_minimax_h3_prompt(segments: list[Segment], provider: str, model: str,
         'refinement_instructions': refinement_instructions.strip() or 'Improve clarity, motion continuity, causal flow, and production readiness without changing the creative intent.',
     })
     rules += "\nCURRENT MEDIA CONTRACT: The asset map may include uploaded reference audio and video soundtracks. Audio-only video samples condition sound only. Follow the supplied labels and observation availability; never invent unheard audio or visual observations. This overrides legacy template text saying audio references are unavailable."
+    rules += MINIMAX_VIDEO_CONTINUITY if any(s.kind == "video" for s in segments) else ""
     rules += UNIFIED_PROMPT_TRANSPORT
     raw = _provider_raw(inputs, provider, model, api_key, rules, timeout)
     return _extract_minimax_h3_prompt(raw, segments)
@@ -113,6 +137,7 @@ def refine_minimax_h3_reference_prompt(segments: list[Segment], provider: str, m
         'refinement_instructions': refinement_instructions.strip() or 'Improve reference clarity, action continuity, camera direction, and production detail without changing creative intent.',
     })
     rules += "\nCURRENT MEDIA CONTRACT: The asset map may include uploaded reference audio and video soundtracks. Audio-only video samples condition sound only. Follow the supplied labels and observation availability; never invent unheard audio or visual observations. This overrides legacy template text saying audio references are unavailable."
+    rules += MINIMAX_VIDEO_CONTINUITY if any(s.kind == "video" for s in segments) else ""
     rules += UNIFIED_PROMPT_TRANSPORT
     raw = _provider_raw(inputs, provider, model, api_key, rules, timeout)
     return _extract_minimax_h3_prompt(raw, segments)
@@ -364,6 +389,9 @@ def _minimax_h3_inputs(segments: list[Segment], provider: str = "gemini", refine
         if item.kind == "video" and source and source.is_file():
             value["source_duration"] = round((item.media_duration_frames or 0) / 24, 3) or None
             value["trim_start_frame"] = item.trim_start
+            value["export_conditioning"] = "full-batch timed video/audio guide at this interval start"
+            value["audio_timeline_start"] = start
+            value["audio_continuity_requirement"] = "carry ongoing source sounds and ambience smoothly into adjacent generated material; preserve source speech timing"
             if frame_checkpoints:
                 source_start = max(0.0, float(item.trim_start or 0) / 24)
                 value["continuity_function"] += (
@@ -372,10 +400,10 @@ def _minimax_h3_inputs(segments: list[Segment], provider: str = "gemini", refine
                 )
             if provider != "openai" and source.stat().st_size <= MAX_INLINE_VIDEO_BYTES:
                 value["video"] = data_url(str(source))
-                value["video_analysis_mode"] = "full source video"
+                value["video_analysis_mode"] = "full source video including soundtrack; use only the timeline trim range"
             else:
                 value["video_frames"] = video_storyboard_data_urls(str(source))
-                value["video_analysis_mode"] = "timestamped samples across the full source video"
+                value["video_analysis_mode"] = "timestamped visual samples; soundtrack not auditioned; use explicit audio notes only"
         if item.kind == "image" and item.media_path:
             value["image"] = data_url(materialize_source(item), max_edge=512)
         elif item.kind == "video" and not value.get("video") and not value.get("video_frames") and item.preview_path:
@@ -468,7 +496,7 @@ def _minimax_reference_inputs(segments: list[Segment], provider: str, reference_
         item = {**record, "reference_mode_input": True}
         if "timeline_index" in record:
             media = timeline_media[record["timeline_index"]]
-            for key in ("image", "video", "video_frames", "video_analysis_mode", "video_number"):
+            for key in ("image", "video", "video_frames", "video_analysis_mode", "video_number", "export_conditioning", "audio_timeline_start", "audio_continuity_requirement"):
                 if key in media:
                     item[key] = media[key]
         else:
