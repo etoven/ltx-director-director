@@ -38,7 +38,7 @@ Video and audio originals are copied into Director’s managed media folder. The
 
 Choose **Export ComfyUI** in the top toolbar, marked with Comfy’s official logo. The exporter adapts the supplied MiniMax graph, fills its prompt and duration, and applies the pictured 16:9 / 0.5 MP / multiple 32 / 20-step defaults, and copies referenced media into **ComfyUI/input** using the existing ComfyUI root setting. Exported `Load Image`, `Load Video` and `Load Audio` fields use those relative input paths. Repeated exports avoid overwriting prior input files.
 
-At zero seconds, an opening image uses the still-image branch of the supplied first-frame switch; timeline videos feed their full frame batch and soundtrack into a timed audiovisual guide at their starting position. Later image checkpoints are chained at their cumulative timeline times. Two end images lasting 3.0 and 7.5 seconds anchor at **3.0** and **10.5** seconds. Audio-only references go to standalone audio inputs; untimed video-reference soundtracks go to paired video-audio inputs.
+All timeline images connect directly to their timed condition nodes, including the image at zero seconds; timeline videos feed their full frame batch and soundtrack into a timed audiovisual guide at their starting position. Later image checkpoints are chained at their cumulative timeline times. Two end images lasting 3.0 and 7.5 seconds anchor at **3.0** and **10.5** seconds. Audio-only references go to standalone audio inputs; untimed video-reference soundtracks go to paired video-audio inputs.
 
 The graph retains the supplied model, sampler and decoder subgraphs. ComfyUI needs the same native MiniMax and custom nodes used by that base workflow. The export checks the native node’s media limits: 9 image inputs, 3 video inputs and 3 standalone audio inputs. Director still offers four mixed reference slots; timed conditioning assets are additional inputs.
 
@@ -78,3 +78,5 @@ The final **Video Combine** node saves a 24 fps WebM with YUV420p, CRF 15, metad
 Timeline videos connect **Load Video → IMAGE** and **Load Video → audio** to the timed condition node at the clip’s start. The full loaded batch supplies frame conditioning; its audio shares the same time anchor. Opening still fallbacks and tail-only video samplers are omitted. Still-image checkpoints retain their conditioning guides. Guided output may differ from the source; no automatic audio crossfade is applied.
 
 Timeline video segments use **MiniMaxH3AddGuide only**, with frames and audio at the same start index. They do not consume native video-reference inputs. Prompt generation and refinement use the original a32 rules and asset labels.
+
+Timeline images and videos are conditioning media only. Native reference inputs are populated exclusively by the four reference slots. The Lazy Switch and first-frame Set/Get detour are removed from exports.

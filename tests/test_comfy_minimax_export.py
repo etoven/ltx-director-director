@@ -75,7 +75,7 @@ def test_four_references_and_audio_only_provider_transport(media):
 
 
 @pytest.mark.parametrize('kind',['image','video'])
-def test_opening_switch_guides_and_media_are_wired_like_reference(media,tmp_path,kind):
+def test_timeline_media_only_condition_and_reference_slots_stay_separate(media,tmp_path,kind):
     image,audio,video=media
     first=video if kind=='video' else image
     segments=[Segment(first.name,str(first),str(image),kind,'start','Opening',3),
@@ -85,12 +85,10 @@ def test_opening_switch_guides_and_media_are_wired_like_reference(media,tmp_path
     export_minimax_workflow(path,segments,'My actual production prompt',refs,tmp_path/'comfy',896,512)
     w=json.loads(path.read_text());nodes=validate_graph(w)
     native=nodes[136]
-    assert len([x for x in native['inputs'] if x['name'].startswith('ref_images.')])==(5 if kind=='video' else 6)
-    if kind=='image':
-        assert nodes[579]['widgets_values']==[False]
-        assert connection(w,579,'on_false')[0]['type']=='LoadImage'
-    else:
-        assert not {451,579,580,581,585} & nodes.keys()
+    assert len([x for x in native['inputs'] if x['name'].startswith('ref_images.')])==4
+    assert not {451,579,580,581,585} & nodes.keys()
+    assert not any(n['type']=='LazySwitchKJ' for n in nodes.values())
+    if kind=='video':
         video_loader=next(n for n in nodes.values() if n['type']=='VHS_LoadVideo')
         assert not any(x['name'].startswith(('ref_videos.','ref_video_audios.')) for x in native['inputs'])
         assert video_loader['type']=='VHS_LoadVideo'
@@ -99,7 +97,9 @@ def test_opening_switch_guides_and_media_are_wired_like_reference(media,tmp_path
     guides=w['extra']['ltxDirector']['guides']
     assert [x['seconds'] for x in guides]==[0,10.5]
     if kind=='image':
-        assert connection(w,guides[0]['node_id'],'image')[0]['id']==581
+        opening_loader=connection(w,guides[0]['node_id'],'image')[0]
+        assert opening_loader['type']=='LoadImage'
+        assert not any(l[1]==opening_loader['id'] and nodes[l[3]]['type']=='SetNode' for l in w['links'])
         assert connection(w,guides[1]['node_id'],'positive_1')[0]['id']==guides[0]['node_id']
     else:
         assert connection(w,guides[0]['node_id'],'positive_1')[0]['id']==518

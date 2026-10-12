@@ -65,8 +65,8 @@ def export_minimax_workflow(path, segments, prompt, references, comfy_root, widt
     if not prompt.strip():raise ValueError('Write or generate the MiniMax production prompt before exporting.')
     refs=reference_slots(references)
     inventory=reference_inventory(segments,refs)
-    counts={kind:sum(r['kind']==kind for r in inventory) for kind in ('image','video','audio')}
-    counts['video']=sum(r['kind']=='video' and 'reference_slot' in r for r in inventory)
+    counts={kind:sum(r['kind']==kind and 'reference_slot' in r for r in inventory)
+            for kind in ('image','video','audio')}
     if counts['image']>9 or counts['video']>3 or counts['audio']>3:
         raise ValueError('This ComfyUI node supports at most 9 image inputs, 3 video inputs and 3 standalone audio inputs. Reduce that media type before exporting.')
     for r in inventory:
@@ -93,7 +93,7 @@ def export_minimax_workflow(path, segments, prompt, references, comfy_root, widt
     original={n['id']:copy.deepcopy(n) for n in w['nodes']}
     guide_types={d['id'] for d in w['definitions']['subgraphs'] if d['name']=='MinMaxCondFrame'}
     g=Graph(w)
-    g.remove({n['id'] for n in w['nodes'] if n['type'] in {'LoadImage','VHS_LoadVideo'}|guide_types or n['id'] in {451,596,597,598,599,600,587}})
+    g.remove({n['id'] for n in w['nodes'] if n['type'] in {'LoadImage','VHS_LoadVideo'}|guide_types or n['id'] in {451,579,580,581,585,596,597,598,599,600,587}})
     # Rebuild dynamic ports while preserving model/latent/sampling subgraphs.
     native=g.nodes[136]
     existing={x['name']:copy.deepcopy(x) for x in native['inputs']}
@@ -179,7 +179,8 @@ def export_minimax_workflow(path, segments, prompt, references, comfy_root, widt
         if kind=='image':
             filename=image_file(ref['image'],ref['name']) if ref else copy_file(materialize_source(segment),segment.name)
             loader=g.add(original[338],r['label'],[x,y]);_set_widget(loader,filename,'image')
-            reference_port(loader,0,'ref_images.ref_image_'+str(image_index));image_index+=1
+            if ref is not None:
+                reference_port(loader,0,'ref_images.ref_image_'+str(image_index));image_index+=1
             loaded[r.get('timeline_index',f"ref{r.get('reference_slot')}")]=(loader,0,None,r)
         elif kind=='video':
             filename=copy_file(ref['path'] if ref else materialize_source(segment),r['name'])
@@ -209,21 +210,11 @@ def export_minimax_workflow(path, segments, prompt, references, comfy_root, widt
             loader=g.add(node,r['label']);reference_port(loader,0,'ref_audios.ref_audio_'+str(audio_index));audio_index+=1
     # Every visual timeline item gets a timed guide; video soundtracks anchor with the clip.
     timed=[r for r in inventory if 'timeline_index' in r and r['kind'] in {'image','video'}]
-    opening=next((r for r in timed if r['kind']=='image' and abs(r.get('checkpoint_time',r['start_time']))<1e-6),None)
-    if not opening:
-        g.remove({451,579,580,581,585})
     previous=518
     guides=[]
     for i,r in enumerate(timed):
         source,slot,audio,_=loaded[r['timeline_index']]
         seconds=r.get('checkpoint_time',r['start_time'])
-        if r is opening:
-            g.remove({451})
-            switch=g.nodes[579]
-            _set_widget(switch,False,'switch')
-            g.connect(source,slot,579,'on_true','IMAGE')
-            g.connect(source,slot,579,'on_false','IMAGE')
-            source=g.nodes[581];slot=0
         guide=g.add(original[541],f"Condition {r['label']} · {seconds:.3f}s",[400+420*i,1700])
         guide['type']=guide_def['id']
         guide['properties'].pop('previewExposures',None)
@@ -296,14 +287,8 @@ def export_minimax_workflow(path, segments, prompt, references, comfy_root, widt
             row_bottom=max(row_bottom,bottom)
         row_y=row_bottom+32
     guide_nodes=section('Conditioning frames')
-    opening_bottom=0
-    if 579 in g.nodes:
-        put(guide_nodes,579,0,0)
-        put(guide_nodes,580,310,0)
-        put(guide_nodes,581,600,0)
-        opening_bottom=max(n['size'][1] for n in guide_nodes)+24
     chain=[518]+[item['node_id'] for item in guides]+[271]
-    row_y=opening_bottom
+    row_y=0
     for offset in range(0,len(chain),4):
         row_bottom=row_y
         for column,key in enumerate(chain[offset:offset+4]):
