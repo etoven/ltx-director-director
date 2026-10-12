@@ -101,13 +101,13 @@ class MiniMaxReferenceTests(unittest.TestCase):
         self.add_reference(window)
         state = window.capture_workspace_state()
         window.minimax_panel.reference_targets[0].clear()
-        self.assertEqual(window.minimax_reference_images, [None, None])
+        self.assertEqual(window.minimax_reference_images, [None] * 4)
         window.restore_workspace_state(state)
         self.assertIsNotNone(window.minimax_reference_images[0])
         payload = window.project_payload()
         del payload["minimaxH3"]["referenceImages"]
         window.load_project_payload(payload)
-        self.assertEqual(window.minimax_reference_images, [None, None])
+        self.assertEqual(window.minimax_reference_images, [None] * 4)
 
     def test_large_image_is_preserved_in_project_and_resized_only_for_provider(self):
         window = self.make_window()
@@ -131,7 +131,7 @@ class MiniMaxReferenceTests(unittest.TestCase):
             path.write_text(json.dumps({"timeline": {"segments": [{"type": "text", "start": 0, "length": 120, "prompt": "New action"}]}}))
             with patch.object(window, "save_library_project"):
                 window.import_ltx(path=str(path))
-        self.assertEqual(window.minimax_reference_images, [None, None])
+        self.assertEqual(window.minimax_reference_images, [None] * 4)
 
     def test_generation_and_refinement_send_the_untimed_image_with_its_role(self):
         window = self.make_window()
@@ -191,11 +191,11 @@ class MiniMaxReferenceTests(unittest.TestCase):
         with patch.object(window, 'ai_credentials', return_value=('gemini', 'test', 'unused')), patch.object(window, 'start_ai_worker') as worker:
             window.generate_minimax_prompt_frames()
             self.assertIs(worker.call_args.args[0], ai.build_minimax_h3_prompt)
-            self.assertEqual(worker.call_args.args[1][-1], [first, second])
+            self.assertEqual(worker.call_args.args[1][-1], [first, second, None, None])
             window.minimax_panel.editor.setPlainText('[FRAME USE] Edited.')
             window.refine_minimax_prompt()
             self.assertIs(worker.call_args.args[0], ai.refine_minimax_h3_prompt)
-            self.assertEqual(worker.call_args.args[1][-1], [first, second])
+            self.assertEqual(worker.call_args.args[1][-1], [first, second, None, None])
 
     def test_reference_edits_invalidate_cache_and_reject_stale_worker_result(self):
         window = self.make_window()

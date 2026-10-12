@@ -17,6 +17,9 @@ REFERENCE_ROLES = {
     "style": "Visual style",
     "object": "Object / prop",
     "composition": "Composition",
+    "voice": "Voice / speaker",
+    "sound": "Sound / ambience",
+    "motion": "Motion / camera",
 }
 WORKFLOW_NAMES = {
     "t2v": "Text to video (T2V)",
@@ -39,17 +42,26 @@ WORKFLOW_DIRECTIONS = {
 
 
 def reference_slots(value: object) -> list[dict | None]:
-    """Copy the two portable image slots; old projects default to empty slots."""
-    result: list[dict | None] = [None, None]
-    for index, item in enumerate(value[:2] if isinstance(value, list) else []):
-        if not isinstance(item, dict) or not str(item.get("image", "")).startswith("data:image/"):
+    """Normalize four mixed slots; old image-only projects remain portable."""
+    result = [None] * 4
+    for index, item in enumerate(value[:4] if isinstance(value, list) else []):
+        if not isinstance(item, dict):
             continue
-        result[index] = {
-            "name": str(item.get("name") or f"Reference {index + 1}"),
-            "image": item["image"],
-            "role": item.get("role") if item.get("role") in REFERENCE_ROLES else "identity",
-            "notes": str(item.get("notes", "")),
-        }
+        kind = item.get('kind', 'image')
+        if kind not in {'image','video','audio'}:
+            continue
+        if kind == 'image' and not str(item.get('image','')).startswith('data:image/'):
+            continue
+        if kind != 'image' and not item.get('path'):
+            continue
+        result[index] = {'name':str(item.get('name') or f'Reference {index+1}'),
+            'role':item.get('role') if item.get('role') in REFERENCE_ROLES else 'identity',
+            'notes':str(item.get('notes',''))}
+        for key in ('kind','path','image','audio_path','frame_count','archiveMedia','archiveAudio'):
+            if key in item:
+                result[index][key] = item[key]
+        if kind == 'video':
+            result[index]['audio_only'] = bool(item.get('audio_only',False))
     return result
 
 
@@ -103,13 +115,35 @@ def reference_inventory(segments: list[Segment], references: list | None = None)
             record["source_end"] = record["source_start"] + item.duration
         records.append(record)
         cursor = end
-    for slot, item in enumerate(reference_slots(references)):
-        if item:
+    slots = reference_slots(references)
+    audio_count = 0
+    # Native reference ordering is images, videos with paired audio, then standalone audio.
+    for slot, item in enumerate(slots):
+        if not item:
+            continue
+        kind = item.get('kind','image')
+        effective = 'audio' if kind == 'video' and item.get('audio_only') else kind
+        if effective == 'image':
             image_count += 1
-            records.append({"label": f"Image{image_count}", "name": item["name"],
-                            "kind": "image", "reference_slot": slot, "role": item["role"],
-                            "notes": item["notes"]})
+            label = f'Image{image_count}'
+        elif effective == 'video':
+            video_count += 1
+            label = f'Video{video_count}'
+        else:
+            label = None
+        record = {'label':label,'name':item['name'],'kind':effective,'source_kind':kind,
+                  'reference_slot':slot,'role':item['role'],'notes':item['notes'],
+                  'audio_only':bool(item.get('audio_only'))}
+        if effective == 'video' and item.get('audio_path'):
+            audio_count += 1
+            record['audio_label'] = f'Audio{audio_count}'
+        records.append(record)
+    for record in records:
+        if record['kind'] == 'audio':
+            audio_count += 1
+            record['label'] = f'Audio{audio_count}'
     return records
+
 
 
 def reference_rules(segments: list[Segment], intent: str, global_prompt: str,

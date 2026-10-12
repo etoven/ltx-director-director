@@ -6,13 +6,17 @@ Start with an image, a video clip or a written beat. Arrange the sequence, descr
 
 ![A complete MiniMax plan in the Aurora workspace](docs/images/ltx-director-director-overview.png)
 
-*The examples throughout this guide use the current 1.13.0a31 native interface with a locally authored Aurora demonstration project.*
+*The examples throughout this guide use the current 1.13.0a32 native interface with a locally authored Aurora demonstration project.*
 
 ## Refine an existing MiniMax prompt
 
 Choose **MiniMax · Prompt Refinement · Annotations Only** for a prompt-only workspace. Paste your text, use `/` to insert editable refinement and constraint notes, and choose **Refine Prompt**. The model receives only that text and its annotations. You can save the draft as a project and copy the result without creating timeline segments or importing media.
 
 ![A full-size annotated MiniMax prompt editor](docs/images/minimax-prompt-refinement.png)
+
+## Take your MiniMax plan into ComfyUI
+
+Add up to four mixed references through **Reference media**. Video samples offer **Use ref audio only**, and standalone audio files are supported. Choose the branded **Export ComfyUI** action to create the graph from the supplied base workflow and copy its full-resolution media to the configured ComfyUI input folder. Opening media and later conditioning frames are connected using the timeline’s cumulative checkpoint values.
 
 ## Your first sequence
 

@@ -39,6 +39,7 @@ from .minimax_reference_widgets import MiniMaxReferenceSlot
 from .generic_ai import build_generic_prompt, refine_generic_prompt, build_generic_segments, refine_generic_segment
 from .downloads import DownloadTray
 from .catalog import MediaCatalog
+from .comfy_export import export_minimax_workflow
 from .media_labels import add_thumbnail_labels
 from .workspaces import is_obsolete_stock_definition, WorkspaceStore
 from .workspace_editor import WorkspaceEditor
@@ -2675,22 +2676,26 @@ class MiniMaxPromptPanel(QFrame):
         self.clear_message()
 
         # Untimed project references can accompany either MiniMax workflow.
-        self.reference_dock = ReferenceImageDock("REFERENCE IMAGES", owner)
+        self.reference_dock = ReferenceImageDock("REFERENCE MEDIA", owner)
         self.reference_dock.setObjectName("minimaxReferenceDock")
+        self.reference_dock.setMinimumWidth(380)
         self.reference_dock.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea)
         self.reference_dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetClosable | QDockWidget.DockWidgetFeature.DockWidgetMovable)
         content = QWidget()
         refs_layout = QVBoxLayout(content)
         self.reference_targets = []
-        for index in range(2):
-            target = MiniMaxReferenceSlot(index + 1)
+        for index in range(4):
+            target = MiniMaxReferenceSlot(index + 1, owner)
             target.changed.connect(lambda value, slot=index: owner.set_minimax_reference_image(slot, value))
             target.error.connect(lambda message: self.show_message(message, "warning"))
             target.export_requested.connect(lambda slot=index: owner.export_reference_image(slot))
             refs_layout.addWidget(target)
             self.reference_targets.append(target)
         refs_layout.addStretch()
-        self.reference_dock.setWidget(content)
+        self.reference_scroll = QScrollArea()
+        self.reference_scroll.setWidgetResizable(True)
+        self.reference_scroll.setWidget(content)
+        self.reference_dock.setWidget(self.reference_scroll)
         owner.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.reference_dock)
         self.reference_dock.hide()
         self.reference_dock.closed_by_user.connect(lambda: owner.set_reference_panel_open(False))
@@ -2721,7 +2726,7 @@ class MiniMaxPromptPanel(QFrame):
             for item in inventory if item["label"]
         ))
         if update_images:
-            labels = {item["reference_slot"]: item["label"] for item in inventory if "reference_slot" in item}
+            labels = {item["reference_slot"]: item["label"] + (" / " + item["audio_label"] if item.get("audio_label") else "") for item in inventory if "reference_slot" in item}
             for index, target in enumerate(self.reference_targets):
                 target.set_value(refs[index], labels.get(index))
 
@@ -2782,7 +2787,7 @@ class MainWindow(QMainWindow):
         self.minimax_prompt_cache_key = ""
         self.minimax_prompt_updated_at = ""
         self.minimax_prompt_mode = "frames"
-        self.minimax_reference_images = [None, None]
+        self.minimax_reference_images = [None] * 4
         self.minimax_panel: MiniMaxPromptPanel | None = None
         self.workspace_store = WorkspaceStore()
         self.workspace_definitions = self.workspace_store.load()
@@ -2918,6 +2923,12 @@ class MainWindow(QMainWindow):
                 elif label == "Delete selected":
                     self.delete_segment_action = action
                 toolbar.addAction(action)
+            if group_index == 1:
+                self.comfy_export_action = QAction(QIcon(str(files('ltx_prompt_director').joinpath('assets/comfyui-logo.svg'))), "Export ComfyUI", self)
+                self.comfy_export_action.setToolTip("Export a MiniMax ComfyUI workflow and copy its media to the configured ComfyUI input folder")
+                self.comfy_export_action.triggered.connect(self.export_comfy_workflow)
+                toolbar.addAction(self.comfy_export_action)
+                toolbar.widgetForAction(self.comfy_export_action).setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
             if group_index < len(action_groups) - 1:
                 toolbar.addSeparator()
         spacer = QWidget()
@@ -2975,7 +2986,7 @@ class MainWindow(QMainWindow):
         self.workflow_label.setObjectName("muted")
         workflow_row.addWidget(self.workflow_label)
         workflow_row.addStretch()
-        self.references_button = QPushButton("Reference images")
+        self.references_button = QPushButton("Reference media")
         self.references_button.clicked.connect(self.show_reference_images)
         workflow_row.addWidget(self.references_button)
         outer.addLayout(workflow_row)
@@ -4826,7 +4837,7 @@ class MainWindow(QMainWindow):
         self.minimax_prompt_cache_key = ""
         self.minimax_prompt_updated_at = ""
         self.minimax_prompt_mode = "frames"
-        self.minimax_reference_images = [None, None]
+        self.minimax_reference_images = [None] * 4
         self.minimax_drafts = {}
         self.project_type = "ltx" if "ltx" in self.workspace_definitions else next(iter(self.workspace_definitions), "")
         self.workspace_revision += 1
@@ -5943,6 +5954,7 @@ class MainWindow(QMainWindow):
         self.refine_timing_button.setVisible(not prompt_only)
         self.magic_button.setText("✦ Magic Build")
         self.magic_button.setToolTip("Build all segment prompts from the timeline")
+        self.comfy_export_action.setVisible(self.workspace_engine in {"minimax_frames","minimax_references","minimax_prompt"})
         self.workflow_export_action.setVisible(ltx)
         self.timeline_import_action.setVisible(not prompt_only)
         self.delete_segment_action.setVisible(not prompt_only)
@@ -5984,7 +5996,7 @@ class MainWindow(QMainWindow):
             return
         inventory = reference_inventory(self.segments, self.active_reference_images())
         timed_images = [r for r in inventory if r['kind'] == 'image' and 'checkpoint_time' in r]
-        videos = [r for r in inventory if r['kind'] == 'video']
+        videos = [r for r in inventory if r['kind'] == 'video' and 'timeline_index' in r]
         total = sum(segment.duration for segment in self.segments)
         mode = ('V2V' if videos else 'T2V' if not timed_images else
                 'L2V' if len(timed_images) == 1 and timed_images[0]['role'] == 'end' else
@@ -6011,7 +6023,7 @@ class MainWindow(QMainWindow):
                 preview = QPixmap(segment.preview_path)
             else:
                 reference = reference_slots(self.minimax_reference_images)[record['reference_slot']]
-                preview = pixmap_from_data_url(reference['image'])
+                preview = pixmap_from_data_url(reference['image']) if reference.get('image') else QPixmap()
             if not preview.isNull():
                 thumbnail.setPixmap(preview.scaled(thumbnail.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
             else:
@@ -6026,7 +6038,7 @@ class MainWindow(QMainWindow):
                     fix = 'Move opening to 0.00s'
                 if mode in {'L2V', 'FL2V'} and record is timed_images[-1] and abs(time - total) > .5 / FPS:
                     fix = f'Move ending to {total:.2f}s'
-            elif record['kind'] == 'video':
+            elif record['kind'] == 'video' and 'timeline_index' in record:
                 detail = f"Source {record['source_start']:.2f}–{record['source_end']:.2f}s"
             else:
                 detail = f"{record['role'].title()} · untimed"
@@ -6181,7 +6193,7 @@ class MainWindow(QMainWindow):
     def active_reference_images(self) -> list:
         options = self.workspace_definition.get("references", {})
         if not options.get("enabled"):
-            return [None, None]
+            return [None] * 4
         count = options.get("untimed_slots", 0)
         kinds = options.get("kinds", [])
         return [value if index < count and value and value.get("role", "identity") in kinds else None
@@ -6192,6 +6204,12 @@ class MainWindow(QMainWindow):
         if not 0 <= slot < len(references) or not references[slot]:
             return
         reference = references[slot]
+        if reference.get('kind') in {'video','audio'}:
+            source = Path(reference['path'])
+            target = self.next_export_path(reference['name'])
+            self.start_disk_job(shutil.copy2,(str(source),str(target)),lambda _result:self.record_export(target),
+                                lambda message:self.export_failed(target,message),serialized=True)
+            return
         image = str(reference.get("image", ""))
         if not image:
             return
@@ -6208,7 +6226,7 @@ class MainWindow(QMainWindow):
             return
         refs = reference_slots(self.minimax_reference_images)
         refs[slot] = dict(value) if value else None
-        image_changed = (self.minimax_reference_images[slot] or {}).get("image") != (value or {}).get("image")
+        image_changed = (self.minimax_reference_images[slot] or {}) != (value or {})
         self.minimax_reference_images = reference_slots(refs)
         self.minimax_prompt_cache_key = ""
         self.mark_dirty()
@@ -6561,6 +6579,21 @@ class MainWindow(QMainWindow):
                             lambda _result: self.record_export(path),
                             lambda message: self.export_failed(path, message), serialized=True)
 
+    def export_comfy_workflow(self) -> None:
+        self.minimax_editor_changed()
+        if not self.minimax_prompt_text.strip():
+            self.minimax_panel.show_message("Write or generate a MiniMax prompt before exporting its ComfyUI workflow.", "warning")
+            return
+        comfy_root = self.resolve_comfy_root()
+        if comfy_root is None:
+            return
+        path = str(self.next_export_path(f"{self.current_project_name}-ComfyUI.json"))
+        self.statusBar().showMessage("Exporting MiniMax ComfyUI workflow and copying input media…")
+        self.start_disk_job(export_minimax_workflow,
+            (path, copy.deepcopy(self.segments) if not self.prompt_only_workspace else [], self.minimax_prompt_text,
+             copy.deepcopy(self.active_reference_images()), comfy_root, self.output_width.value(), self.output_height.value()),
+            lambda _result:self.record_export(path), lambda message:self.export_failed(path,message), serialized=True)
+
     def resolve_comfy_root(self) -> Path | None:
         configured = str(self.settings.value("comfy_root_dir", "") or "").strip()
         configured_path = Path(configured).expanduser() if configured else None
@@ -6616,7 +6649,7 @@ class MainWindow(QMainWindow):
             if not loaded:
                 raise ValueError("No supported embedded image, video, or text segments were found.")
             self.segments = loaded
-            self.minimax_reference_images = [None, None]
+            self.minimax_reference_images = [None] * 4
             self.minimax_prompt_text = ""
             self.minimax_refinement_instructions = ""
             self.minimax_prompt_cache_key = ""

@@ -46,7 +46,7 @@ class WorkspaceEditor(QWidget):
         self.kinds = QLineEdit()
         self.kinds.setToolTip("Comma-separated types: " + ", ".join(sorted(KINDS)))
         self.slots = QSpinBox()
-        self.slots.setRange(0, 2)
+        self.slots.setRange(0, 4)
         self.variables = QLabel()
         self.variables.setWordWrap(True)
         form.addRow("Template fields", self.variables)
@@ -57,7 +57,7 @@ class WorkspaceEditor(QWidget):
         self.refine.setAcceptRichText(False)
         for title, control in (("ID", self.identifier), ("Name", self.name), ("Generation engine", self.engine),
                                ("Prompt layout", self.mode), ("", self.global_prompt), ("", self.audio),
-                               ("", self.references), ("Reference kinds", self.kinds), ("Untimed image slots", self.slots),
+                               ("", self.references), ("Reference kinds", self.kinds), ("Untimed media slots", self.slots),
                                ("Generation instructions", self.generate), ("Refinement instructions", self.refine)):
             form.addRow(title, control)
         body.addLayout(form, 1)

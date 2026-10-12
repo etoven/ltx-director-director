@@ -48,6 +48,7 @@ def build_minimax_h3_prompt(segments: list[Segment], provider: str, model: str, 
         raise ValueError("Add at least one timeline item before exporting a MiniMax H3 prompt.")
     inputs = _minimax_frames_inputs(segments, provider, reference_images)
     rules = _minimax_h3_rules(segments, intent, global_prompt, sfx, spoken_dialog, reduce_music, reference_images)
+    rules += "\nCURRENT MEDIA CONTRACT: The asset map may include uploaded reference audio and video soundtracks. Audio-only video samples condition sound only. Follow the supplied labels and observation availability; never invent unheard audio or visual observations. This overrides legacy template text saying audio references are unavailable."
     rules += UNIFIED_PROMPT_TRANSPORT
     raw = _provider_raw(inputs, provider, model, api_key, rules, timeout)
     return _extract_minimax_h3_prompt(raw, segments)
@@ -59,6 +60,7 @@ def build_minimax_h3_reference_prompt(segments: list[Segment], provider: str, mo
         raise ValueError("Add at least one timeline item before generating a MiniMax H3 reference prompt.")
     inputs = _minimax_reference_inputs(segments, provider, reference_images)
     rules = _minimax_h3_reference_rules(segments, intent, global_prompt, sfx, spoken_dialog, reduce_music, reference_images)
+    rules += "\nCURRENT MEDIA CONTRACT: The asset map may include uploaded reference audio and video soundtracks. Audio-only video samples condition sound only. Follow the supplied labels and observation availability; never invent unheard audio or visual observations. This overrides legacy template text saying audio references are unavailable."
     rules += UNIFIED_PROMPT_TRANSPORT
     raw = _provider_raw(inputs, provider, model, api_key, rules, timeout)
     return _extract_minimax_h3_prompt(raw, segments)
@@ -92,6 +94,7 @@ def refine_minimax_h3_prompt(segments: list[Segment], provider: str, model: str,
         'current_prompt': current_prompt.strip(),
         'refinement_instructions': refinement_instructions.strip() or 'Improve clarity, motion continuity, causal flow, and production readiness without changing the creative intent.',
     })
+    rules += "\nCURRENT MEDIA CONTRACT: The asset map may include uploaded reference audio and video soundtracks. Audio-only video samples condition sound only. Follow the supplied labels and observation availability; never invent unheard audio or visual observations. This overrides legacy template text saying audio references are unavailable."
     rules += UNIFIED_PROMPT_TRANSPORT
     raw = _provider_raw(inputs, provider, model, api_key, rules, timeout)
     return _extract_minimax_h3_prompt(raw, segments)
@@ -109,6 +112,7 @@ def refine_minimax_h3_reference_prompt(segments: list[Segment], provider: str, m
         'current_prompt': current_prompt.strip(),
         'refinement_instructions': refinement_instructions.strip() or 'Improve reference clarity, action continuity, camera direction, and production detail without changing creative intent.',
     })
+    rules += "\nCURRENT MEDIA CONTRACT: The asset map may include uploaded reference audio and video soundtracks. Audio-only video samples condition sound only. Follow the supplied labels and observation availability; never invent unheard audio or visual observations. This overrides legacy template text saying audio references are unavailable."
     rules += UNIFIED_PROMPT_TRANSPORT
     raw = _provider_raw(inputs, provider, model, api_key, rules, timeout)
     return _extract_minimax_h3_prompt(raw, segments)
@@ -382,6 +386,31 @@ def _minimax_h3_inputs(segments: list[Segment], provider: str = "gemini", refine
     return inputs
 
 
+def _mixed_reference_input(record, source, provider):
+    item = {**record, 'reference_mode_input':True}
+    kind = record['kind']
+    if kind == 'image':
+        item['image'] = reference_image_for_provider(source['image'])
+    elif kind == 'video':
+        item['video_number'] = int(record['label'].removeprefix('Video'))
+        if provider == 'gemini':
+            item['video'] = data_url(source['path'])
+            item['video_analysis_mode'] = 'complete uploaded reference video including its soundtrack'
+        else:
+            item['video_frames'] = video_storyboard_data_urls(source['path'])
+            item['video_analysis_mode'] = 'sampled visuals; soundtrack not auditioned by this provider; use explicit audio notes only'
+    else:
+        audio = source.get('audio_path')
+        if not audio:
+            raise ValueError('The audio-only video reference has no usable soundtrack. Choose a sample with audio.')
+        if provider == 'gemini':
+            item['audio'] = data_url(audio)
+            item['audio_analysis_mode'] = 'uploaded audio only; no visual conditioning'
+        else:
+            item['audio_analysis_mode'] = 'source audio is available to ComfyUI export, but this provider has not auditioned it; use explicit notes only'
+    return item
+
+
 def _minimax_frames_inputs(segments: list[Segment], provider: str, reference_images: list | None = None, refinement: bool = False) -> list[dict]:
     """Keep timed conditioning media separate from untimed, role-limited images."""
     inputs = _minimax_h3_inputs(segments, provider, refinement=refinement, frame_checkpoints=True)
@@ -389,8 +418,7 @@ def _minimax_frames_inputs(segments: list[Segment], provider: str, reference_ima
     for record in reference_inventory(segments, slots):
         if "reference_slot" not in record:
             continue
-        entry = {**record, "reference_mode_input": True,
-                 "image": reference_image_for_provider(slots[record["reference_slot"]]["image"])}
+        entry = _mixed_reference_input(record, slots[record["reference_slot"]], provider)
         if refinement:
             entry["guidance_priority"] = "SECONDARY CONTINUITY EVIDENCE ONLY"
         inputs.append(entry)
@@ -444,7 +472,7 @@ def _minimax_reference_inputs(segments: list[Segment], provider: str, reference_
                 if key in media:
                     item[key] = media[key]
         else:
-            item["image"] = reference_image_for_provider(references[record["reference_slot"]]["image"])
+            item.update(_mixed_reference_input(record, references[record["reference_slot"]], provider))
         if refinement:
             item["guidance_priority"] = "SECONDARY CONTINUITY EVIDENCE ONLY"
         item["prompt_label"] = "TIMELINE ACTION DIRECTION"
@@ -453,7 +481,7 @@ def _minimax_reference_inputs(segments: list[Segment], provider: str, reference_
 
 
 def _minimax_reference_header(item: dict) -> str:
-    metadata = {key: value for key, value in item.items() if key not in {"image", "video", "video_frames"}}
+    metadata = {key: value for key, value in item.items() if key not in {"image", "video", "video_frames", "audio"}}
     return "REFERENCE INPUT: " + json.dumps(metadata, ensure_ascii=False)
 
 
@@ -633,6 +661,9 @@ def _gemini_raw(images: list[dict], key: str, model: str, rules: str, timeout: i
         analysis_mode = f" — {item['video_analysis_mode']}" if item.get("video_analysis_mode") else ""
         source_duration = f" — source clip {float(item['source_duration']):.3f}s" if item.get("source_duration") else ""
         parts.append({"text": _minimax_reference_header(item) if item.get("reference_mode_input") else f"SEGMENT {index} OF {len(images)} — {label}{picture}{video} — {item['name']}{timing}{cue}{next_cue}{continuity}{source_duration}{analysis_mode}"})
+        if item.get("audio"):
+            mime, encoded = re.match(r"^data:([^;]+);base64,(.+)$", item["audio"], re.S).groups()
+            parts.append({"inline_data": {"mime_type": mime, "data": encoded}})
         if item.get("video"):
             mime, encoded = re.match(r"^data:([^;]+);base64,(.+)$", item["video"], re.S).groups()
             parts.append({"inline_data": {"mime_type": mime, "data": encoded}})

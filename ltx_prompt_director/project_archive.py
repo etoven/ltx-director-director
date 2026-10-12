@@ -85,6 +85,14 @@ def save_project_archive(path: str | Path, payload: dict, segments: list) -> Non
                         frame["sourceSize"] = list(size)
             refs = payload.get("minimaxH3", {}).get("referenceImages", [])
             for index, ref in enumerate(refs):
+                if ref and ref.get('kind') in {'video','audio'}:
+                    for key, archive_key in [('path','archiveMedia'),('audio_path','archiveAudio')]:
+                        if ref.get(key):
+                            source = Path(ref.pop(key))
+                            member = f'references/{index}-{key}{source.suffix}'
+                            with source.open('rb') as stream:
+                                _copy_to_archive(archive,member,stream)
+                            ref[archive_key] = member
                 if not ref or not ref.get("image"):
                     continue
                 header, encoded = ref.pop("image").split(",", 1)
@@ -137,6 +145,10 @@ def load_project_archive(path: str | Path) -> dict:
             ))
             frame["_archiveSourceSize"] = info.file_size
         for ref in payload.get("minimaxH3", {}).get("referenceImages", []):
+            if ref:
+                for key, archive_key in [('path','archiveMedia'),('audio_path','archiveAudio')]:
+                    if ref.get(archive_key):
+                        ref[key] = str(_cached_member(archive,ref[archive_key],source))
             if ref and ref.get("archiveImage"):
                 raw = archive.read(ref["archiveImage"])
                 ref["image"] = f"data:{ref.get('imageMime', 'image/png')};base64," + base64.b64encode(raw).decode()

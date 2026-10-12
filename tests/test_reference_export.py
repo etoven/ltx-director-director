@@ -13,7 +13,7 @@ def test_reference_export_preserves_resolution_uses_actual_format_and_records_hi
     try:
         window.download_directory = str(tmp_path / 'exports')
         window.set_project_type('minimax_references')
-        first, second = window.minimax_panel.reference_targets
+        first, second = window.minimax_panel.reference_targets[:2]
         assert not first.export_action.isEnabled()
         assert not second.export_action.isEnabled()
         image = QImage(1024, 768, QImage.Format.Format_RGB32)

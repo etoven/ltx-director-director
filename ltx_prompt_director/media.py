@@ -103,7 +103,7 @@ def data_url(path: str, max_edge: int | None = None, quality: int = 82) -> str:
             output = io.BytesIO()
             image.save(output, "WEBP", quality=quality, method=6)
         return "data:image/webp;base64," + base64.b64encode(output.getvalue()).decode()
-    video_mimes = {".webm": "video/webm", ".mp4": "video/mp4"}
+    video_mimes = {".webm": "video/webm", ".mp4": "video/mp4", ".mov":"video/quicktime", ".mkv":"video/x-matroska", ".wav":"audio/wav", ".mp3":"audio/mpeg", ".flac":"audio/flac", ".ogg":"audio/ogg", ".m4a":"audio/mp4", ".aac":"audio/aac", ".opus":"audio/ogg"}
     mime = video_mimes.get(source.suffix.lower(), _image_mime(source))
     return f"data:{mime};base64," + base64.b64encode(source.read_bytes()).decode()
 

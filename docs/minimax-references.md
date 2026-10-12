@@ -1,14 +1,14 @@
 # Give every reference a purpose.
 
-## More control over what the AI takes from an image
+## Four sources. One coherent production brief.
 
-Use a picture to guide a face, wardrobe, atmosphere, prop or composition without placing that picture at a particular second. MiniMax’s two reference-image slots keep these visual instructions beside the timeline and the production brief.
+Use a picture to guide a face, wardrobe, atmosphere, prop or composition without placing that picture at a particular second. MiniMax’s four mixed reference slots keep images, videos and sound samples beside the timeline and production brief. Each reference carries its own role and notes.
 
 ![A visual-style reference with notes in the MiniMax References workspace](images/minimax-references.png)
 
 ## Add the image. Define the role.
 
-Open **Reference images** in **MiniMax Full Reference**. Drop a local still into a slot, click **Browse**, or use **Paste** for clipboard image pixels or a local image file. Choose the role and add notes describing exactly what to use.
+Open **Reference media** in a MiniMax timeline workspace. Drop an image, video or audio file into any of the four slots, click **Browse**, or use **Paste** for clipboard image pixels or a local media file. Choose the role and add notes describing exactly what to use.
 
 | Role | Guide the generation toward |
 | --- | --- |
@@ -18,12 +18,29 @@ Open **Reference images** in **MiniMax Full Reference**. Drop a local still into
 | Visual style | Lighting, palette, atmosphere or treatment |
 | Object / prop | A particular item and its appearance |
 | Composition | Framing and spatial arrangement |
+| Voice / speaker | Vocal identity, timbre or performance |
+| Sound / ambience | An ambient or physical sound texture |
+| Motion / camera | Movement or camera behavior from a video |
 
-![Two reference slots with role selectors, notes and image controls](images/reference-images.png)
+![Four mixed references and the ComfyUI export action](images/minimax-comfyui-export.png)
 
 For the Aurora scene, choose **Visual style** and write “Use the cool sky, warm lanterns and luminous atmosphere.” That gives the picture a clear job while the timeline continues to describe when the traveler moves and arrives.
 
-References keep their original resolution in the saved project. AI analysis uses a size-limited copy. Roles and notes travel with the .LTXD project. Right-click the reference image and choose **Export Image** to save the full-resolution stored image into the project’s export folder. It also appears in Recent exports. Automatic filenames avoid overwriting earlier exports. **Clear** in the same context menu removes only that slot’s reference; it does not remove timeline media or change the sequence’s duration.
+References keep their original resolution in the saved project. AI analysis uses a size-limited copy. Roles and notes travel with the .LTXD project. Right-click the reference image and choose **Export Media** to save the full-resolution stored image into the project’s export folder. It also appears in Recent exports. Automatic filenames avoid overwriting earlier exports. **Clear** in the same context menu removes only that slot’s reference; it does not remove timeline media or change the sequence’s duration.
+
+## Use a video for its soundtrack
+
+For an uploaded video sample, enable **Use ref audio only** to use its soundtrack without borrowing its visual appearance or motion. The checkbox is available when the imported video contains a usable audio stream. Leave it off to use the video and its paired soundtrack together. Standalone audio files can be dropped into a slot directly.
+
+Video and audio originals are copied into Director’s managed media folder. Their soundtrack and selected audio-only state travel inside saved .LTXD projects. Gemini receives the actual audio for prompt analysis; with OpenAI, provide explicit sound notes because this transport does not audition reference audio. Both providers export the real audio into the ComfyUI graph.
+
+## Export directly to ComfyUI
+
+Choose **Export ComfyUI** in the top toolbar, marked with Comfy’s official logo. The exporter adapts the supplied MiniMax graph, fills its prompt, dimensions and duration, and copies referenced media into **ComfyUI/input/whatdreamscost** using the existing ComfyUI root setting. Exported `Load Image`, `Load Video` and `Load Audio` fields use those relative input paths. Repeated exports avoid overwriting prior input files.
+
+At zero seconds, an opening image uses the still-image branch of the supplied first-frame switch; an opening video uses its sampled-video branch, with its soundtrack connected to the guide. Later image checkpoints are chained at their cumulative timeline times. Two end images lasting 3.0 and 7.5 seconds anchor at **3.0** and **10.5** seconds. Audio-only references go to standalone audio inputs; ordinary video soundtracks go to paired video-audio inputs.
+
+The graph retains the supplied model, sampler and decoder subgraphs. ComfyUI needs the same native MiniMax and custom nodes used by that base workflow. The export checks the native node’s media limits: 9 image inputs, 3 video inputs and 3 standalone audio inputs. Director still offers four mixed reference slots; timed conditioning assets are additional inputs.
 
 ## Choose the right source pattern
 

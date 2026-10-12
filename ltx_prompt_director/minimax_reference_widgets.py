@@ -1,4 +1,4 @@
-"""Two portable, untimed reference-image drop targets for the MiniMax editor."""
+"""Portable mixed reference-media drop targets for the MiniMax editor."""
 from __future__ import annotations
 
 import base64
@@ -7,9 +7,11 @@ from pathlib import Path
 
 from PySide6.QtCore import QBuffer, QEvent, QIODevice, QMimeData, QStandardPaths, QUrl, Qt, Signal
 from PySide6.QtGui import QAction, QDrag, QImage, QPixmap
-from PySide6.QtWidgets import QApplication, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton, QVBoxLayout
+from PySide6.QtWidgets import QApplication, QCheckBox, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton, QVBoxLayout
 
 from .minimax_reference import REFERENCE_ROLES
+from .reference_media import AUDIO_SUFFIXES, import_reference
+from .media import TIMELINE_VIDEO_SUFFIXES
 
 
 class MiniMaxReferenceSlot(QFrame):
@@ -17,8 +19,10 @@ class MiniMaxReferenceSlot(QFrame):
     error = Signal(str)
     export_requested = Signal()
 
-    def __init__(self, number: int):
+    def __init__(self, number: int, owner=None):
         super().__init__()
+        self.owner = owner
+        self._import_serial = 0
         self.number = number
         self.value = None
         self.setAcceptDrops(True)
@@ -37,7 +41,7 @@ class MiniMaxReferenceSlot(QFrame):
             button.setObjectName("copyButton")
             button.clicked.connect(callback)
             row.addWidget(button)
-        self.export_action = QAction("Export Image", self)
+        self.export_action = QAction("Export Media", self)
         self.export_action.setEnabled(False)
         self.export_action.triggered.connect(lambda: self.export_requested.emit())
         self.clear_action = QAction("Clear", self)
@@ -45,7 +49,7 @@ class MiniMaxReferenceSlot(QFrame):
         self.clear_action.triggered.connect(self.clear)
         layout.addLayout(row)
         body = QHBoxLayout()
-        self.preview = QLabel("Drop image here")
+        self.preview = QLabel("Drop media here")
         self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.preview.setFixedSize(116, 72)
         self.preview.setObjectName("referenceImagePreview")
@@ -68,44 +72,56 @@ class MiniMaxReferenceSlot(QFrame):
         self.notes.setPlaceholderText("Optional: subject or reference instructions")
         self.notes.textChanged.connect(self.metadata_changed)
         fields.addWidget(self.notes)
+        self.audio_only = QCheckBox("Use ref audio only")
+        self.audio_only.setToolTip("Use only the uploaded video soundtrack; exclude its visual reference")
+        self.audio_only.toggled.connect(self.metadata_changed)
+        self.audio_only.hide()
+        fields.addWidget(self.audio_only)
         body.addLayout(fields, 1)
         layout.addLayout(body)
-        self.setToolTip("Reference appearance, setting or style. This image adds no timeline frame or duration.")
+        self.setToolTip("Reference appearance, setting or style. Reference media adds no timeline frame or duration.")
 
     def set_value(self, value: dict | None, label: str | None = None) -> None:
         self.title.setText(f"REFERENCE {self.number}" + (f" · {label}" if label else " · untimed"))
         if value == self.value:
             return
         self.value = dict(value) if value else None
-        self.export_action.setEnabled(bool(value and value.get("image")))
+        self.export_action.setEnabled(bool(value and (value.get("image") or value.get("path"))))
         self.clear_action.setEnabled(bool(value))
         self.preview.setCursor(Qt.CursorShape.OpenHandCursor if value else Qt.CursorShape.ArrowCursor)
+        self.audio_only.blockSignals(True)
+        self.audio_only.setVisible(bool(value and value.get("kind") == "video"))
+        self.audio_only.setChecked(bool(value and value.get("audio_only")))
+        self.audio_only.setEnabled(bool(value and value.get("audio_path")))
+        self.audio_only.blockSignals(False)
         self.role.blockSignals(True)
         self.notes.blockSignals(True)
         self.role.setCurrentIndex(max(0, self.role.findData(value.get("role", "identity") if value else "identity")))
         self.notes.setText(value.get("notes", "") if value else "")
         self.role.blockSignals(False)
         self.notes.blockSignals(False)
-        self.filename.setText(value["name"] if value else "No image")
+        self.filename.setText(value["name"] if value else "No media")
         self.filename.setToolTip(value["name"] if value else "")
         self.preview.clear()
         pixmap = QPixmap()
         if value:
             try:
-                pixmap.loadFromData(base64.b64decode(value["image"].split(",", 1)[1]))
-            except (ValueError, IndexError):
+                pixmap.loadFromData(base64.b64decode(value.get("image", "").split(",", 1)[1]))
+            except (ValueError, IndexError, KeyError):
                 pass
         if pixmap.isNull():
-            self.preview.setText("Image unavailable" if value else "Drop image here")
+            self.preview.setText("♫ Audio" if value and value.get("kind") == "audio" else "Preview unavailable" if value else "Drop image, video or audio")
         else:
             self.preview.setPixmap(pixmap.scaled(self.preview.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
 
     def metadata_changed(self, *_args) -> None:
         if self.value:
             self.value = {**self.value, "role": self.role.currentData(), "notes": self.notes.text()}
+            self.value["audio_only"] = self.audio_only.isChecked() if self.value.get("kind") == "video" else False
             self.changed.emit(dict(self.value))
 
     def load_image(self, image: QImage, name: str = "Pasted reference.png") -> bool:
+        self._import_serial += 1
         if image.isNull():
             self.error.emit("That file could not be read as an image.")
             return False
@@ -121,24 +137,57 @@ class MiniMaxReferenceSlot(QFrame):
         return True
 
     def load_path(self, path: str) -> bool:
+        if Path(path).suffix.lower() in TIMELINE_VIDEO_SUFFIXES | AUDIO_SUFFIXES:
+            self._import_serial += 1
+            serial = self._import_serial
+            revision = self.owner.workspace_revision if self.owner else None
+            def imported(value):
+                if serial != self._import_serial or (self.owner and revision != self.owner.workspace_revision):
+                    return
+                self.set_value(value)
+                self.changed.emit(value)
+            if self.owner:
+                self.filename.setText("Importing media…")
+                self.owner.start_disk_job(import_reference, (path, self.role.currentData(), self.notes.text()),
+                    imported, lambda message:self.error.emit(message))
+            else:
+                try:
+                    imported(import_reference(path,self.role.currentData(),self.notes.text()))
+                except Exception as error:
+                    self.error.emit(str(error))
+                    return False
+            return True
         from PySide6.QtGui import QImageReader
         reader = QImageReader(path)
         reader.setAutoTransform(True)
         if reader.supportsAnimation():
             self.error.emit("Use a still image for this reference slot.")
             return False
-        return self.load_image(reader.read(), Path(path).name)
+        image = reader.read()
+        if image.isNull():
+            self.error.emit("That file could not be read as an image.")
+            return False
+        self._import_serial += 1
+        source = Path(path)
+        mime = {'.jpg':'image/jpeg','.jpeg':'image/jpeg','.webp':'image/webp','.bmp':'image/bmp',
+                '.tif':'image/tiff','.tiff':'image/tiff'}.get(source.suffix.lower(),'image/png')
+        value = {'name':source.name,'image':'data:'+mime+';base64,'+base64.b64encode(source.read_bytes()).decode(),
+                 'role':self.role.currentData(),'notes':self.notes.text()}
+        self.set_value(value)
+        self.changed.emit(value)
+        return True
 
     def browse(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "Choose reference image", "", "Images (*.png *.jpg *.jpeg *.webp *.bmp *.tif *.tiff)")
+        path, _ = QFileDialog.getOpenFileName(self, "Choose reference media", "", "Media (*.png *.jpg *.jpeg *.webp *.bmp *.tif *.tiff *.mp4 *.webm *.mov *.mkv *.wav *.mp3 *.flac *.ogg *.m4a *.aac *.opus)")
         if path:
             self.load_path(path)
 
     def paste(self) -> None:
         if not self.load_mime(QApplication.clipboard().mimeData()):
-            self.error.emit("Copy an image or a local image file, then paste it here.")
+            self.error.emit("Copy an image or a local media file, then paste it here.")
 
     def clear(self) -> None:
+        self._import_serial += 1
         self.set_value(None)
         self.changed.emit(None)
 
@@ -165,7 +214,7 @@ class MiniMaxReferenceSlot(QFrame):
     @staticmethod
     def accepts_mime(mime) -> bool:
         return mime.hasImage() or any(url.isLocalFile() and Path(url.toLocalFile()).is_file()
-            and Path(url.toLocalFile()).suffix.lower() in {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
+            and Path(url.toLocalFile()).suffix.lower() in ({".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"} | TIMELINE_VIDEO_SUFFIXES | AUDIO_SUFFIXES)
             for url in mime.urls())
 
     def dragMoveEvent(self, event) -> None:
@@ -192,16 +241,20 @@ class MiniMaxReferenceSlot(QFrame):
         event.accept()
 
     def drag_mime(self):
+        if self.value and self.value.get('kind') in {'video','audio'} and Path(self.value.get('path','')).is_file():
+            mime = QMimeData()
+            mime.setUrls([QUrl.fromLocalFile(self.value['path'])])
+            return mime
         if not self.value or not self.value.get("image"):
             return None
-        data = base64.b64decode(self.value["image"].split(",", 1)[1])
+        data = base64.b64decode(self.value.get("image", "").split(",", 1)[1])
         # Keep URL targets alive after the drag returns: external file managers
         # may read them asynchronously. The content hash avoids stale copies.
         root = Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.CacheLocation)) / "reference-drags"
         root = root / hashlib.sha256(data).hexdigest()
         root.mkdir(parents=True, exist_ok=True)
         name = Path(self.value.get("name") or "Reference.png").stem
-        mime_type = self.value["image"].split(";", 1)[0].removeprefix("data:").lower()
+        mime_type = self.value.get("image", "").split(";", 1)[0].removeprefix("data:").lower()
         suffix = {"image/jpeg": ".jpg", "image/webp": ".webp", "image/bmp": ".bmp",
                   "image/tiff": ".tiff"}.get(mime_type, ".png")
         path = root / (name + suffix)

@@ -9,7 +9,7 @@ from pathlib import Path
 from PySide6.QtCore import QStandardPaths
 
 SCHEMA_VERSION = 1
-KINDS = {"image", "video", "start", "end", "identity", "style", "scene", "object", "composition", "wardrobe"}
+KINDS = {"image", "video", "start", "end", "identity", "style", "scene", "object", "composition", "wardrobe", "voice", "sound", "motion"}
 
 
 def is_obsolete_stock_definition(value: dict) -> bool:
@@ -53,8 +53,8 @@ def validate_definition(value: dict) -> dict:
     if not isinstance(refs.get("kinds"), list) or any(kind not in KINDS for kind in refs["kinds"]):
         raise ValueError("Unknown reference kind.")
     count = refs.get("untimed_slots", 0)
-    if type(count) is not int or not 0 <= count <= 2:
-        raise ValueError("Untimed reference slots must be 0, 1 or 2.")
+    if type(count) is not int or not 0 <= count <= 4:
+        raise ValueError("Untimed reference slots must be between 0 and 4.")
     if value["engine"] == "ltx" and count:
         raise ValueError("LTX references are timeline frames; untimed image slots require a MiniMax engine.")
     if value["prompt_mode"] == "prompt_only" and (refs["enabled"] or count or value["global_prompt"] or value["audio_generation"]):
@@ -125,6 +125,21 @@ class WorkspaceStore:
                 source = files("ltx_prompt_director").joinpath("workspace_templates/minimax_prompt_refinement.json")
                 self.save(json.loads(source.read_text(encoding="utf-8")))
             prompt_marker.touch()
+        mixed_marker = self.root / ".stock-minimax-four-media"
+        if not mixed_marker.exists():
+            import hashlib
+            previous = {'minimax_base_guide': '238f498a7d088ecaeaa6d81516508c2e503bba53594cdd82ba4ffd03b13f4e53', 'minimax_full_reference_guide': '76b84e540da50439b14a2e559ed761ccc7a1c1b46a3c0238e126fbd059b68831', 'minimax_official_skill_reference': '5fe899c6c1d97a3bd7a8358f79e0c273d365eb69b5724fbf650d043d4e64e7ab', 'minimax_official_skill_base': '5ca56ee84f89fd5a64640e0f1af654b9918d902671bc460413fe3cfaf537cdb5'}
+            for workspace_id, digest in previous.items():
+                path = self.root / f"{workspace_id}.json"
+                if path.exists():
+                    try:
+                        value = json.loads(path.read_text())
+                        if hashlib.sha256(json.dumps(value,sort_keys=True).encode()).hexdigest() == digest:
+                            source = files("ltx_prompt_director").joinpath(f"workspace_templates/{workspace_id}.json")
+                            self.save(json.loads(source.read_text()))
+                    except (OSError,ValueError):
+                        pass
+            mixed_marker.touch()
         self.errors: list[str] = []
 
     def load(self) -> dict[str, dict]:
