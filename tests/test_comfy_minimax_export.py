@@ -86,15 +86,23 @@ def test_opening_switch_guides_and_media_are_wired_like_reference(media,tmp_path
     w=json.loads(path.read_text());nodes=validate_graph(w)
     native=nodes[136]
     assert len([x for x in native['inputs'] if x['name'].startswith('ref_images.')])==(5 if kind=='video' else 6)
-    assert nodes[579]['widgets_values']==[kind=='video']
-    first_branch=connection(w,579,'on_true' if kind=='video' else 'on_false')[0]
-    assert first_branch['type']==('2c0df155-dd3d-4efc-a94e-2e32e2f2af39' if kind=='video' else 'LoadImage')
+    if kind=='image':
+        assert nodes[579]['widgets_values']==[False]
+        assert connection(w,579,'on_false')[0]['type']=='LoadImage'
+    else:
+        assert not {451,579,580,581,585} & nodes.keys()
+        video_loader=connection(w,136,'ref_videos.ref_video_0')[0]
+        assert video_loader['type']=='VHS_LoadVideo'
+        assert connection(w,136,'ref_audios.ref_audio_0')==(video_loader,2)
+        assert not any(n.get('title') in {'Conditioning video sample','Video opening still (fallback)'} for n in nodes.values())
     guides=w['extra']['ltxDirector']['guides']
-    assert [x['seconds'] for x in guides]==[0,10.5]
-    assert connection(w,guides[0]['node_id'],'image')[0]['id']==581
-    assert connection(w,guides[1]['node_id'],'positive_1')[0]['id']==guides[0]['node_id']
-    assert connection(w,271,'CONDITIONING')[0]['id']==guides[1]['node_id']
-    if kind=='video':assert connection(w,guides[0]['node_id'],'audio') is not None
+    assert [x['seconds'] for x in guides]==([0,10.5] if kind=='image' else [10.5])
+    if kind=='image':
+        assert connection(w,guides[0]['node_id'],'image')[0]['id']==581
+        assert connection(w,guides[1]['node_id'],'positive_1')[0]['id']==guides[0]['node_id']
+    else:
+        assert connection(w,guides[0]['node_id'],'positive_1')[0]['id']==518
+    assert connection(w,271,'CONDITIONING')[0]['id']==guides[-1]['node_id']
     assert nodes[138]['widgets_values']==['My actual production prompt']
     for node in nodes.values():
         if node['type']=='LoadImage':

@@ -4,8 +4,6 @@ import base64
 import copy
 import json
 import math
-import subprocess
-import imageio_ffmpeg
 import uuid
 from importlib.resources import files
 from pathlib import Path
@@ -68,6 +66,8 @@ def export_minimax_workflow(path, segments, prompt, references, comfy_root, widt
     refs=reference_slots(references)
     inventory=reference_inventory(segments,refs)
     counts={kind:sum(r['kind']==kind for r in inventory) for kind in ('image','video','audio')}
+    # Timeline clips contribute their soundtrack directly to standalone ref_audio ports.
+    counts['audio'] += sum(r['kind']=='video' and 'timeline_index' in r for r in inventory)
     if counts['image']>9 or counts['video']>3 or counts['audio']>3:
         raise ValueError('This ComfyUI node supports at most 9 image inputs, 3 video inputs and 3 standalone audio inputs. Reduce that media type before exporting.')
     for r in inventory:
@@ -94,7 +94,7 @@ def export_minimax_workflow(path, segments, prompt, references, comfy_root, widt
     original={n['id']:copy.deepcopy(n) for n in w['nodes']}
     guide_types={d['id'] for d in w['definitions']['subgraphs'] if d['name']=='MinMaxCondFrame'}
     g=Graph(w)
-    g.remove({n['id'] for n in w['nodes'] if n['type'] in {'LoadImage','VHS_LoadVideo'}|guide_types or n['id'] in {596,597,598,599,600,587}})
+    g.remove({n['id'] for n in w['nodes'] if n['type'] in {'LoadImage','VHS_LoadVideo'}|guide_types or n['id'] in {451,596,597,598,599,600,587}})
     # Rebuild dynamic ports while preserving model/latent/sampling subgraphs.
     native=g.nodes[136]
     existing={x['name']:copy.deepcopy(x) for x in native['inputs']}
@@ -158,15 +158,9 @@ def export_minimax_workflow(path, segments, prompt, references, comfy_root, widt
         setter['pos']=[source['pos'][0],source['pos'][1]+source.get('size',[300,500])[1]+30+(90 if slot==2 else 0)]
         reference_getters.append(getter)
         g.connect(source,slot,setter,kind,kind);g.connect(getter,0,136,name,kind)
-    # Use one common supplied conditioning subgraph, exposing its native audio input.
+    # Only still-image checkpoints need frame conditioning. Videos are native references.
     guide_def=copy.deepcopy(next(d for d in w['definitions']['subgraphs'] if d['id']==original[541]['type']))
     guide_def['id']=str(uuid.uuid4())
-    new_link=max(x['id'] for x in guide_def['links'])+1
-    inner=next(n for n in guide_def['nodes'] if n['type']=='MiniMaxH3AddGuide')
-    inner['inputs'][5]['link']=new_link
-    guide_def['inputs'].append({'id':str(uuid.uuid4()),'name':'audio','type':'AUDIO','shape':7,'linkIds':[new_link]})
-    guide_def['links'].append({'id':new_link,'origin_id':-10,'origin_slot':3,'target_id':inner['id'],'target_slot':5,'type':'AUDIO'})
-    guide_def['state']['lastLinkId']=max(guide_def['state']['lastLinkId'],new_link)
     w['definitions']['subgraphs'].append(guide_def)
     image_index=video_index=audio_index=0
     loaded={}
@@ -187,20 +181,24 @@ def export_minimax_workflow(path, segments, prompt, references, comfy_root, widt
             vals=loader['widgets_values'];vals.update(video=filename,force_rate=24,custom_width=0,custom_height=0,
                 frame_load_cap=round(segment.duration*24) if segment else frame_count,skip_first_frames=segment.trim_start or 0 if segment else 0)
             vals.pop('videopreview',None);loader['widgets_values_named']=copy.deepcopy(vals)
-            reference_port(loader,0,'ref_videos.ref_video_'+str(video_index))
-            if ref and ref.get('audio_path'):reference_port(loader,2,'ref_video_audios.ref_video_audio_'+str(video_index))
-            video_index+=1
             if segment:
-                sample=g.add(original[451],'Conditioning video sample',[x,1150]);_set_widget(sample,24,'num_frames',1)
-                g.connect(loader,0,sample,'images','IMAGE');g.connect(loader,2,sample,'audio','AUDIO')
-                loaded[r['timeline_index']]=(sample,0,(sample,1),r)
+                # Exactly the requested native hookup: no sampling or first-frame detour.
+                g.connect(loader,0,136,'ref_videos.ref_video_'+str(video_index),'IMAGE')
+                g.connect(loader,2,136,'ref_audios.ref_audio_'+str(audio_index),'AUDIO')
+                audio_index+=1
+                loader['pos']=[-1100+420*video_index,1800]
+            else:
+                reference_port(loader,0,'ref_videos.ref_video_'+str(video_index))
+                if ref.get('audio_path'):
+                    reference_port(loader,2,'ref_video_audios.ref_video_audio_'+str(video_index))
+            video_index+=1
         else:
             filename=copy_file(ref['audio_path'],Path(ref['name']).stem+'.wav')
             node={'type':'LoadAudio','pos':[x,y],'size':[300,150],'flags':{},'order':0,'mode':0,'inputs':[],
                 'outputs':[{'name':'AUDIO','type':'AUDIO','links':[]}],'properties':{'Node name for S&R':'LoadAudio'},'widgets_values':[filename]}
             loader=g.add(node,r['label']);reference_port(loader,0,'ref_audios.ref_audio_'+str(audio_index));audio_index+=1
-    # Opening guide exactly follows the supplied video/still LazySwitchKJ hookup.
-    timed=[r for r in inventory if 'timeline_index' in r and r['kind'] in {'image','video'}]
+    # Still images retain their timed guides; timeline videos never create guides.
+    timed=[r for r in inventory if 'timeline_index' in r and r['kind']=='image']
     opening=next((r for r in timed if abs(r.get('checkpoint_time',r['start_time']))<1e-6),None)
     if not opening:
         g.remove({451,579,580,581,585})
@@ -212,32 +210,17 @@ def export_minimax_workflow(path, segments, prompt, references, comfy_root, widt
         if r is opening:
             g.remove({451})
             switch=g.nodes[579]
-            _set_widget(switch,r['kind']=='video','switch')
+            _set_widget(switch,False,'switch')
             g.connect(source,slot,579,'on_true','IMAGE')
-            if r['kind']=='video':
-                segment=segments[r['timeline_index']]
-                source_time=max(0,segment.trim_start or 0)/24+max(0,segment.duration-1)
-                name=unique_media_filename(safe_media_filename(Path(segment.name).stem+'-opening.png','opening'),used)
-                frame=destination/name
-                result=subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(),'-y','-v','error','-ss',str(source_time),'-i',materialize_source(segment),'-frames:v','1',str(frame)],capture_output=True)
-                if result.returncode or not frame.is_file():
-                    # Very short clips use their available first full-resolution frame.
-                    subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(),'-y','-v','error','-i',materialize_source(segment),'-frames:v','1',str(frame)],check=True,capture_output=True)
-                fallback=g.add(original[338],'Video opening still (fallback)',[-420,1150])
-                _set_widget(fallback,name,'image')
-                g.connect(fallback,0,579,'on_false','IMAGE')
-            else:
-                g.connect(source,slot,579,'on_false','IMAGE')
+            g.connect(source,slot,579,'on_false','IMAGE')
             source=g.nodes[581];slot=0
         guide=g.add(original[541],f"Condition {r['label']} · {seconds:.3f}s",[400+420*i,1700])
         guide['type']=guide_def['id']
         guide['properties'].pop('previewExposures',None)
-        guide['inputs'].append({'name':'audio','type':'AUDIO','shape':7,'link':None})
         _set_widget(guide,seconds,'value')
         # If a checkpoint lands exactly outside the AV tensor, anchor the actual final frame.
         if round(seconds*24)>=frame_count:_set_widget(guide,(frame_count-1)/24,'value')
         g.connect(source,slot,guide,'image','IMAGE');g.connect(previous,0,guide,'positive_1','CONDITIONING')
-        if audio:g.connect(audio[0],audio[1],guide,'audio','AUDIO')
         previous=guide['id'];guides.append({'label':r['label'],'seconds':seconds,'node_id':guide['id']})
     g.connect(previous,0,271,'CONDITIONING','CONDITIONING')
     # Remove unused definitions recursively, including all old frame-guide variants.

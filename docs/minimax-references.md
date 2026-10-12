@@ -38,7 +38,7 @@ Video and audio originals are copied into Director’s managed media folder. The
 
 Choose **Export ComfyUI** in the top toolbar, marked with Comfy’s official logo. The exporter adapts the supplied MiniMax graph, fills its prompt and duration, and applies the pictured 16:9 / 0.5 MP / multiple 32 / 20-step defaults, and copies referenced media into **ComfyUI/input** using the existing ComfyUI root setting. Exported `Load Image`, `Load Video` and `Load Audio` fields use those relative input paths. Repeated exports avoid overwriting prior input files.
 
-At zero seconds, an opening image uses the still-image branch of the supplied first-frame switch; an opening video uses its sampled-video branch, with its soundtrack connected to the guide. Later image checkpoints are chained at their cumulative timeline times. Two end images lasting 3.0 and 7.5 seconds anchor at **3.0** and **10.5** seconds. Audio-only references go to standalone audio inputs; ordinary video soundtracks go to paired video-audio inputs.
+At zero seconds, an opening image uses the still-image branch of the supplied first-frame switch; timeline videos connect directly to native video and standalone audio reference inputs. Later image checkpoints are chained at their cumulative timeline times. Two end images lasting 3.0 and 7.5 seconds anchor at **3.0** and **10.5** seconds. Audio-only references go to standalone audio inputs; untimed video-reference soundtracks go to paired video-audio inputs.
 
 The graph retains the supplied model, sampler and decoder subgraphs. ComfyUI needs the same native MiniMax and custom nodes used by that base workflow. The export checks the native node’s media limits: 9 image inputs, 3 video inputs and 3 standalone audio inputs. Director still offers four mixed reference slots; timed conditioning assets are additional inputs.
 
@@ -59,7 +59,7 @@ A start image anchors the beginning of its segment; an end image is reached at t
 
 ## References and timeline frames work together
 
-Use **MiniMax Full Reference** to combine timeline checkpoints, source video, and two untimed image references in one production brief.
+Use **MiniMax Full Reference** to combine timeline checkpoints, source video, and four untimed media references in one production brief.
 
 An untimed image supplies attributes rather than chronology: it does not add a segment, move a checkpoint or extend the plan. For a sequence guided entirely by the reference slots, add a text segment to establish the action and duration.
 
@@ -74,3 +74,5 @@ Image labels and video labels are assigned consistently within the asset invento
 Drag a reference image into your file manager or the timeline to use its full-resolution image. Drop a still image from your file manager onto a reference slot to replace it. The image highlights on hover, and a blue border marks an accepted drop.
 
 The final **Video Combine** node saves a 24 fps WebM with YUV420p, CRF 15, metadata and audio trimming enabled. Media and conditioning occupy separate groups; unused sample guides and video branches are removed. The **Get Condition → Set Cooked Condition** connection is retained when there are no timed guides.
+
+Timeline videos connect directly from **Load Video → IMAGE** to **ref_video**, and **Load Video → audio** to **ref_audio**. They do not create sampled frame guides, opening stills or first-frame switches. Still-image checkpoints retain their conditioning guides.
