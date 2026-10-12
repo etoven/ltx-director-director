@@ -36,7 +36,7 @@ Video and audio originals are copied into Director’s managed media folder. The
 
 ## Export directly to ComfyUI
 
-Choose **Export ComfyUI** in the top toolbar, marked with Comfy’s official logo. The exporter adapts the supplied MiniMax graph, fills its prompt, dimensions and duration, and copies referenced media into **ComfyUI/input/whatdreamscost** using the existing ComfyUI root setting. Exported `Load Image`, `Load Video` and `Load Audio` fields use those relative input paths. Repeated exports avoid overwriting prior input files.
+Choose **Export ComfyUI** in the top toolbar, marked with Comfy’s official logo. The exporter adapts the supplied MiniMax graph, fills its prompt and duration, and applies the pictured 16:9 / 0.5 MP / multiple 32 / 20-step defaults, and copies referenced media into **ComfyUI/input** using the existing ComfyUI root setting. Exported `Load Image`, `Load Video` and `Load Audio` fields use those relative input paths. Repeated exports avoid overwriting prior input files.
 
 At zero seconds, an opening image uses the still-image branch of the supplied first-frame switch; an opening video uses its sampled-video branch, with its soundtrack connected to the guide. Later image checkpoints are chained at their cumulative timeline times. Two end images lasting 3.0 and 7.5 seconds anchor at **3.0** and **10.5** seconds. Audio-only references go to standalone audio inputs; ordinary video soundtracks go to paired video-audio inputs.
 
@@ -72,3 +72,5 @@ Image labels and video labels are assigned consistently within the asset invento
 **Continue:** [Prompt workflows](unified-workflows.md) · [Refinement](refinement-and-audio.md) · [Complete feature guide](../usage.md)
 
 Drag a reference image into your file manager or the timeline to use its full-resolution image. Drop a still image from your file manager onto a reference slot to replace it. The image highlights on hover, and a blue border marks an accepted drop.
+
+The final **Video Combine** node saves a 24 fps WebM with YUV420p, CRF 15, metadata and audio trimming enabled. Media and conditioning occupy separate groups; unused sample guides and video branches are removed. The **Get Condition → Set Cooked Condition** connection is retained when there are no timed guides.

@@ -47,7 +47,11 @@ def connection(w,node_id,name):
     inp=next(x for x in nodes[node_id]['inputs'] if x['name']==name)
     if inp['link'] is None:return None
     link=next(x for x in w['links'] if x[0]==inp['link'])
-    return nodes[link[1]],link[2]
+    source=nodes[link[1]]
+    if source['type']=='GetNode' and source['widgets_values'][0].startswith('LTX Director '):
+        setter=next(n for n in nodes.values() if n['type']=='SetNode' and n.get('widgets_values')==source['widgets_values'])
+        return connection(w,setter['id'],setter['inputs'][0]['name'])
+    return source,link[2]
 
 
 def test_four_references_and_audio_only_provider_transport(media):
@@ -119,9 +123,9 @@ def test_end_frame_times_and_audio_only_video_load_audio(media,tmp_path):
     assert connection(w,136,'ref_videos.ref_video_0')[0]['type']=='VHS_LoadVideo'
     assert connection(w,136,'ref_video_audios.ref_video_audio_0')[1]==2
     # Repeated exports must not overwrite existing input media.
-    before={p.name:p.read_bytes() for p in (tmp_path/'comfy/input/whatdreamscost').iterdir()}
+    before={p.name:p.read_bytes() for p in (tmp_path/'comfy/input').iterdir()}
     export_minimax_workflow(tmp_path/'second.json',segments,'Scene',refs,tmp_path/'comfy')
-    assert all((tmp_path/'comfy/input/whatdreamscost'/n).read_bytes()==v for n,v in before.items())
+    assert all((tmp_path/'comfy/input'/n).read_bytes()==v for n,v in before.items())
 
 
 def test_reference_media_is_portable_after_source_files_disappear(media,tmp_path):

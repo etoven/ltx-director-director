@@ -6,7 +6,7 @@ Start with an image, a video clip or a written beat. Arrange the sequence, descr
 
 ![A complete MiniMax plan in the Aurora workspace](docs/images/ltx-director-director-overview.png)
 
-*The examples throughout this guide use the current 1.13.0a32 native interface with a locally authored Aurora demonstration project.*
+*The examples throughout this guide use the current 1.13.0a33 native interface with a locally authored Aurora demonstration project.*
 
 ## Refine an existing MiniMax prompt
 
