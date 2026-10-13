@@ -49,5 +49,6 @@
     "filename": "ref-en.txt",
     "sha256": "1e574f356716ad55612247ffb7bbccbcdb484ad96599d63c7dca1af186b1fab7",
     "adaptation": "Application variables, asset provenance, shared conventions and independent unified-prompt transport."
-  }
+  },
+  "max_sequence_duration": 15
 }

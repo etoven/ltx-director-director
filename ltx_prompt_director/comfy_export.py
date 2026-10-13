@@ -259,10 +259,12 @@ def export_minimax_workflow(path, segments, prompt, references, comfy_root, widt
         for key in keys:
             if key in g.nodes:y+=put(nodes,key,x,y)+gap
         return y-gap
-    settings_nodes=section('Prompt and settings')
-    y=stack(settings_nodes,[138,283],0,0)
-    put(settings_nodes,452,0,y+24)
-    stack(settings_nodes,[516,515,517,513,514],420,y+24)
+    prompt_nodes=section('Production prompt')
+    put(prompt_nodes,138,0,0)
+    put(prompt_nodes,283,0,300)
+    settings_nodes=section('Video settings')
+    put(settings_nodes,452,0,0)
+    stack(settings_nodes,[516,515,517,513,514],420,0)
     model_nodes=section('Models and sampler settings')
     put(model_nodes,285,0,0)
     stack(model_nodes,[207,206,281,229,228],280,0)
@@ -312,7 +314,7 @@ def export_minimax_workflow(path, segments, prompt, references, comfy_root, widt
     # Pack complete group rectangles into adjacent rows, leaving only a small gutter.
     boxes=[]
     for title,nodes in sections:
-        if not nodes:continue
+        if not nodes or nodes is prompt_nodes:continue
         right=max(n['pos'][0]+n['size'][0] for n in nodes)
         bottom=max(n['pos'][1]+n['size'][1] for n in nodes)
         boxes.append((title,nodes,right+48,bottom+72))
@@ -327,6 +329,17 @@ def export_minimax_workflow(path, segments, prompt, references, comfy_root, widt
         w['groups'].append({'id':len(w['groups'])+1,'title':title,
             'bounding':[x,y,width,height],'color':'#3f789e','flags':{}})
         x+=width+32;row_height=max(row_height,height)
+    # Reserve the whole left edge for a readable prompt, beside the packed group stack.
+    prompt_height=max(1000, max(group['bounding'][1]+group['bounding'][3] for group in w['groups']))
+    prompt_width=648
+    for _,nodes,_,_ in boxes:
+        for node in nodes:node['pos'][0]+=prompt_width+32
+    for group in w['groups']:group['bounding'][0]+=prompt_width+32
+    g.nodes[138]['size']=[600,prompt_height-168]
+    g.nodes[138]['pos']=[24,48]
+    g.nodes[283]['pos']=[24,prompt_height-96]
+    w['groups'].insert(0,{'id':len(w['groups'])+1,'title':'Production prompt',
+        'bounding':[0,0,prompt_width,prompt_height],'color':'#b58b2a','flags':{}})
     w.pop('reroutes',None)
     for key in ('reroutes','linkExtensions'):w.get('extra',{}).pop(key,None)
     workflow=g.finish()

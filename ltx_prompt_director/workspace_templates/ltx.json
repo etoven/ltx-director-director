@@ -35,5 +35,6 @@
       "director_intent",
       "ordered_plan"
     ]
-  }
+  },
+  "max_sequence_duration": 20
 }

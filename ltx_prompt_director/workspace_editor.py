@@ -10,7 +10,7 @@ from uuid import uuid4
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QFormLayout, QListWidget,
                               QLineEdit, QComboBox, QCheckBox, QTextEdit, QPushButton,
-                              QFileDialog, QMessageBox, QLabel, QSpinBox)
+                              QFileDialog, QMessageBox, QLabel, QSpinBox, QDoubleSpinBox)
 
 from .workspaces import WorkspaceStore, KINDS, validate_definition
 from .spellcheck import install_spellcheck
@@ -47,6 +47,19 @@ class WorkspaceEditor(QWidget):
         self.kinds.setToolTip("Comma-separated types: " + ", ".join(sorted(KINDS)))
         self.slots = QSpinBox()
         self.slots.setRange(0, 4)
+        self.no_length_limit = QCheckBox("No limit")
+        self.max_length = QDoubleSpinBox()
+        self.max_length.setRange(0.01, 1000000)
+        self.max_length.setDecimals(2)
+        self.max_length.setSuffix(" s")
+        self.max_length.setToolTip("Maximum duration of the entire timeline, including all segments.")
+        self.no_length_limit.toggled.connect(lambda unlimited: self.max_length.setEnabled(not unlimited))
+        length_control = QWidget()
+        length_layout = QHBoxLayout(length_control)
+        length_layout.setContentsMargins(0, 0, 0, 0)
+        length_layout.addWidget(self.max_length)
+        length_layout.addWidget(self.no_length_limit)
+        form.addRow("Maximum sequence length", length_control)
         self.variables = QLabel()
         self.variables.setWordWrap(True)
         form.addRow("Template fields", self.variables)
@@ -118,6 +131,11 @@ class WorkspaceEditor(QWidget):
         self.populate(self.values[self.current_id])
 
     def populate(self, value):
+        from .timing_limits import sequence_limit
+        maximum = sequence_limit(value)
+        self.no_length_limit.setChecked(maximum is None)
+        self.max_length.setEnabled(maximum is not None)
+        self.max_length.setValue(maximum if maximum is not None else 20)
         self.identifier.setText(value["id"])
         self.name.setText(value["name"])
         self.engine.blockSignals(True)
@@ -137,8 +155,9 @@ class WorkspaceEditor(QWidget):
 
     def value(self):
         existing = self.values.get(self.current_id, {})
-        return validate_definition(dict(**{key: value for key, value in existing.items() if key not in {"schema_version", "id", "name", "engine", "prompt_mode", "global_prompt", "audio_generation", "references", "generation_prompts"}}, schema_version=1, id=self.identifier.text().strip(), name=self.name.text().strip(),
+        return validate_definition(dict(**{key: value for key, value in existing.items() if key not in {"schema_version", "id", "name", "engine", "prompt_mode", "global_prompt", "audio_generation", "references", "generation_prompts", "max_sequence_duration"}}, schema_version=1, id=self.identifier.text().strip(), name=self.name.text().strip(),
             engine=self.engine.currentData(), prompt_mode=self.mode.currentData(), global_prompt=self.global_prompt.isChecked(),
+            max_sequence_duration=None if self.no_length_limit.isChecked() else self.max_length.value(),
             audio_generation=self.audio.isChecked(), references=dict(enabled=self.references.isChecked(),
             kinds=[kind.strip() for kind in self.kinds.text().split(",") if kind.strip()], untimed_slots=self.slots.value()),
             generation_prompts=dict(generate=self.generate.toPlainText(), refine=self.refine.toPlainText())))

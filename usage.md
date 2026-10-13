@@ -6,7 +6,7 @@ Start with an image, a video clip or a written beat. Arrange the sequence, descr
 
 ![A complete MiniMax plan in the Aurora workspace](docs/images/ltx-director-director-overview.png)
 
-*The examples throughout this guide use the current 1.13.0a39 native interface with a locally authored Aurora demonstration project.*
+*The examples throughout this guide use the current 1.13.0a40 native interface with a locally authored Aurora demonstration project.*
 
 ## Refine an existing MiniMax prompt
 
@@ -128,3 +128,9 @@ Recent exports show small image and video previews. Use the broom button to clea
 ![Catalog video viewer with playback and frame tools](docs/images/catalog-video-viewer.png)
 
 Global timing instructions such as `/refine-global Resize the segments proportionally to 15 seconds` work through **Global → Refine Prompt** in LTX and MiniMax. Segment refinement can resize the selected card. In MiniMax, both **Refine Prompt** and **Refine Timing** generate the unified production prompt after applying the refinement, including Global timing requests. Ordinary manual segment edits keep the existing unified draft until generation is requested. The compact MiniMax conditioning strip shows frame times, source trims and setup fixes; unified text edits never retime the timeline.
+
+## Workspace sequence limits
+
+In **Settings → Workspaces**, set **Maximum sequence length** or select **No limit**. The limit covers the whole timeline: LTX defaults to 20 seconds and MiniMax to 15 seconds. Dragging or editing a duration stops at the remaining sequence budget. After refinement or Magic Build, Director shortens the final segment first; if that cannot fit the plan, all durations scale proportionally. Media and segment order remain intact. Imported plans and workspace changes use the same budget.
+
+The ComfyUI export puts the production prompt in a tall group along the left edge, with the remaining groups packed beside it.

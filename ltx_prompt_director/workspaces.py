@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 from importlib.resources import files
 from pathlib import Path
 
 from PySide6.QtCore import QStandardPaths
+
+from .timing_limits import sequence_limit
 
 SCHEMA_VERSION = 1
 KINDS = {"image", "video", "start", "end", "identity", "style", "scene", "object", "composition", "wardrobe", "voice", "sound", "motion"}
@@ -66,6 +69,11 @@ def validate_definition(value: dict) -> dict:
         raise ValueError("Refinement instruction must be text.")
     if value["prompt_mode"] == "prompt_only" and not prompts.get("refine", "").strip():
         raise ValueError("Prompt-only refinement requires a refinement instruction.")
+    maximum = sequence_limit(value)
+    if maximum is not None and (isinstance(maximum, bool) or not isinstance(maximum, (int, float))
+                                or not math.isfinite(maximum) or maximum < 0.01):
+        raise ValueError("Maximum sequence length must be at least 0.01 seconds, or null for no limit.")
+    value["max_sequence_duration"] = maximum
     return value
 
 

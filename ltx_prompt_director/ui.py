@@ -42,6 +42,7 @@ from .catalog import MediaCatalog
 from .comfy_export import export_minimax_workflow
 from .media_labels import add_thumbnail_labels
 from .workspaces import is_obsolete_stock_definition, WorkspaceStore
+from .timing_limits import sequence_limit, fit_sequence
 from .workspace_editor import WorkspaceEditor
 from .models import Segment, order_segments_by_ids, text_segment_from_ltx
 from .project_data import ARCHIVE_COLOR, load_other_tags, load_project_tags, new_note, normalize_notes, normalize_project_labels
@@ -4971,6 +4972,16 @@ class MainWindow(QMainWindow):
             text = text[len(quality):].lstrip("\n ")
         self.global_prompt.setPlainText(text)
 
+    @property
+    def maximum_sequence_duration(self) -> float | None:
+        return sequence_limit(self.workspace_definition)
+
+    def available_segment_duration(self, segment: Segment | None) -> float:
+        maximum = self.maximum_sequence_duration
+        if maximum is None or segment is None:
+            return sys.float_info.max
+        return max(MIN_DURATION, maximum - sum(item.duration for item in self.segments if item.id != segment.id))
+
     def total_duration(self) -> float:
         return sum(item.duration for item in self.segments)
 
@@ -5043,6 +5054,9 @@ class MainWindow(QMainWindow):
                             lambda message: QMessageBox.warning(self, "Media error", message))
 
     def refresh_timeline(self, selected: int = 0) -> None:
+        targets = fit_sequence([item.duration for item in self.segments], self.maximum_sequence_duration)
+        for item, duration in zip(self.segments, targets):
+            item.duration = duration
         self.update_conditioning_guide()
         for segment in self.segments:
             segment.prompt_detached = False
@@ -5150,7 +5164,7 @@ class MainWindow(QMainWindow):
     def load_editor(self, row: int) -> None:
         self._loading = True
         segment = self.current_segment()
-        self.duration_spin.setMaximum(sys.float_info.max)
+        self.duration_spin.setMaximum(self.available_segment_duration(segment))
         self.duration_spin.setToolTip("Segment duration in seconds")
         self.duration_spin.setEnabled(bool(segment))
         self.refresh_shared_editor()
@@ -5193,7 +5207,7 @@ class MainWindow(QMainWindow):
         if not segment:
             return
         self.duration_spin.blockSignals(True)
-        self.duration_spin.setMaximum(sys.float_info.max)
+        self.duration_spin.setMaximum(self.available_segment_duration(segment))
         self.duration_spin.setToolTip("Segment duration in seconds")
         self.duration_spin.setValue(segment.duration)
         self.duration_spin.blockSignals(False)
@@ -5255,8 +5269,9 @@ class MainWindow(QMainWindow):
     def change_duration(self, segment_id: str, value: float) -> None:
         self.autofit_tail_extension = 0
         segment = next(item for item in self.segments if item.id == segment_id)
+        value = min(max(MIN_DURATION, round(value, 2)), self.available_segment_duration(segment))
         self.preserve_timeline_scale_for_growth(sum(item.duration for item in self.segments) - segment.duration + value)
-        segment.duration = max(MIN_DURATION, round(value, 2))
+        segment.duration = value
         self.mark_dirty()
         for row in range(self.timeline.count()):
             item = self.timeline.item(row)
@@ -5277,6 +5292,7 @@ class MainWindow(QMainWindow):
         self.timeline.viewport().update()
         self.update_segment_start_times()
         self.update_summary()
+        self.sync_selected_duration_control()
 
     def finish_resize(self, segment_id: str) -> None:
         self.update_timeline_layout()
@@ -5714,7 +5730,7 @@ class MainWindow(QMainWindow):
             durations = [item.duration for item in self.segments]
             durations[index] = float(result["duration"])
             self.animate_timeline_durations(durations)
-            self.statusBar().showMessage(f"Segment {index + 1} timing refined to {durations[index]:.2f}s; prompt text unchanged")
+            self.statusBar().showMessage(f"Segment {index + 1} timing refined to {self.segments[index].duration:.2f}s; prompt text unchanged")
         self.set_ai_controls_enabled(True)
         self.magic_overlay.hide_overlay()
         if target and self.unified_workspace:
@@ -5906,6 +5922,10 @@ class MainWindow(QMainWindow):
         self.mark_dirty()
 
     def apply_project_type_ui(self) -> None:
+        if hasattr(self, "timeline") and self.segments:
+            current = [item.duration for item in self.segments]
+            if fit_sequence(current, self.maximum_sequence_duration) != current:
+                self.refresh_timeline(self.timeline.currentRow())
         prompt_only = self.prompt_only_workspace
         ltx = not self.unified_workspace
         references = self.workspace_definition.get("references", {})
@@ -6500,6 +6520,7 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(duration, hide_current_toast)
 
     def animate_timeline_durations(self, target_durations: list[float]) -> None:
+        target_durations = fit_sequence(target_durations, self.maximum_sequence_duration)
         self.autofit_tail_extension = 0
         if getattr(self, 'duration_animation', None):
             self.duration_animation.stop()
