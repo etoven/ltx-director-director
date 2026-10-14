@@ -6,7 +6,7 @@ Start with an image, a video clip or a written beat. Arrange the sequence, descr
 
 ![A complete MiniMax plan in the Aurora workspace](docs/images/ltx-director-director-overview.png)
 
-*The examples throughout this guide use the current 1.13.0a47 native interface with a locally authored Aurora demonstration project.*
+*The examples throughout this guide use the current 1.13.0a48 native interface with a locally authored Aurora demonstration project.*
 
 ## Refine an existing MiniMax prompt
 
@@ -111,7 +111,7 @@ Import files or drop files and folders from your file manager. Browse large prev
 
 Imports copy full-resolution images and videos into Prompt Director’s working folder. Catalog tiles and timeline drags use these managed copies, so moving or deleting the original source does not break your imported media. Same-named files remain separate. Removing a catalog entry or folder keeps the media on disk.
 
-The app ships with **LTX Video**, **MiniMax Standard / Keyframes** and **MiniMax Full Reference**. The guide-based MiniMax templates replace the old MiniMax default. Two additional **Official Skill** workflows provide Standard / Keyframes and Full Reference versions adapted from the supplied prompt-writing skill files. LTX generation and refinement return video prompts and timing without requiring a separate still-image prompt. Drag the splitter below **Director’s Intent** to resize it or collapse it upward. Drag it downward to reopen. Its height and collapsed state persist across workspaces and restarts.
+The app ships with **LTX Video**, **MiniMax Standard / Keyframes** and **MiniMax Full Reference**. The guide-based MiniMax templates replace the old MiniMax default. Two additional **Official Skill** workflows provide Standard / Keyframes and Full Reference versions adapted from the supplied prompt-writing skill files. LTX generation and refinement return video prompts and timing without requiring a separate still-image prompt. Drag the splitter below **Director’s Intent** to resize it or collapse it upward. Drag it downward to reopen. Its height and collapsed state persist across workspaces and restarts. The segment and unified prompt divider also resizes both editors and remembers their proportions. Controls wrap within the available width, and panels shrink within the window without an outer editor scrollbar.
 
 Media tags appear as pills on each thumbnail, matching the project cards. Press **F2** to rename a selected tile directly below its image; Enter saves and Escape cancels. Press **Delete** to remove selected catalog entries after confirmation. The managed media files remain available on disk.
 
@@ -137,7 +137,7 @@ The ComfyUI export puts the production prompt in a tall group along the left edg
 
 ## Completed shot sequences
 
-Each collection includes a **Shot Sequence** tile. Drop finished movies onto its thumbnail NLA timeline at the blue insertion marker and reorder them. Select a shot to set its blend, overlap and overlap side using the existing top controls. New shots copy a neighbor’s settings; each shot then keeps its own settings independently. Its context menu offers transition editing, export and Delete. The assembled preview updates automatically in background workers, with source audio and a scrubhead linked to the player. Green regions are cached; red regions are rebuilding. Workfiles persist in the per-user cache so unchanged clips and joins can be reused. The default join is a 1-second source-side perceptual crossfade. **Bake WebM** writes the full-resolution sequence with audio and configurable CRF (default 15). [Read the illustrated guide](docs/shot-sequences.md).
+Each collection includes a **Shot Sequence** tile. Drop finished movies onto its thumbnail NLA timeline at the blue insertion marker and reorder them. Select a shot to set its blend, overlap and overlap side using the existing top controls. New shots copy a neighbor’s settings; each shot then keeps its own settings independently. Its context menu offers shot status, export and Delete. The assembled preview updates automatically in background workers, with source audio and a scrubhead linked to the player. Green regions are cached; red regions are rebuilding. Workfiles persist in the per-user cache so unchanged clips and joins can be reused. The default join is a 1-second source-side perceptual crossfade. **Bake WebM** writes the full-resolution sequence with audio and configurable CRF (default 15). [Read the illustrated guide](docs/shot-sequences.md).
 
 ## Storage, backups and reset
 

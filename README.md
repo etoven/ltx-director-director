@@ -8,7 +8,7 @@ Build a visual plan for AI video, turn it into a detailed production prompt, and
 
 ![The Aurora workspace: a visual timeline, creative direction and one continuous MiniMax production brief](docs/images/ltx-director-director-overview.png)
 
-*Current release: Aurora 1.13.0a47 on `experimental`. Screenshots show the current native app with an authored demonstration project.*
+*Current release: Aurora 1.13.0a48 on `experimental`. Screenshots show the current native app with an authored demonstration project.*
 
 ## See the story before you generate
 
@@ -88,7 +88,7 @@ Bring your rendered video back into the project. Play it in a dockable preview, 
 
 ## Assemble your finished shots
 
-Every collection includes a **Shot Sequence** project. Drop completed movies into a thumbnail NLA timeline, arrange them in order, and scrub the extended film with its source audio. Background workers update only changed preview regions; a green/red coverage line shows cached and rebuilding footage. Reusable workfiles live in your platform cache, while playback runs from RAM. Choose a cut, linear blend, filmic crossfade or perceptual crossfade; tune overlap and its source or destination side for the selected shot’s next join, using the existing controls. New shots copy a neighbor’s settings and remain independently editable. Drop movies at the highlighted timeline boundary and use the context menu to edit transitions, export originals or delete shots. Bake the final VP9/Opus WebM with configurable CRF quality, defaulting to 15.
+Every collection includes a **Shot Sequence** project. Drop completed movies into a thumbnail NLA timeline, arrange them in order, and scrub the extended film with its source audio. Background workers update only changed preview regions; a green/red coverage line shows cached and rebuilding footage. Reusable workfiles live in your platform cache, while playback runs from RAM. Choose a cut, linear blend, filmic crossfade or perceptual crossfade; tune overlap and its source or destination side for the selected shot’s next join, using the existing controls. New shots copy a neighbor’s settings and remain independently editable. Drop movies at the highlighted timeline boundary and use the context menu to set shot status, export originals or delete shots. Bake the final VP9/Opus WebM with configurable CRF quality, defaulting to 15.
 
 ![Completed shots assembled in the Shot Sequence workspace](docs/images/shot-sequence.png)
 
@@ -109,7 +109,7 @@ Customize the workspace itself in **Settings → Workspaces**: choose the editor
 Install the current experimental wheel:
 
 ```bash
-python3 -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a47-py3-none-any.whl'
+python3 -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a48-py3-none-any.whl'
 ltx-director-director
 ```
 

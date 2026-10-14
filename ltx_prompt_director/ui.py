@@ -38,6 +38,7 @@ from .minimax_reference import WORKFLOW_NAMES, detect_workflow, reference_invent
 from .minimax_reference_widgets import MiniMaxReferenceSlot
 from .generic_ai import build_generic_prompt, refine_generic_prompt, build_generic_segments, refine_generic_segment
 from .downloads import DownloadTray
+from .responsive_layout import ControlRow
 from .catalog import MediaCatalog
 from .comfy_export import export_minimax_workflow
 from .media_labels import add_thumbnail_labels
@@ -765,7 +766,8 @@ class ProjectVideoWidget(QVideoWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAcceptDrops(True)
-        self.setMinimumSize(320, 180)
+        self.setMinimumSize(160, 90)
+        self.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Ignored)
 
     def mouseDoubleClickEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
@@ -870,7 +872,7 @@ class ProjectFilesPanel(QWidget):
         self.files = WorkflowDropList()
         self.files.setObjectName("projectWorkflowList")
         self.files.files_dropped.connect(self.files_dropped)
-        controls = QHBoxLayout()
+        controls = ControlRow()
         self.add_button = QPushButton("Add Files…")
         self.add_button.clicked.connect(self.add_requested)
         self.export_button = QPushButton("Export")
@@ -1016,7 +1018,7 @@ class ProjectPreviewPanel(QWidget):
         seek_row.addWidget(self.seek, 1)
         seek_row.addWidget(self.position)
         layout.addLayout(seek_row)
-        controls = QHBoxLayout()
+        controls = ControlRow()
         self.play = QPushButton("▶ Play")
         self.play.clicked.connect(self.toggle_playback)
         self.choose = QPushButton("Add Video…")
@@ -1879,7 +1881,7 @@ class SegmentCard(QFrame):
             self.preview.setText(text or "Enter text prompt…")
 
     def update_layout(self, preview_height: int, pixels_per_second: int) -> None:
-        height = max(80, preview_height)
+        height = max(24, preview_height)
         width = max(36, int(self.segment.duration * pixels_per_second) - 14)
         self.preview.setMinimumHeight(height)
         if not self.source_pixmap.isNull():
@@ -2721,6 +2723,8 @@ class MiniMaxPromptPanel(QFrame):
         header = QHBoxLayout()
         self.header = header
         self.cache_state = QLabel("Not generated")
+        self.cache_state.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Preferred)
+        self.cache_state.setMinimumWidth(80)
         self.cache_state.setObjectName("minimaxCacheState")
         label = QLabel("UNIFIED PROMPT")
         self.prompt_label = label
@@ -2736,6 +2740,7 @@ class MiniMaxPromptPanel(QFrame):
         self.message_banner = QLabel()
         self.message_banner.setObjectName("minimaxMessageBanner")
         self.message_banner.setWordWrap(True)
+        self.message_banner.setMaximumHeight(40)
         self.message_banner.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         message_layout.addWidget(self.message_banner, 1)
         self.retry_button = QPushButton("↻ Retry")
@@ -2750,7 +2755,7 @@ class MiniMaxPromptPanel(QFrame):
         # Untimed project references can accompany either MiniMax workflow.
         self.reference_dock = ReferenceImageDock("REFERENCE MEDIA", owner)
         self.reference_dock.setObjectName("minimaxReferenceDock")
-        self.reference_dock.setMinimumWidth(380)
+        self.reference_dock.setMinimumWidth(200)
         self.reference_dock.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea)
         self.reference_dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetClosable | QDockWidget.DockWidgetFeature.DockWidgetMovable)
         content = QWidget()
@@ -2804,9 +2809,11 @@ class MiniMaxPromptPanel(QFrame):
 
     def set_cache_state(self, text: str) -> None:
         self.cache_state.setText(text)
+        self.cache_state.setToolTip(text)
 
     def show_message(self, text: str, level: str = "info", retry: bool = False) -> None:
         self.message_banner.setText(text)
+        self.message_banner.setToolTip(text)
         self.message_panel.setProperty("level", level)
         self.message_panel.style().unpolish(self.message_panel)
         self.message_panel.style().polish(self.message_panel)
@@ -2875,7 +2882,7 @@ class MainWindow(QMainWindow):
         self.autofit_tail_extension = 0
         self.timeline_fit_mode = False
         self._restoring_layout = True
-        self.project_panel_width = max(280, self.settings.value("project_panel_width", 330, int))
+        self.project_panel_width = max(180, self.settings.value("project_panel_width", 330, int))
         self.project_panel_height = max(160, self.settings.value("project_panel_height", 300, int))
         saved_icon_size = self.settings.value("project_icon_size", 230, int)
         self.project_icon_size = min((96, 156, 230), key=lambda size: abs(size - saved_icon_size))
@@ -3051,7 +3058,7 @@ class MainWindow(QMainWindow):
         outer = QVBoxLayout(root)
         outer.setContentsMargins(10, 5, 10, 8)
         outer.setSpacing(8)
-        workflow_row = QHBoxLayout()
+        workflow_row = ControlRow()
         workflow_row.addWidget(QLabel("PROJECT TYPE"))
         self.project_type_combo = QComboBox()
         for key, definition in self.workspace_definitions.items():
@@ -3059,6 +3066,7 @@ class MainWindow(QMainWindow):
         self.project_type_combo.currentIndexChanged.connect(self.project_type_changed)
         workflow_row.addWidget(self.project_type_combo)
         self.workflow_label = QLabel()
+        self.workflow_label.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Preferred)
         self.workflow_label.setObjectName("muted")
         workflow_row.addWidget(self.workflow_label)
         workflow_row.addStretch()
@@ -3072,7 +3080,7 @@ class MainWindow(QMainWindow):
         timeline_layout = QVBoxLayout(timeline_shell)
         timeline_layout.setContentsMargins(0, 0, 0, 0)
         timeline_layout.setSpacing(0)
-        self.timeline_controls = QHBoxLayout()
+        self.timeline_controls = ControlRow()
         self.timeline_controls.setContentsMargins(10, 6, 10, 5)
         self.timeline_controls.setSpacing(8)
         timeline_title = QLabel("TIMELINE")
@@ -3119,7 +3127,8 @@ class MainWindow(QMainWindow):
         self.timeline_scale = QSlider(Qt.Orientation.Horizontal)
         self.timeline_scale.setRange(0, 160)
         self.timeline_scale.setValue(self.pixels_per_second)
-        self.timeline_scale.setFixedWidth(150)
+        self.timeline_scale.setMinimumWidth(60)
+        self.timeline_scale.setMaximumWidth(150)
         self.timeline_scale.setToolTip("Timeline scale (far left fits the full sequence)")
         self.timeline_scale.valueChanged.connect(self.set_timeline_scale)
         self.timeline_controls.addWidget(self.timeline_scale)
@@ -3180,8 +3189,8 @@ class MainWindow(QMainWindow):
         self.add_tile_layout = QVBoxLayout(self.add_tile_wrap)
         self.add_tile_layout.setContentsMargins(8, 8, 8, 8)
         self.add_tile_layout.setSpacing(0)
-        self.add_tile.setFixedHeight(54)
-        self.add_text_tile.setFixedHeight(30)
+        self.add_tile.setFixedHeight(44)
+        self.add_text_tile.setFixedHeight(26)
         self.add_tile_layout.addStretch(1)
         self.add_tile_layout.addWidget(self.add_tile, 0, Qt.AlignmentFlag.AlignHCenter)
         self.add_tile_layout.addWidget(self.add_text_tile, 0, Qt.AlignmentFlag.AlignHCenter)
@@ -3196,7 +3205,8 @@ class MainWindow(QMainWindow):
         self.conditioning_guide = QScrollArea()
         self.conditioning_guide.setObjectName("conditioningGuide")
         self.conditioning_guide.setWidgetResizable(True)
-        self.conditioning_guide.setFixedHeight(68)
+        self.conditioning_guide.setMinimumHeight(52)
+        self.conditioning_guide.setMaximumHeight(68)
         self.conditioning_guide.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.conditioning_content = QWidget()
         self.conditioning_row = QHBoxLayout(self.conditioning_content)
@@ -3206,6 +3216,7 @@ class MainWindow(QMainWindow):
         outer.addWidget(self.conditioning_guide)
 
         self.sequence_bar = QLabel()
+        self.sequence_bar.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Preferred)
         self.sequence_bar.setObjectName("sequenceBar")
         self.sequence_controls = QHBoxLayout()
         self.sequence_controls.setContentsMargins(0, 0, 0, 0)
@@ -3261,7 +3272,7 @@ class MainWindow(QMainWindow):
         intent_row.addWidget(self.intent, 1)
         workflow_row.addWidget(self.magic_button)
         self.director_controls.addLayout(intent_row, 1)
-        planning_row = QHBoxLayout()
+        planning_row = ControlRow()
         planning_row.setContentsMargins(0, 0, 0, 0)
         planning_row.setSpacing(6)
         planning_label = QLabel("DIRECTION SETTINGS")
@@ -3315,7 +3326,7 @@ class MainWindow(QMainWindow):
         planning_row.addWidget(self.speaker_accent)
         planning_row.addStretch()
         self.director_controls.addLayout(planning_row)
-        options_row = QHBoxLayout()
+        options_row = ControlRow()
         options_row.setContentsMargins(0, 0, 0, 0)
         options_row.setSpacing(6)
         options_label = QLabel("PROMPT OPTIONS")
@@ -3333,7 +3344,7 @@ class MainWindow(QMainWindow):
         segment_panel.setObjectName("promptPanel")
         segment_layout = QVBoxLayout(segment_panel)
         segment_layout.setContentsMargins(9, 6, 9, 5)
-        self.segment_header = QHBoxLayout()
+        self.segment_header = ControlRow()
         self.segment_header.setSpacing(8)
         self.prompt_label = QLabel("SEGMENT PROMPT")
         segment_label = self.prompt_label
@@ -3434,6 +3445,9 @@ class MainWindow(QMainWindow):
         self.unified_prompt.setAcceptRichText(False)
         self.unified_prompt.setPlaceholderText("Generate the unified prompt from your segments, or write and refine your own…")
         self.unified_prompt.textChanged.connect(self.minimax_editor_changed)
+        for editor in (self.intent,self.segment_prompt,self.unified_prompt):
+            editor.setMinimumHeight(32)
+            editor.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Ignored)
         self.minimax_panel = MiniMaxPromptPanel(self)
         unified_layout.addWidget(self.minimax_panel)
         unified_layout.addWidget(self.unified_prompt, 1)
@@ -3450,6 +3464,8 @@ class MainWindow(QMainWindow):
         self.prompt_splitter.addWidget(self.unified_panel)
         self.prompt_splitter.setStretchFactor(0, 1)
         self.prompt_splitter.setStretchFactor(1, 1)
+        self.prompt_splitter.setChildrenCollapsible(False)
+        self.prompt_splitter.splitterMoved.connect(self.prompt_splitter_moved)
         self.intent_prompt_splitter = QSplitter(Qt.Orientation.Vertical)
         self.intent_prompt_splitter.setObjectName("intentPromptSplitter")
         self.intent_prompt_splitter.addWidget(director_panel)
@@ -3468,12 +3484,11 @@ class MainWindow(QMainWindow):
         outer.addWidget(self.shot_sequence_panel, 1)
         self.shot_sequence_panel.hide()
         self.editor_root=root
-        self.editor_scroll=QScrollArea(self)
-        self.editor_scroll.setWidgetResizable(True)
-        self.editor_scroll.setFrameShape(QFrame.Shape.NoFrame)
-        self.editor_scroll.setWidget(root)
-        self.editor_scroll.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Ignored)
-        self.setCentralWidget(self.editor_scroll)
+        root.setMinimumWidth(320)
+        root.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Ignored)
+        outer.setSizeConstraint(QLayout.SizeConstraint.SetNoConstraint)
+        root.installEventFilter(self)
+        self.setCentralWidget(root)
         self.setStatusBar(QStatusBar())
         self.apply_project_type_ui()
         self.update_summary()
@@ -3489,7 +3504,7 @@ class MainWindow(QMainWindow):
             | QDockWidget.DockWidgetFeature.DockWidgetMovable
             | QDockWidget.DockWidgetFeature.DockWidgetFloatable
         )
-        self.project_preview_dock.setMinimumWidth(400)
+        self.project_preview_dock.setMinimumWidth(200)
         self.project_preview_panel = ProjectPreviewPanel(self.project_preview_dock)
         self.project_preview_panel.video_dropped.connect(self.attach_project_video)
         self.project_preview_panel.choose_requested.connect(self.choose_project_video)
@@ -3558,7 +3573,7 @@ class MainWindow(QMainWindow):
             | QDockWidget.DockWidgetFeature.DockWidgetMovable
             | QDockWidget.DockWidgetFeature.DockWidgetFloatable
         )
-        self.project_dock.setMinimumWidth(280)
+        self.project_dock.setMinimumWidth(180)
 
         panel = QWidget()
         layout = QVBoxLayout(panel)
@@ -3710,7 +3725,7 @@ class MainWindow(QMainWindow):
             self.project_panel_height = max(160, height)
             self.settings.setValue("project_panel_height", self.project_panel_height)
         else:
-            self.project_panel_width = max(280, width)
+            self.project_panel_width = max(180, width)
             self.settings.setValue("project_panel_width", self.project_panel_width)
         self.queue_settings_sync()
 
@@ -3768,7 +3783,7 @@ class MainWindow(QMainWindow):
         self._restoring_layout = False
 
     def set_project_panel_width(self, width: int, persist: bool = True) -> None:
-        width = max(280, int(width))
+        width = max(180, int(width))
         self.project_panel_width = width
         if self.project_dock.isFloating():
             self.project_dock.resize(width, self.project_dock.height())
@@ -3902,6 +3917,8 @@ class MainWindow(QMainWindow):
         self.requested_length.setFixedWidth(metric(82))
         self.speaker_language.setMinimumWidth(metric(170))
         self.speaker_accent.setMinimumWidth(metric(170))
+        for field in (self.speaker_language,self.speaker_accent):
+            field.setMinimumWidth(90);field.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Fixed)
         self.director_controls.setSpacing(metric(8))
         self.segment_header.setSpacing(metric(8))
         self.ruler.setFixedHeight(metric(28))
@@ -4901,7 +4918,9 @@ class MainWindow(QMainWindow):
             self._screen_connected=True
 
     def keep_window_on_screen(self) -> None:
-        if not self.isVisible() or self.isMaximized() or self.isFullScreen():return
+        if not self.isVisible():return
+        self.fit_internal_panels()
+        if self.isMaximized() or self.isFullScreen():return
         screen=self.screen() or QApplication.primaryScreen()
         if not screen:return
         available=screen.availableGeometry();frame=self.frameGeometry()
@@ -4913,6 +4932,30 @@ class MainWindow(QMainWindow):
         x=max(available.left(),min(frame.left(),available.right()-frame.width()+1))
         y=max(available.top(),min(frame.top(),available.bottom()-frame.height()+1))
         if x!=frame.left() or y!=frame.top():self.move(self.pos()+QPoint(x-frame.left(),y-frame.top()))
+
+    def eventFilter(self,watched,event):
+        if watched is getattr(self,'editor_root',None) and event.type()==QEvent.Type.LayoutRequest:
+            self._viewport_timer.start()
+        return super().eventFilter(watched,event)
+
+    def fit_internal_panels(self):
+        if not hasattr(self,'editor_root') or getattr(self,'_fitting_panels',False):return
+        self._fitting_panels=True
+        try:
+            self.editor_root.layout().activate()
+            timeline_resized=False
+            if not self.timeline_shell.isHidden():
+                limit=self.maximum_safe_timeline_height()
+                height=min(self.timeline_height,limit)
+                if self.timeline.height()!=height:
+                    timeline_resized=True
+                    self.timeline.setFixedHeight(height)
+                    self.add_tile_wrap.setFixedHeight(max(80,height-32))
+                    self.update_timeline_layout()
+            self.editor_root.layout().activate()
+            if timeline_resized:
+                self.set_director_intent_expanded(self.settings.value('director_intent_expanded',True,bool),persist=False)
+        finally:self._fitting_panels=False
 
     def mark_dirty(self, *_args) -> None:
         if self._loading:
@@ -5057,14 +5100,16 @@ class MainWindow(QMainWindow):
             window_overhead = max(0, self.frameGeometry().height() - central.height())
             desktop_client_height = max(0, screen.availableGeometry().height() - window_overhead)
             available_client_height = min(available_client_height, desktop_client_height)
-        return max(184, min(430, available_client_height - other_minimum))
+        reserve=min(100,max(40,round(available_client_height*.14)))
+        return max(96, min(430, available_client_height - other_minimum - reserve))
 
     def set_timeline_height(self, value: int) -> None:
-        value = max(184, min(int(value), self.maximum_safe_timeline_height()))
+        value = max(184, min(int(value), 430))
         self.timeline_height = value
         self.timeline_height_handle.current_height = value
-        self.timeline.setFixedHeight(value)
-        self.add_tile_wrap.setFixedHeight(max(152, value - 32))
+        effective=min(value,self.maximum_safe_timeline_height())
+        self.timeline.setFixedHeight(effective)
+        self.add_tile_wrap.setFixedHeight(max(80, effective - 32))
         self.update_timeline_layout()
         self.mark_dirty()
 
@@ -5201,8 +5246,8 @@ class MainWindow(QMainWindow):
         self._loading = True
         try:
             self.timeline.clear()
-            card_height = max(152, self.timeline_height - 32)
-            preview_height = max(80, card_height - 55)
+            card_height = max(80, self.timeline.height() - 32)
+            preview_height = max(24, card_height - 55)
             widths = self.timeline_item_widths()
             start_time = 0.0
             for index, segment in enumerate(self.segments):
@@ -6239,21 +6284,29 @@ class MainWindow(QMainWindow):
 
     def restore_director_intent_splitter(self) -> None:
         self.set_director_intent_expanded(self.settings.value("director_intent_expanded", True, bool), persist=False)
+        if not self.unified_panel.isHidden() and not self.segment_panel.isHidden():
+            total=max(1,sum(self.prompt_splitter.sizes()))
+            fraction=max(.05,min(.95,self.settings.value('prompt_splitter_fraction',.35,float)))
+            self.prompt_splitter.setSizes([round(total*fraction),round(total*(1-fraction))])
 
     def set_director_intent_expanded(self, expanded: bool, *, persist: bool = True) -> None:
         if self.prompt_only_workspace:
             return
         sizes = self.intent_prompt_splitter.sizes()
         height = self.settings.value("director_intent_height", 164, int)
-        # Keep enough editor content for a usable intent splitter on small
-        # screens. The central scroll area absorbs the added content height.
-        minimum=self.prompt_splitter.minimumSizeHint().height()+self.intent_prompt_splitter.handleWidth()
-        self.intent_prompt_splitter.setMinimumHeight(max(500,minimum+height) if expanded else minimum)
-        if hasattr(self,'editor_root'):self.editor_root.layout().activate()
-        total = max(sum(sizes), self.intent_prompt_splitter.height(), 500)
+        # Let the native splitter allocate the current viewport; saved sizes
+        # must never impose a minimum height on the whole window.
+        self.intent_prompt_splitter.setMinimumHeight(0)
+        total = max(1,sum(sizes), self.intent_prompt_splitter.height())
         self.intent_prompt_splitter.setSizes([height if expanded else 0, max(1, total - height if expanded else total)])
         if persist:
             self.director_intent_splitter_moved()
+
+    def prompt_splitter_moved(self,*_):
+        sizes=self.prompt_splitter.sizes()
+        if all(sizes):
+            self.settings.setValue('prompt_splitter_fraction',sizes[0]/sum(sizes))
+            self.queue_settings_sync()
 
     def director_intent_splitter_moved(self, *_args) -> None:
         if self.prompt_only_workspace:

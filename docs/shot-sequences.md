@@ -18,7 +18,7 @@ The NLA timeline places shots on alternating video tracks with linked audio trac
 
 The defaults are **perceptual_crossfade**, **1 second** of overlap, and **Source side**. Select a shot to edit its **Blend**, **Overlap** and **Side** in the existing top controls. Each shot owns its settings.
 
-Right-click a shot and choose **Edit transition…** to focus those same controls. Its settings control the join into the following shot and remain attached when you reorder or replace it. You can configure the last shot too; its settings take effect when another shot follows it. New shots copy their preceding neighbor’s settings, or the following neighbor’s at the beginning of the timeline. The first shot uses the initial defaults. After insertion, each shot can be edited independently. Settings appear on the video strip and are saved with the project; the timeline, mixed audio, RAM preview and final bake all use them.
+The selected shot’s settings control the join into the following shot and remain attached when you reorder or replace it. You can configure the last shot too; its settings take effect when another shot follows it. New shots copy their preceding neighbor’s settings, or the following neighbor’s at the beginning of the timeline. The first shot uses the initial defaults. After insertion, each shot can be edited independently. Settings appear on the video strip and are saved with the project; the timeline, mixed audio, RAM preview and final bake all use them.
 
 | Mode | Result |
 | --- | --- |

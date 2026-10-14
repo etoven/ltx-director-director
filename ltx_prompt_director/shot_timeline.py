@@ -19,7 +19,6 @@ class ShotTimeline(QScrollArea):
     scrub_started = Signal()
     scrub_finished = Signal()
     export_requested = Signal(str)
-    transition_requested = Signal(str)
     LEFT = 94
     TOP = 50
     TRACK = 60
@@ -35,7 +34,7 @@ class ShotTimeline(QScrollArea):
         self.setWidget(self.canvas)
         self.setAcceptDrops(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.setMinimumHeight(274)
+        self.setMinimumHeight(150)
         self.scale = 38.0
         self.total = 0.0
         self.clips = []
@@ -118,7 +117,6 @@ class ShotTimeline(QScrollArea):
             action.triggered.connect(lambda checked=False,name=name:self.status_requested.emit(ids,name))
         menu.addSeparator()
         ident=self.item(index).data(Qt.ItemDataRole.UserRole)
-        edit=menu.addAction('Edit transition…',lambda:self.transition_requested.emit(ident))
         menu.addAction('Export segment video',lambda:self.export_requested.emit(ident))
         menu.addSeparator()
         menu.addAction('Delete',self.remove_requested.emit)

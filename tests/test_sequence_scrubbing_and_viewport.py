@@ -42,6 +42,7 @@ def test_timeline_follows_playback_and_exports_clicked_shot():
     timeline.set_playhead(0,follow=True);assert timeline.horizontalScrollBar().value()==0
     exports=[];timeline.export_requested.connect(exports.append)
     menu=timeline.status_menu(1)
+    assert not any(action.text().startswith('Edit transition') for action in menu.actions())
     next(action for action in menu.actions() if action.text()=='Export segment video').trigger()
     assert exports==[shots[1].id]
     timeline.close()
@@ -52,6 +53,7 @@ def test_modes_and_long_prompts_stay_within_screen_and_reset_confirms(tmp_path,m
     from ltx_prompt_director.workspaces import WorkspaceStore
     app=QApplication.instance() or QApplication([])
     store=WorkspaceStore(tmp_path/'workspaces')
+    store.restore_stock()
     monkeypatch.setattr(ui,'WorkspaceStore',lambda:store)
     monkeypatch.setattr(ui,'project_library_path',lambda:tmp_path/'projects')
     monkeypatch.setattr(ui.MainWindow,'restore_startup_workspace',lambda self:None)
@@ -75,5 +77,49 @@ def test_modes_and_long_prompts_stay_within_screen_and_reset_confirms(tmp_path,m
         assert 'Saved projects, collections and managed media will be kept' in confirmations[0][2]
         monkeypatch.setattr(storage_widgets.QMessageBox,'question',lambda *args:QMessageBox.StandardButton.Yes)
         panel.reset_settings();assert jobs[0][0][0] is storage_widgets.stage_reset
+    finally:
+        window.project_dirty=False;window._close_saves_queued=True;window.close()
+
+
+def test_internal_layout_and_native_prompt_drag_without_outer_scrollbar(tmp_path,monkeypatch):
+    from PySide6.QtWidgets import QScrollArea
+    from ltx_prompt_director import ui
+    from ltx_prompt_director.workspaces import WorkspaceStore
+    app=QApplication.instance() or QApplication([])
+    store=WorkspaceStore(tmp_path/'workspaces')
+    store.restore_stock()
+    monkeypatch.setattr(ui,'WorkspaceStore',lambda:store)
+    monkeypatch.setattr(ui,'project_library_path',lambda:tmp_path)
+    monkeypatch.setattr(ui.MainWindow,'restore_startup_workspace',lambda self:None)
+    window=ui.MainWindow();window.settings=QSettings(str(tmp_path/'layout.ini'),QSettings.Format.IniFormat)
+    try:
+        for dock in window.findChildren(ui.QDockWidget):dock.hide()
+        window.resize(790,780);window.show()
+        for mode in ('ltx','minimax_base_guide','minimax_prompt_refinement','shot_sequence','minimax_base_guide'):
+            window.set_project_type(mode);QTest.qWait(80)
+            assert window.project_type==mode
+            assert not isinstance(window.centralWidget(),QScrollArea)
+            assert window.centralWidget() is window.editor_root
+            assert window.screen().availableGeometry().contains(window.frameGeometry())
+            assert window.intent_prompt_splitter.minimumHeight()==0
+            if window.unified_workspace:
+                window.unified_prompt.setPlainText('A crafted production prompt. '*2000)
+                window.minimax_panel.show_message('A refinement update. '*100,'success');QTest.qWait(80)
+                point=window.minimax_panel.copy_button.mapTo(window.editor_root,QPoint(0,0))
+                assert point.y()+window.minimax_panel.copy_button.height()<=window.editor_root.height()
+                window.minimax_panel.clear_message()
+        window.set_director_intent_expanded(False);QTest.qWait(80)
+        splitter=window.prompt_splitter;before=splitter.sizes()[0]
+        handle=splitter.handle(1);point=handle.rect().center()
+        QTest.mouseMove(handle,point);QTest.qWait(20)
+        QTest.mousePress(handle,Qt.MouseButton.LeftButton,pos=point)
+        QTest.mouseMove(handle,point+QPoint(0,35));QTest.mouseRelease(handle,Qt.MouseButton.LeftButton,pos=point+QPoint(0,35))
+        QTest.qWait(80)
+        assert splitter.sizes()[0]>before+15
+        assert window.segment_prompt.height()>=32 and window.unified_prompt.height()>=32
+        fraction=window.settings.value('prompt_splitter_fraction',0,float)
+        assert 0<fraction<1
+        window.set_project_type('minimax_full_reference_guide');QTest.qWait(80)
+        assert window.settings.value('prompt_splitter_fraction',0,float)==fraction
     finally:
         window.project_dirty=False;window._close_saves_queued=True;window.close()

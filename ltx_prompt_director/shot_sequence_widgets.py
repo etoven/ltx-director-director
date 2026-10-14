@@ -21,6 +21,7 @@ from .shot_sequence import MODES, settings, probe, render_sequence, shot_layout,
 from .shot_timeline import ShotTimeline
 from .shot_preview_cache import PreviewCache, make_plan, source_identity
 from .audio_scrub import AudioScrubber
+from .responsive_layout import ControlRow
 
 
 def render_shots(shots,options,output=None,preview=False,cancel=None,progress=None):
@@ -92,7 +93,7 @@ class ShotSequencePanel(QWidget):
         layout=QVBoxLayout(self)
         heading=QLabel('SHOT SEQUENCE · completed movies');heading.setObjectName('previewTitle')
         layout.addWidget(heading)
-        row=QHBoxLayout()
+        row=ControlRow()
         self.blend=QComboBox();self.blend.addItems(MODES)
         self.side=QComboBox();self.side.addItem('Source side','source');self.side.addItem('Destination side','destination')
         self.side.setToolTip('Source: fade source tail toward destination head. Destination: reverse overlap weighting. For cut, trim the selected side.')
@@ -100,7 +101,7 @@ class ShotSequencePanel(QWidget):
         self.crf=QSpinBox();self.crf.setRange(0,63);self.crf.setValue(15);self.crf.setToolTip('WebM CRF: lower values retain more detail.')
         self.width=QSpinBox();self.height=QSpinBox()
         for field,value in [(self.width,1280),(self.height,704)]:field.setRange(32,8192);field.setSingleStep(2);field.setValue(value)
-        row2=QHBoxLayout()
+        row2=ControlRow()
         for text,widget in [('Blend',self.blend),('Overlap',self.overlap),('Side',self.side),('Width',self.width),('Height',self.height),('CRF',self.crf)]:
             target=row2 if text in {"Width","Height","CRF"} else row
             target.addWidget(QLabel(text));target.addWidget(widget)
@@ -113,7 +114,6 @@ class ShotSequencePanel(QWidget):
         self.shots.movies_replaced.connect(self.replace_paths)
         self.shots.status_requested.connect(self.set_shot_status)
         self.shots.export_requested.connect(self.export_segment)
-        self.shots.transition_requested.connect(self.edit_transition)
         self.shots.remove_requested.connect(self.remove)
         self.shots.order_changed.connect(self.order_changed)
         self.shots.items.currentRowChanged.connect(self.sync_transition_controls)
@@ -122,7 +122,7 @@ class ShotSequencePanel(QWidget):
             signal.connect(self.transition_changed)
         column.addWidget(QLabel('NLA timeline · thumbnail strips · drag scrubhead to seek · green cached / red rebuilding'))
         column.addWidget(self.shots,1)
-        buttons=QHBoxLayout()
+        buttons=ControlRow()
         self.timeline_buttons=[]
         actions=[('Add shots…','add',self.choose,'Import completed movie files'),
                  ('Collection previews…','collection',self.add_collection_movies,'Add saved rendered previews from other projects in this collection'),
@@ -273,13 +273,6 @@ class ShotSequencePanel(QWidget):
         else:return
         self.owner.shot_sequence_settings=settings(opts)
         self.refresh();self.owner.mark_dirty()
-
-    def edit_transition(self,ident):
-        row=next((i for i,shot in enumerate(self.owner.segments) if shot.id==ident),-1)
-        if row<0:return
-        self.shots.setCurrentRow(row);self.sync_transition_controls()
-        self.blend.setFocus()
-        self.owner.editor_scroll.ensureWidgetVisible(self.blend)
 
     def choose(self):
         paths,_=QFileDialog.getOpenFileNames(self,'Add completed shots','', 'Movies (*.mp4 *.webm *.mov *.mkv *.avi *.m4v)')

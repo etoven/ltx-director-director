@@ -300,6 +300,8 @@ def test_intent_uses_same_native_splitter_and_resizes_text_area(window):
     window.show()
     QApplication.processEvents()
     assert window.intent_prompt_splitter.handle(1).metaObject().className() == window.prompt_splitter.handle(1).metaObject().className()
+    from PySide6.QtTest import QTest
+    QTest.qWait(100)
     before = window.intent.height()
     total = sum(window.intent_prompt_splitter.sizes())
     window.intent_prompt_splitter.setSizes([300,total-300])
@@ -310,7 +312,7 @@ def test_intent_uses_same_native_splitter_and_resizes_text_area(window):
     assert window.settings.value('director_intent_height',0,int) == saved
     for mode in ['ltx','minimax_official_skill_reference','minimax_base_guide']:
         window.set_project_type(mode)
-        QApplication.processEvents()
+        QTest.qWait(100)
         assert abs(window.intent_prompt_splitter.sizes()[0]-saved) < 3
     window.set_director_intent_expanded(False)
     assert window.intent_prompt_splitter.sizes()[0] == 0
