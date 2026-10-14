@@ -37,10 +37,12 @@ class WorkspaceEditor(QWidget):
         self.engine.addItem("MiniMax References", "minimax_references")
         self.engine.addItem("Generic", "generic")
         self.engine.addItem("MiniMax Prompt Refinement", "minimax_prompt")
+        self.engine.addItem("Shot Sequence", "shot_sequence")
         self.mode = QComboBox()
         self.mode.addItem("One unified prompt", "unified")
         self.mode.addItem("Per-segment prompts", "segmented")
         self.mode.addItem("Prompt refinement · annotations only", "prompt_only")
+        self.mode.addItem("Completed-shot sequence", "sequence")
         self.global_prompt, self.audio = QCheckBox("Include global prompt"), QCheckBox("Supports audio generation")
         self.references = QCheckBox("Allow reference media")
         self.kinds = QLineEdit()
@@ -89,6 +91,12 @@ class WorkspaceEditor(QWidget):
         self.engine.currentIndexChanged.connect(self.engine_changed)
 
     def engine_changed(self):
+        if self.engine.currentData() == "shot_sequence":
+            self.mode.setCurrentIndex(self.mode.findData("sequence"))
+            self.global_prompt.setChecked(False);self.audio.setChecked(False)
+            self.references.setChecked(False);self.slots.setValue(0);self.kinds.setText("video")
+            self.no_length_limit.setChecked(True)
+            return
         if self.engine.currentData() == "minimax_prompt":
             for kind, editor in (("generate", self.generate), ("refine", self.refine)):
                 if any(editor.toPlainText() == stock_prompt(engine, kind)

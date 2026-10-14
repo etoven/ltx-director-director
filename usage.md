@@ -6,7 +6,7 @@ Start with an image, a video clip or a written beat. Arrange the sequence, descr
 
 ![A complete MiniMax plan in the Aurora workspace](docs/images/ltx-director-director-overview.png)
 
-*The examples throughout this guide use the current 1.13.0a40 native interface with a locally authored Aurora demonstration project.*
+*The examples throughout this guide use the current 1.13.0a41 native interface with a locally authored Aurora demonstration project.*
 
 ## Refine an existing MiniMax prompt
 
@@ -134,3 +134,7 @@ Global timing instructions such as `/refine-global Resize the segments proportio
 In **Settings → Workspaces**, set **Maximum sequence length** or select **No limit**. The limit covers the whole timeline: LTX defaults to 20 seconds and MiniMax to 15 seconds. Dragging or editing a duration stops at the remaining sequence budget. After refinement or Magic Build, Director shortens the final segment first; if that cannot fit the plan, all durations scale proportionally. Media and segment order remain intact. Imported plans and workspace changes use the same budget.
 
 The ComfyUI export puts the production prompt in a tall group along the left edge, with the remaining groups packed beside it.
+
+## Completed shot sequences
+
+Each collection includes a **Shot Sequence** tile. Drop finished movies into its shot list, reorder them, and build a continuous RAM preview with source audio. The default join is a 1-second source-side perceptual crossfade. **Bake WebM** writes the full-resolution sequence with audio and configurable CRF (default 15). [Read the illustrated guide](docs/shot-sequences.md).

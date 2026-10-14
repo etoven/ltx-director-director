@@ -39,13 +39,15 @@ def validate_definition(value: dict) -> dict:
         raise ValueError("ID must contain only letters, numbers, hyphens and underscores.")
     if not isinstance(value.get("name"), str) or not value["name"].strip():
         raise ValueError("A workspace name is required.")
-    if value.get("prompt_mode") not in {"unified", "segmented", "prompt_only"}:
-        raise ValueError("Prompt mode must be unified, segmented or prompt_only.")
-    if value.get("engine") not in {"ltx", "minimax_frames", "minimax_references", "minimax_prompt", "generic"}:
+    if value.get("prompt_mode") not in {"unified", "segmented", "prompt_only", "sequence"}:
+        raise ValueError("Prompt mode must be unified, segmented or prompt_only or sequence.")
+    if value.get("engine") not in {"ltx", "minimax_frames", "minimax_references", "minimax_prompt", "generic", "shot_sequence"}:
         raise ValueError("Choose LTX, MiniMax Frames, MiniMax References, MiniMax Prompt Refinement or Generic.")
+    if (value["engine"] == "shot_sequence") != (value["prompt_mode"] == "sequence"):
+        raise ValueError("Shot Sequence requires sequence mode.")
     if (value["engine"] == "minimax_prompt") != (value["prompt_mode"] == "prompt_only"):
         raise ValueError("MiniMax Prompt Refinement requires prompt_only mode.")
-    if value["engine"] not in {"generic", "minimax_prompt"} and (value["engine"] == "ltx") != (value["prompt_mode"] == "segmented"):
+    if value["engine"] not in {"generic", "minimax_prompt", "shot_sequence"} and (value["engine"] == "ltx") != (value["prompt_mode"] == "segmented"):
         raise ValueError("The LTX engine requires segmented prompts; MiniMax engines require unified prompts.")
     for key in ("global_prompt", "audio_generation"):
         if not isinstance(value.get(key), bool):
@@ -142,12 +144,22 @@ class WorkspaceStore:
                 if path.exists():
                     try:
                         value = json.loads(path.read_text())
-                        if hashlib.sha256(json.dumps(value,sort_keys=True).encode()).hexdigest() == digest:
+                        legacy = {key:item for key,item in value.items() if key != "max_sequence_duration"}
+                        if hashlib.sha256(json.dumps(legacy,sort_keys=True).encode()).hexdigest() == digest:
                             source = files("ltx_prompt_director").joinpath(f"workspace_templates/{workspace_id}.json")
-                            self.save(json.loads(source.read_text()))
+                            upgraded = json.loads(source.read_text())
+                            if "max_sequence_duration" in value:
+                                upgraded["max_sequence_duration"] = value["max_sequence_duration"]
+                            self.save(upgraded)
                     except (OSError,ValueError):
                         pass
             mixed_marker.touch()
+        sequence_marker = self.root / ".stock-shot-sequence"
+        if not sequence_marker.exists():
+            source = files("ltx_prompt_director").joinpath("workspace_templates/shot_sequence.json")
+            if not (self.root / "shot_sequence.json").exists():
+                self.save(json.loads(source.read_text()))
+            sequence_marker.touch()
         self.errors: list[str] = []
 
     def load(self) -> dict[str, dict]:

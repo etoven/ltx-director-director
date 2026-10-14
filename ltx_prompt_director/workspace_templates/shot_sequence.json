@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "id": "shot_sequence",
+  "name": "Shot Sequence",
+  "engine": "shot_sequence",
+  "prompt_mode": "sequence",
+  "global_prompt": false,
+  "audio_generation": false,
+  "references": {
+    "enabled": false,
+    "kinds": [
+      "video"
+    ],
+    "untimed_slots": 0
+  },
+  "generation_prompts": {
+    "generate": "Assemble completed shots in order.",
+    "refine": ""
+  },
+  "max_sequence_duration": null
+}

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ltx-prompt-director"
-version = "1.13.0a40"
+version = "1.13.0a41"
 description = "LTX Director - Director: native timeline prompt builder for LTX Video 2.3"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -16,6 +16,8 @@ dependencies = [
   "Pillow>=10.4,<12",
   "requests>=2.32,<3",
   "imageio-ffmpeg>=0.5,<1",
+  "av>=14,<17",
+  "numpy>=1.26,<3",
   "pyenchant>=3.2,<4",
 ]
 

@@ -18,7 +18,7 @@ from importlib.resources import files
 from pathlib import Path
 from uuid import uuid4
 
-from PySide6.QtCore import QDateTime, QEasingCurve, QEvent, QEventLoop, QObject, QRunnable, QRectF, QSettings, QSize, QStandardPaths, Qt, QThreadPool, QTimer, QUrl, QVariantAnimation, Signal, Slot
+from PySide6.QtCore import QBuffer, QIODevice, QDateTime, QEasingCurve, QEvent, QEventLoop, QObject, QRunnable, QRectF, QSettings, QSize, QStandardPaths, Qt, QThreadPool, QTimer, QUrl, QVariantAnimation, Signal, Slot
 from PySide6.QtGui import QAction, QActionGroup, QBrush, QColor, QCursor, QIcon, QImageReader, QPainter, QPen, QPixmap, QTextCharFormat, QTextCursor, QTextOption
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
@@ -44,6 +44,8 @@ from .media_labels import add_thumbnail_labels
 from .workspaces import is_obsolete_stock_definition, WorkspaceStore
 from .timing_limits import sequence_limit, fit_sequence
 from .workspace_editor import WorkspaceEditor
+from .shot_sequence import DEFAULTS as SHOT_DEFAULTS, settings as shot_settings, ensure_collection_sequences, overlaps as shot_overlaps
+from .shot_sequence_widgets import ShotSequencePanel
 from .models import Segment, order_segments_by_ids, text_segment_from_ltx
 from .project_data import ARCHIVE_COLOR, load_other_tags, load_project_tags, new_note, normalize_notes, normalize_project_labels
 from .spellcheck import install_spellcheck
@@ -1083,7 +1085,29 @@ class ProjectPreviewPanel(QWidget):
         total = max(0, int(milliseconds) // 1000)
         return f"{total // 60:02d}:{total % 60:02d}"
 
+    def release_memory_video(self):
+        if getattr(self, "_memory_buffer", None) is not None:
+            self.player.stop()
+            self.player.setSource(QUrl())
+            self._memory_buffer.close()
+            self._memory_buffer.deleteLater()
+            self._memory_buffer = None
+
+    def set_memory_video(self, name: str, data: bytes) -> None:
+        self.clear_project()
+        self.title.setText(name)
+        self._memory_preview = True
+        self.pending_preview_path = ""
+        self._memory_buffer = QBuffer(self)
+        self._memory_buffer.setData(data)
+        self._memory_buffer.open(QIODevice.OpenModeFlag.ReadOnly)
+        self.player.setAudioOutput(self.audio)
+        self.player.setSourceDevice(self._memory_buffer, QUrl("ram-preview.webm"))
+        self.choose.setEnabled(True);self.export.setEnabled(True)
+        self.empty.setText("Loading continuous RAM preview…")
+
     def set_project(self, name: str, video_path: str = "") -> None:
+        self.release_memory_video()
         self.title.setText(name)
         self.choose.setEnabled(True)
         self.pending_preview_path = video_path
@@ -1163,6 +1187,8 @@ class ProjectPreviewPanel(QWidget):
         self.fullscreen.setEnabled(False)
 
     def clear_project(self) -> None:
+        self.release_memory_video()
+        self._memory_preview = False
         self._source_generation += 1
         self.player.stop()
         self.current_frame = None
@@ -1198,8 +1224,11 @@ class ProjectPreviewPanel(QWidget):
             self.empty.hide()
             self.video.show()
             self.fullscreen.setEnabled(True)
-            self.player.setPosition(1)
-            self.player.pause()
+            if getattr(self, "_memory_preview", False):
+                self.player.play()
+            else:
+                self.player.setPosition(1)
+                self.player.pause()
 
     def position_changed(self, position: int) -> None:
         if not self.seek.isSliderDown():
@@ -2797,6 +2826,7 @@ class MainWindow(QMainWindow):
         self.workspace_revision = 0
         self.ai_busy = False
         self.current_collection: str | None = None
+        self.shot_sequence_settings = dict(SHOT_DEFAULTS)
         self.autofit_tail_extension = 0
         self.timeline_fit_mode = False
         self._restoring_layout = True
@@ -3389,6 +3419,9 @@ class MainWindow(QMainWindow):
         outer.addWidget(self.intent_prompt_splitter, 1)
         self.restore_director_intent_splitter()
         QTimer.singleShot(0, self.restore_director_intent_splitter)
+        self.shot_sequence_panel = ShotSequencePanel(self, ProjectPreviewPanel, root)
+        outer.addWidget(self.shot_sequence_panel, 1)
+        self.shot_sequence_panel.hide()
         self.setCentralWidget(root)
         self.setStatusBar(QStatusBar())
         self.apply_project_type_ui()
@@ -3847,6 +3880,7 @@ class MainWindow(QMainWindow):
         self.project_list._scroll_target = previous_scroll
         self.project_list.clear()
         records = self.library_records()
+        records.extend(ensure_collection_sequences(project_library_path(), records))
         self.collection_up.setVisible(bool(self.current_collection))
         self.project_library_title.setText(self.current_collection or "Saved projects")
         visible_records = [record for record in records if record.get("collection", "") == (self.current_collection or "")]
@@ -3915,6 +3949,8 @@ class MainWindow(QMainWindow):
             if labels:
                 pixmap = self.add_thumbnail_labels(pixmap, labels)
             item.setIcon(QIcon(pixmap))
+            if meta.get("projectType") == "shot_sequence" and not meta.get("thumbnailData"):
+                item.setIcon(QIcon(str(files("ltx_prompt_director").joinpath("assets/shot-sequence.svg"))))
             self.project_list.addItem(item)
             if meta.get("id") == selected:
                 selected_item = item
@@ -4336,6 +4372,7 @@ class MainWindow(QMainWindow):
         return {
             "projectType": self.project_type,
             "workspaceDefinition": copy.deepcopy(self.workspace_definition),
+            "shotSequence": dict(self.shot_sequence_settings),
             "downloadDirectory": self.download_directory,
             "minimaxDrafts": {key: dict(value) for key, value in self.minimax_drafts.items()},
             "segments": self.segments,
@@ -4371,6 +4408,7 @@ class MainWindow(QMainWindow):
         }
 
     def restore_workspace_state(self, state: dict) -> None:
+        self.shot_sequence_settings = shot_settings(state.get("shotSequence"))
         self._loading = True
         self.workspace_revision += 1
         self.segments = state.get("segments", [])
@@ -4474,7 +4512,10 @@ class MainWindow(QMainWindow):
             self.update_window_title()
         meta["downloadDirectory"] = self.download_directory
         meta["savedAt"] = datetime.now(timezone.utc).isoformat()
-        meta["duration"] = self.total_duration()
+        meta["projectType"] = self.project_type
+        meta["duration"] = (shot_overlaps([{"frames":max(1,round(s.duration*FPS))} for s in self.segments],
+                                               self.shot_sequence_settings["overlap"])[1]/FPS
+                            if self.workspace_engine == "shot_sequence" else self.total_duration())
         meta["segmentCount"] = len(self.segments)
         if not meta.get("thumbnailSource"):
             visual = next((segment for segment in self.segments if segment.kind != "text" and segment.preview_path), None)
@@ -4757,6 +4798,8 @@ class MainWindow(QMainWindow):
         QApplication.processEvents(QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents)
 
     def closeEvent(self, event) -> None:
+        if hasattr(self, "shot_sequence_panel"):
+            self.shot_sequence_panel.deactivate()
         if not self._close_saves_queued:
             needs_save = self.project_dirty or any(session.get("dirty") for session in self.project_sessions.values())
             if needs_save or self._pending_disk_jobs:
@@ -4840,6 +4883,7 @@ class MainWindow(QMainWindow):
         self.minimax_prompt_mode = "frames"
         self.minimax_reference_images = [None] * 4
         self.minimax_drafts = {}
+        self.shot_sequence_settings = dict(SHOT_DEFAULTS)
         self.project_type = "ltx" if "ltx" in self.workspace_definitions else next(iter(self.workspace_definitions), "")
         self.workspace_revision += 1
         self.apply_project_type_ui()
@@ -5057,6 +5101,8 @@ class MainWindow(QMainWindow):
         targets = fit_sequence([item.duration for item in self.segments], self.maximum_sequence_duration)
         for item, duration in zip(self.segments, targets):
             item.duration = duration
+        if hasattr(self, "shot_sequence_panel") and self.workspace_engine == "shot_sequence":
+            self.shot_sequence_panel.refresh()
         self.update_conditioning_guide()
         for segment in self.segments:
             segment.prompt_detached = False
@@ -5298,6 +5344,11 @@ class MainWindow(QMainWindow):
         self.update_timeline_layout()
 
     def update_summary(self) -> None:
+        if self.workspace_engine == "shot_sequence":
+            self.workflow_label.setText("Completed shots · RAM playback · source audio")
+            self.magic_button.hide()
+            self.statusBar().showMessage("Shot Sequence · completed movies with source audio")
+            return
         if self.prompt_only_workspace:
             self.add_tile.setEnabled(False)
             self.add_text_tile.setEnabled(False)
@@ -5872,7 +5923,7 @@ class MainWindow(QMainWindow):
 
     @property
     def has_project_content(self) -> bool:
-        return bool(self.segments) or (self.prompt_only_workspace and bool(self.minimax_prompt_text.strip()))
+        return self.workspace_engine == "shot_sequence" or bool(self.segments) or (self.prompt_only_workspace and bool(self.minimax_prompt_text.strip()))
 
     @property
     def workspace_draft_key(self) -> str:
@@ -5995,6 +6046,25 @@ class MainWindow(QMainWindow):
 
         self.queue_project_panel_width_restore()
         self.update_summary()
+
+        if hasattr(self, "shot_sequence_panel"):
+            sequence = self.workspace_engine == "shot_sequence"
+            self.shot_sequence_panel.setVisible(sequence)
+            for i in range(self.sequence_controls.count()):
+                widget=self.sequence_controls.itemAt(i).widget()
+                if widget:widget.setVisible(not sequence and not prompt_only)
+            self.intent_prompt_splitter.setVisible(not sequence)
+            if sequence:
+                for widget in (self.timeline_shell,self.conditioning_guide,self.sequence_bar,self.references_button):widget.hide()
+                self.magic_button.setEnabled(False)
+                self.magic_button.hide()
+                self.workflow_export_action.setVisible(False)
+                self.timeline_import_action.setVisible(False)
+                self.delete_segment_action.setVisible(False)
+                self.shot_sequence_panel.refresh()
+                self.workflow_label.setText("Completed shots · RAM playback · source audio")
+            else:
+                self.shot_sequence_panel.deactivate()
 
     def update_conditioning_guide(self) -> None:
         if not hasattr(self, "conditioning_guide"):
@@ -6715,6 +6785,7 @@ class MainWindow(QMainWindow):
             "projectVersion": 8,
             "projectType": self.project_type,
             "workspaceDefinition": copy.deepcopy(self.workspace_definition),
+            "shotSequence": dict(self.shot_sequence_settings),
             "downloadDirectory": self.download_directory,
             "globalPrompt": self.global_prompt.toPlainText(),
             "directorIntent": self.intent.toPlainText(),
@@ -6744,6 +6815,7 @@ class MainWindow(QMainWindow):
         }
 
     def load_project_payload(self, payload: dict) -> None:
+        self.shot_sequence_settings = shot_settings(payload.get("shotSequence"))
         if payload.get("app") not in {"ltx-director-director", "ltx-prompt-director-python"}:
             raise ValueError("This is not an LTX Director - Director project file.")
         definition = payload.get("workspaceDefinition")

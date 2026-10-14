@@ -8,7 +8,7 @@ Build a visual plan for AI video, turn it into a detailed production prompt, and
 
 ![The Aurora workspace: a visual timeline, creative direction and one continuous MiniMax production brief](docs/images/ltx-director-director-overview.png)
 
-*Current release: Aurora 1.13.0a40 on `experimental`. Screenshots show the current native app with an authored demonstration project.*
+*Current release: Aurora 1.13.0a41 on `experimental`. Screenshots show the current native app with an authored demonstration project.*
 
 ## See the story before you generate
 
@@ -56,7 +56,7 @@ Keep your editing requests beside the passage they affect. Inline **Refinement, 
 
 ## Keep identity, atmosphere and composition in view
 
-Two untimed reference-image slots in MiniMax Full Reference let you guide **Identity, Wardrobe, Setting, Visual style, Object / prop or Composition**. Add a picture by dropping it, browsing or pasting; explain the attributes you want in its notes. Timeline media sets the chronology. These image slots supply visual guidance.
+Four untimed reference-media slots in MiniMax Full Reference let you guide **Identity, Wardrobe, Setting, Visual style, Object / prop or Composition**. Add a picture by dropping it, browsing or pasting; explain the attributes you want in its notes. Timeline media sets the chronology. These image slots supply visual guidance.
 
 ![Reference images with explicit visual roles alongside the timed production brief](docs/images/minimax-references.png)
 
@@ -86,6 +86,14 @@ Bring your rendered video back into the project. Play it in a dockable preview, 
 
 **[Explore video review and project files →](docs/video-review-and-files.md)**
 
+## Assemble your finished shots
+
+Every collection includes a **Shot Sequence** project. Drop completed movies, arrange them in order, and preview the extended film in RAM with its source audio. Choose a cut, linear blend, filmic crossfade or perceptual crossfade; tune overlap and its source or destination side. Bake the final VP9/Opus WebM with configurable CRF quality, defaulting to 15.
+
+![Completed shots assembled in the Shot Sequence workspace](docs/images/shot-sequence.png)
+
+[See the illustrated Shot Sequence guide](docs/shot-sequences.md).
+
 ## Move from planning to production
 
 Copy a MiniMax brief straight from the editor. Export LTX Director JSON for your ComfyUI workflow. Save original media, captured video frames and portable projects into a consistent download folder. The export button signals when a file is ready; **Recent exports** lets you open it, reveal its folder or drag it into another application.
@@ -101,7 +109,7 @@ Customize the workspace itself in **Settings → Workspaces**: choose the editor
 Install the current experimental wheel:
 
 ```bash
-python3 -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a40-py3-none-any.whl'
+python3 -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a41-py3-none-any.whl'
 ltx-director-director
 ```
 
