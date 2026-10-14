@@ -112,12 +112,12 @@ def test_automatic_gui_cache_and_scrubhead(tmp_path,monkeypatch):
         assert not p._desired_playing
         builds=p.cache.stats['source_builds'];region_builds=p.cache.stats['region_builds']
         p.blend.setCurrentText('linear_blend')
-        assert sum(end-start for start,end,ready in p.shots.coverage if not ready)==1
+        assert sum(end-start for start,end,ready in p.shots.coverage if not ready)==.5
         assert any(ready for _,_,ready in p.shots.coverage)
         p.seek_sequence(1800) # retain a seek while that range is rebuilding
         until(lambda:not p._worker_running and not p._installing and p._available_frames==84 and p.preview.duration>3400)
         assert p.cache.stats['source_builds']==builds
-        assert p.cache.stats['region_builds']==region_builds+2
+        assert p.cache.stats['region_builds']==region_builds+1
         assert p.preview.player.position()==1800
         assert p.shots.playhead==1.8
         revision=p._revision;buffer=p.preview._memory_buffer

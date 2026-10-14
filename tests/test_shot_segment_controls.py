@@ -119,9 +119,10 @@ def test_selected_shot_settings_persist_delete_and_drop_insert(tmp_path,monkeypa
         window.refresh_timeline();panel=window.shot_sequence_panel
         assert not hasattr(panel,'preview_button') and not hasattr(panel,'bake_button')
         assert [button.text() for button in panel.findChildren(QPushButton)].count('Bake WebM…')==1
-        panel.shots.setCurrentRow(0);assert panel.transition_default.isEnabled()
-        panel.transition_default.setChecked(False);panel.transition_blend.setCurrentText('linear_blend')
-        panel.transition_overlap.setValue(.25);panel.transition_side.setCurrentIndex(1)
+        panel.shots.setCurrentRow(0);assert panel.blend.isEnabled()
+        assert not hasattr(panel,'transition_group') and not hasattr(panel,'transition_default')
+        panel.blend.setCurrentText('linear_blend')
+        panel.overlap.setValue(.25);panel.side.setCurrentIndex(1)
         ident=window.segments[0].id
         assert window.shot_sequence_settings['shot_transitions'][ident]==dict(blend='linear_blend',overlap=.25,side='destination')
         assert panel.shots.total==2.75 and panel.shots.currentRow()==0
@@ -133,15 +134,29 @@ def test_selected_shot_settings_persist_delete_and_drop_insert(tmp_path,monkeypa
         assert any(meta.get('duration')==2.75 and meta.get('segmentCount')==2 for meta in metadata)
         window.restore_workspace_state(window.capture_workspace_state())
         assert window.shot_sequence_settings['shot_transitions'][ident]['blend']=='linear_blend'
+        old_last=window.segments[1].id
+        panel.shots.setCurrentRow(1);assert panel.blend.currentText()=='perceptual_crossfade'
+        panel.shots.setCurrentRow(0);assert panel.blend.currentText()=='linear_blend'
         panel.add_paths([paths[2]],1)
         until(lambda:len(window.segments)==3)
         assert [shot.name for shot in window.segments]==['0.mp4','2.mp4','1.mp4']
+        inserted=window.segments[1].id
+        joins=window.shot_sequence_settings['shot_transitions']
+        assert joins[inserted]==joins[ident] and joins[inserted] is not joins[ident]
+        assert joins[old_last]['blend']=='perceptual_crossfade'
+        panel.shots.setCurrentRow(1);panel.blend.setCurrentText('cut')
+        assert window.shot_sequence_settings['shot_transitions'][ident]['blend']=='linear_blend'
         panel.shots.setCurrentRow(0);panel.move(1)
         assert window.segments[1].id==ident and panel.shots.clips[1]['transition']['overlap']==.25
         panel.shots.setCurrentRow(1);menu=panel.shots.status_menu(1)
         next(action for action in menu.actions() if action.text()=='Delete').trigger()
         assert len(window.segments)==2 and ident not in window.shot_sequence_settings['shot_transitions']
-        panel.shots.setCurrentRow(1);assert not panel.transition_default.isEnabled()
+        panel.shots.setCurrentRow(1);assert panel.blend.isEnabled()
+        panel.blend.setCurrentText('filmic_crossfade')
+        panel.overlap.setValue(.1)
+        panel.add_paths([paths[0]])
+        until(lambda:len(window.segments)==3)
+        assert window.shot_sequence_settings['shot_transitions'][window.segments[-1].id]==dict(blend='filmic_crossfade',overlap=.1,side='source')
         # The remaining player transport can request playback before cache finishes.
         panel.preview.play.click();assert panel._desired_playing
         until(lambda:panel.cache_percent==100 and not panel._worker_running and not panel._installing and panel.preview.player.playbackState()==ui.QMediaPlayer.PlaybackState.PlayingState)

@@ -65,6 +65,20 @@ def transitions(shot_ids,options):
     return [_transition(overrides.get(str(ident),{}),opts) for ident in list(shot_ids)[:-1]]
 
 
+def independent_transitions(shot_ids,options):
+    """Freeze legacy defaults into each shot, including the last shot's next join."""
+    opts=settings(options);existing=opts.get('shot_transitions',{})
+    return {**opts,'shot_transitions':{str(ident):_transition(existing.get(str(ident),{}),opts) for ident in shot_ids}}
+
+
+def inherit_transitions(shot_ids,options,neighbor=None):
+    """New shots copy their closest neighbor once; subsequent edits are independent."""
+    opts=settings(options);existing=dict(opts.get('shot_transitions',{}))
+    inherited=_transition(existing.get(str(neighbor),{}),opts)
+    for ident in shot_ids:existing[str(ident)]=dict(inherited)
+    return {**opts,'shot_transitions':existing}
+
+
 def shot_layout(shots,options):
     joins=transitions([shot.id for shot in shots],options)
     return overlaps([{'frames':max(1,round(shot.duration*FPS))} for shot in shots],

@@ -55,7 +55,8 @@ class ShotTimeline(QScrollArea):
     def count(self):return self.items.count()
     def selectedItems(self):return self.items.selectedItems()
     def currentRow(self):return self.items.currentRow()
-    def setCurrentRow(self, row):self.items.setCurrentRow(row);self.canvas.update()
+    def setCurrentRow(self, row):
+        self.items.setCurrentRow(row,QItemSelectionModel.SelectionFlag.ClearAndSelect);self.canvas.update()
     def takeItem(self, row):return self.items.takeItem(row)
     def insertItem(self, row, item):self.items.insertItem(row,item)
 
@@ -118,7 +119,6 @@ class ShotTimeline(QScrollArea):
         menu.addSeparator()
         ident=self.item(index).data(Qt.ItemDataRole.UserRole)
         edit=menu.addAction('Edit transition…',lambda:self.transition_requested.emit(ident))
-        edit.setEnabled(index<len(self.clips)-1)
         menu.addAction('Export segment video',lambda:self.export_requested.emit(ident))
         menu.addSeparator()
         menu.addAction('Delete',self.remove_requested.emit)

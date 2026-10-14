@@ -63,9 +63,8 @@ with tempfile.TemporaryDirectory() as temporary:
         panel.set_shot_status([window.segments[0].id],'Done')
         panel.set_shot_status([window.segments[2].id],'Consider')
         panel.shots.setCurrentRow(0)
-        panel.transition_default.setChecked(False)
-        panel.transition_blend.setCurrentText('linear_blend')
-        panel.transition_overlap.setValue(.25)
+        panel.blend.setCurrentText('linear_blend')
+        panel.overlap.setValue(.25)
         panel.build_preview()
         timer=QElapsedTimer();timer.start()
         while (panel.preview.current_frame is None or panel._baking or panel._worker_running or panel._installing or timer.elapsed()<500) and timer.elapsed()<10000:
@@ -81,7 +80,7 @@ with tempfile.TemporaryDirectory() as temporary:
         target=Path(__file__).resolve().parents[1]/'docs/images/shot-sequence.png'
         window.grab().save(str(target))
         print(target)
-        panel.transition_blend.setCurrentText('perceptual_crossfade')
+        panel.blend.setCurrentText('perceptual_crossfade')
         # This is the actual invalidated cache plan, before the debounce starts.
         panel.shots.grab().save(str(target.with_name('shot-sequence-cache.png')))
         window.project_dirty=False;window._close_saves_queued=True;window.close()

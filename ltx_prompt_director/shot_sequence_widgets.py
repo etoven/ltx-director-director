@@ -13,11 +13,11 @@ from PySide6.QtMultimedia import QMediaPlayer
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (QWidget,QVBoxLayout,QHBoxLayout,QLabel,QPushButton,QComboBox,
                               QDoubleSpinBox,QSpinBox,QListWidget,QListWidgetItem,QAbstractItemView,
-                              QSplitter,QFileDialog,QMessageBox,QProgressBar,QGroupBox,QCheckBox,QSizePolicy)
+                              QSplitter,QFileDialog,QMessageBox,QProgressBar)
 from .models import Segment
 from .media import prepare_media, safe_media_filename, TIMELINE_VIDEO_SUFFIXES
 from .project_archive import materialize_source
-from .shot_sequence import MODES, settings, probe, render_sequence, shot_layout
+from .shot_sequence import MODES, settings, probe, render_sequence, shot_layout, independent_transitions, inherit_transitions
 from .shot_timeline import ShotTimeline
 from .shot_preview_cache import PreviewCache, make_plan, source_identity
 from .audio_scrub import AudioScrubber
@@ -101,7 +101,7 @@ class ShotSequencePanel(QWidget):
         self.width=QSpinBox();self.height=QSpinBox()
         for field,value in [(self.width,1280),(self.height,704)]:field.setRange(32,8192);field.setSingleStep(2);field.setValue(value)
         row2=QHBoxLayout()
-        for text,widget in [('Default blend',self.blend),('Default overlap',self.overlap),('Default side',self.side),('Width',self.width),('Height',self.height),('CRF',self.crf)]:
+        for text,widget in [('Blend',self.blend),('Overlap',self.overlap),('Side',self.side),('Width',self.width),('Height',self.height),('CRF',self.crf)]:
             target=row2 if text in {"Width","Height","CRF"} else row
             target.addWidget(QLabel(text));target.addWidget(widget)
         layout.addLayout(row)
@@ -116,25 +116,9 @@ class ShotSequencePanel(QWidget):
         self.shots.transition_requested.connect(self.edit_transition)
         self.shots.remove_requested.connect(self.remove)
         self.shots.order_changed.connect(self.order_changed)
-        self.transition_group=QGroupBox('Transition after selected shot')
-        transition_layout=QVBoxLayout(self.transition_group)
-        self.transition_label=QLabel('Select a shot to configure its next join')
-        self.transition_label.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Preferred)
-        transition_layout.addWidget(self.transition_label)
-        transition_row=QHBoxLayout()
-        self.transition_default=QCheckBox('Use sequence defaults');self.transition_default.setChecked(True)
-        self.transition_blend=QComboBox();self.transition_blend.addItems(MODES)
-        self.transition_overlap=QDoubleSpinBox();self.transition_overlap.setRange(0,60)
-        self.transition_overlap.setDecimals(2);self.transition_overlap.setSuffix(' s')
-        self.transition_side=QComboBox();self.transition_side.addItem('Source side','source');self.transition_side.addItem('Destination side','destination')
-        transition_row.addWidget(self.transition_default)
-        for title,control in [('Blend',self.transition_blend),('Overlap',self.transition_overlap),('Side',self.transition_side)]:
-            transition_row.addWidget(QLabel(title));transition_row.addWidget(control)
-        transition_layout.addLayout(transition_row);column.addWidget(self.transition_group)
         self.shots.items.currentRowChanged.connect(self.sync_transition_controls)
         self.shots.items.itemSelectionChanged.connect(self.sync_transition_controls)
-        for signal in (self.transition_default.toggled,self.transition_blend.currentIndexChanged,
-                       self.transition_overlap.valueChanged,self.transition_side.currentIndexChanged):
+        for signal in (self.blend.currentIndexChanged,self.overlap.valueChanged,self.side.currentIndexChanged):
             signal.connect(self.transition_changed)
         column.addWidget(QLabel('NLA timeline · thumbnail strips · drag scrubhead to seek · green cached / red rebuilding'))
         column.addWidget(self.shots,1)
@@ -186,14 +170,13 @@ class ShotSequencePanel(QWidget):
         layout.addWidget(self.summary)
         self.bake_progress=QProgressBar()
         self.bake_progress.setRange(0,100);self.bake_progress.setValue(0);self.bake_progress.hide();layout.addWidget(self.bake_progress)
-        for control,signal in [(self.blend,self.blend.currentIndexChanged),(self.side,self.side.currentIndexChanged),
-                               (self.overlap,self.overlap.valueChanged),(self.crf,self.crf.valueChanged),
+        for control,signal in [(self.crf,self.crf.valueChanged),
                                (self.width,self.width.valueChanged),(self.height,self.height.valueChanged)]:signal.connect(self.options_changed)
         self.refresh()
 
     def options(self):
-        return settings({**getattr(self.owner,'shot_sequence_settings',{}),**dict(blend=self.blend.currentText(),side=self.side.currentData(),overlap=self.overlap.value(),
-                             crf=self.crf.value(),width=self.width.value(),height=self.height.value())})
+        return settings({**getattr(self.owner,'shot_sequence_settings',{}),
+                         'crf':self.crf.value(),'width':self.width.value(),'height':self.height.value()})
 
     def invalidate(self):
         self._audio_scrub.cancel()
@@ -216,14 +199,16 @@ class ShotSequencePanel(QWidget):
         self.invalidate();self._signature=None;self._plan=None;self.shots.set_coverage([])
 
     def refresh(self):
-        opts=settings(getattr(self.owner,'shot_sequence_settings',None))
+        opts=independent_transitions([shot.id for shot in self.owner.segments],getattr(self.owner,'shot_sequence_settings',None))
+        self.owner.shot_sequence_settings=opts
         tags=self.owner.project_status_tags()
         signature=(self.owner.workspace_revision,tuple((s.id,s.media_path,s.duration,s.name,s.preview_path,source_identity(s)) for s in self.owner.segments),tuple(opts.items()),tuple((t["name"],t["color"]) for t in tags))
         if signature==self._signature:return
         self._active=self.owner.workspace_engine=="shot_sequence"
         self._signature=signature;self._populating=True
         selected={item.data(Qt.ItemDataRole.UserRole) for item in self.shots.selectedItems()}
-        current=self.shots.item(self.shots.currentRow())
+        current_row=self.shots.currentRow()
+        current=self.shots.item(current_row)
         current_id=current.data(Qt.ItemDataRole.UserRole) if current else None
         self.blend.setCurrentText(opts['blend']);self.side.setCurrentIndex(self.side.findData(opts['side']))
         self.overlap.setValue(opts['overlap']);self.crf.setValue(opts['crf']);self.width.setValue(opts['width']);self.height.setValue(opts['height'])
@@ -239,11 +224,12 @@ class ShotSequencePanel(QWidget):
         for index,shot in enumerate(self.owner.segments):
             if shot.id==current_id:self.shots.setCurrentRow(index)
         for index,shot in enumerate(self.owner.segments):self.shots.item(index).setSelected(shot.id in selected)
+        if self.owner.segments and not any(shot.id==current_id for shot in self.owner.segments):
+            self.shots.setCurrentRow(min(max(0,current_row),len(self.owner.segments)-1))
         self._populating=False
         self.sync_transition_controls()
         joins,total=shot_layout(self.owner.segments,opts)
-        custom=any(shot.id in opts.get('shot_transitions',{}) for shot in self.owner.segments[:-1])
-        self.summary.setText(f'{len(self.owner.segments)} shots · {total/24:.2f}s · '+('per-shot transitions' if custom else opts['blend'])+' · audio included')
+        self.summary.setText(f'{len(self.owner.segments)} shots · {total/24:.2f}s · per-shot transitions · audio included')
         plan=make_plan(copy.deepcopy(self.owner.segments),opts)
         if self._plan is None or plan.signature!=self._plan.signature:
             self._plan=plan
@@ -263,42 +249,37 @@ class ShotSequencePanel(QWidget):
         if self._populating:return
         row=self.shots.currentRow()
         selected=0<=row<len(self.owner.segments) and self.shots.item(row).isSelected()
-        valid=selected and row<len(self.owner.segments)-1
         self._populating=True
-        opts=self.options();custom=False
+        opts=self.options()
         join={key:opts[key] for key in ('blend','overlap','side')}
         if selected:
             shot=self.owner.segments[row]
-            self.transition_label.setText(f'{row+1:02d} · {shot.name}'+
-                (f' → {self.owner.segments[row+1].name}' if valid else ' · last shot, no following join'))
-            self.transition_label.setToolTip(self.transition_label.text())
-            custom=shot.id in opts.get('shot_transitions',{})
+            hint=f'{row+1:02d} · {shot.name}'+(f' → {self.owner.segments[row+1].name}' if row<len(self.owner.segments)-1 else ' · used when the next shot is added')
             join.update(opts.get('shot_transitions',{}).get(shot.id,{}))
-        else:self.transition_label.setText('Select a shot to configure its next join')
-        self.transition_default.setChecked(not custom)
-        self.transition_blend.setCurrentText(join['blend']);self.transition_overlap.setValue(join['overlap'])
-        self.transition_side.setCurrentIndex(self.transition_side.findData(join['side']))
-        self.transition_default.setEnabled(valid)
-        for control in (self.transition_blend,self.transition_overlap,self.transition_side):control.setEnabled(valid and custom)
+        else:hint='Settings for the first shot' if not self.owner.segments else 'Select a shot to edit its transition'
+        self.blend.setCurrentText(join['blend']);self.overlap.setValue(join['overlap'])
+        self.side.setCurrentIndex(self.side.findData(join['side']))
+        for control in (self.blend,self.overlap,self.side):
+            control.setEnabled(selected or not self.owner.segments);control.setToolTip(hint)
         self._populating=False
 
     def transition_changed(self,*_):
         if self._populating:return
         row=self.shots.currentRow()
-        if not 0<=row<len(self.owner.segments)-1:return
-        ident=self.owner.segments[row].id;opts=self.options()
-        overrides=dict(opts.get('shot_transitions',{}))
-        if self.transition_default.isChecked():overrides.pop(ident,None)
-        else:overrides[ident]=dict(blend=self.transition_blend.currentText(),overlap=self.transition_overlap.value(),side=self.transition_side.currentData())
-        self.owner.shot_sequence_settings=settings({**opts,'shot_transitions':overrides})
+        opts=self.options();join=dict(blend=self.blend.currentText(),overlap=self.overlap.value(),side=self.side.currentData())
+        if not self.owner.segments:opts.update(join)
+        elif 0<=row<len(self.owner.segments) and self.shots.item(row).isSelected():
+            opts['shot_transitions']={**opts.get('shot_transitions',{}),self.owner.segments[row].id:join}
+        else:return
+        self.owner.shot_sequence_settings=settings(opts)
         self.refresh();self.owner.mark_dirty()
 
     def edit_transition(self,ident):
         row=next((i for i,shot in enumerate(self.owner.segments) if shot.id==ident),-1)
         if row<0:return
         self.shots.setCurrentRow(row);self.sync_transition_controls()
-        self.transition_default.setFocus()
-        self.owner.editor_scroll.ensureWidgetVisible(self.transition_group)
+        self.blend.setFocus()
+        self.owner.editor_scroll.ensureWidgetVisible(self.blend)
 
     def choose(self):
         paths,_=QFileDialog.getOpenFileNames(self,'Add completed shots','', 'Movies (*.mp4 *.webm *.mov *.mkv *.avi *.m4v)')
@@ -323,6 +304,8 @@ class ShotSequencePanel(QWidget):
                 for shot in shots:Path(shot.media_path).unlink(missing_ok=True)
                 return
             position=next((i for i,shot in enumerate(self.owner.segments) if shot.id==anchor),min(index,len(self.owner.segments))) if anchor else len(self.owner.segments)
+            neighbor=self.owner.segments[position-1] if position>0 else self.owner.segments[0] if self.owner.segments else None
+            self.owner.shot_sequence_settings=inherit_transitions([shot.id for shot in shots],self.owner.shot_sequence_settings,neighbor.id if neighbor else None)
             self.owner.segments[position:position]=shots
             self.owner.refresh_timeline();self.refresh();self.owner.mark_dirty()
             if shots:self.shots.setCurrentRow(position)
@@ -342,6 +325,7 @@ class ShotSequencePanel(QWidget):
             # Keep the slot identity and sequence order, adopting the full length
             # of the replacement. Additional dropped movies follow this slot.
             shots[0].id=target_id
+            self.owner.shot_sequence_settings=inherit_transitions([shot.id for shot in shots[1:]],self.owner.shot_sequence_settings,target_id)
             self.owner.segments[location:location+1]=shots
             self.owner.refresh_timeline();self.shots.setCurrentRow(location);self.owner.mark_dirty()
         self.owner.start_disk_job(import_shots,(list(paths),project_library_path()/'shot_sources'),imported,
