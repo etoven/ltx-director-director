@@ -52,9 +52,12 @@ with tempfile.TemporaryDirectory() as temporary:
         for dock in [window.project_preview_dock,window.project_files_dock,window.project_properties_dock,window.catalog_dock]:dock.hide()
         window.resize(1460,900);window.show()
         panel=window.shot_sequence_panel
-        panel.preview.set_memory_video('Observatory · continuous sequence',render_sequence(movies,window.shot_sequence_settings,preview=True))
+        panel.build_preview()
+        window.next_export_path=lambda _:root/'final.webm'
+        window.record_export=lambda _:None
+        panel.bake()
         timer=QElapsedTimer();timer.start()
-        while (panel.preview.current_frame is None or timer.elapsed()<500) and timer.elapsed()<3000:
+        while (panel.preview.current_frame is None or panel._baking or timer.elapsed()<500) and timer.elapsed()<10000:
             app.processEvents(QEventLoop.ProcessEventsFlag.AllEvents,20)
         # Native video surfaces are excluded by QWidget.grab; show the identical decoded frame.
         if panel.preview.current_frame is not None:

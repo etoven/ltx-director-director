@@ -1097,6 +1097,7 @@ class ProjectPreviewPanel(QWidget):
         self.clear_project()
         self.title.setText(name)
         self._memory_preview = True
+        self._initial_media_pending = True
         self.pending_preview_path = ""
         self._memory_buffer = QBuffer(self)
         self._memory_buffer.setData(data)
@@ -1108,6 +1109,8 @@ class ProjectPreviewPanel(QWidget):
 
     def set_project(self, name: str, video_path: str = "") -> None:
         self.release_memory_video()
+        self._memory_preview = False
+        self._initial_media_pending = False
         self.title.setText(name)
         self.choose.setEnabled(True)
         self.pending_preview_path = video_path
@@ -1162,6 +1165,7 @@ class ProjectPreviewPanel(QWidget):
         if not source.is_file() or source.suffix.casefold() not in ProjectVideoWidget.VIDEO_SUFFIXES:
             self.media_error()
             return
+        self._initial_media_pending = True
         self.player.setAudioOutput(self.audio)
         self.player.setSource(QUrl.fromLocalFile(str(source)))
 
@@ -1189,6 +1193,7 @@ class ProjectPreviewPanel(QWidget):
     def clear_project(self) -> None:
         self.release_memory_video()
         self._memory_preview = False
+        self._initial_media_pending = False
         self._source_generation += 1
         self.player.stop()
         self.current_frame = None
@@ -1204,9 +1209,14 @@ class ProjectPreviewPanel(QWidget):
         self.position.setText("00:00 / 00:00")
 
     def toggle_playback(self) -> None:
+        # Only the first load may initialize playback; buffered/seek events must
+        # never undo the user's pause or stop a replay at position zero.
+        self._initial_media_pending = False
         if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
             self.player.pause()
         else:
+            if self.player.mediaStatus() == QMediaPlayer.MediaStatus.EndOfMedia or (self.duration and self.player.position() >= self.duration):
+                self.player.setPosition(0)
             self.player.play()
 
     def seek_to(self, position: int) -> None:
@@ -1220,10 +1230,12 @@ class ProjectPreviewPanel(QWidget):
         self.position_changed(self.player.position())
 
     def media_status_changed(self, status) -> None:
-        if status in {QMediaPlayer.MediaStatus.LoadedMedia, QMediaPlayer.MediaStatus.BufferedMedia} and self.player.position() == 0:
+        if status in {QMediaPlayer.MediaStatus.LoadedMedia, QMediaPlayer.MediaStatus.BufferedMedia}:
             self.empty.hide()
             self.video.show()
             self.fullscreen.setEnabled(True)
+            if not getattr(self, "_initial_media_pending", False):return
+            self._initial_media_pending = False
             if getattr(self, "_memory_preview", False):
                 self.player.play()
             else:
@@ -5018,7 +5030,8 @@ class MainWindow(QMainWindow):
 
     @property
     def maximum_sequence_duration(self) -> float | None:
-        return sequence_limit(self.workspace_definition)
+        # Completed-shot editing must never inherit a generation duration budget.
+        return None if self.workspace_engine == "shot_sequence" else sequence_limit(self.workspace_definition)
 
     def available_segment_duration(self, segment: Segment | None) -> float:
         maximum = self.maximum_sequence_duration
@@ -5056,6 +5069,9 @@ class MainWindow(QMainWindow):
 
 
     def add_media_paths(self, paths: list[str], insert_index: int | None = None) -> None:
+        if self.workspace_engine == "shot_sequence":
+            self.shot_sequence_panel.add_paths(paths)
+            return
         if self.prompt_only_workspace:
             return
         paths = [path for path in paths if Path(path).is_file()]
@@ -5098,6 +5114,15 @@ class MainWindow(QMainWindow):
                             lambda message: QMessageBox.warning(self, "Media error", message))
 
     def refresh_timeline(self, selected: int = 0) -> None:
+        if self.workspace_engine == "shot_sequence":
+            # Recover full imported movies if an older build applied a generation cap.
+            for shot in self.segments:
+                if shot.media_duration_frames:
+                    shot.duration = shot.media_duration_frames / 24
+                    shot.trim_start = 0
+            self.shot_sequence_panel.refresh()
+            self.update_summary()
+            return
         targets = fit_sequence([item.duration for item in self.segments], self.maximum_sequence_duration)
         for item, duration in zip(self.segments, targets):
             item.duration = duration
@@ -5959,6 +5984,7 @@ class MainWindow(QMainWindow):
             return
         if getattr(self, "duration_animation", None):
             self.duration_animation.stop()
+        was_sequence = self.workspace_engine == "shot_sequence"
         self.store_minimax_draft()
         self.project_type = project_type
         self.workspace_revision += 1
@@ -5970,10 +5996,11 @@ class MainWindow(QMainWindow):
         self.minimax_panel.clear_message()
         self.sync_minimax_panel()
         self.sync_reference_panel_visibility()
+        if was_sequence or self.workspace_engine == "shot_sequence":self.refresh_timeline()
         self.mark_dirty()
 
     def apply_project_type_ui(self) -> None:
-        if hasattr(self, "timeline") and self.segments:
+        if hasattr(self, "timeline") and self.segments and not self._loading:
             current = [item.duration for item in self.segments]
             if fit_sequence(current, self.maximum_sequence_duration) != current:
                 self.refresh_timeline(self.timeline.currentRow())
@@ -6858,7 +6885,8 @@ class MainWindow(QMainWindow):
                 segment._source_size = raw.get("sourceSize")
             loaded.append(segment)
         prompt_only = self.workspace_definitions.get(payload.get("projectType"), {}).get("prompt_mode") == "prompt_only"
-        if not loaded and not prompt_only:
+        sequence = self.workspace_definitions.get(payload.get("projectType"), {}).get("engine") == "shot_sequence"
+        if not loaded and not prompt_only and not sequence:
             raise ValueError("Project contains no supported main-track segments.")
         self.segments = loaded
         self.global_prompt.setPlainText(payload.get("globalPrompt", ""))

@@ -113,11 +113,12 @@ def test_workspace_panel_memory_player_and_portable_save(movies,tmp_path,monkeyp
         w.shot_sequence_settings={**DEFAULTS,'overlap':2}
         w.restore_workspace_state(state)
         assert w.shot_sequence_settings['overlap']==.5
-        ram=render_sequence(movies,w.shot_sequence_settings,preview=True)
-        p.preview.set_memory_video('Continuous sequence',ram)
+        p.build_preview()
+        assert not p.preview_progress.isHidden()
         timer=QElapsedTimer();timer.start()
-        while p.preview.duration==0 and timer.elapsed()<5000:
+        while (p.preview.duration==0 or p.preview_progress.value()!=100) and timer.elapsed()<5000:
             app.processEvents(QEventLoop.ProcessEventsFlag.AllEvents,20)
+        assert p.preview_progress.value()==100
         assert p.preview.duration>2000
         assert p.preview.player.audioOutput() is p.preview.audio
         timer.restart()
@@ -129,8 +130,17 @@ def test_workspace_panel_memory_player_and_portable_save(movies,tmp_path,monkeyp
         assert not p.preview.player.source().isLocalFile()
         p.preview.seek_to(1200)
         assert p.preview.player.position()==1200
+        saved=[]
+        monkeypatch.setattr(w,'next_export_path',lambda _:tmp_path/'ui-final.webm')
+        monkeypatch.setattr(w,'record_export',lambda path:saved.append(path))
+        p.bake()
+        assert not p.bake_progress.isHidden() and not p.bake_button.isEnabled()
+        timer.restart()
+        while not saved and timer.elapsed()<5000:app.processEvents(QEventLoop.ProcessEventsFlag.AllEvents,20)
+        assert saved==[tmp_path/'ui-final.webm']
+        assert p.bake_progress.value()==100 and p.bake_button.isEnabled()
         p.deactivate()
-        assert p.preview._memory_buffer is None
+        assert p.preview._memory_buffer is None and p.preview_progress.isHidden()
     finally:
         w.project_dirty=False;w._close_saves_queued=True;w.close()
 
@@ -148,3 +158,108 @@ def test_worker_restores_archived_movies_and_respects_clip_budget(movies,tmp_pat
         assert len(list(container.decode(video=0)))==36
     cancel=threading.Event();cancel.set()
     assert render_preview(shots,DEFAULTS,cancel) is None
+
+
+def test_video_duration_uses_video_timestamps_not_container(tmp_path):
+    # Fifteen-second WebM, with timestamps starting at ten seconds and no stream
+    # duration. Counting 24fps frames at a different source rate would also fail.
+    path=tmp_path/'offset.webm'
+    with av.open(str(path),'w') as container:
+        stream=container.add_stream('libvpx-vp9',rate=12)
+        stream.width=32;stream.height=32;stream.pix_fmt='yuv420p'
+        stream.options={'deadline':'realtime','cpu-used':'8'}
+        for i in range(180):
+            frame=av.VideoFrame.from_ndarray(np.full((32,32,3),i%255,dtype=np.uint8),format='rgb24')
+            frame.pts=120+i;frame.time_base=Fraction(1,12)
+            for packet in stream.encode(frame):container.mux(packet)
+        for packet in stream.encode():container.mux(packet)
+    info=probe(path)
+    assert info['frames']==360
+    assert info['start_time']==pytest.approx(10)
+    from ltx_prompt_director.shot_sequence_widgets import import_shots
+    shots=import_shots([str(path)],tmp_path/'sources')
+    assert shots[0].duration==15 and shots[0].trim_start==0
+    data=render_sequence([str(path)],dict(width=32,height=32),preview=True)
+    with av.open(io.BytesIO(data)) as container:
+        assert len(list(container.decode(video=0)))==360
+
+
+def test_render_progress_reports_real_work_and_completion(movies,tmp_path):
+    for output in (None,str(tmp_path/'final.webm')):
+        events=[]
+        render_sequence(movies,dict(width=96,height=64,overlap=.5),output,preview=output is None,
+                        progress=lambda value,stage:events.append((value,stage)))
+        percentages=[value for value,_ in events]
+        assert percentages==sorted(percentages)
+        assert percentages[0]==0 and percentages[-1]==100
+        assert len(set(percentages))>30
+        assert {'Reading source movies','Preparing source audio','Encoding video and audio','Finishing WebM','Complete'} <= {s for _,s in events}
+
+
+def test_empty_collection_tile_and_full_clip_recovery(tmp_path,monkeypatch):
+    from PySide6.QtWidgets import QApplication
+    from ltx_prompt_director import ui
+    from ltx_prompt_director.workspaces import WorkspaceStore
+    from ltx_prompt_director.models import Segment
+    app=QApplication.instance() or QApplication([])
+    store=WorkspaceStore(tmp_path/'ws')
+    monkeypatch.setattr(ui,'WorkspaceStore',lambda:store)
+    monkeypatch.setattr(ui.MainWindow,'restore_startup_workspace',lambda self:None)
+    monkeypatch.setattr(ui,'project_library_path',lambda:tmp_path)
+    w=ui.MainWindow()
+    try:
+        record=ensure_collection_sequences(tmp_path,[{'collection':'Finished film'}])[0]
+        w.load_project_payload(json.loads(Path(record['projectPath']).read_text()))
+        assert w.workspace_engine=='shot_sequence' and w.has_project_content
+        assert not w.shot_sequence_panel.isHidden()
+        # Simulate loading an old sequence while MiniMax (15s generation budget)
+        # is active. The clips must recover their full imported lengths.
+        w.set_project_type('minimax_base_guide')
+        frames=[Segment(f'Shot {i}','missing.mp4','',kind='video',duration=1.5,media_duration_frames=360,trim_start=0).to_dict() for i in range(10)]
+        w.load_project_payload({'app':'ltx-director-director','projectType':'shot_sequence','frames':frames,'shotSequence':DEFAULTS})
+        assert [s.duration for s in w.segments]==[15]*10
+        assert w.total_duration()==150 and w.maximum_sequence_duration is None
+        p=w.shot_sequence_panel
+        assert p.shots.total==141 # nine 1-second overlaps
+        assert p.shots.clips[1]['start']==14
+        assert p.shots.clip_rect(1).x()==pytest.approx(p.shots.LEFT+14*p.shots.scale)
+        assert p.shots.clip_rect(0,True).y()>p.shots.clip_rect(1).y()
+        ids=[s.id for s in w.segments]
+        p.shots.reorder([0,1],4)
+        assert [s.id for s in w.segments][:4]==ids[2:4]+ids[:2]
+        p.shots.set_playhead(22000)
+        assert p.shots.playhead==22
+    finally:
+        w.project_dirty=False;w._close_saves_queued=True;w.close()
+
+
+def test_preview_play_pause_does_not_reinitialize_on_buffering(movies):
+    from PySide6.QtWidgets import QApplication
+    from PySide6.QtMultimedia import QMediaPlayer
+    from PySide6.QtCore import QElapsedTimer,QEventLoop
+    from ltx_prompt_director.ui import ProjectPreviewPanel
+    app=QApplication.instance() or QApplication([])
+    panel=ProjectPreviewPanel()
+    try:
+        panel.set_memory_video('Replay',render_sequence(movies,dict(width=96,height=64,overlap=.5),preview=True))
+        def until(predicate,timeout=4000):
+            timer=QElapsedTimer();timer.start()
+            while not predicate() and timer.elapsed()<timeout:app.processEvents(QEventLoop.ProcessEventsFlag.AllEvents,20)
+            assert predicate()
+        until(lambda:panel.player.playbackState()==QMediaPlayer.PlaybackState.PlayingState)
+        panel.toggle_playback()
+        until(lambda:panel.player.playbackState()==QMediaPlayer.PlaybackState.PausedState)
+        panel.player.setPosition(0)
+        panel.media_status_changed(QMediaPlayer.MediaStatus.BufferedMedia)
+        assert panel.player.playbackState()==QMediaPlayer.PlaybackState.PausedState
+        panel.toggle_playback()
+        until(lambda:panel.player.playbackState()==QMediaPlayer.PlaybackState.PlayingState)
+        panel.toggle_playback()
+        until(lambda:panel.player.playbackState()==QMediaPlayer.PlaybackState.PausedState)
+        panel.player.setPosition(panel.duration-40);panel.toggle_playback()
+        until(lambda:panel.player.mediaStatus()==QMediaPlayer.MediaStatus.EndOfMedia)
+        panel.toggle_playback()
+        until(lambda:panel.player.playbackState()==QMediaPlayer.PlaybackState.PlayingState)
+        assert panel.player.position()<panel.duration-100
+    finally:
+        panel.clear_project();panel.close()

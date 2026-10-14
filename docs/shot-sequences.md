@@ -6,9 +6,11 @@
 
 ## Bring in your completed shots
 
-Open a collection and select **Shot Sequence**. Drop movie files into the shot list, use **Add shots**, or choose **Collection movies** to bring in the saved rendered videos from that collection. Director copies imports into managed storage; their originals and shot order travel inside saved `.LTXD` projects.
+Open a collection and select **Shot Sequence**. Drop movie files onto the NLA timeline, use **Add shots**, or choose **Add collection previews…** to bring in the saved rendered videos from that collection. Director copies imports into managed storage; their originals and shot order travel inside saved `.LTXD` projects.
 
-Drag shots to reorder them, use the up/down buttons, or select shots and press **Delete** to remove them from the sequence. Double-click a shot to inspect its source movie through the same player. Save the project to keep its order, blend settings and output options. The sequence workspace has no default duration ceiling.
+Drag linked video/audio strips to reorder them, use the left/right buttons, or select shots and press **Delete** to remove them from the sequence. Double-click a shot to inspect its source movie through the same player. Save the project to keep its order, blend settings and output options. Completed shots keep their full source lengths, independent of generation duration limits. **Restore full clips** re-reads the source movies if an older project contains shortened timings. The sequence workspace has no duration ceiling.
+
+The NLA timeline places shots on alternating video tracks with linked audio tracks below. Strip widths follow actual movie duration; shaded regions show overlaps. Use **+**, **−** and **Fit** to inspect a long sequence, Ctrl-click to select multiple strips, and click the time ruler to seek the continuous RAM preview.
 
 ## Shape the join
 
@@ -27,7 +29,7 @@ The source movies' audio follows the same joins. Blends crossfade the two soundt
 
 ## Watch continuously, in RAM
 
-Click **Build RAM preview**. Director composes a lightweight preview in memory and plays it with source audio through the existing player. No preview movie is written to disk. Use Play/Pause, click the seek bar, or open fullscreen. Frame export and clipboard frame capture remain available through the player's context menu.
+Click **Build RAM preview**. Director composes a lightweight preview in memory and plays it with source audio through the existing player. A progress bar follows source reading, audio preparation, encoding and WebM finishing. No preview movie is written to disk. Use Play/Pause, click the seek bar, or open fullscreen. Frame export and clipboard frame capture remain available through the player's context menu.
 
 Changing the order or blend settings clears the previous preview so the next preview reflects the current sequence. Preview uses a reduced canvas for responsive playback; output dimensions remain independent.
 
@@ -35,4 +37,4 @@ Changing the order or blend settings clears the previous preview so the next pre
 
 Choose output width and height, then click **Bake WebM**. The finished file includes video and source audio, encoded as VP9 and Opus. **CRF defaults to 15**; lower values retain more detail and usually produce larger files. Baking uses the same blend and overlap settings as the RAM preview at the selected output resolution.
 
-Clips are normalized to 24 fps and fitted to the output canvas without stretching. Only overlap frame buffers and working audio are retained during composition; full-resolution movies do not need to be loaded as one giant image batch. Baking runs in the background and the finished file appears in **Recent exports**, where it can be opened, revealed or dragged into another application.
+Clips are normalized to 24 fps and fitted to the output canvas without stretching. Only overlap frame buffers and working audio are retained during composition; full-resolution movies do not need to be loaded as one giant image batch. Baking runs in the background with its own progress bar, and the finished file appears in **Recent exports**, where it can be opened, revealed or dragged into another application.

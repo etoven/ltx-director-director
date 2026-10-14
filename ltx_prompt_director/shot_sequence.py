@@ -35,17 +35,31 @@ def settings(value=None):
     return result
 
 
-def probe(path):
+def probe(path, cancel=None):
+    """Measure the actual video interval, independent of container/audio timestamps."""
     with av.open(str(path)) as container:
         if not container.streams.video:
             raise ValueError(f'{Path(path).name} has no video stream.')
         video = container.streams.video[0]
-        seconds = float(video.duration * video.time_base) if video.duration else (container.duration or 0) / av.time_base
-        if seconds <= 0:
-            seconds = sum(1 for _ in container.decode(video)) / float(video.average_rate or FPS)
+        first = last = None
+        step = 1 / float(video.average_rate or FPS)
+        count = 0
+        # WebM often omits stream.duration. Container duration can include a nonzero
+        # start timestamp or a longer audio stream, so it is not a clip length.
+        for frame in container.decode(video):
+            if cancel is not None and cancel.is_set():
+                raise RuntimeError('Shot sequence operation cancelled.')
+            count += 1
+            if frame.time is not None:
+                if first is None:first = frame.time
+                if last is not None and frame.time > last:step = frame.time-last
+                last = frame.time
+                if frame.duration:step = float(frame.duration * frame.time_base)
+        if not count:raise ValueError(f'{Path(path).name} has no decodable video frames.')
+        seconds = last-first+step if first is not None else count / float(video.average_rate or FPS)
         return dict(path=str(path), frames=max(1, round(seconds * FPS)),
                     width=video.width, height=video.height, audio=bool(container.streams.audio),
-                    start_time=float((video.start_time or 0)*video.time_base))
+                    start_time=first if first is not None else float((video.start_time or 0)*video.time_base))
 
 
 def overlaps(clips, seconds):
@@ -171,11 +185,16 @@ def join_audio(source, destination, amount, mode, side):
     return np.concatenate((source[:,:-amount],mixed,destination[:,amount:]),axis=1)
 
 
-def render_sequence(paths, options, output=None, preview=False, cancel=None):
+def render_sequence(paths, options, output=None, preview=False, cancel=None, progress=None):
     """Encode directly to BytesIO for preview, or atomically to a baked WebM."""
     opts=settings(options)
     if not paths:raise ValueError('Add at least one completed shot.')
-    clips=[probe(path) for path in paths]
+    report = progress or (lambda percent, stage: None)
+    report(0, 'Reading source movies')
+    clips=[]
+    for index,path in enumerate(paths):
+        clips.append(probe(path,cancel))
+        report(round(10*(index+1)/len(paths)), 'Reading source movies')
     for clip,limit in zip(clips,opts.get('_frame_limits',[])):
         clip['frames']=max(1,min(clip['frames'],int(limit)))
     joins,count=overlaps(clips,opts['overlap'])
@@ -184,10 +203,13 @@ def render_sequence(paths, options, output=None, preview=False, cancel=None):
         scale=min(1,640/width,360/height)
         width=max(32,round(width*scale)//2*2);height=max(32,round(height*scale)//2*2)
     images=_frames(clips[0],width,height,cancel)
+    report(10, 'Preparing source audio')
     audio=_audio(clips[0],cancel)
-    for clip,amount in zip(clips[1:],joins):
+    report(10+round(10/len(clips)), 'Preparing source audio')
+    for clip_index,(clip,amount) in enumerate(zip(clips[1:],joins),2):
         images=_join(images,_frames(clip,width,height,cancel),amount,opts['blend'],opts['side'])
         audio=join_audio(audio,_audio(clip,cancel),round(amount*RATE/FPS),opts['blend'],opts['side'])
+        report(10+round(10*clip_index/len(clips)), 'Preparing source audio')
     memory=io.BytesIO() if output is None else None
     temporary=None
     if output is not None:
@@ -210,16 +232,23 @@ def render_sequence(paths, options, output=None, preview=False, cancel=None):
                     frame.sample_rate=RATE;frame.pts=cursor;frame.time_base=Fraction(1,RATE)
                     for packet in sound.encode(frame):container.mux(packet)
                     cursor+=size
+            last_progress=20
+            report(last_progress, 'Encoding video and audio')
             for index,image in enumerate(images):
                 if cancel is not None and cancel.is_set():raise RuntimeError('Shot sequence operation cancelled.')
                 frame=av.VideoFrame.from_ndarray(image,format='rgb24')
                 frame.pts=index;frame.time_base=Fraction(1,FPS)
                 for packet in video.encode(frame):container.mux(packet)
                 encode_audio(min(audio.shape[1],round((index+1)*RATE/FPS)))
+                percent=20+int(78*(index+1)/count)
+                if percent != last_progress:
+                    report(percent, 'Encoding video and audio');last_progress=percent
+            report(99, 'Finishing WebM')
             encode_audio(audio.shape[1])
             for stream in (video,sound):
                 for packet in stream.encode(None):container.mux(packet)
         if temporary is not None:os.replace(temporary,output)
+        report(100, 'Complete')
         return memory.getvalue() if memory is not None else str(output)
     finally:
         if temporary is not None:temporary.unlink(missing_ok=True)
