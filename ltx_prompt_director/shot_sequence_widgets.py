@@ -20,6 +20,7 @@ from .project_archive import materialize_source
 from .shot_sequence import MODES, settings, probe, render_sequence, overlaps
 from .shot_timeline import ShotTimeline
 from .shot_preview_cache import PreviewCache, make_plan, source_identity
+from .audio_scrub import AudioScrubber
 
 
 def render_shots(shots,options,output=None,preview=False,cancel=None,progress=None):
@@ -110,6 +111,7 @@ class ShotSequencePanel(QWidget):
         self.shots.movies_dropped.connect(self.add_paths)
         self.shots.movies_replaced.connect(self.replace_paths)
         self.shots.status_requested.connect(self.set_shot_status)
+        self.shots.export_requested.connect(self.export_segment)
         self.shots.remove_requested.connect(self.remove)
         self.shots.order_changed.connect(self.order_changed)
         column.addWidget(QLabel('NLA timeline · thumbnail strips · drag scrubhead to seek · green cached / red rebuilding'))
@@ -142,7 +144,16 @@ class ShotSequencePanel(QWidget):
         self.preview.video_dropped.connect(lambda path:self.add_paths([path]))
         split.addWidget(self.preview);split.addWidget(left)
         split.setStretchFactor(0,3);split.setStretchFactor(1,1)
-        self.shots.seek_requested.connect(self.seek_sequence)
+        self._audio_scrub=AudioScrubber(self.preview.player,self)
+        self.shots.seek_requested.connect(self.scrub_sequence)
+        self.shots.scrub_started.connect(self._audio_scrub.begin)
+        self.shots.scrub_finished.connect(self._audio_scrub.end)
+        for slider,callback in ((self.preview.seek,self.preview.seek_to),
+                                (self.preview.fullscreen_window.seek,self.preview.fullscreen_window.seek_to)):
+            slider.seek_requested.disconnect(callback)
+            slider.seek_requested.connect(self.scrub_sequence)
+            slider.scrub_started.connect(self._audio_scrub.begin)
+            slider.scrub_finished.connect(self._audio_scrub.end)
         self.preview.player.positionChanged.connect(self.sequence_position_changed)
         self.preview.player.playbackStateChanged.connect(self.sequence_playback_changed)
         self.preview.player.mediaStatusChanged.connect(self.sequence_media_status)
@@ -167,6 +178,7 @@ class ShotSequencePanel(QWidget):
                              crf=self.crf.value(),width=self.width.value(),height=self.height.value())})
 
     def invalidate(self):
+        self._audio_scrub.cancel()
         self._revision+=1
         self._build_timer.stop()
         if self._cancel:self._cancel.set()
@@ -302,21 +314,36 @@ class ShotSequencePanel(QWidget):
         self._populating=False;self.order_changed()
         self.shots.setCurrentRow(target)
 
-    def seek_sequence(self,milliseconds):
+    def export_segment(self,ident):
+        for index,shot in enumerate(self.owner.segments):
+            if shot.id==ident:
+                self.owner.export_segment(shot,index+1)
+                return
+
+    def scrub_sequence(self,milliseconds):
+        self.seek_sequence(milliseconds,audible=True)
+
+    def seek_sequence(self,milliseconds,audible=False):
         self._pending_position=milliseconds
         self._waiting_position=milliseconds>=self._available_frames/24*1000
         if getattr(self.preview,'_memory_preview',False):
             if milliseconds < self._available_frames/24*1000:
-                self.preview.seek_to(milliseconds)
+                if audible and not self._installing:
+                    self._audio_scrub.seek(max(0,min(milliseconds,self.preview.duration)))
+                else:self.preview.seek_to(milliseconds)
             else:
+                self._audio_scrub.cancel()
                 self._installing=True;self.preview.player.pause();self._installing=False
         self.shots.set_playhead(milliseconds)
 
     def sequence_position_changed(self,milliseconds):
+        if self._audio_scrub.active:return
         if getattr(self.preview,'_memory_preview',False) and not self._installing and not self._waiting_position:
-            self._pending_position=milliseconds;self.shots.set_playhead(milliseconds)
+            self._pending_position=milliseconds
+            self.shots.set_playhead(milliseconds,follow=self.preview.player.playbackState()==QMediaPlayer.PlaybackState.PlayingState)
 
     def sequence_playback_changed(self,state):
+        if self._audio_scrub.active:return
         if not self._installing and state!=QMediaPlayer.PlaybackState.StoppedState:
             self._desired_playing=state==QMediaPlayer.PlaybackState.PlayingState
 
@@ -327,6 +354,7 @@ class ShotSequencePanel(QWidget):
                 self._installing=False
                 self.shots.set_playhead(self._pending_position)
         elif status==QMediaPlayer.MediaStatus.EndOfMedia and self._available_frames < (self._plan.count if self._plan else 0):
+            if self._audio_scrub.active:return
             # A growing prefix has ended. Resume automatically once more is linked.
             self._desired_playing=True
             self._pending_position=round(self._available_frames/24*1000)
@@ -340,6 +368,7 @@ class ShotSequencePanel(QWidget):
 
     def install_preview(self,data,frames):
         if not data:return
+        self._audio_scrub.cancel()
         self._available_frames=frames
         playable=self._pending_position<frames/24*1000
         self._waiting_position=not playable

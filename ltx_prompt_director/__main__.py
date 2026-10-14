@@ -2,18 +2,8 @@ import sys
 
 
 def migrate_settings() -> None:
-    """Preserve saved keys and preferences across the application rename."""
-    from PySide6.QtCore import QSettings
-
-    current = QSettings()
-    if current.allKeys():
-        return
-    for organization,name in (("LTXDirectorDirector","LTX Director - Director"),
-                              ("LTXPromptDirector","LTX Prompt Director")):
-        legacy=QSettings(organization,name)
-        for key in legacy.allKeys():
-            if not current.contains(key):current.setValue(key,legacy.value(key))
-    current.sync()
+    from .config_migration import migrate_settings as migrate
+    migrate()
 
 
 def main() -> int:
@@ -35,18 +25,32 @@ def main() -> int:
         try:
             from .desktop import install_desktop_entry
             install_desktop_entry()
-        except OSError as error:
+        except (OSError,ValueError) as error:
             print(f"Desktop entry installation skipped: {error}", file=sys.stderr)
     app = QApplication(sys.argv)
     app.setApplicationName("Prompt Director")
     app.setApplicationDisplayName("Prompt Director")
     app.setDesktopFileName("ltx-director-director")
-    app.setOrganizationName("LTXDirectorDirector")
-    migrate_settings()
+    app.setOrganizationName("PromptDirector")
     splash = StartupSplash()
     app._director_splash = splash
     splash.show()
     app.processEvents()
+    try:
+        from .config_migration import migrate_configuration
+        def migration_progress(message):
+            splash.set_status(message);app.processEvents()
+        migrate_configuration(migration_progress)
+        from .storage_management import apply_pending_setup
+        splash.set_status("Checking pending settings restores…")
+        app.processEvents()
+        apply_pending_setup()
+    except (OSError,ValueError) as error:
+        from PySide6.QtWidgets import QMessageBox
+        splash.hide()
+        QMessageBox.critical(None,'Configuration migration failed',
+                             f'Your previous files are unchanged. Migration can be retried on the next launch.\n\n{error}')
+        return 2
     splash.set_status('Loading workspace and project tools…')
     app.processEvents()
     window = MainWindow()

@@ -8,13 +8,13 @@ Build a visual plan for AI video, turn it into a detailed production prompt, and
 
 ![The Aurora workspace: a visual timeline, creative direction and one continuous MiniMax production brief](docs/images/ltx-director-director-overview.png)
 
-*Current release: Aurora 1.13.0a44 on `experimental`. Screenshots show the current native app with an authored demonstration project.*
+*Current release: Aurora 1.13.0a45 on `experimental`. Screenshots show the current native app with an authored demonstration project.*
 
 ## See the story before you generate
 
 Put images, MP4 and WebM clips, and text beats on a timeline that shows how long each moment lasts. Drag to reorder. Pull a segment’s edge to change its duration. Zoom in to shape a transition or fit the whole sequence into view. Start times, frame roles and resolution badges keep the important details close at hand.
 
-Replace a frame without rebuilding the beat. Copy an original image to the clipboard, paste a new image into its place, or turn a text idea into an image segment when your next reference is ready. The workspace grows with the sequence, without a fixed segment-count or total-length cap.
+Replace a frame without rebuilding the beat. Copy an original image to the clipboard, paste a new image into its place, or turn a text idea into an image segment when your next reference is ready. The workspace grows with the sequence. Configurable duration budgets default to 20 seconds for LTX and 15 seconds for MiniMax; choose No limit for longer plans.
 
 ![Image checkpoints and a text action beat arranged on a duration-scaled timeline](docs/images/timeline-and-magic-build.png)
 
@@ -109,7 +109,7 @@ Customize the workspace itself in **Settings → Workspaces**: choose the editor
 Install the current experimental wheel:
 
 ```bash
-python3 -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a44-py3-none-any.whl'
+python3 -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a45-py3-none-any.whl'
 ltx-director-director
 ```
 

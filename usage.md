@@ -6,7 +6,7 @@ Start with an image, a video clip or a written beat. Arrange the sequence, descr
 
 ![A complete MiniMax plan in the Aurora workspace](docs/images/ltx-director-director-overview.png)
 
-*The examples throughout this guide use the current 1.13.0a44 native interface with a locally authored Aurora demonstration project.*
+*The examples throughout this guide use the current 1.13.0a45 native interface with a locally authored Aurora demonstration project.*
 
 ## Refine an existing MiniMax prompt
 
@@ -138,3 +138,13 @@ The ComfyUI export puts the production prompt in a tall group along the left edg
 ## Completed shot sequences
 
 Each collection includes a **Shot Sequence** tile. Drop finished movies onto its thumbnail NLA timeline and reorder them. The assembled preview updates automatically in background workers, with source audio and a scrubhead linked to the player. Green regions are cached; red regions are rebuilding. Workfiles persist in the per-user cache so unchanged clips and joins can be reused. The default join is a 1-second source-side perceptual crossfade. **Bake WebM** writes the full-resolution sequence with audio and configurable CRF (default 15). [Read the illustrated guide](docs/shot-sequences.md).
+
+## Storage, backups and reset
+
+Open **Settings → Storage and backups** to see cache disk usage and remaining free disk space. **Clear unused cache** removes disposable workfiles while retaining media used by open projects. Preview workfiles rebuild when needed.
+
+**Export complete setup** saves open projects and ZIPs the full configuration and project-data folders, including preferences, stored API keys, custom workspaces, collections, projects, catalog entries and managed media. Cache files are excluded. **Import complete setup** validates the ZIP and prepares it for the next launch. Close and reopen Prompt Director to apply it. Managed paths are updated for the destination computer; files outside the configuration and project-data folders remain external.
+
+**Reset settings** asks for confirmation before preparing a reset for the next launch. It restores application preferences and workspace definitions to defaults, removes stored API keys, and retains projects, collections and managed media.
+
+![Cache disk usage and full setup backup controls](docs/images/storage-settings.png)

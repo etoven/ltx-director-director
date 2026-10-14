@@ -16,7 +16,7 @@ You need **Python 3.10 or newer** and a desktop environment supported by Qt 6. A
 python3 -m venv ~/.venvs/ltx-director
 source ~/.venvs/ltx-director/bin/activate
 python -m pip install --upgrade pip
-python -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a44-py3-none-any.whl'
+python -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a45-py3-none-any.whl'
 prompt-director
 ```
 
@@ -26,9 +26,11 @@ prompt-director
 py -m venv "$env:USERPROFILE\ltx-director-venv"
 & "$env:USERPROFILE\ltx-director-venv\Scripts\Activate.ps1"
 python -m pip install --upgrade pip
-python -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a44-py3-none-any.whl'
+python -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a45-py3-none-any.whl'
 prompt-director
 ```
+
+On first launch, Prompt Director migrates preferences, custom workspaces, projects and managed media from the previous LTX Director folders. Existing files in the new folders take priority, and the original folders are retained.
 
 The package installs Qt components, image handling and the bundled FFmpeg helper. Review-video playback also depends on codec availability on the system.
 

@@ -98,9 +98,18 @@ def test_automatic_gui_cache_and_scrubhead(tmp_path,monkeypatch):
         canvas=p.shots.canvas
         x=p.shots.LEFT+round(.5*p.shots.scale)
         QTest.mousePress(canvas,Qt.MouseButton.LeftButton,pos=QPoint(x,15))
+        assert p.preview.player.playbackState()==QMediaPlayer.PlaybackState.PlayingState
+        assert not p._desired_playing # audio audition does not change transport intent
         x2=p.shots.LEFT+round(1*p.shots.scale)
         QTest.mouseMove(canvas,QPoint(x2,15));QTest.mouseRelease(canvas,Qt.MouseButton.LeftButton,pos=QPoint(x2,15))
         assert abs(p.preview.player.position()-1000)<20
+        until(lambda:p.preview.player.playbackState()==QMediaPlayer.PlaybackState.PausedState and abs(p.preview.player.position()-1000)<20)
+        assert abs(p.shots.playhead-1)<.02 and not p._desired_playing
+        QTest.mouseClick(p.preview.seek,Qt.MouseButton.LeftButton,pos=QPoint(max(1,p.preview.seek.width()*3//4),p.preview.seek.height()//2))
+        assert p.preview.player.playbackState()==QMediaPlayer.PlaybackState.PlayingState
+        until(lambda:not p._audio_scrub.active)
+        assert p.preview.player.playbackState()==QMediaPlayer.PlaybackState.PausedState
+        assert not p._desired_playing
         builds=p.cache.stats['source_builds'];region_builds=p.cache.stats['region_builds']
         p.blend.setCurrentText('linear_blend')
         assert sum(end-start for start,end,ready in p.shots.coverage if not ready)==1

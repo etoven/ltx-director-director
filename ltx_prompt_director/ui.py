@@ -18,7 +18,7 @@ from importlib.resources import files
 from pathlib import Path
 from uuid import uuid4
 
-from PySide6.QtCore import QBuffer, QIODevice, QDateTime, QEasingCurve, QEvent, QEventLoop, QObject, QRunnable, QRectF, QSettings, QSize, QStandardPaths, Qt, QThreadPool, QTimer, QUrl, QVariantAnimation, Signal, Slot
+from PySide6.QtCore import QBuffer, QIODevice, QDateTime, QEasingCurve, QEvent, QEventLoop, QObject, QRunnable, QPoint, QRectF, QSettings, QSize, QStandardPaths, Qt, QThreadPool, QTimer, QUrl, QVariantAnimation, Signal, Slot
 from PySide6.QtGui import QAction, QActionGroup, QBrush, QColor, QCursor, QIcon, QImageReader, QPainter, QPen, QPixmap, QTextCharFormat, QTextCursor, QTextOption
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
@@ -692,16 +692,21 @@ class SeekSlider(QSlider):
     """A normal slider that also seeks directly to a clicked groove position."""
 
     seek_requested = Signal(int)
+    scrub_started = Signal()
+    scrub_finished = Signal()
 
     def __init__(self, orientation, parent=None):
         super().__init__(orientation, parent)
+        self._groove_drag=False
         self.sliderMoved.connect(self.seek_requested.emit)
-        self.sliderReleased.connect(lambda: self.seek_requested.emit(self.value()))
+        self.sliderReleased.connect(lambda: self.seek_requested.emit(self.value()) if not self._groove_drag else None)
 
     def mousePressEvent(self, event) -> None:
         if event.button() != Qt.MouseButton.LeftButton or self.orientation() != Qt.Orientation.Horizontal:
             super().mousePressEvent(event)
             return
+
+        self.scrub_started.emit()
 
         option = QStyleOptionSlider()
         self.initStyleOption(option)
@@ -715,8 +720,16 @@ class SeekSlider(QSlider):
             super().mousePressEvent(event)
             return
 
+        self._groove_drag=True;self.setSliderDown(True)
+        self.seek_at(event.position().x(),option,handle)
+        event.accept()
+
+    def seek_at(self,x,option=None,handle=None):
+        if option is None:
+            option=QStyleOptionSlider();self.initStyleOption(option)
+            handle=self.style().subControlRect(QStyle.ComplexControl.CC_Slider,option,QStyle.SubControl.SC_SliderHandle,self)
         span = max(1, self.width() - handle.width())
-        click_position = round(event.position().x() - handle.width() / 2)
+        click_position = round(x - handle.width() / 2)
         value = QStyle.sliderValueFromPosition(
             self.minimum(),
             self.maximum(),
@@ -724,9 +737,19 @@ class SeekSlider(QSlider):
             span,
             option.upsideDown,
         )
+        blocked=self.blockSignals(True)
         self.setValue(value)
+        self.blockSignals(blocked)
         self.seek_requested.emit(value)
-        event.accept()
+
+    def mouseMoveEvent(self,event) -> None:
+        if self._groove_drag:self.seek_at(event.position().x());event.accept()
+        else:super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self,event) -> None:
+        super().mouseReleaseEvent(event)
+        self.setSliderDown(False);self._groove_drag=False
+        if event.button()==Qt.MouseButton.LeftButton:self.scrub_finished.emit()
 
 
 class ProjectVideoWidget(QVideoWidget):
@@ -1976,6 +1999,9 @@ class SettingsDialog(QDialog):
         form = QFormLayout(general)
         tabs.addTab(general, "Application")
         tabs.addTab(WorkspaceEditor(parent.workspace_store, parent, tabs), "Workspaces")
+        from .storage_widgets import StorageSettingsPanel
+        self.storage_panel=StorageSettingsPanel(parent,tabs)
+        tabs.addTab(self.storage_panel,"Storage and backups")
         self.resize(850, 760)
         self.provider = QComboBox()
         self.provider.addItems(["gemini", "openai"])
@@ -2815,6 +2841,9 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(application_window_title())
         self.setWindowIcon(QIcon(str(files("ltx_prompt_director").joinpath("assets/icon.png"))))
         self.resize(1450, 900)
+        self._viewport_timer=QTimer(self)
+        self._viewport_timer.setSingleShot(True);self._viewport_timer.setInterval(0)
+        self._viewport_timer.timeout.connect(self.keep_window_on_screen)
         self.settings = QSettings()
         self._settings_sync_timer = QTimer(self)
         self._settings_sync_timer.setSingleShot(True)
@@ -3438,7 +3467,13 @@ class MainWindow(QMainWindow):
         self.shot_sequence_panel = ShotSequencePanel(self, ProjectPreviewPanel, root)
         outer.addWidget(self.shot_sequence_panel, 1)
         self.shot_sequence_panel.hide()
-        self.setCentralWidget(root)
+        self.editor_root=root
+        self.editor_scroll=QScrollArea(self)
+        self.editor_scroll.setWidgetResizable(True)
+        self.editor_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.editor_scroll.setWidget(root)
+        self.editor_scroll.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Ignored)
+        self.setCentralWidget(self.editor_scroll)
         self.setStatusBar(QStatusBar())
         self.apply_project_type_ui()
         self.update_summary()
@@ -4855,6 +4890,29 @@ class MainWindow(QMainWindow):
             self.magic_overlay.setGeometry(self.rect())
         if getattr(self, "timeline_fit_mode", False) and hasattr(self, "_timeline_fit_timer"):
             self._timeline_fit_timer.start()
+        if hasattr(self,'_viewport_timer'):self._viewport_timer.start()
+
+    def showEvent(self,event) -> None:
+        super().showEvent(event)
+        self._viewport_timer.start()
+        handle=self.windowHandle()
+        if handle and not getattr(self,'_screen_connected',False):
+            handle.screenChanged.connect(lambda *_:self._viewport_timer.start())
+            self._screen_connected=True
+
+    def keep_window_on_screen(self) -> None:
+        if not self.isVisible() or self.isMaximized() or self.isFullScreen():return
+        screen=self.screen() or QApplication.primaryScreen()
+        if not screen:return
+        available=screen.availableGeometry();frame=self.frameGeometry()
+        border_x=max(0,frame.width()-self.width());border_y=max(0,frame.height()-self.height())
+        width=min(self.width(),max(1,available.width()-border_x))
+        height=min(self.height(),max(1,available.height()-border_y))
+        if width!=self.width() or height!=self.height():self.resize(width,height)
+        frame=self.frameGeometry()
+        x=max(available.left(),min(frame.left(),available.right()-frame.width()+1))
+        y=max(available.top(),min(frame.top(),available.bottom()-frame.height()+1))
+        if x!=frame.left() or y!=frame.top():self.move(self.pos()+QPoint(x-frame.left(),y-frame.top()))
 
     def mark_dirty(self, *_args) -> None:
         if self._loading:
@@ -4992,7 +5050,7 @@ class MainWindow(QMainWindow):
             return 430
         central = self.centralWidget()
         current = max(1, self.timeline.height())
-        other_minimum = max(0, central.minimumSizeHint().height() - current)
+        other_minimum = max(0, self.editor_root.minimumSizeHint().height() - current)
         available_client_height = central.height()
         screen = self.screen() or QApplication.primaryScreen()
         if screen:
@@ -5504,8 +5562,11 @@ class MainWindow(QMainWindow):
         segment = self.current_segment()
         if not segment:
             return
-        suffix = segment_media_suffix(segment)
         row = max(0, self.timeline.currentRow()) + 1
+        self.export_segment(segment,row)
+
+    def export_segment(self,segment: Segment,row: int) -> None:
+        suffix = segment_media_suffix(segment)
         target = self.next_export_path(f"{self.current_project_name} - Segment {row:02d}{suffix}")
         self.start_disk_job(_export_segment_source, (copy.deepcopy(segment), target), lambda _result: self.record_export(target),
                             lambda message: self.export_failed(target, message), serialized=True)
@@ -6183,8 +6244,13 @@ class MainWindow(QMainWindow):
         if self.prompt_only_workspace:
             return
         sizes = self.intent_prompt_splitter.sizes()
-        total = max(sum(sizes), self.intent_prompt_splitter.height(), 500)
         height = self.settings.value("director_intent_height", 164, int)
+        # Keep enough editor content for a usable intent splitter on small
+        # screens. The central scroll area absorbs the added content height.
+        minimum=self.prompt_splitter.minimumSizeHint().height()+self.intent_prompt_splitter.handleWidth()
+        self.intent_prompt_splitter.setMinimumHeight(max(500,minimum+height) if expanded else minimum)
+        if hasattr(self,'editor_root'):self.editor_root.layout().activate()
+        total = max(sum(sizes), self.intent_prompt_splitter.height(), 500)
         self.intent_prompt_splitter.setSizes([height if expanded else 0, max(1, total - height if expanded else total)])
         if persist:
             self.director_intent_splitter_moved()

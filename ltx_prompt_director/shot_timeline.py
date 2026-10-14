@@ -16,6 +16,9 @@ class ShotTimeline(QScrollArea):
     order_changed = Signal()
     itemDoubleClicked = Signal(object)
     seek_requested = Signal(int)
+    scrub_started = Signal()
+    scrub_finished = Signal()
+    export_requested = Signal(str)
     LEFT = 94
     TOP = 50
     TRACK = 60
@@ -105,6 +108,9 @@ class ShotTimeline(QScrollArea):
             if color:
                 swatch=QPixmap(16,16);swatch.fill(QColor(color));action.setIcon(QIcon(swatch))
             action.triggered.connect(lambda checked=False,name=name:self.status_requested.emit(ids,name))
+        menu.addSeparator()
+        ident=self.item(index).data(Qt.ItemDataRole.UserRole)
+        menu.addAction('Export segment video',lambda:self.export_requested.emit(ident))
         return menu
 
     def set_waveform(self,shot_id,peaks):
@@ -142,8 +148,16 @@ class ShotTimeline(QScrollArea):
     def zoom(self, factor):
         self._fit=False;self.scale=max(.2,min(500,self.scale*factor));self.resize_canvas()
 
-    def set_playhead(self, milliseconds):
+    def set_playhead(self, milliseconds, follow=False):
         self.playhead=milliseconds/1000;self.canvas.update()
+        if follow and not self.canvas.scrubbing:
+            bar=self.horizontalScrollBar();x=self.LEFT+self.playhead*self.scale
+            margin=min(80,self.viewport().width()/4)
+            if milliseconds<=0:bar.setValue(0)
+            elif x>bar.value()+self.viewport().width()-margin:
+                bar.setValue(round(x-self.viewport().width()+margin))
+            elif x<bar.value()+margin:
+                bar.setValue(round(max(0,x-margin)))
 
     def reorder(self, indices, target):
         indices=sorted(set(indices))
@@ -296,7 +310,7 @@ class TimelineCanvas(QWidget):
         point=event.position()
         head=t.LEFT+t.playhead*t.scale
         if point.y()<t.TOP or abs(point.x()-head)<5:
-            self.scrubbing=True;t.scrub(point.x());return
+            self.scrubbing=True;t.scrub_started.emit();t.scrub(point.x());return
         index=self.hit(point)
         if index is None:
             t.items.clearSelection();return
@@ -312,6 +326,7 @@ class TimelineCanvas(QWidget):
 
     def mouseReleaseEvent(self,event):
         t=self.timeline
+        if self.scrubbing:t.scrub_finished.emit()
         if self.dragging and self.target is not None:
             indices=[i for i in range(t.count()) if t.item(i).isSelected()]
             t.reorder(indices,self.target)
