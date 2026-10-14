@@ -48,7 +48,7 @@ def connection(w,node_id,name):
     if inp['link'] is None:return None
     link=next(x for x in w['links'] if x[0]==inp['link'])
     source=nodes[link[1]]
-    if source['type']=='GetNode' and source['widgets_values'][0].startswith('LTX Director '):
+    if source['type']=='GetNode' and source['widgets_values'][0].startswith('Prompt Director '):
         setter=next(n for n in nodes.values() if n['type']=='SetNode' and n.get('widgets_values')==source['widgets_values'])
         return connection(w,setter['id'],setter['inputs'][0]['name'])
     return source,link[2]

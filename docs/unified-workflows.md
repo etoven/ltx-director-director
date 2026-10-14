@@ -6,7 +6,7 @@ All timeline workspaces use the same segment editor. The Prompt Refinement works
 
 | Workspace | Production format |
 | --- | --- |
-| LTX Video | Segment prompts and shared global direction for LTX Director export |
+| LTX Video | Segment prompts and shared global direction for LTX timeline export |
 | MiniMax Standard / Keyframes | Guide-based integrated description, soundscape and music sections |
 | MiniMax Full Reference | Guide-based subject definitions, summary, retention analysis, detailed description, soundscape and music |
 | MiniMax Official Skill · Standard / Keyframes | Supplied skill conventions for T2VA, I2VA, FL2VA and L2VA, with project variables |

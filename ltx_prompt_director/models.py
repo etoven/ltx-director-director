@@ -47,9 +47,9 @@ def order_segments_by_ids(segments: list[Segment], ordered_ids: list[str]) -> li
 
 
 def text_segment_from_ltx(value: dict, index: int, fps: float) -> Segment:
-    """Create an editable text-only segment from an LTX Director record."""
+    """Create an editable text-only segment from an LTX timeline record."""
     if value.get("type") != "text":
-        raise ValueError("The LTX Director record is not a text segment.")
+        raise ValueError("The LTX timeline record is not a text segment.")
     return Segment(
         str(value.get("fileName") or f"Text {index + 1}"),
         "",

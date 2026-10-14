@@ -22,6 +22,9 @@ DEFAULTS = dict(blend='perceptual_crossfade', overlap=1.0, side='source', crf=15
 
 def settings(value=None):
     result = {**DEFAULTS, **(value if isinstance(value, dict) else {})}
+    if 'shot_statuses' in result:
+        raw=result['shot_statuses']
+        result['shot_statuses']={str(key):str(value) for key,value in raw.items() if isinstance(value,str)} if isinstance(raw,dict) else {}
     if result['blend'] not in MODES or result['side'] not in ('source', 'destination'):
         raise ValueError('Unknown shot blend mode or overlap side.')
     result['overlap'] = float(result['overlap'])

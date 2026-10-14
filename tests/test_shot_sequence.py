@@ -114,11 +114,11 @@ def test_workspace_panel_memory_player_and_portable_save(movies,tmp_path,monkeyp
         w.restore_workspace_state(state)
         assert w.shot_sequence_settings['overlap']==.5
         p.build_preview()
-        assert not p.preview_progress.isHidden()
+        assert not hasattr(p,'preview_progress')
         timer=QElapsedTimer();timer.start()
-        while (p.preview.duration<2400 or p.preview_progress.value()!=100 or p._worker_running or p._installing) and timer.elapsed()<5000:
+        while (p.preview.duration<2400 or p.cache_percent!=100 or p._worker_running or p._installing) and timer.elapsed()<5000:
             app.processEvents(QEventLoop.ProcessEventsFlag.AllEvents,20)
-        assert p.preview_progress.value()==100
+        assert p.cache_percent==100
         assert p.preview.duration>2000
         assert p.preview.player.audioOutput() is p.preview.audio
         timer.restart()
@@ -140,7 +140,7 @@ def test_workspace_panel_memory_player_and_portable_save(movies,tmp_path,monkeyp
         assert saved==[tmp_path/'ui-final.webm']
         assert p.bake_progress.value()==100 and p.bake_button.isEnabled()
         p.deactivate()
-        assert p.preview._memory_buffer is None and p.preview_progress.isHidden()
+        assert p.preview._memory_buffer is None
     finally:
         w.project_dirty=False;w._close_saves_queued=True;w.close()
 

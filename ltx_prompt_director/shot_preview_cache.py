@@ -118,6 +118,14 @@ def _encode(images,width,height,cancel):
     return memory.getvalue()
 
 
+def audio_peaks(pcm,bins=384):
+    """Peak envelopes retain quiet sounds and short transients without normalization."""
+    count=min(bins,pcm.shape[1])
+    if not count:return []
+    mono=np.max(np.abs(pcm),axis=0)
+    return [min(1.0,float(np.max(part))) for part in np.array_split(mono,count)]
+
+
 class PreviewCache:
     def __init__(self,max_bytes=128*1024*1024,root=DEFAULT_ROOT,max_disk_bytes=2*1024**3):
         self.max_bytes=max_bytes;self._entries=OrderedDict();self._bytes=0
@@ -169,12 +177,15 @@ class PreviewCache:
         return [(p.start/FPS,(p.start+len(p.frames))/FPS,self.contains(('region',p.key))) for p in plan.parts]
 
     def thumbnails(self,plan):
-        return {key:source['thumbs'] for key in plan.sources if (source:=self.memory_get(('source',key))) is not None}
+        return {key:(source['thumbs'],source.get('peaks',[])) for key in plan.sources if (source:=self.memory_get(('source',key))) is not None}
 
     def _source(self,key,plan,cancel,notify=None):
         cached=self.get(('source',key))
         if cached is not None:
-            if notify:notify(key,cached['thumbs'])
+            if 'peaks' not in cached or not cached['peaks']:
+                cached['peaks']=audio_peaks(np.frombuffer(zlib.decompress(cached['audio']),dtype=np.float32).reshape(2,-1))
+                self.put(('source',key),cached,self.size(cached))
+            if notify:notify(key,cached['thumbs'],cached['peaks'])
             return cached
         _check(cancel)
         shot=plan.sources[key];path=materialize_source(shot)
@@ -203,8 +214,9 @@ class PreviewCache:
                 self.put(identity,encoded,len(encoded))
             blocks.append(encoded)
             memory=io.BytesIO();thumb=Image.fromarray(batch[len(batch)//2]);thumb.thumbnail((120,72));thumb.save(memory,format='JPEG',quality=75);thumbs.append(memory.getvalue())
-        audio=zlib.compress(_audio(info,cancel).tobytes(),1)
-        result=dict(blocks=blocks,audio=audio,thumbs=thumbs,frames=info['frames'])
+        pcm=_audio(info,cancel);peaks=audio_peaks(pcm)
+        audio=zlib.compress(pcm.tobytes(),1)
+        result=dict(blocks=blocks,audio=audio,thumbs=thumbs,peaks=peaks,frames=info['frames'])
         with self._lock:
             for index in range(len(blocks)):
                 old=self._entries.pop(('source-block',key,index),None)
@@ -212,7 +224,7 @@ class PreviewCache:
         self.put(('source',key),result,sum(map(len,blocks))+len(audio)+sum(map(len,thumbs)))
         for index in range(len(blocks)):self.workfiles.remove(('source-block',key,index))
         self.stats['source_builds']+=1
-        if notify:notify(key,thumbs)
+        if notify:notify(key,thumbs,peaks)
         return result
 
     def build(self,plan,cancel=None,progress=None,region_ready=None,thumbnails=None,partial=None):

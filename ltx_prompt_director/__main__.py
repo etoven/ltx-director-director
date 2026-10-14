@@ -8,9 +8,11 @@ def migrate_settings() -> None:
     current = QSettings()
     if current.allKeys():
         return
-    legacy = QSettings("LTXPromptDirector", "LTX Prompt Director")
-    for key in legacy.allKeys():
-        current.setValue(key, legacy.value(key))
+    for organization,name in (("LTXDirectorDirector","LTX Director - Director"),
+                              ("LTXPromptDirector","LTX Prompt Director")):
+        legacy=QSettings(organization,name)
+        for key in legacy.allKeys():
+            if not current.contains(key):current.setValue(key,legacy.value(key))
     current.sync()
 
 
@@ -36,7 +38,9 @@ def main() -> int:
         except OSError as error:
             print(f"Desktop entry installation skipped: {error}", file=sys.stderr)
     app = QApplication(sys.argv)
-    app.setApplicationName("LTX Director - Director")
+    app.setApplicationName("Prompt Director")
+    app.setApplicationDisplayName("Prompt Director")
+    app.setDesktopFileName("ltx-director-director")
     app.setOrganizationName("LTXDirectorDirector")
     migrate_settings()
     splash = StartupSplash()

@@ -33,15 +33,15 @@ def desktop_contents() -> str:
     return f"""[Desktop Entry]
 Type=Application
 Version=1.0
-Name=LTX Director - Director
-Comment=Build LTX Video 2.3 timeline and global prompts
+Name=Prompt Director
+Comment=Direct AI video prompts and assemble completed shot sequences
 Exec=\"{python}\" -m ltx_prompt_director
 Icon=ltx-director-director
 Terminal=false
 Categories=AudioVideo;Video;Graphics;
-Keywords=LTX;video;prompt;timeline;Gemini;OpenAI;
+Keywords=Prompt;Director;LTX;MiniMax;video;timeline;Gemini;OpenAI;
 StartupNotify=true
-StartupWMClass=LTX Director - Director
+StartupWMClass=Prompt Director
 """
 
 
@@ -95,5 +95,5 @@ def uninstall_main() -> int:
     if uninstall_desktop_entry():
         print(f"Removed desktop entry: {desktop_path()}")
     else:
-        print("No LTX Director - Director desktop entry was installed.")
+        print("No Prompt Director desktop entry was installed.")
     return 0

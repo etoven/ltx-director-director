@@ -104,7 +104,7 @@ def requested_length_value(value: object) -> float:
 
 
 def application_window_title(project_name: str = "") -> str:
-    title = f"LTX Director - Director v{__version__}"
+    title = f"Prompt Director v{__version__}"
     return f"{title} :: {project_name}" if project_name else title
 
 
@@ -3065,7 +3065,7 @@ class MainWindow(QMainWindow):
         self.output_width.setSingleStep(32)
         self.output_width.setValue(1280)
         self.output_width.setSuffix(" px")
-        self.output_width.setToolTip("LTX Director custom output width")
+        self.output_width.setToolTip("Output width")
         self.output_width.valueChanged.connect(self.mark_dirty)
         self.output_width.editingFinished.connect(self.normalize_output_dimensions)
         self.output_height = QSpinBox()
@@ -3074,7 +3074,7 @@ class MainWindow(QMainWindow):
         self.output_height.setSingleStep(32)
         self.output_height.setValue(704)
         self.output_height.setSuffix(" px")
-        self.output_height.setToolTip("LTX Director custom output height")
+        self.output_height.setToolTip("Output height")
         self.output_height.valueChanged.connect(self.mark_dirty)
         self.output_height.editingFinished.connect(self.normalize_output_dimensions)
         resolution_separator = QLabel("×")
@@ -6694,7 +6694,7 @@ class MainWindow(QMainWindow):
             return
         path = str(self.next_export_path(f"{self.current_project_name}.json"))
         self.normalize_output_dimensions()
-        self.statusBar().showMessage(f"Exporting LTX Director JSON in background: {path}…")
+        self.statusBar().showMessage(f"Exporting LTX timeline JSON in background: {path}…")
         self.start_disk_job(_export_ltx_snapshot,
                             (copy.deepcopy(self.segments), self.global_prompt.toPlainText(),
                              self.output_width.value(), self.output_height.value(), comfy_root / "input" / "whatdreamscost", path),
@@ -6730,7 +6730,7 @@ class MainWindow(QMainWindow):
         return root
 
     def import_ltx(self, checked: bool = False, path: str | None = None) -> None:
-        path = path or choose_document_open(self, "Import LTX Director JSON", self.settings.value("last_document_dir", str(Path.home())), "LTX Director JSON (*.json)")
+        path = path or choose_document_open(self, "Import LTX timeline JSON", self.settings.value("last_document_dir", str(Path.home())), "LTX timeline JSON (*.json)")
         if not path:
             return
         self.settings.setValue("last_document_dir", str(Path(path).parent))
@@ -6848,7 +6848,7 @@ class MainWindow(QMainWindow):
     def load_project_payload(self, payload: dict) -> None:
         self.shot_sequence_settings = shot_settings(payload.get("shotSequence"))
         if payload.get("app") not in {"ltx-director-director", "ltx-prompt-director-python"}:
-            raise ValueError("This is not an LTX Director - Director project file.")
+            raise ValueError("This is not an Prompt Director project file.")
         definition = payload.get("workspaceDefinition")
         if isinstance(definition, dict) and definition.get("id") not in self.workspace_definitions and not is_obsolete_stock_definition(definition):
             self.workspace_store.save(definition)
@@ -7019,7 +7019,7 @@ class MainWindow(QMainWindow):
                             lambda message: self.export_failed(path, message), serialized=True)
 
     def open_project(self, checked: bool = False, path: str | None = None) -> None:
-        path = path or choose_document_open(self, "Open Project", self.settings.value("last_document_dir", str(Path.home())), "LTX Director - Director Project (*.LTXD *.ltxd)")
+        path = path or choose_document_open(self, "Open Project", self.settings.value("last_document_dir", str(Path.home())), "Prompt Director Project (*.LTXD *.ltxd)")
         if not path:
             return
         self.settings.setValue("last_document_dir", str(Path(path).parent))

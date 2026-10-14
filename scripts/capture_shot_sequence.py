@@ -22,6 +22,7 @@ from ltx_prompt_director.shot_sequence_widgets import import_shots
 def make_clip(path,palette,offset):
     with av.open(str(path),'w') as container:
         stream=container.add_stream('mpeg4',rate=24);stream.width=640;stream.height=352;stream.pix_fmt='yuv420p'
+        sound=container.add_stream('aac',rate=48000);sound.layout='stereo'
         for i in range(48):
             y=np.linspace(0,1,352)[:,None,None]
             rgb=(1-y)*np.array(palette[0])[None,None,:]+y*np.array(palette[1])[None,None,:]
@@ -35,7 +36,14 @@ def make_clip(path,palette,offset):
             draw.rectangle((294+offset,194,309+offset,227),fill=(235,174,88))
             frame=av.VideoFrame.from_ndarray(np.asarray(image),format='rgb24');frame.pts=i;frame.time_base=Fraction(1,24)
             for packet in stream.encode(frame):container.mux(packet)
-        for packet in stream.encode():container.mux(packet)
+            t=np.arange(i*2000,(i+1)*2000)/48000
+            envelope=.04+.55*np.maximum(0,np.sin(2*np.pi*(1.5+offset/48)*t))**2
+            pcm=np.stack([envelope*np.sin(2*np.pi*(220+offset*8)*t)]*2).astype('float32')
+            audio=av.AudioFrame.from_ndarray(pcm,format='fltp',layout='stereo')
+            audio.sample_rate=48000;audio.pts=i*2000;audio.time_base=Fraction(1,48000)
+            for packet in sound.encode(audio):container.mux(packet)
+        for output in (stream,sound):
+            for packet in output.encode():container.mux(packet)
 
 app=QApplication.instance() or QApplication([])
 with tempfile.TemporaryDirectory() as temporary:
@@ -52,6 +60,8 @@ with tempfile.TemporaryDirectory() as temporary:
         for dock in [window.project_preview_dock,window.project_files_dock,window.project_properties_dock,window.catalog_dock]:dock.hide()
         window.resize(1460,900);window.show()
         panel=window.shot_sequence_panel
+        panel.set_shot_status([window.segments[0].id],'Done')
+        panel.set_shot_status([window.segments[2].id],'Consider')
         panel.build_preview()
         window.next_export_path=lambda _:root/'final.webm'
         window.record_export=lambda _:None

@@ -149,7 +149,7 @@ def export_minimax_workflow(path, segments, prompt, references, comfy_root, widt
     reference_getters=[]
     def reference_port(source,slot,name):
         kind=source['outputs'][slot]['type']
-        key='LTX Director '+name
+        key='Prompt Director '+name
         setter=g.add({'type':'SetNode','pos':[0,0],'size':[220,60],'flags':{},'inputs':[{'name':kind,'type':kind,'link':None}],
             'outputs':[{'name':kind,'type':kind,'links':[]}],'properties':{'Node name for S&R':'SetNode'},'widgets_values':[key]},key)
         getter=g.add({'type':'GetNode','pos':[0,0],'size':[220,60],'flags':{},'inputs':[],

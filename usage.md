@@ -6,7 +6,7 @@ Start with an image, a video clip or a written beat. Arrange the sequence, descr
 
 ![A complete MiniMax plan in the Aurora workspace](docs/images/ltx-director-director-overview.png)
 
-*The examples throughout this guide use the current 1.13.0a43 native interface with a locally authored Aurora demonstration project.*
+*The examples throughout this guide use the current 1.13.0a44 native interface with a locally authored Aurora demonstration project.*
 
 ## Refine an existing MiniMax prompt
 
@@ -25,7 +25,7 @@ Add up to four mixed references through **Reference media**. Video samples offer
 3. Use **Add media** or drop supported images, MP4 or WebM clips onto the timeline. Use **Add text** for a beat described in words.
 4. Arrange the segments and set their durations. Expand **Director’s Intent**, describe the sequence, and choose a total length or Auto.
 5. Select **Magic Build** to develop segment prompts. In MiniMax, edit the unified draft below the shared segment editor. Use **Regenerate** in the segment-change notice when you want to rebuild an existing production draft.
-6. Use **Save to Library** to name and retain the project. Copy the MiniMax brief or use **Export** for LTX Director JSON.
+6. Use **Save to Library** to name and retain the project. Copy the MiniMax brief or use **Export** for LTX timeline JSON.
 
 AI generation is an explicit action. Switching workspaces and adding media let you prepare the plan before submitting a request.
 
@@ -74,7 +74,7 @@ AI generation is an explicit action. Switching workspaces and adding media let y
 | Playback and fullscreen | Inspect pacing and detail | Play/pause, click the seek bar or choose Fullscreen |
 | Frame capture | Reuse a moment from the render | Right-click the video to export or copy the current frame |
 | Project Files | Retain the rendering setup | Add or drop workflow JSON, then export or remove attachments as needed |
-| LTX Director JSON | Hand off the planned sequence | Choose Export in the LTX workspace |
+| LTX timeline JSON | Hand off the planned sequence | Choose Export in the LTX workspace |
 | Download folders | Keep each project’s output together | Set a project folder in Properties or an application default in Settings |
 | Recent exports | Find and move finished files | Click the download button, open a file or drag it to another app |
 | Custom workspaces | Fit the editor to your process | Open Settings → Workspaces and edit or create a definition |
@@ -109,7 +109,7 @@ Open **Media Catalog** from the top toolbar. Dock it beside the timeline or floa
 
 Import files or drop files and folders from your file manager. Browse large preview tiles, select several with Ctrl/Shift, and search names, tags, or descriptions. Right-click a selection to edit its tags and short description, move it into a catalog folder, or add it to the timeline. Create folders with **New folder**; select a folder first to create a subfolder. Drag tiles onto a folder to organize them, onto the timeline to insert them, or into a file manager using native file URLs.
 
-Imports copy full-resolution images and videos into LTX Director’s working folder. Catalog tiles and timeline drags use these managed copies, so moving or deleting the original source does not break your imported media. Same-named files remain separate. Removing a catalog entry or folder keeps the media on disk.
+Imports copy full-resolution images and videos into Prompt Director’s working folder. Catalog tiles and timeline drags use these managed copies, so moving or deleting the original source does not break your imported media. Same-named files remain separate. Removing a catalog entry or folder keeps the media on disk.
 
 The app ships with **LTX Video**, **MiniMax Standard / Keyframes** and **MiniMax Full Reference**. The guide-based MiniMax templates replace the old MiniMax default. Two additional **Official Skill** workflows provide Standard / Keyframes and Full Reference versions adapted from the supplied prompt-writing skill files. LTX generation and refinement return video prompts and timing without requiring a separate still-image prompt. Drag the splitter below **Director’s Intent** to resize it or collapse it upward. Drag it downward to reopen. Its height and collapsed state persist across workspaces and restarts.
 
@@ -121,7 +121,7 @@ Double-click a catalog tile, or choose **View media** from its context menu, to 
 
 Reference images have **Export Image** and **Clear** in their context menu. Drag an image out to the filesystem or timeline, and drop a still image into a slot to replace it. Reference images, project tiles, and catalog tiles highlight on hover.
 
-Recent exports show small image and video previews. Use the broom button to clear the history while keeping your exported files. The panel stays open when you switch to another application, making file drags easier; clicking elsewhere in LTX Director closes it.
+Recent exports show small image and video previews. Use the broom button to clear the history while keeping your exported files. The panel stays open when you switch to another application, making file drags easier; clicking elsewhere in Prompt Director closes it.
 
 ![Full-resolution image lightbox](docs/images/catalog-image-viewer.png)
 

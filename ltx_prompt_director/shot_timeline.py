@@ -2,14 +2,16 @@
 from pathlib import Path
 from collections import OrderedDict
 from PySide6.QtCore import Qt, Signal, QRectF
-from PySide6.QtGui import QColor, QPainter, QPen, QPixmap
-from PySide6.QtWidgets import QScrollArea, QWidget, QListWidget, QAbstractItemView
+from PySide6.QtGui import QColor, QPainter, QPen, QPixmap, QPainterPath, QIcon, QActionGroup
+from PySide6.QtWidgets import QScrollArea, QWidget, QListWidget, QAbstractItemView, QMenu
 from .media import TIMELINE_VIDEO_SUFFIXES
 from .shot_sequence import overlaps, FPS
 
 
 class ShotTimeline(QScrollArea):
     movies_dropped = Signal(list)
+    movies_replaced = Signal(list,str)
+    status_requested = Signal(list,str)
     remove_requested = Signal()
     order_changed = Signal()
     itemDoubleClicked = Signal(object)
@@ -34,7 +36,9 @@ class ShotTimeline(QScrollArea):
         self.clips = []
         self.playhead = 0.0
         self.coverage=[]
-        self._thumbnails=OrderedDict()
+        self.replace_target=None
+        self.status_tags=[];self.statuses={}
+        self._thumbnails=OrderedDict();self._waveforms={}
         self._fit = True
         self.items.itemSelectionChanged.connect(self.canvas.update)
 
@@ -51,6 +55,7 @@ class ShotTimeline(QScrollArea):
 
     def set_shots(self, shots, overlap):
         ids={shot.id for shot in shots}
+        self._waveforms={key:value for key,value in self._waveforms.items() if key in ids}
         self._thumbnails=OrderedDict((key,value) for key,value in self._thumbnails.items() if key in ids)
         joins, count = overlaps([{'frames':max(1,round(s.duration*FPS))} for s in shots],overlap)
         self.total = count/FPS
@@ -60,7 +65,7 @@ class ShotTimeline(QScrollArea):
             amount=joins[index-1]/FPS if index else 0.0
             start=end-amount
             self.clips.append(dict(start=start,end=start+shot.duration,overlap=amount,
-                                   name=shot.name,preview=QPixmap(shot.preview_path),id=shot.id,thumbs=self._thumbnails.get(shot.id,[])))
+                                   name=shot.name,preview=QPixmap(shot.preview_path),id=shot.id,thumbs=self._thumbnails.get(shot.id,[]),peaks=self._waveforms.get(shot.id,[])))
             end=start+shot.duration
         self.resize_canvas()
 
@@ -77,6 +82,35 @@ class ShotTimeline(QScrollArea):
                 if clip['id']==removed:clip['thumbs']=[]
         for clip in self.clips:
             if clip['id']==shot_id:clip['thumbs']=thumbs
+        self.canvas.update()
+
+    def set_statuses(self,statuses,tags):
+        self.statuses=dict(statuses) if isinstance(statuses,dict) else {}
+        self.status_tags=list(tags)
+        colors={tag['name'].casefold():tag['color'] for tag in tags}
+        for clip in self.clips:
+            clip['status']=self.statuses.get(clip['id'],'')
+            clip['status_color']=colors.get(clip['status'].casefold(),'#56616a' if clip['status'] else '')
+        self.canvas.update()
+
+    def status_menu(self,index):
+        if not self.item(index).isSelected():self.setCurrentRow(index)
+        ids=[item.data(Qt.ItemDataRole.UserRole) for item in self.selectedItems()]
+        selected={self.statuses.get(ident,'').casefold() for ident in ids}
+        menu=QMenu(self);menu.addSection('Shot status')
+        group=QActionGroup(menu);group.setExclusive(True)
+        for name,color in [('',None)]+[(t['name'],t['color']) for t in self.status_tags]:
+            action=menu.addAction(name or 'No status');action.setCheckable(True)
+            action.setChecked(selected=={name.casefold()});group.addAction(action)
+            if color:
+                swatch=QPixmap(16,16);swatch.fill(QColor(color));action.setIcon(QIcon(swatch))
+            action.triggered.connect(lambda checked=False,name=name:self.status_requested.emit(ids,name))
+        return menu
+
+    def set_waveform(self,shot_id,peaks):
+        self._waveforms[shot_id]=list(peaks)
+        for clip in self.clips:
+            if clip['id']==shot_id:clip['peaks']=self._waveforms[shot_id]
         self.canvas.update()
 
     def set_coverage(self,ranges):
@@ -133,12 +167,26 @@ class ShotTimeline(QScrollArea):
     def dragEnterEvent(self,event):
         if self.movie_paths(event):event.acceptProposedAction()
         else:event.ignore()
+    def replacement_target(self,event):
+        if not event.modifiers()&Qt.KeyboardModifier.ControlModifier:return None
+        point=self.canvas.mapFrom(self.viewport(),event.position().toPoint())
+        return self.canvas.hit(point)
+
     def dragMoveEvent(self,event):
-        if self.movie_paths(event):event.acceptProposedAction()
+        if self.movie_paths(event):
+            self.replace_target=self.replacement_target(event);self.canvas.update();event.acceptProposedAction()
         else:event.ignore()
+
+    def dragLeaveEvent(self,event):
+        self.replace_target=None;self.canvas.update();event.accept()
+
     def dropEvent(self,event):
-        paths=self.movie_paths(event)
-        if paths:self.movies_dropped.emit(paths);event.acceptProposedAction()
+        paths=self.movie_paths(event);target=self.replacement_target(event)
+        self.replace_target=None;self.canvas.update()
+        if paths:
+            if target is not None:self.movies_replaced.emit(paths,self.item(target).data(Qt.ItemDataRole.UserRole))
+            else:self.movies_dropped.emit(paths)
+            event.acceptProposedAction()
         else:event.ignore()
 
 
@@ -146,7 +194,7 @@ class TimelineCanvas(QWidget):
     def __init__(self,timeline):
         super().__init__();self.timeline=timeline;self.press=None;self.dragging=False;self.target=None
         self.setMouseTracking(True)
-        self.setToolTip('Drag strips to reorder · Ctrl-click selects multiple · drag scrubhead/ruler to seek the sequence · green is cached, red is rebuilding')
+        self.setToolTip('Drag strips to reorder · Ctrl-click selects multiple · drag scrubhead/ruler to seek the sequence · green is cached, red is rebuilding · Ctrl-drop a movie to replace a shot')
         self.scrubbing=False
 
     def hit(self,point):
@@ -184,8 +232,11 @@ class TimelineCanvas(QWidget):
             selected=t.item(index) is not None and t.item(index).isSelected()
             for audio in (False,True):
                 rect=t.clip_rect(index,audio)
-                color=QColor('#29645f' if audio else '#36587b')
-                p.setBrush(color);p.setPen(QPen(QColor('#efbc65' if selected else '#62778b'),2 if selected else 1))
+                if not rect.intersects(QRectF(event.rect())):continue
+                status_color=QColor(clip.get('status_color',''))
+                color=status_color.darker(160) if status_color.isValid() else QColor('#29645f' if audio else '#36587b')
+                p.setBrush(color);p.setPen(QPen(QColor('#66d1c5' if t.replace_target==index else '#efbc65' if selected else '#62778b'),2 if selected or t.replace_target==index else 1))
+                if status_color.isValid() and not selected and t.replace_target!=index:p.setPen(QPen(status_color.lighter(145),1.4))
                 p.drawRoundedRect(rect,4,4)
                 p.save();p.setClipRect(rect.adjusted(3,2,-3,-2))
                 label=(f'{index+1:02d} · Audio · {clip["end"]-clip["start"]:.2f}s' if audio else f'{index+1:02d} · {clip["name"]}')
@@ -199,8 +250,25 @@ class TimelineCanvas(QWidget):
                         if not thumb.isNull():
                             image=thumb.scaled(tile_width,rect.height()-18,Qt.AspectRatioMode.KeepAspectRatioByExpanding,Qt.TransformationMode.SmoothTransformation)
                             p.drawPixmap(int(rect.x()+offset),int(rect.y()+18),image)
+                    if status_color.isValid():
+                        tint=QColor(status_color);tint.setAlpha(85);p.fillRect(rect,tint)
                     p.fillRect(QRectF(rect.x(),rect.y(),rect.width(),18),QColor(15,25,38,210))
-                p.setPen(QColor('#edf3fa'));p.drawText(QRectF(rect.x()+7,rect.y()+1,max(1,rect.width()-12),18),label)
+                if audio:
+                    area=rect.adjusted(3,1,-3,-1);center=area.center().y()
+                    p.setPen(QPen(QColor('#79c4b7'),.7));p.drawLine(area.left(),center,area.right(),center)
+                    peaks=clip['peaks']
+                    if peaks:
+                        wave=QPainterPath()
+                        gain=1/max(.02,max(peaks))
+                        def amplitude(value):return min(.5*area.height(),value*gain*.48*area.height())
+                        wave.moveTo(area.left(),center)
+                        for i,peak in enumerate(peaks):wave.lineTo(area.left()+i*area.width()/max(1,len(peaks)-1),center-amplitude(peak))
+                        for i in range(len(peaks)-1,-1,-1):wave.lineTo(area.left()+i*area.width()/max(1,len(peaks)-1),center+amplitude(peaks[i]))
+                        wave.closeSubpath();p.setBrush(QColor('#a3e0cf'));p.setPen(QPen(QColor('#86cbb9'),.6));p.drawPath(wave)
+                    p.setBrush(Qt.BrushStyle.NoBrush)
+                    p.setPen(QColor('#edf3fa'));p.drawText(QRectF(rect.x()+7,rect.y()+1,max(1,rect.width()-12),18),label)
+                else:
+                    p.setPen(QColor('#edf3fa'));p.drawText(QRectF(rect.x()+7,rect.y()+1,max(1,rect.width()-12),18),label)
                 if clip['overlap']:
                     fade=QRectF(rect.x(),rect.y(),clip['overlap']*t.scale,rect.height())
                     p.fillRect(fade,QColor(234,185,101,40));p.setPen(QPen(QColor('#e7b46c'),1))
@@ -215,6 +283,12 @@ class TimelineCanvas(QWidget):
             x=t.LEFT+(t.clips[self.target]['start'] if self.target<len(t.clips) else t.total)*t.scale
             p.setPen(QPen(QColor('#74e5cc'),3));p.drawLine(int(x),t.TOP,int(x),self.height())
         p.end()
+
+    def contextMenuEvent(self,event):
+        index=self.hit(event.pos())
+        if index is None:return
+        menu=self.timeline.status_menu(index)
+        menu.exec(event.globalPos());menu.deleteLater()
 
     def mousePressEvent(self,event):
         t=self.timeline;t.setFocus()

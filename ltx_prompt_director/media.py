@@ -88,7 +88,7 @@ def copy_media_for_export(source_path: str, display_name: str, destination: Path
 
 
 def comfy_input_references(filename: str, subfolder: str = "whatdreamscost") -> tuple[str, str]:
-    """Return LTX Director's Comfy-relative file and browser preview references."""
+    """Return Prompt Director's Comfy-relative file and browser preview references."""
     relative = f"{subfolder}/{filename}"
     preview = f"/api/view?filename={quote(filename, safe='')}&type=input&subfolder={quote(subfolder, safe='')}"
     return relative, preview

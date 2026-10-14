@@ -192,3 +192,62 @@ def test_cancelled_build_keeps_completed_regions(tmp_path):
     cache.build(plan)
     assert cache.stats['region_hits']>=2
     assert cache.stats['source_builds']==2
+
+
+def test_ctrl_drop_replaces_slot_and_configured_status_persists(tmp_path,monkeypatch):
+    import json
+    from PySide6.QtWidgets import QApplication
+    from PySide6.QtCore import QMimeData,QUrl,Qt,QPointF,QElapsedTimer,QEventLoop
+    from PySide6.QtGui import QDropEvent
+    from ltx_prompt_director import ui
+    from ltx_prompt_director.workspaces import WorkspaceStore
+    from ltx_prompt_director.project_archive import save_project_archive,read_project
+    app=QApplication.instance() or QApplication([])
+    store=WorkspaceStore(tmp_path/'ws')
+    monkeypatch.setattr(ui,'WorkspaceStore',lambda:store)
+    monkeypatch.setattr(ui.MainWindow,'restore_startup_workspace',lambda self:None)
+    monkeypatch.setattr(ui,'project_library_path',lambda:tmp_path)
+    paths=[]
+    for i,color in enumerate(([200,10,30],[20,180,30],[20,40,200],[190,80,160])):
+        path=tmp_path/f'{i}.mp4';movie(path,color);paths.append(str(path))
+    w=ui.MainWindow()
+    def until(predicate):
+        timer=QElapsedTimer();timer.start()
+        while not predicate() and timer.elapsed()<6000:app.processEvents(QEventLoop.ProcessEventsFlag.AllEvents,20)
+        assert predicate()
+    try:
+        w.shot_sequence_panel.cache=PreviewCache(root=tmp_path/'work')
+        w.set_project_type('shot_sequence')
+        w.segments=import_shots(paths[:3],tmp_path/'shots')
+        w.shot_sequence_settings={**DEFAULTS,'width':96,'height':64,'overlap':.5}
+        w.refresh_timeline();p=w.shot_sequence_panel
+        until(lambda:p.cache_percent==100 and not p._worker_running)
+        assert all(max(clip['peaks'])>0 for clip in p.shots.clips)
+        assert all(not button.icon().isNull() for button in p.timeline_buttons)
+        monkeypatch.setattr(w,'project_status_tags',lambda:[{'name':'Approved','color':'#4e9271'},{'name':'Review','color':'#a88b40'}])
+        p.refresh();ids=[s.id for s in w.segments];revision=p._revision
+        menu=p.shots.status_menu(1)
+        actions={action.text():action for action in menu.actions()}
+        assert 'Approved' in actions and 'Review' in actions and 'Done' not in actions
+        actions['Approved'].trigger();menu.deleteLater()
+        assert p.shots.clips[1]['status_color']=='#4e9271'
+        assert p._revision==revision # status changes don't rebuild the preview
+        archive=tmp_path/'sequence.LTXD'
+        save_project_archive(archive,w.project_payload(False),w.segments)
+        assert read_project(archive)['shotSequence']['shot_statuses'][ids[1]]=='Approved'
+        p.overlap.setValue(.25)
+        assert w.shot_sequence_settings['shot_statuses'][ids[1]]=='Approved'
+        mime=QMimeData();mime.setUrls([QUrl.fromLocalFile(paths[3])])
+        view=p.shots;view.zoom(2);view.horizontalScrollBar().setValue(20)
+        center=view.clip_rect(1).center().toPoint()
+        position=view.canvas.mapTo(view.viewport(),center)
+        event=QDropEvent(QPointF(position),Qt.DropAction.CopyAction,mime,Qt.MouseButton.LeftButton,Qt.KeyboardModifier.ControlModifier)
+        view.dropEvent(event)
+        assert event.isAccepted()
+        until(lambda:w.segments[1].name=='3.mp4')
+        assert [s.id for s in w.segments]==ids
+        assert len(w.segments)==3 and w.segments[1].duration==1.5
+        assert p.shots.clips[1]['status']=='Approved'
+        until(lambda:p.cache_percent==100 and not p._worker_running)
+    finally:
+        w.project_dirty=False;w._close_saves_queued=True;w.close()

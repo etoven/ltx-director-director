@@ -36,7 +36,7 @@ class Workfiles:
                     meta=json.loads(archive.read('manifest.json'))
                     count=int(meta['blocks']);frames=int(meta['frames'])
                     if not 0<count<=100000 or not 0<frames<=2400000:raise ValueError('Invalid preview workfile')
-                    result=dict(frames=frames,blocks=[archive.read(f'video/{i}.webm') for i in range(count)],
+                    result=dict(frames=frames,peaks=meta.get('peaks',[]),blocks=[archive.read(f'video/{i}.webm') for i in range(count)],
                                 audio=archive.read('audio.pcm.zlib'),thumbs=[archive.read(f'thumbnails/{i}.jpg') for i in range(count)])
             else:
                 if not data.startswith(b'\x1aE\xdf\xa3'):raise ValueError('Invalid preview workfile')
@@ -60,7 +60,7 @@ class Workfiles:
         if key[0]=='source':
             memory=io.BytesIO()
             with zipfile.ZipFile(memory,'w',compression=zipfile.ZIP_STORED) as archive:
-                archive.writestr('manifest.json',json.dumps(dict(frames=value['frames'],blocks=len(value['blocks']))))
+                archive.writestr('manifest.json',json.dumps(dict(frames=value['frames'],blocks=len(value['blocks']),peaks=value.get('peaks',[]))))
                 archive.writestr('audio.pcm.zlib',value['audio'])
                 for i,(data,thumb) in enumerate(zip(value['blocks'],value['thumbs'])):
                     archive.writestr(f'video/{i}.webm',data);archive.writestr(f'thumbnails/{i}.jpg',thumb)

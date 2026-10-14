@@ -1,10 +1,10 @@
-# Welcome to Aurora.
+# Welcome to Prompt Director.
 
 ## A workspace built around the creative sequence
 
-Aurora brings the visual timeline, your intent and the production prompt into one native desktop workspace. Open the app, return to a project and keep shaping the motion from the same place.
+Prompt Director brings the visual timeline, your intent and the production prompt into one native desktop workspace. Open the app, return to a project and keep shaping the motion from the same place.
 
-![The current Aurora welcome screen and startup status](images/aurora-startup.png)
+![The Prompt Director welcome screen and startup status](images/aurora-startup.png)
 
 The startup screen shows progress while Director prepares the panels, text tools and project previews. The interface uses local assets and native desktop controls. Once open, you can arrange the project library, Properties, Preview and Project Files around the way you work.
 

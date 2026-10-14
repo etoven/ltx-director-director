@@ -31,7 +31,7 @@ Set the desired output width and height in LTX’s timeline header, then choose 
 
 Director JSON includes segment timing at 24 fps, prompt text, frame roles, supported video metadata and global direction. Text-only segments retain their type. When an imported video contains audio, export can extract and include its soundtrack as an audio segment for the receiving workflow. Export defaults include crop resizing and audio inpainting.
 
-Use **Import** to reopen a supported LTX Director JSON timeline. It restores supported image, video and text segments and global context; it is not an editor for every ComfyUI node or specialized track. For the complete native working project, use .LTXD.
+Use **Import** to reopen a supported LTX timeline JSON timeline. It restores supported image, video and text segments and global context; it is not an editor for every ComfyUI node or specialized track. For the complete native working project, use .LTXD.
 
 ## Design a workspace around your process
 

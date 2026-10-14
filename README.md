@@ -1,14 +1,14 @@
-# LTX Director — Director
+# Prompt Director
 
 ## Shape the moment. Direct the sequence.
 
 **Your images, your story, your timing—brought together in one creative workspace.**
 
-Build a visual plan for AI video, turn it into a detailed production prompt, and refine every beat while the timeline stays in view. LTX Director — Director gives you a hands-on way to direct **MiniMax H3** and **LTX Video 2.3**, with **Gemini or OpenAI** helping you develop the words behind the motion.
+Build a visual plan for AI video, turn it into a detailed production prompt, and refine every beat while the timeline stays in view. Prompt Director gives you a hands-on way to direct **MiniMax H3** and **LTX Video 2.3**, with **Gemini or OpenAI** helping you develop the words behind the motion.
 
 ![The Aurora workspace: a visual timeline, creative direction and one continuous MiniMax production brief](docs/images/ltx-director-director-overview.png)
 
-*Current release: Aurora 1.13.0a43 on `experimental`. Screenshots show the current native app with an authored demonstration project.*
+*Current release: Aurora 1.13.0a44 on `experimental`. Screenshots show the current native app with an authored demonstration project.*
 
 ## See the story before you generate
 
@@ -96,7 +96,7 @@ Every collection includes a **Shot Sequence** project. Drop completed movies int
 
 ## Move from planning to production
 
-Copy a MiniMax brief straight from the editor. Export LTX Director JSON for your ComfyUI workflow. Save original media, captured video frames and portable projects into a consistent download folder. The export button signals when a file is ready; **Recent exports** lets you open it, reveal its folder or drag it into another application.
+Copy a MiniMax brief straight from the editor. Export LTX timeline JSON for your ComfyUI workflow. Save original media, captured video frames and portable projects into a consistent download folder. The export button signals when a file is ready; **Recent exports** lets you open it, reveal its folder or drag it into another application.
 
 ![Recent exports with file types, filenames and direct access to the download folder](docs/images/export-history.png)
 
@@ -109,7 +109,7 @@ Customize the workspace itself in **Settings → Workspaces**: choose the editor
 Install the current experimental wheel:
 
 ```bash
-python3 -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a43-py3-none-any.whl'
+python3 -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a44-py3-none-any.whl'
 ltx-director-director
 ```
 
