@@ -116,7 +116,7 @@ def test_workspace_panel_memory_player_and_portable_save(movies,tmp_path,monkeyp
         p.build_preview()
         assert not p.preview_progress.isHidden()
         timer=QElapsedTimer();timer.start()
-        while (p.preview.duration==0 or p.preview_progress.value()!=100) and timer.elapsed()<5000:
+        while (p.preview.duration<2400 or p.preview_progress.value()!=100 or p._worker_running or p._installing) and timer.elapsed()<5000:
             app.processEvents(QEventLoop.ProcessEventsFlag.AllEvents,20)
         assert p.preview_progress.value()==100
         assert p.preview.duration>2000

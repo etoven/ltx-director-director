@@ -8,9 +8,9 @@
 
 Open a collection and select **Shot Sequence**. Drop movie files onto the NLA timeline, use **Add shots**, or choose **Add collection previews…** to bring in the saved rendered videos from that collection. Director copies imports into managed storage; their originals and shot order travel inside saved `.LTXD` projects.
 
-Drag linked video/audio strips to reorder them, use the left/right buttons, or select shots and press **Delete** to remove them from the sequence. Double-click a shot to inspect its source movie through the same player. Save the project to keep its order, blend settings and output options. Completed shots keep their full source lengths, independent of generation duration limits. **Restore full clips** re-reads the source movies if an older project contains shortened timings. The sequence workspace has no duration ceiling.
+Drag linked video/audio strips to reorder them, use the left/right buttons, or select shots and press **Delete** to remove them from the sequence. The preview player stays on the assembled sequence; double-click a strip or drag the scrubhead to seek within that sequence. Save the project to keep its order, blend settings and output options. Completed shots keep their full source lengths, independent of generation duration limits. **Restore full clips** re-reads the source movies if an older project contains shortened timings. The sequence workspace has no duration ceiling.
 
-The NLA timeline places shots on alternating video tracks with linked audio tracks below. Strip widths follow actual movie duration; shaded regions show overlaps. Use **+**, **−** and **Fit** to inspect a long sequence, Ctrl-click to select multiple strips, and click the time ruler to seek the continuous RAM preview.
+The NLA timeline places shots on alternating video tracks with linked audio tracks below. Strip widths follow actual movie duration; shaded regions show overlaps. Use **+**, **−** and **Fit** to inspect a long sequence, Ctrl-click to select multiple strips, and drag the time ruler or scrubhead to seek the assembled RAM preview. Thumbnail filmstrips show moments from each source movie.
 
 ## Shape the join
 
@@ -29,9 +29,15 @@ The source movies' audio follows the same joins. Blends crossfade the two soundt
 
 ## Watch continuously, in RAM
 
-Click **Build RAM preview**. Director composes a lightweight preview in memory and plays it with source audio through the existing player. A progress bar follows source reading, audio preparation, encoding and WebM finishing. No preview movie is written to disk. Use Play/Pause, click the seek bar, or open fullscreen. Frame export and clipboard frame capture remain available through the player's context menu.
+Adding or editing shots automatically starts a background preview update. Click **Play sequence** or use the player's Play/Pause button to watch the assembled movie with source audio. The timeline scrubhead and player position stay linked in both directions. Fullscreen, frame export and clipboard frame capture remain available.
 
-Changing the order or blend settings clears the previous preview so the next preview reflects the current sequence. Preview uses a reduced canvas for responsive playback; output dimensions remain independent.
+The thin coverage line above the strips shows **green** for completed cached regions and **red** for regions waiting to rebuild. As the worker completes more footage, the playable prefix grows. Scrubbing into unfinished footage keeps that position pending until it is ready.
+
+![Cached clip bodies stay green while changed overlap regions wait to rebuild](images/shot-sequence-cache.png)
+
+Changing a blend rebuilds the affected overlaps, while reordering or replacing shots reuses unchanged clip regions. Completed source blocks and joins are stored as disposable workfiles in the operating system's per-user cache: normally `~/.cache/ltx-director-director/shot-sequences/v1` on Linux, respecting `XDG_CACHE_HOME`, or the Qt local application cache location on Windows. The workfiles survive closing the app; the playable assembled sequence is held in RAM.
+
+The preview cache keeps a bounded 128 MiB memory working set and prunes older workfiles around a 2 GiB disk budget. Decoded filmstrip thumbnails have their own bounded memory cache. Final-bake CRF changes leave the preview intact. Preview uses a reduced canvas; baking uses the selected output dimensions and original source movies.
 
 ## Bake the final movie
 

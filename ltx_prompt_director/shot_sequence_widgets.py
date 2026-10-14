@@ -1,12 +1,14 @@
 """Completed-shot ordering and rendering controls, using Director's existing player."""
 from __future__ import annotations
 import copy
+import hashlib
 import shutil
 import threading
 from pathlib import Path
 from uuid import uuid4
 
-from PySide6.QtCore import Qt, Signal, QObject
+from PySide6.QtCore import Qt, Signal, QObject, QTimer
+from PySide6.QtMultimedia import QMediaPlayer
 from PySide6.QtWidgets import (QWidget,QVBoxLayout,QHBoxLayout,QLabel,QPushButton,QComboBox,
                               QDoubleSpinBox,QSpinBox,QListWidget,QListWidgetItem,QAbstractItemView,
                               QSplitter,QFileDialog,QMessageBox,QProgressBar)
@@ -15,6 +17,7 @@ from .media import prepare_media, safe_media_filename, TIMELINE_VIDEO_SUFFIXES
 from .project_archive import materialize_source
 from .shot_sequence import MODES, settings, probe, render_sequence, overlaps
 from .shot_timeline import ShotTimeline
+from .shot_preview_cache import PreviewCache, make_plan, source_identity
 
 
 def render_shots(shots,options,output=None,preview=False,cancel=None,progress=None):
@@ -46,8 +49,13 @@ def import_shots(paths, directory):
             shutil.copy2(source,dest)
             info=probe(dest)
             kind,preview,_,_=prepare_media(str(dest))
-            result.append(Segment(source.name,str(dest),preview,kind,'start','',info['frames']/24,
-                                  media_duration_frames=info['frames'],trim_start=0))
+            shot=Segment(source.name,str(dest),preview,kind,'start','',info['frames']/24,
+                         media_duration_frames=info['frames'],trim_start=0)
+            digest=hashlib.sha256()
+            with dest.open('rb') as stream:
+                for chunk in iter(lambda:stream.read(1024*1024),b''):digest.update(chunk)
+            shot._media_digest=digest.hexdigest()
+            result.append(shot)
         except Exception:
             dest.unlink(missing_ok=True)
             # Remove earlier copies when a batch import fails before it can be committed.
@@ -58,6 +66,9 @@ def import_shots(paths, directory):
 
 class RenderProgress(QObject):
     updated=Signal(int,str)
+    region=Signal(int)
+    thumbnail=Signal(str,object)
+    partial=Signal(object,int)
 
 
 class ShotSequencePanel(QWidget):
@@ -65,6 +76,11 @@ class ShotSequencePanel(QWidget):
         super().__init__(parent)
         self.owner=owner;self._revision=0;self._cancel=None;self._populating=False
         self._signature=None;self._baking=False
+        self.cache=PreviewCache();self._plan=None;self._worker_running=False
+        self._active=False;self._pending=False;self._pending_position=0
+        self._desired_playing=False;self._installing=False;self._available_frames=0;self._waiting_position=False
+        self._build_timer=QTimer(self);self._build_timer.setSingleShot(True);self._build_timer.setInterval(180)
+        self._build_timer.timeout.connect(self._start_cached_preview)
         layout=QVBoxLayout(self)
         heading=QLabel('SHOT SEQUENCE · completed movies');heading.setObjectName('previewTitle')
         layout.addWidget(heading)
@@ -88,8 +104,7 @@ class ShotSequencePanel(QWidget):
         self.shots.movies_dropped.connect(self.add_paths)
         self.shots.remove_requested.connect(self.remove)
         self.shots.order_changed.connect(self.order_changed)
-        self.shots.itemDoubleClicked.connect(self.preview_source)
-        column.addWidget(QLabel('NLA timeline · linked video/audio strips · drag to reorder · ruler to seek'))
+        column.addWidget(QLabel('NLA timeline · thumbnail strips · drag scrubhead to seek · green cached / red rebuilding'))
         column.addWidget(self.shots,1)
         buttons=QHBoxLayout();buttons2=QHBoxLayout()
         for title,action in [('Add shots…',self.choose),('Add collection previews…',self.add_collection_movies),('Restore full clips',self.restore_full_clips),('Remove',self.remove),('←',lambda:self.move(-1)),('→',lambda:self.move(1)),('−',lambda:self.shots.zoom(.8)),('+',lambda:self.shots.zoom(1.25)),('Fit',self.shots.fit)]:
@@ -107,10 +122,12 @@ class ShotSequencePanel(QWidget):
         split.setStretchFactor(0,3);split.setStretchFactor(1,1)
         self.shots.seek_requested.connect(self.seek_sequence)
         self.preview.player.positionChanged.connect(self.sequence_position_changed)
+        self.preview.player.playbackStateChanged.connect(self.sequence_playback_changed)
+        self.preview.player.mediaStatusChanged.connect(self.sequence_media_status)
         layout.addWidget(split,1)
         bottom=QHBoxLayout()
         self.summary=QLabel('No shots yet')
-        self.preview_button=QPushButton('▶ Build RAM preview');self.preview_button.clicked.connect(self.build_preview)
+        self.preview_button=QPushButton('▶ Play sequence');self.preview_button.clicked.connect(self.build_preview)
         self.bake_button=QPushButton('Bake WebM…');self.bake_button.clicked.connect(self.bake)
         bottom.addWidget(self.summary,1);bottom.addWidget(self.preview_button);bottom.addWidget(self.bake_button)
         layout.addLayout(bottom)
@@ -128,24 +145,29 @@ class ShotSequencePanel(QWidget):
 
     def invalidate(self):
         self._revision+=1
+        self._build_timer.stop()
         if self._cancel:self._cancel.set()
         self._cancel=None
-        self.preview.clear_project()
+        self._installing=True;self.preview.clear_project();self._installing=False
+        self._available_frames=0
         self.preview.choose.setEnabled(True)
-        self.preview.export.setEnabled(bool(self.owner.segments))
-        self.preview_button.setEnabled(bool(self.owner.segments));self.bake_button.setEnabled(bool(self.owner.segments) and not self._baking)
+        self.preview_button.setEnabled(bool(self.owner.segments))
+        self.bake_button.setEnabled(bool(self.owner.segments) and not self._baking)
         self.preview.export.setEnabled(bool(self.owner.segments) and not self._baking)
-        self.preview_progress.hide();self.shots.set_playhead(0)
+        self.preview_progress.hide();self.shots.set_playhead(self._pending_position)
+        self.preview.play.setEnabled(False)
         self.preview.title.setText('Shot Sequence · RAM preview')
-        self.preview.empty.setText('Drop completed shots, then build a continuous RAM preview')
+        self.preview.empty.setText('Caching the sequence in the background…' if self.owner.segments else 'Drop completed shots to begin')
 
     def deactivate(self):
-        self.invalidate();self._signature=None
+        self._active=False;self._pending=False;self._desired_playing=False;self._pending_position=0
+        self.invalidate();self._signature=None;self._plan=None;self.shots.set_coverage([])
 
     def refresh(self):
         opts=settings(getattr(self.owner,'shot_sequence_settings',None))
-        signature=(self.owner.workspace_revision,tuple((s.id,s.media_path,s.duration) for s in self.owner.segments),tuple(opts.items()))
+        signature=(self.owner.workspace_revision,tuple((s.id,s.media_path,s.duration,s.name,s.preview_path,source_identity(s)) for s in self.owner.segments),tuple(opts.items()))
         if signature==self._signature:return
+        self._active=self.owner.workspace_engine=="shot_sequence"
         self._signature=signature;self._populating=True
         self.blend.setCurrentText(opts['blend']);self.side.setCurrentIndex(self.side.findData(opts['side']))
         self.overlap.setValue(opts['overlap']);self.crf.setValue(opts['crf']);self.width.setValue(opts['width']);self.height.setValue(opts['height'])
@@ -161,7 +183,15 @@ class ShotSequencePanel(QWidget):
         clips=[{'frames':max(1,round(s.duration*24))} for s in self.owner.segments]
         joins,total=overlaps(clips,opts['overlap'])
         self.summary.setText(f'{len(clips)} shots · {total/24:.2f}s · {opts["blend"]} · audio included')
-        self.invalidate()
+        plan=make_plan(copy.deepcopy(self.owner.segments),opts)
+        if self._plan is None or plan.signature!=self._plan.signature:
+            self._plan=plan
+            self._pending_position=min(self._pending_position,round(plan.count/24*1000))
+            self.invalidate()
+            self.shots.set_coverage(self.cache.coverage(plan))
+            for key,images in self.cache.thumbnails(plan).items():self.install_thumbnails(plan,key,images)
+            self._pending=bool(plan.parts)
+            if self._active and self._pending:self._build_timer.start()
 
     def options_changed(self,*_):
         if self._populating:return
@@ -214,21 +244,51 @@ class ShotSequencePanel(QWidget):
         self._populating=False;self.order_changed()
         self.shots.setCurrentRow(target)
 
-    def preview_source(self,item):
-        shot=next((s for s in self.owner.segments if s.id==item.data(Qt.ItemDataRole.UserRole)),None)
-        if shot:
-            revision=self._revision
-            def ready(path):
-                if revision==self._revision:
-                    self.preview.set_project(shot.name,path);self.preview.export.setEnabled(True)
-            self.owner.start_disk_job(materialize_source,(copy.deepcopy(shot),),ready,
-                                     lambda message:QMessageBox.warning(self,'Source movie',message))
-
     def seek_sequence(self,milliseconds):
-        if getattr(self.preview,'_memory_preview',False):self.preview.seek_to(milliseconds)
+        self._pending_position=milliseconds
+        self._waiting_position=milliseconds>=self._available_frames/24*1000
+        if getattr(self.preview,'_memory_preview',False):
+            if milliseconds < self._available_frames/24*1000:
+                self.preview.seek_to(milliseconds)
+            else:
+                self._installing=True;self.preview.player.pause();self._installing=False
+        self.shots.set_playhead(milliseconds)
 
     def sequence_position_changed(self,milliseconds):
-        if getattr(self.preview,'_memory_preview',False):self.shots.set_playhead(milliseconds)
+        if getattr(self.preview,'_memory_preview',False) and not self._installing and not self._waiting_position:
+            self._pending_position=milliseconds;self.shots.set_playhead(milliseconds)
+
+    def sequence_playback_changed(self,state):
+        if not self._installing and state!=QMediaPlayer.PlaybackState.StoppedState:
+            self._desired_playing=state==QMediaPlayer.PlaybackState.PlayingState
+
+    def sequence_media_status(self,status):
+        if status in {QMediaPlayer.MediaStatus.LoadedMedia,QMediaPlayer.MediaStatus.BufferedMedia}:
+            self.preview.play.setEnabled(True)
+            if self._installing:
+                self._installing=False
+                self.shots.set_playhead(self._pending_position)
+        elif status==QMediaPlayer.MediaStatus.EndOfMedia and self._available_frames < (self._plan.count if self._plan else 0):
+            # A growing prefix has ended. Resume automatically once more is linked.
+            self._desired_playing=True
+            self._pending_position=round(self._available_frames/24*1000)
+
+    def install_thumbnails(self,plan,key,images):
+        identity=plan.sources.get(key)
+        if identity is None:return
+        for shot in self.owner.segments:
+            if source_identity(shot)==source_identity(identity):self.shots.set_thumbnails(shot.id,images)
+
+    def install_preview(self,data,frames):
+        if not data:return
+        self._available_frames=frames
+        playable=self._pending_position<frames/24*1000
+        self._waiting_position=not playable
+        self._installing=True
+        self.preview.set_memory_video('Shot Sequence · continuous preview',data,
+                                      min(self._pending_position,max(0,round(frames/24*1000)-1)),
+                                      autoplay=self._desired_playing and playable)
+        self.preview.export.setEnabled(not self._baking)
 
     def restore_full_clips(self):
         if not self.owner.segments:return
@@ -259,27 +319,47 @@ class ShotSequencePanel(QWidget):
         return copy.deepcopy(self.owner.segments),self.options()
 
     def build_preview(self):
-        try:paths,opts=self.snapshot()
-        except ValueError as error:QMessageBox.information(self,'Shot Sequence',str(error));return
-        self.invalidate();revision=self._revision
+        if not self._plan or not self._plan.parts:return
+        self._desired_playing=True
+        if self._worker_running:
+            if self._available_frames and not self._installing:self.preview.player.play()
+            return
+        if self._available_frames==self._plan.count and getattr(self.preview,"_memory_preview",False) and not self._installing:
+            self.preview.player.play();return
+        self._pending=True
+        self._build_timer.stop();self._start_cached_preview()
+
+    def _start_cached_preview(self):
+        if not self._active or not self._pending or not self._plan or not self._plan.parts:return
+        if self._worker_running:return # latest revision starts after the cancelled job returns
+        plan=self._plan;revision=self._revision
+        self._pending=False;self._worker_running=True
         cancel=threading.Event();self._cancel=cancel
-        self.preview_button.setEnabled(False)
-        self.preview.empty.setText('Building continuous preview in RAM…')
-        progress=self.progress_channel(self.preview_progress,'RAM preview',lambda:revision==self._revision)
+        self.preview_button.setEnabled(True)
+        progress=self.progress_channel(self.preview_progress,'RAM cache',lambda:revision==self._revision)
+        coverage=self.cache.coverage(plan)
+        self.shots.set_coverage(coverage)
+        def region(index):
+            if revision!=self._revision:return
+            start,end,_=coverage[index];coverage[index]=(start,end,True)
+            self.shots.set_coverage(coverage)
+        progress.region.connect(region,Qt.ConnectionType.QueuedConnection)
+        progress.thumbnail.connect(lambda key,images:self.install_thumbnails(plan,key,images) if revision==self._revision else None,Qt.ConnectionType.QueuedConnection)
+        progress.partial.connect(lambda data,frames:self.install_preview(data,frames) if revision==self._revision else None,Qt.ConnectionType.QueuedConnection)
+        def finish():
+            progress.deleteLater();self._worker_running=False
+            if revision==self._revision:self._cancel=None;self.preview_button.setEnabled(True)
+            elif self._active and self._pending:self._build_timer.start()
         def ready(data):
-            progress.deleteLater()
-            if revision!=self._revision:return
-            self._cancel=None;self.preview_button.setEnabled(True)
-            self.preview_progress.setValue(100);self.preview_progress.setFormat('RAM preview · ready · %p%')
-            self.preview.set_memory_video('Shot Sequence · continuous preview',data)
-            self.preview.export.setEnabled(not self._baking)
+            finish()
+            if revision!=self._revision or data is None:return
+            self.preview_progress.setValue(100);self.preview_progress.setFormat('RAM cache · ready · %p%')
+            self.install_preview(data,plan.count)
         def failed(message):
-            progress.deleteLater()
+            finish()
             if revision!=self._revision:return
-            self._cancel=None;self.preview_button.setEnabled(True)
-            self.preview.empty.setText(message)
-            self.preview_progress.setFormat('RAM preview · failed · %p%')
-        self.owner.start_disk_job(render_preview,(paths,opts,cancel,progress.updated.emit),ready,failed)
+            self.preview.empty.setText(message);self.preview_progress.setFormat('RAM cache · failed · %p%')
+        self.owner.start_disk_job(self.cache.build,(plan,cancel,progress.updated.emit,progress.region.emit,progress.thumbnail.emit,progress.partial.emit),ready,failed)
 
     def bake(self):
         if self._baking:return

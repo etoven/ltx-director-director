@@ -57,7 +57,7 @@ with tempfile.TemporaryDirectory() as temporary:
         window.record_export=lambda _:None
         panel.bake()
         timer=QElapsedTimer();timer.start()
-        while (panel.preview.current_frame is None or panel._baking or timer.elapsed()<500) and timer.elapsed()<10000:
+        while (panel.preview.current_frame is None or panel._baking or panel._worker_running or panel._installing or timer.elapsed()<500) and timer.elapsed()<10000:
             app.processEvents(QEventLoop.ProcessEventsFlag.AllEvents,20)
         # Native video surfaces are excluded by QWidget.grab; show the identical decoded frame.
         if panel.preview.current_frame is not None:
@@ -70,4 +70,7 @@ with tempfile.TemporaryDirectory() as temporary:
         target=Path(__file__).resolve().parents[1]/'docs/images/shot-sequence.png'
         window.grab().save(str(target))
         print(target)
+        panel.blend.setCurrentText('linear_blend')
+        # This is the actual invalidated cache plan, before the debounce starts.
+        panel.shots.grab().save(str(target.with_name('shot-sequence-cache.png')))
         window.project_dirty=False;window._close_saves_queued=True;window.close()

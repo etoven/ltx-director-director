@@ -1093,10 +1093,12 @@ class ProjectPreviewPanel(QWidget):
             self._memory_buffer.deleteLater()
             self._memory_buffer = None
 
-    def set_memory_video(self, name: str, data: bytes) -> None:
+    def set_memory_video(self, name: str, data: bytes, position: int = 0, autoplay: bool = True) -> None:
         self.clear_project()
         self.title.setText(name)
         self._memory_preview = True
+        self._initial_media_position = max(0,position)
+        self._initial_media_autoplay = autoplay
         self._initial_media_pending = True
         self.pending_preview_path = ""
         self._memory_buffer = QBuffer(self)
@@ -1237,7 +1239,9 @@ class ProjectPreviewPanel(QWidget):
             if not getattr(self, "_initial_media_pending", False):return
             self._initial_media_pending = False
             if getattr(self, "_memory_preview", False):
-                self.player.play()
+                self.player.setPosition(min(self.duration,self._initial_media_position) if self._initial_media_autoplay else min(self.duration,max(1,self._initial_media_position)))
+                if self._initial_media_autoplay:self.player.play()
+                else:self.player.pause()
             else:
                 self.player.setPosition(1)
                 self.player.pause()

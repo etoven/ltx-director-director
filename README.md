@@ -8,7 +8,7 @@ Build a visual plan for AI video, turn it into a detailed production prompt, and
 
 ![The Aurora workspace: a visual timeline, creative direction and one continuous MiniMax production brief](docs/images/ltx-director-director-overview.png)
 
-*Current release: Aurora 1.13.0a42 on `experimental`. Screenshots show the current native app with an authored demonstration project.*
+*Current release: Aurora 1.13.0a43 on `experimental`. Screenshots show the current native app with an authored demonstration project.*
 
 ## See the story before you generate
 
@@ -88,7 +88,7 @@ Bring your rendered video back into the project. Play it in a dockable preview, 
 
 ## Assemble your finished shots
 
-Every collection includes a **Shot Sequence** project. Drop completed movies, arrange them in order, and preview the extended film in RAM with its source audio. Choose a cut, linear blend, filmic crossfade or perceptual crossfade; tune overlap and its source or destination side. Bake the final VP9/Opus WebM with configurable CRF quality, defaulting to 15.
+Every collection includes a **Shot Sequence** project. Drop completed movies into a thumbnail NLA timeline, arrange them in order, and scrub the extended film with its source audio. Background workers update only changed preview regions; a green/red coverage line shows cached and rebuilding footage. Reusable workfiles live in your platform cache, while playback runs from RAM. Choose a cut, linear blend, filmic crossfade or perceptual crossfade; tune overlap and its source or destination side. Bake the final VP9/Opus WebM with configurable CRF quality, defaulting to 15.
 
 ![Completed shots assembled in the Shot Sequence workspace](docs/images/shot-sequence.png)
 
@@ -109,7 +109,7 @@ Customize the workspace itself in **Settings → Workspaces**: choose the editor
 Install the current experimental wheel:
 
 ```bash
-python3 -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a42-py3-none-any.whl'
+python3 -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a43-py3-none-any.whl'
 ltx-director-director
 ```
 

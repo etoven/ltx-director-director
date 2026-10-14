@@ -6,7 +6,7 @@ Start with an image, a video clip or a written beat. Arrange the sequence, descr
 
 ![A complete MiniMax plan in the Aurora workspace](docs/images/ltx-director-director-overview.png)
 
-*The examples throughout this guide use the current 1.13.0a42 native interface with a locally authored Aurora demonstration project.*
+*The examples throughout this guide use the current 1.13.0a43 native interface with a locally authored Aurora demonstration project.*
 
 ## Refine an existing MiniMax prompt
 
@@ -137,4 +137,4 @@ The ComfyUI export puts the production prompt in a tall group along the left edg
 
 ## Completed shot sequences
 
-Each collection includes a **Shot Sequence** tile. Drop finished movies into its shot list, reorder them, and build a continuous RAM preview with source audio. The default join is a 1-second source-side perceptual crossfade. **Bake WebM** writes the full-resolution sequence with audio and configurable CRF (default 15). [Read the illustrated guide](docs/shot-sequences.md).
+Each collection includes a **Shot Sequence** tile. Drop finished movies onto its thumbnail NLA timeline and reorder them. The assembled preview updates automatically in background workers, with source audio and a scrubhead linked to the player. Green regions are cached; red regions are rebuilding. Workfiles persist in the per-user cache so unchanged clips and joins can be reused. The default join is a 1-second source-side perceptual crossfade. **Bake WebM** writes the full-resolution sequence with audio and configurable CRF (default 15). [Read the illustrated guide](docs/shot-sequences.md).
