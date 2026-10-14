@@ -44,7 +44,7 @@ from .media_labels import add_thumbnail_labels
 from .workspaces import is_obsolete_stock_definition, WorkspaceStore
 from .timing_limits import sequence_limit, fit_sequence
 from .workspace_editor import WorkspaceEditor
-from .shot_sequence import DEFAULTS as SHOT_DEFAULTS, settings as shot_settings, ensure_collection_sequences, overlaps as shot_overlaps
+from .shot_sequence import DEFAULTS as SHOT_DEFAULTS, settings as shot_settings, ensure_collection_sequences, shot_layout
 from .shot_sequence_widgets import ShotSequencePanel
 from .models import Segment, order_segments_by_ids, text_segment_from_ltx
 from .project_data import ARCHIVE_COLOR, load_other_tags, load_project_tags, new_note, normalize_notes, normalize_project_labels
@@ -3847,6 +3847,7 @@ class MainWindow(QMainWindow):
         #catalogTiles::item:selected{background:#294356;border:2px solid #69a5d0}
         #mediaCatalogPanel{border:1px solid transparent} #mediaCatalogPanel[dropActive="true"]{border:3px solid #68b9ee;background:#13232c}
         #timeline{padding:3px;background:#0d0f10;outline:0} #timeline::item,#timeline::item:selected,#timeline::item:focus{background:#0d0f10;border:0;outline:0} #timeline[dropActive="true"]{border:3px solid #68b9ee;background:#13232c} #timeline[dropActive="false"]{border:1px solid #323638}
+        #shotTimeline[dropActive="true"]{border:3px solid #68b9ee;background:#13232c} #shotTimeline[dropActive="false"]{border:1px solid #323638}
         #segmentCard{background:transparent;border:1px solid transparent} #segmentCard[selected="true"]{background:#17262e;border:1px solid #73a9c4} #segmentCardBody{background:#252728;border:0} #mediaBadge{background:#e5e5e5;color:#262626;font-weight:bold;padding:2px} #roleBadge{background:#36393a;color:#eee;padding:2px}
         #tileDelete{padding:0;min-height:0;max-height:20px;background:#454849;color:#ddd;border:0} #tileDelete:hover{background:#a94444;color:#fff;border:1px solid #e07878} #tileTitle{background:#242627;padding:3px;font-size:9px} #tileStartTime{color:#79b8d7;font-size:8px;font-weight:bold} #tileDuration{color:#a2a7a9;font-size:8px}
         #resizeHandle{background:transparent;border:0} #resizeHandle:hover{background:rgba(88,118,134,35);border:0}
@@ -4564,8 +4565,7 @@ class MainWindow(QMainWindow):
         meta["downloadDirectory"] = self.download_directory
         meta["savedAt"] = datetime.now(timezone.utc).isoformat()
         meta["projectType"] = self.project_type
-        meta["duration"] = (shot_overlaps([{"frames":max(1,round(s.duration*FPS))} for s in self.segments],
-                                               self.shot_sequence_settings["overlap"])[1]/FPS
+        meta["duration"] = (shot_layout(self.segments,self.shot_sequence_settings)[1]/FPS
                             if self.workspace_engine == "shot_sequence" else self.total_duration())
         meta["segmentCount"] = len(self.segments)
         if not meta.get("thumbnailSource"):
@@ -5132,7 +5132,7 @@ class MainWindow(QMainWindow):
 
     def add_media_paths(self, paths: list[str], insert_index: int | None = None) -> None:
         if self.workspace_engine == "shot_sequence":
-            self.shot_sequence_panel.add_paths(paths)
+            self.shot_sequence_panel.add_paths(paths,insert_index)
             return
         if self.prompt_only_workspace:
             return

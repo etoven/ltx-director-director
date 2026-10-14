@@ -1,15 +1,15 @@
 """Time-scaled NLA tracks for completed movies and their linked source audio."""
 from pathlib import Path
 from collections import OrderedDict
-from PySide6.QtCore import Qt, Signal, QRectF
+from PySide6.QtCore import Qt, Signal, QRectF, QItemSelectionModel
 from PySide6.QtGui import QColor, QPainter, QPen, QPixmap, QPainterPath, QIcon, QActionGroup
 from PySide6.QtWidgets import QScrollArea, QWidget, QListWidget, QAbstractItemView, QMenu
 from .media import TIMELINE_VIDEO_SUFFIXES
-from .shot_sequence import overlaps, FPS
+from .shot_sequence import shot_layout, settings, transitions, FPS
 
 
 class ShotTimeline(QScrollArea):
-    movies_dropped = Signal(list)
+    movies_dropped = Signal(list,int)
     movies_replaced = Signal(list,str)
     status_requested = Signal(list,str)
     remove_requested = Signal()
@@ -19,6 +19,7 @@ class ShotTimeline(QScrollArea):
     scrub_started = Signal()
     scrub_finished = Signal()
     export_requested = Signal(str)
+    transition_requested = Signal(str)
     LEFT = 94
     TOP = 50
     TRACK = 60
@@ -26,6 +27,7 @@ class ShotTimeline(QScrollArea):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setObjectName('shotTimeline');self.setProperty('dropActive',False)
         self.items = QListWidget(self)
         self.items.hide()
         self.items.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
@@ -40,6 +42,7 @@ class ShotTimeline(QScrollArea):
         self.playhead = 0.0
         self.coverage=[]
         self.replace_target=None
+        self.drop_target=None
         self.status_tags=[];self.statuses={}
         self._thumbnails=OrderedDict();self._waveforms={}
         self._fit = True
@@ -57,10 +60,12 @@ class ShotTimeline(QScrollArea):
     def insertItem(self, row, item):self.items.insertItem(row,item)
 
     def set_shots(self, shots, overlap):
+        options=settings(overlap if isinstance(overlap,dict) else {'overlap':overlap})
         ids={shot.id for shot in shots}
         self._waveforms={key:value for key,value in self._waveforms.items() if key in ids}
         self._thumbnails=OrderedDict((key,value) for key,value in self._thumbnails.items() if key in ids)
-        joins, count = overlaps([{'frames':max(1,round(s.duration*FPS))} for s in shots],overlap)
+        joins,count=shot_layout(shots,options)
+        outgoing=transitions([shot.id for shot in shots],options)
         self.total = count/FPS
         self.clips=[]
         end=0.0
@@ -68,7 +73,9 @@ class ShotTimeline(QScrollArea):
             amount=joins[index-1]/FPS if index else 0.0
             start=end-amount
             self.clips.append(dict(start=start,end=start+shot.duration,overlap=amount,
-                                   name=shot.name,preview=QPixmap(shot.preview_path),id=shot.id,thumbs=self._thumbnails.get(shot.id,[]),peaks=self._waveforms.get(shot.id,[])))
+                                   name=shot.name,preview=QPixmap(shot.preview_path),id=shot.id,thumbs=self._thumbnails.get(shot.id,[]),peaks=self._waveforms.get(shot.id,[]),
+                                   transition=outgoing[index] if index<len(outgoing) else None,
+                                   custom_transition=shot.id in options.get('shot_transitions',{})))
             end=start+shot.duration
         self.resize_canvas()
 
@@ -110,7 +117,11 @@ class ShotTimeline(QScrollArea):
             action.triggered.connect(lambda checked=False,name=name:self.status_requested.emit(ids,name))
         menu.addSeparator()
         ident=self.item(index).data(Qt.ItemDataRole.UserRole)
+        edit=menu.addAction('Edit transition…',lambda:self.transition_requested.emit(ident))
+        edit.setEnabled(index<len(self.clips)-1)
         menu.addAction('Export segment video',lambda:self.export_requested.emit(ident))
+        menu.addSeparator()
+        menu.addAction('Delete',self.remove_requested.emit)
         return menu
 
     def set_waveform(self,shot_id,peaks):
@@ -179,8 +190,22 @@ class ShotTimeline(QScrollArea):
         return [url.toLocalFile() for url in event.mimeData().urls() if url.isLocalFile()
                 and Path(url.toLocalFile()).suffix.lower() in TIMELINE_VIDEO_SUFFIXES]
     def dragEnterEvent(self,event):
-        if self.movie_paths(event):event.acceptProposedAction()
+        if self.movie_paths(event):
+            self.set_drop_active(True);self.update_drop_target(event);event.acceptProposedAction()
         else:event.ignore()
+
+    def set_drop_active(self,active):
+        if self.property('dropActive')==active:return
+        self.setProperty('dropActive',active);self.style().unpolish(self);self.style().polish(self)
+
+    def update_drop_target(self,event):
+        self.replace_target=self.replacement_target(event)
+        point=self.canvas.mapFrom(self.viewport(),event.position().toPoint())
+        self.drop_target=None if self.replace_target is not None else self.canvas.insertion(point.x())
+        self.canvas.update()
+
+    def clear_drop_target(self):
+        self.replace_target=None;self.drop_target=None;self.set_drop_active(False);self.canvas.update()
     def replacement_target(self,event):
         if not event.modifiers()&Qt.KeyboardModifier.ControlModifier:return None
         point=self.canvas.mapFrom(self.viewport(),event.position().toPoint())
@@ -188,18 +213,20 @@ class ShotTimeline(QScrollArea):
 
     def dragMoveEvent(self,event):
         if self.movie_paths(event):
-            self.replace_target=self.replacement_target(event);self.canvas.update();event.acceptProposedAction()
-        else:event.ignore()
+            self.set_drop_active(True);self.update_drop_target(event);event.acceptProposedAction()
+        else:self.clear_drop_target();event.ignore()
 
     def dragLeaveEvent(self,event):
-        self.replace_target=None;self.canvas.update();event.accept()
+        self.clear_drop_target();event.accept()
 
     def dropEvent(self,event):
         paths=self.movie_paths(event);target=self.replacement_target(event)
-        self.replace_target=None;self.canvas.update()
+        point=self.canvas.mapFrom(self.viewport(),event.position().toPoint())
+        insertion=self.canvas.insertion(point.x())
+        self.clear_drop_target()
         if paths:
             if target is not None:self.movies_replaced.emit(paths,self.item(target).data(Qt.ItemDataRole.UserRole))
-            else:self.movies_dropped.emit(paths)
+            else:self.movies_dropped.emit(paths,insertion)
             event.acceptProposedAction()
         else:event.ignore()
 
@@ -218,9 +245,8 @@ class TimelineCanvas(QWidget):
 
     def insertion(self,x):
         t=self.timeline
-        for i,clip in enumerate(t.clips):
-            if x<t.LEFT+(clip['start']+clip['end'])/2*t.scale:return i
-        return len(t.clips)
+        boundaries=[clip['start'] for clip in t.clips]+[t.total]
+        return min(range(len(boundaries)),key=lambda index:abs(x-(t.LEFT+boundaries[index]*t.scale)))
 
     def paintEvent(self,event):
         t=self.timeline;p=QPainter(self);p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -249,7 +275,7 @@ class TimelineCanvas(QWidget):
                 if not rect.intersects(QRectF(event.rect())):continue
                 status_color=QColor(clip.get('status_color',''))
                 color=status_color.darker(160) if status_color.isValid() else QColor('#29645f' if audio else '#36587b')
-                p.setBrush(color);p.setPen(QPen(QColor('#66d1c5' if t.replace_target==index else '#efbc65' if selected else '#62778b'),2 if selected or t.replace_target==index else 1))
+                p.setBrush(color);p.setPen(QPen(QColor('#68b9ee' if t.replace_target==index else '#efbc65' if selected else '#62778b'),2 if selected or t.replace_target==index else 1))
                 if status_color.isValid() and not selected and t.replace_target!=index:p.setPen(QPen(status_color.lighter(145),1.4))
                 p.drawRoundedRect(rect,4,4)
                 p.save();p.setClipRect(rect.adjusted(3,2,-3,-2))
@@ -283,6 +309,11 @@ class TimelineCanvas(QWidget):
                     p.setPen(QColor('#edf3fa'));p.drawText(QRectF(rect.x()+7,rect.y()+1,max(1,rect.width()-12),18),label)
                 else:
                     p.setPen(QColor('#edf3fa'));p.drawText(QRectF(rect.x()+7,rect.y()+1,max(1,rect.width()-12),18),label)
+                    join=clip['transition']
+                    if join and clip['custom_transition'] and rect.width()>120:
+                        text=f'→ {join["blend"]} · {join["overlap"]:.2f}s'
+                        badge=QRectF(rect.x()+3,rect.bottom()-17,rect.width()-6,15)
+                        p.fillRect(badge,QColor(15,25,38,220));p.drawText(badge,Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignVCenter,text)
                 if clip['overlap']:
                     fade=QRectF(rect.x(),rect.y(),clip['overlap']*t.scale,rect.height())
                     p.fillRect(fade,QColor(234,185,101,40));p.setPen(QPen(QColor('#e7b46c'),1))
@@ -293,9 +324,10 @@ class TimelineCanvas(QWidget):
         x=t.LEFT+min(t.total,t.playhead)*t.scale
         p.setPen(QPen(QColor('#f3c476'),2));p.drawLine(int(x),0,int(x),self.height())
         p.setBrush(QColor('#f3c476'));p.drawRect(QRectF(x-5,0,10,8))
-        if self.target is not None:
-            x=t.LEFT+(t.clips[self.target]['start'] if self.target<len(t.clips) else t.total)*t.scale
-            p.setPen(QPen(QColor('#74e5cc'),3));p.drawLine(int(x),t.TOP,int(x),self.height())
+        target=t.drop_target if t.drop_target is not None else self.target
+        if target is not None:
+            x=t.LEFT+(t.clips[target]['start'] if target<len(t.clips) else t.total)*t.scale
+            p.setPen(QPen(QColor('#68b9ee'),4));p.drawLine(int(x),4,int(x),self.height()-4)
         p.end()
 
     def contextMenuEvent(self,event):
@@ -315,14 +347,18 @@ class TimelineCanvas(QWidget):
         if index is None:
             t.items.clearSelection();return
         item=t.item(index)
-        if event.modifiers()&Qt.KeyboardModifier.ControlModifier:item.setSelected(not item.isSelected())
+        if event.modifiers()&Qt.KeyboardModifier.ControlModifier:
+            selected=item.isSelected()
+            t.items.setCurrentItem(item,QItemSelectionModel.SelectionFlag.NoUpdate)
+            item.setSelected(not selected)
         elif not item.isSelected():t.setCurrentRow(index)
+        else:t.items.setCurrentItem(item,QItemSelectionModel.SelectionFlag.NoUpdate)
         self.press=point;self.dragging=False;self.update()
 
     def mouseMoveEvent(self,event):
         if self.scrubbing:self.timeline.scrub(event.position().x());return
         if self.press is not None and (event.position()-self.press).manhattanLength()>6:
-            self.dragging=True;self.target=self.insertion(event.position().x());self.update()
+            self.dragging=True;self.timeline.set_drop_active(True);self.target=self.insertion(event.position().x());self.update()
 
     def mouseReleaseEvent(self,event):
         t=self.timeline
@@ -330,6 +366,7 @@ class TimelineCanvas(QWidget):
         if self.dragging and self.target is not None:
             indices=[i for i in range(t.count()) if t.item(i).isSelected()]
             t.reorder(indices,self.target)
+        t.set_drop_active(False)
         self.press=None;self.target=None;self.dragging=False;self.scrubbing=False;self.update()
 
     def mouseDoubleClickEvent(self,event):

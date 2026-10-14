@@ -30,12 +30,45 @@ def settings(value=None):
     result['overlap'] = float(result['overlap'])
     if not np.isfinite(result['overlap']) or not 0 <= result['overlap'] <= 60:
         raise ValueError('Overlap must be between 0 and 60 seconds.')
+    raw=result.get('shot_transitions',{})
+    if isinstance(raw,dict):
+        overrides={}
+        for ident,value in raw.items():
+            if not isinstance(value,dict):continue
+            entry={key:value[key] for key in ('blend','overlap','side') if key in value}
+            if not entry:continue
+            effective=_transition(entry,result)
+            overrides[str(ident)]={key:effective[key] for key in entry}
+        if overrides or 'shot_transitions' in result:result['shot_transitions']=overrides
+    elif 'shot_transitions' in result:result['shot_transitions']={}
     result['crf'] = int(result['crf'])
     if not 0 <= result['crf'] <= 63:
         raise ValueError('WebM CRF must be between 0 and 63.')
     for key in ('width', 'height'):
         result[key] = max(32, min(8192, int(result[key]) // 2 * 2))
     return result
+
+
+def _transition(value,defaults):
+    result={key:value.get(key,defaults[key]) for key in ('blend','overlap','side')}
+    if result['blend'] not in MODES or result['side'] not in ('source','destination'):
+        raise ValueError('Unknown shot blend mode or overlap side.')
+    result['overlap']=float(result['overlap'])
+    if not np.isfinite(result['overlap']) or not 0<=result['overlap']<=60:
+        raise ValueError('Overlap must be between 0 and 60 seconds.')
+    return result
+
+
+def transitions(shot_ids,options):
+    """The outgoing join belongs to its source shot, including after reordering."""
+    opts=settings(options);overrides=opts.get('shot_transitions',{})
+    return [_transition(overrides.get(str(ident),{}),opts) for ident in list(shot_ids)[:-1]]
+
+
+def shot_layout(shots,options):
+    joins=transitions([shot.id for shot in shots],options)
+    return overlaps([{'frames':max(1,round(shot.duration*FPS))} for shot in shots],
+                    [join['overlap'] for join in joins])
 
 
 def probe(path, cancel=None):
@@ -69,7 +102,9 @@ def overlaps(clips, seconds):
     counts = [clip['frames'] for clip in clips]
     result = []
     total = counts[0] if counts else 0
-    for count in counts[1:]:
+    intervals=[seconds]*(len(counts)-1) if isinstance(seconds,(int,float)) else list(seconds)
+    if len(intervals)!=max(0,len(counts)-1):raise ValueError('Each shot join needs an overlap duration.')
+    for count,seconds in zip(counts[1:],intervals):
         amount = min(round(seconds * FPS), total, count)
         result.append(amount)
         total += count - amount
@@ -200,7 +235,9 @@ def render_sequence(paths, options, output=None, preview=False, cancel=None, pro
         report(round(10*(index+1)/len(paths)), 'Reading source movies')
     for clip,limit in zip(clips,opts.get('_frame_limits',[])):
         clip['frames']=max(1,min(clip['frames'],int(limit)))
-    joins,count=overlaps(clips,opts['overlap'])
+    join_options=transitions(opts.get('_shot_ids',range(len(clips))),opts)
+    if len(join_options)!=len(clips)-1:raise ValueError('Shot identities must match the source movies.')
+    joins,count=overlaps(clips,[join['overlap'] for join in join_options])
     width,height=opts['width'],opts['height']
     if preview:
         scale=min(1,640/width,360/height)
@@ -209,9 +246,9 @@ def render_sequence(paths, options, output=None, preview=False, cancel=None, pro
     report(10, 'Preparing source audio')
     audio=_audio(clips[0],cancel)
     report(10+round(10/len(clips)), 'Preparing source audio')
-    for clip_index,(clip,amount) in enumerate(zip(clips[1:],joins),2):
-        images=_join(images,_frames(clip,width,height,cancel),amount,opts['blend'],opts['side'])
-        audio=join_audio(audio,_audio(clip,cancel),round(amount*RATE/FPS),opts['blend'],opts['side'])
+    for clip_index,(clip,amount,join) in enumerate(zip(clips[1:],joins,join_options),2):
+        images=_join(images,_frames(clip,width,height,cancel),amount,join['blend'],join['side'])
+        audio=join_audio(audio,_audio(clip,cancel),round(amount*RATE/FPS),join['blend'],join['side'])
         report(10+round(10*clip_index/len(clips)), 'Preparing source audio')
     memory=io.BytesIO() if output is None else None
     temporary=None

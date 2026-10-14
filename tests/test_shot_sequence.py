@@ -134,11 +134,11 @@ def test_workspace_panel_memory_player_and_portable_save(movies,tmp_path,monkeyp
         monkeypatch.setattr(w,'next_export_path',lambda _:tmp_path/'ui-final.webm')
         monkeypatch.setattr(w,'record_export',lambda path:saved.append(path))
         p.bake()
-        assert not p.bake_progress.isHidden() and not p.bake_button.isEnabled()
+        assert not p.bake_progress.isHidden() and not p.preview.export.isEnabled()
         timer.restart()
         while not saved and timer.elapsed()<5000:app.processEvents(QEventLoop.ProcessEventsFlag.AllEvents,20)
         assert saved==[tmp_path/'ui-final.webm']
-        assert p.bake_progress.value()==100 and p.bake_button.isEnabled()
+        assert p.bake_progress.value()==100 and p.preview.export.isEnabled()
         p.deactivate()
         assert p.preview._memory_buffer is None
     finally:

@@ -20,7 +20,7 @@ import numpy as np
 from PIL import Image
 
 from .project_archive import materialize_source
-from .shot_sequence import FPS, RATE, settings, overlaps, _frames, _audio, blend_frame
+from .shot_sequence import FPS, RATE, settings, overlaps, transitions, _frames, _audio, blend_frame
 from .shot_workfiles import Workfiles, DEFAULT_ROOT
 
 BLOCK = FPS
@@ -79,17 +79,19 @@ def make_plan(shots,options):
         key=_hash((source_identity(shot),count,width,height))
         sources[key]=shot
         clips.append({'frames':count,'key':key})
-    joins,count=overlaps(clips,opts['overlap'])
+    join_options=transitions([shot.id for shot in shots],opts)
+    joins,count=overlaps(clips,[join['overlap'] for join in join_options])
     frames=[]
     for index,clip in enumerate(clips):
         destination=[('source',clip['key'],i) for i in range(clip['frames'])]
         amount=joins[index-1] if index else 0
+        join=join_options[index-1] if index else None
         if not amount:frames+=destination
-        elif opts['blend']=='cut':
-            frames=frames+destination[amount:] if opts['side']=='destination' else frames[:-amount]+destination
+        elif join['blend']=='cut':
+            frames=frames+destination[amount:] if join['side']=='destination' else frames[:-amount]+destination
         else:
             tail=frames[-amount:]
-            mixed=[('blend',opts['blend'],opts['side'],i+1,amount+1,source,destination[i]) for i,source in enumerate(tail)]
+            mixed=[('blend',join['blend'],join['side'],i+1,amount+1,source,destination[i]) for i,source in enumerate(tail)]
             frames=frames[:-amount]+mixed+destination[amount:]
     parts=[];start=0
     while start<len(frames):

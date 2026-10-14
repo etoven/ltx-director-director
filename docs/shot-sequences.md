@@ -6,17 +6,19 @@
 
 ## Bring in your completed shots
 
-Open a collection and select **Shot Sequence**. Drop movie files onto the NLA timeline, use **Add shots**, or choose **Add collection previews…** to bring in the saved rendered videos from that collection. Director copies imports into managed storage; their originals and shot order travel inside saved `.LTXD` projects.
+Open a collection and select **Shot Sequence**. Drop movie files onto the NLA timeline at the desired position. The blue border and insertion line show the closest shot boundary to the cursor. Use **Add shots**, or choose **Add collection previews…** to bring in the saved rendered videos from that collection. Director copies imports into managed storage; their originals and shot order travel inside saved `.LTXD` projects.
 
 Hold **Ctrl** while dropping a movie onto an existing video or audio strip to replace that shot in place. The new movie keeps its full length, the sequence slot stays put, and only changed content and joins are rebuilt. If you drop multiple movies, the additional files follow the replacement.
 
-Drag linked video/audio strips to reorder them, use the left/right buttons, or select shots and press **Delete** to remove them from the sequence. The preview player stays on the assembled sequence; double-click a strip or drag the scrubhead to seek within that sequence. Save the project to keep its order, blend settings and output options. Completed shots keep their full source lengths, independent of generation duration limits. **Restore full clips** re-reads the source movies if an older project contains shortened timings. The sequence workspace has no duration ceiling. Right-click a video or audio strip to choose **Shot status** from the statuses configured in Application Settings. Both linked strips take on that status color. Statuses are saved with the sequence; assigning one leaves the preview cache intact. Choose **Export segment video** from the same menu to export that shot’s original movie with audio to the configured download folder; it appears in Recent exports.
+Drag linked video/audio strips to reorder them, use the left/right buttons, or select shots and press **Delete** or choose **Delete** from the right-click menu to remove them from the sequence. The preview player stays on the assembled sequence; double-click a strip or drag the scrubhead to seek within that sequence. Save the project to keep its order, blend settings and output options. Completed shots keep their full source lengths, independent of generation duration limits. **Restore full clips** re-reads the source movies if an older project contains shortened timings. The sequence workspace has no duration ceiling. Right-click a video or audio strip to choose **Shot status** from the statuses configured in Application Settings. Both linked strips take on that status color. Statuses are saved with the sequence; assigning one leaves the preview cache intact. Choose **Export segment video** from the same menu to export that shot’s original movie with audio to the configured download folder; it appears in Recent exports.
 
 The NLA timeline places shots on alternating video tracks with linked audio tracks below. Strip widths follow actual movie duration; shaded regions show overlaps. Use **+**, **−** and **Fit** to inspect a long sequence, Ctrl-click to select multiple strips, and drag the time ruler or scrubhead to seek the assembled RAM preview. Thumbnail filmstrips show moments from each source movie, and linked audio strips show the source waveform. Illustrated controls make importing, restoring, moving and zooming shots easy to recognize.
 
 ## Shape the join
 
-The defaults are **perceptual_crossfade**, **1 second** of overlap, and **Source side**.
+The defaults are **perceptual_crossfade**, **1 second** of overlap, and **Source side**. The top controls set sequence defaults.
+
+Select a shot, or right-click it and choose **Edit transition…**. In **Transition after selected shot**, uncheck **Use sequence defaults** to choose that shot’s blend, overlap duration and overlap side. These settings control the join into the following shot and remain attached when you reorder or replace it. The last shot has no following join. Check **Use sequence defaults** again to remove its override. Custom joins appear on the video strip and are saved with the project; the timeline, mixed audio, RAM preview and final bake all use the same settings.
 
 | Mode | Result |
 | --- | --- |
@@ -31,7 +33,7 @@ The source movies' audio follows the same joins. Blends crossfade the two soundt
 
 ## Watch continuously, in RAM
 
-Adding or editing shots automatically starts a background preview update. Click **Play sequence** or use the player's Play/Pause button to watch the assembled movie with source audio. The timeline scrubhead and player position stay linked in both directions. Scrubbing auditions the mixed sequence audio even while paused, then returns to the selected position; playback resumes only if it was already playing. During playback, a zoomed timeline scrolls to keep the playhead in view. Fullscreen, frame export and clipboard frame capture remain available.
+Adding or editing shots automatically starts a background preview update. Use the player's Play/Pause button to watch the assembled movie with source audio. The timeline scrubhead and player position stay linked in both directions. Scrubbing auditions the mixed sequence audio even while paused, then returns to the selected position; playback resumes only if it was already playing. During playback, a zoomed timeline scrolls to keep the playhead in view. Fullscreen, frame export and clipboard frame capture remain available.
 
 Preview progress appears directly on the timeline. The thin coverage line above the strips shows **green** for completed cached regions and **red** for regions waiting to rebuild. As the worker completes more footage, the playable prefix grows. Scrubbing into unfinished footage keeps that position pending until it is ready.
 
@@ -43,6 +45,6 @@ The preview cache keeps a bounded 128 MiB memory working set and prunes older wo
 
 ## Bake the final movie
 
-Choose output width and height, then click **Bake WebM**. The finished file includes video and source audio, encoded as VP9 and Opus. **CRF defaults to 15**; lower values retain more detail and usually produce larger files. Baking uses the same blend and overlap settings as the RAM preview at the selected output resolution.
+Choose output width and height, then click **Bake WebM** in the player controls. The finished file includes video and source audio, encoded as VP9 and Opus. **CRF defaults to 15**; lower values retain more detail and usually produce larger files. Baking uses the same blend and overlap settings as the RAM preview at the selected output resolution.
 
 Clips are normalized to 24 fps and fitted to the output canvas without stretching. Only overlap frame buffers and working audio are retained during composition; full-resolution movies do not need to be loaded as one giant image batch. Baking runs in the background with its own progress bar, and the finished file appears in **Recent exports**, where it can be opened, revealed or dragged into another application.
