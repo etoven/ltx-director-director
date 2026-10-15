@@ -6,13 +6,15 @@ from PySide6.QtCore import Qt, Signal, QRectF, QItemSelectionModel
 from PySide6.QtGui import QColor, QPainter, QPen, QPixmap, QPainterPath, QIcon, QActionGroup
 from PySide6.QtWidgets import QScrollArea, QWidget, QListWidget, QAbstractItemView, QMenu
 from .media import TIMELINE_VIDEO_SUFFIXES
-from .shot_sequence import shot_layout, settings, transitions, FPS
+from .shot_sequence import shot_layout, settings, transitions, FPS, MODES
 
 
 class ShotTimeline(QScrollArea):
     movies_dropped = Signal(list,int)
     movies_replaced = Signal(list,str)
     status_requested = Signal(list,str)
+    side_requested = Signal(list,str)
+    blend_requested = Signal(list,str)
     remove_requested = Signal()
     order_changed = Signal()
     itemDoubleClicked = Signal(object)
@@ -114,8 +116,25 @@ class ShotTimeline(QScrollArea):
     def status_menu(self,index):
         if not self.item(index).isSelected():self.setCurrentRow(index)
         ids=[item.data(Qt.ItemDataRole.UserRole) for item in self.selectedItems()]
+        menu=QMenu(self);menu.addSection('Side')
+        sides={self._options.get('shot_transitions',{}).get(ident,{}).get('side',self._options['side']) for ident in ids}
+        group=QActionGroup(menu);group.setExclusive(True)
+        for side,label in (('source','Source side'),('destination','Destination side')):
+            action=menu.addAction(label);action.setCheckable(True)
+            action.setChecked(sides=={side});group.addAction(action)
+            action.triggered.connect(lambda checked=False,side=side:self.side_requested.emit(ids,side))
+        menu.addSeparator()
+        menu.addSection('Blend mode')
+        blends={self._options.get('shot_transitions',{}).get(ident,{}).get('blend',self._options['blend']) for ident in ids}
+        group=QActionGroup(menu);group.setExclusive(True)
+        labels={'cut':'Cut','linear_blend':'Linear blend','filmic_crossfade':'Filmic crossfade','perceptual_crossfade':'Perceptual crossfade'}
+        for mode in MODES:
+            action=menu.addAction(labels.get(mode,mode.replace('_',' ').title()));action.setCheckable(True)
+            action.setChecked(blends=={mode});group.addAction(action)
+            action.triggered.connect(lambda checked=False,mode=mode:self.blend_requested.emit(ids,mode))
+        menu.addSeparator()
         selected={self.statuses.get(ident,'').casefold() for ident in ids}
-        menu=QMenu(self);menu.addSection('Shot status')
+        menu.addSection('Shot status')
         group=QActionGroup(menu);group.setExclusive(True)
         for name,color in [('',None)]+[(t['name'],t['color']) for t in self.status_tags]:
             action=menu.addAction(name or 'No status');action.setCheckable(True)

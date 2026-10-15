@@ -114,6 +114,8 @@ class ShotSequencePanel(QWidget):
         self.shots.movies_dropped.connect(self.add_paths)
         self.shots.movies_replaced.connect(self.replace_paths)
         self.shots.status_requested.connect(self.set_shot_status)
+        self.shots.side_requested.connect(self.set_shot_side)
+        self.shots.blend_requested.connect(self.set_shot_blend)
         self.shots.export_requested.connect(self.export_segment)
         self.shots.trim_started.connect(self.pause_for_edit)
         self.shots.trim_requested.connect(self.trim_shot)
@@ -358,6 +360,32 @@ class ShotSequencePanel(QWidget):
             else:statuses.pop(ident,None)
         if statuses==current.get('shot_statuses',{}):return
         self.owner.shot_sequence_settings={**current,'shot_statuses':statuses}
+        self.refresh();self.owner.mark_dirty()
+
+    def set_shot_blend(self,ids,blend):
+        if blend not in MODES:return
+        current=settings(getattr(self.owner,'shot_sequence_settings',None))
+        overrides=dict(current.get('shot_transitions',{}))
+        existing={shot.id for shot in self.owner.segments}
+        for ident in ids:
+            if ident not in existing:continue
+            join=dict(overrides.get(ident,{}))
+            join['blend']=blend
+            overrides[ident]=join
+        self.owner.shot_sequence_settings=settings({**current,'shot_transitions':overrides})
+        self.refresh();self.owner.mark_dirty()
+
+    def set_shot_side(self,ids,side):
+        if side not in ('source','destination'):return
+        current=settings(getattr(self.owner,'shot_sequence_settings',None))
+        overrides=dict(current.get('shot_transitions',{}))
+        existing={shot.id for shot in self.owner.segments}
+        for ident in ids:
+            if ident not in existing:continue
+            join=dict(overrides.get(ident,{}))
+            join['side']=side
+            overrides[ident]=join
+        self.owner.shot_sequence_settings=settings({**current,'shot_transitions':overrides})
         self.refresh();self.owner.mark_dirty()
 
     def order_changed(self,*_):

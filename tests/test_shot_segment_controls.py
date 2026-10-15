@@ -149,6 +149,16 @@ def test_selected_shot_settings_persist_delete_and_drop_insert(tmp_path,monkeypa
         panel.shots.setCurrentRow(0);panel.move(1)
         assert window.segments[1].id==ident and panel.shots.clips[1]['transition']['overlap']==.25
         panel.shots.setCurrentRow(1);menu=panel.shots.status_menu(1)
+        actions=menu.actions()
+        assert actions[0].text()=='Side' and actions[1].isCheckable()
+        assert actions[3].isSeparator() and actions[4].text()=='Blend mode'
+        assert actions[9].isSeparator() # separator immediately follows the blend choices
+        next(action for action in actions if action.text()=='Source side').trigger()
+        assert window.shot_sequence_settings['shot_transitions'][ident]['side']=='source'
+        menu=panel.shots.status_menu(1)
+        next(action for action in menu.actions() if action.text()=='Cut').trigger()
+        assert window.shot_sequence_settings['shot_transitions'][ident]==dict(blend='cut',overlap=.25,side='source')
+        menu=panel.shots.status_menu(1)
         next(action for action in menu.actions() if action.text()=='Delete').trigger()
         assert len(window.segments)==2 and ident not in window.shot_sequence_settings['shot_transitions']
         panel.shots.setCurrentRow(1);assert panel.blend.isEnabled()
