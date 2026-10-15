@@ -8,7 +8,7 @@ from pathlib import Path
 from importlib.resources import files
 from uuid import uuid4
 
-from PySide6.QtCore import Qt, Signal, QObject, QTimer, QSize
+from PySide6.QtCore import Qt, Signal, QObject, QTimer, QSize, QEvent
 from PySide6.QtMultimedia import QMediaPlayer
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (QWidget,QVBoxLayout,QHBoxLayout,QLabel,QPushButton,QComboBox,
@@ -158,6 +158,7 @@ class ShotSequencePanel(QWidget):
         split.setStretchFactor(0,3);split.setStretchFactor(1,1)
         self._audio_scrub=AudioScrubber(self.preview.player,self)
         self.shots.seek_requested.connect(self.scrub_sequence)
+        self.shots.frame_seek_requested.connect(self.step_sequence)
         self.shots.scrub_started.connect(self._audio_scrub.begin)
         self.shots.scrub_finished.connect(self._audio_scrub.end)
         for slider,callback in ((self.preview.seek,self.preview.seek_to),
@@ -176,7 +177,19 @@ class ShotSequencePanel(QWidget):
         self.bake_progress.setRange(0,100);self.bake_progress.setValue(0);self.bake_progress.hide();layout.addWidget(self.bake_progress)
         for control,signal in [(self.crf,self.crf.valueChanged),
                                (self.width,self.width.valueChanged),(self.height,self.height.valueChanged)]:signal.connect(self.options_changed)
+        # Player surfaces and transport buttons share timeline stepping. Editing
+        # fields keep their own arrow-key behavior.
+        for widget in [self.preview,*self.preview.findChildren(QWidget),*self.timeline_buttons]:
+            widget.installEventFilter(self)
         self.refresh()
+
+    def eventFilter(self,watched,event):
+        if (event.type()==QEvent.Type.KeyPress and self._active
+                and event.modifiers()==Qt.KeyboardModifier.NoModifier
+                and event.key() in (Qt.Key.Key_Left,Qt.Key.Key_Right)):
+            self.shots.step_frame(-1 if event.key()==Qt.Key.Key_Left else 1)
+            event.accept();return True
+        return super().eventFilter(watched,event)
 
     def options(self):
         return settings({**getattr(self.owner,'shot_sequence_settings',{}),
@@ -412,6 +425,10 @@ class ShotSequencePanel(QWidget):
 
     def scrub_sequence(self,milliseconds):
         self.seek_sequence(milliseconds,audible=True)
+
+    def step_sequence(self,milliseconds):
+        self.pause_for_edit()
+        self.seek_sequence(milliseconds)
 
     def seek_sequence(self,milliseconds,audible=False):
         self._pending_position=milliseconds

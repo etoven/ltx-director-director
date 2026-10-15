@@ -91,6 +91,21 @@ def test_automatic_gui_cache_and_scrubhead(tmp_path,monkeypatch):
         assert not p.preview.player.source().isLocalFile()
         until(lambda:p.preview.current_frame is not None)
         assert all(len(clip['thumbs'])==2 for clip in p.shots.clips)
+        # One-frame keyboard seeking works on timeline and player controls,
+        # pauses playback and never turns into slider-sized jumps or audio scrub.
+        for control in (p.shots,p.preview.seek,p.preview.video,p.preview.play,p.preview.fullscreen_window.seek):
+            p.seek_sequence(1000)
+            QTest.keyClick(control,Qt.Key.Key_Right)
+            until(lambda:p.preview.player.position()==1042 and p.shots.playhead==1.042)
+            assert p.preview.player.playbackState()==QMediaPlayer.PlaybackState.PausedState
+            assert not p._audio_scrub.active
+            QTest.keyClick(control,Qt.Key.Key_Left)
+            until(lambda:p.preview.player.position()==1000 and p.shots.playhead==1)
+        p.preview.player.play();QTest.keyClick(p.shots,Qt.Key.Key_Right)
+        assert p.preview.player.playbackState()==QMediaPlayer.PlaybackState.PausedState and not p._desired_playing
+        position=p.shots.playhead
+        QTest.keyClick(p.crf,Qt.Key.Key_Left)
+        assert p.shots.playhead==position
         p.seek_sequence(1200)
         until(lambda:p.preview.player.position()==1200)
         assert p.shots.playhead==1.2

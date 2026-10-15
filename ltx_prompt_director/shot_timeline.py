@@ -17,6 +17,7 @@ class ShotTimeline(QScrollArea):
     order_changed = Signal()
     itemDoubleClicked = Signal(object)
     seek_requested = Signal(int)
+    frame_seek_requested = Signal(int)
     scrub_started = Signal()
     scrub_finished = Signal()
     export_requested = Signal(str)
@@ -193,10 +194,19 @@ class ShotTimeline(QScrollArea):
         self.canvas.update()
 
     def keyPressEvent(self,event):
-        if event.key()==Qt.Key.Key_Escape and self.canvas.trimming is not None:
+        if event.key() in (Qt.Key.Key_Left,Qt.Key.Key_Right) and event.modifiers()==Qt.KeyboardModifier.NoModifier:
+            self.step_frame(-1 if event.key()==Qt.Key.Key_Left else 1);event.accept()
+        elif event.key()==Qt.Key.Key_Escape and self.canvas.trimming is not None:
             self.canvas.cancel_trim();event.accept()
         elif event.key()==Qt.Key.Key_Delete:self.remove_requested.emit();event.accept()
         else:super().keyPressEvent(event)
+
+    def step_frame(self,direction):
+        if not self.clips or self.canvas.trimming is not None:return
+        frame=max(0,min(max(0,round(self.total*FPS)-1),round(self.playhead*FPS)+direction))
+        position=round(frame*1000/FPS)
+        self.set_playhead(position,follow=True)
+        self.frame_seek_requested.emit(position)
 
     def movie_paths(self,event):
         return [url.toLocalFile() for url in event.mimeData().urls() if url.isLocalFile()
@@ -247,7 +257,7 @@ class TimelineCanvas(QWidget):
     def __init__(self,timeline):
         super().__init__();self.timeline=timeline;self.press=None;self.dragging=False;self.target=None
         self.setMouseTracking(True)
-        self.setToolTip('Drag strip edges to trim linked video/audio · drag strips to reorder · right-click to split at the playhead · Ctrl-click selects multiple · drag scrubhead/ruler to seek · green is cached, red is rebuilding · Ctrl-drop replaces a shot')
+        self.setToolTip('Drag strip edges to trim linked video/audio · drag strips to reorder · right-click to split at the playhead · Left/Right steps one frame · Ctrl-click selects multiple · drag scrubhead/ruler to seek · green is cached, red is rebuilding · Ctrl-drop replaces a shot')
         self.scrubbing=False;self.trimming=None
 
     def trim_handle(self,point):

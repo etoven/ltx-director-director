@@ -40,6 +40,15 @@ def test_timeline_follows_playback_and_exports_clicked_shot():
     before=timeline.horizontalScrollBar().value();timeline.set_playhead(500)
     assert timeline.horizontalScrollBar().value()==before
     timeline.set_playhead(0,follow=True);assert timeline.horizontalScrollBar().value()==0
+    steps=[];timeline.frame_seek_requested.connect(steps.append)
+    for _ in range(100):QTest.keyClick(timeline,Qt.Key.Key_Right)
+    assert steps[-1]==4167 and timeline.playhead==4.167
+    for _ in range(101):QTest.keyClick(timeline,Qt.Key.Key_Left)
+    assert steps[-1]==0 and timeline.playhead==0
+    timeline.set_playhead(round(timeline.total*1000))
+    QTest.keyClick(timeline,Qt.Key.Key_Right)
+    assert steps[-1]==round((round(timeline.total*24)-1)*1000/24)
+    assert timeline.horizontalScrollBar().value()>0
     exports=[];timeline.export_requested.connect(exports.append)
     menu=timeline.status_menu(1)
     assert not any(action.text().startswith('Edit transition') for action in menu.actions())
