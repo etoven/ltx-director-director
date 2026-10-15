@@ -19,6 +19,7 @@ class Segment:
     id: str = ""
     image_prompt: str = ""
     prompt_detached: bool = False
+    shot_trimmed: bool = False
 
     def __post_init__(self) -> None:
         self.id = self.id or str(uuid4())

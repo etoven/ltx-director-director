@@ -6,7 +6,7 @@ Start with an image, a video clip or a written beat. Arrange the sequence, descr
 
 ![A complete MiniMax plan in the Aurora workspace](docs/images/ltx-director-director-overview.png)
 
-*The examples throughout this guide use the current 1.13.0a48 native interface with a locally authored Aurora demonstration project.*
+*The examples throughout this guide use the current 1.13.0a49 native interface with a locally authored Aurora demonstration project.*
 
 ## Refine an existing MiniMax prompt
 
@@ -137,7 +137,7 @@ The ComfyUI export puts the production prompt in a tall group along the left edg
 
 ## Completed shot sequences
 
-Each collection includes a **Shot Sequence** tile. Drop finished movies onto its thumbnail NLA timeline at the blue insertion marker and reorder them. Select a shot to set its blend, overlap and overlap side using the existing top controls. New shots copy a neighbor’s settings; each shot then keeps its own settings independently. Its context menu offers shot status, export and Delete. The assembled preview updates automatically in background workers, with source audio and a scrubhead linked to the player. Green regions are cached; red regions are rebuilding. Workfiles persist in the per-user cache so unchanged clips and joins can be reused. The default join is a 1-second source-side perceptual crossfade. **Bake WebM** writes the full-resolution sequence with audio and configurable CRF (default 15). [Read the illustrated guide](docs/shot-sequences.md).
+Each collection includes a **Shot Sequence** tile. Drop finished movies onto its thumbnail NLA timeline at the blue insertion marker and reorder them. Select a shot to set its blend, overlap and overlap side using the existing top controls. New shots copy a neighbor’s settings; each shot then keeps its own settings independently. Drag either edge of a video or audio strip to trim both together. **Split at playhead** creates two adjoining pieces; their source media stays intact. Its context menu also offers shot status, export and Delete. Segment export uses the trimmed interval and copies the original video/audio codecs; stream-copy cuts can follow source keyframes. The assembled preview updates automatically in background workers, with source audio and a scrubhead linked to the player. Green regions are cached; red regions are rebuilding. Workfiles persist in the per-user cache so unchanged clips and joins can be reused. The default join is a 1-second source-side perceptual crossfade. **Bake WebM** writes the full-resolution sequence with audio and configurable CRF (default 15). [Read the illustrated guide](docs/shot-sequences.md).
 
 ## Storage, backups and reset
 

@@ -1,6 +1,7 @@
 """Time-scaled NLA tracks for completed movies and their linked source audio."""
 from pathlib import Path
 from collections import OrderedDict
+import copy
 from PySide6.QtCore import Qt, Signal, QRectF, QItemSelectionModel
 from PySide6.QtGui import QColor, QPainter, QPen, QPixmap, QPainterPath, QIcon, QActionGroup
 from PySide6.QtWidgets import QScrollArea, QWidget, QListWidget, QAbstractItemView, QMenu
@@ -19,6 +20,9 @@ class ShotTimeline(QScrollArea):
     scrub_started = Signal()
     scrub_finished = Signal()
     export_requested = Signal(str)
+    trim_started = Signal()
+    trim_requested = Signal(str,int,int)
+    split_requested = Signal(str,int)
     LEFT = 94
     TOP = 50
     TRACK = 60
@@ -61,6 +65,7 @@ class ShotTimeline(QScrollArea):
 
     def set_shots(self, shots, overlap):
         options=settings(overlap if isinstance(overlap,dict) else {'overlap':overlap})
+        self._shots=[copy.copy(shot) for shot in shots];self._options=options
         ids={shot.id for shot in shots}
         self._waveforms={key:value for key,value in self._waveforms.items() if key in ids}
         self._thumbnails=OrderedDict((key,value) for key,value in self._thumbnails.items() if key in ids)
@@ -73,6 +78,8 @@ class ShotTimeline(QScrollArea):
             amount=joins[index-1]/FPS if index else 0.0
             start=end-amount
             self.clips.append(dict(start=start,end=start+shot.duration,overlap=amount,
+                                   source_start=int(shot.trim_start or 0),source_end=int(shot.trim_start or 0)+max(1,round(shot.duration*FPS)),
+                                   source_frames=shot.media_duration_frames or int(shot.trim_start or 0)+max(1,round(shot.duration*FPS)),
                                    name=shot.name,preview=QPixmap(shot.preview_path),id=shot.id,thumbs=self._thumbnails.get(shot.id,[]),peaks=self._waveforms.get(shot.id,[]),
                                    transition=outgoing[index] if index<len(outgoing) else None,
                                    custom_transition=shot.id in options.get('shot_transitions',{})))
@@ -117,7 +124,12 @@ class ShotTimeline(QScrollArea):
             action.triggered.connect(lambda checked=False,name=name:self.status_requested.emit(ids,name))
         menu.addSeparator()
         ident=self.item(index).data(Qt.ItemDataRole.UserRole)
-        menu.addAction('Export segment video',lambda:self.export_requested.emit(ident))
+        clip=self.clips[index]
+        frame=round((self.playhead-clip['start'])*FPS)
+        split=menu.addAction('Split at playhead',lambda:self.split_requested.emit(ident,frame))
+        split.setEnabled(0<frame<clip['source_end']-clip['source_start'])
+        export=menu.addAction('Export segment video',lambda:self.export_requested.emit(ident))
+        export.setToolTip('Export the trimmed source with original video/audio codecs. Stream-copy cuts depend on source keyframes.')
         menu.addSeparator()
         menu.addAction('Delete',self.remove_requested.emit)
         return menu
@@ -181,7 +193,9 @@ class ShotTimeline(QScrollArea):
         self.canvas.update()
 
     def keyPressEvent(self,event):
-        if event.key()==Qt.Key.Key_Delete:self.remove_requested.emit();event.accept()
+        if event.key()==Qt.Key.Key_Escape and self.canvas.trimming is not None:
+            self.canvas.cancel_trim();event.accept()
+        elif event.key()==Qt.Key.Key_Delete:self.remove_requested.emit();event.accept()
         else:super().keyPressEvent(event)
 
     def movie_paths(self,event):
@@ -233,8 +247,24 @@ class TimelineCanvas(QWidget):
     def __init__(self,timeline):
         super().__init__();self.timeline=timeline;self.press=None;self.dragging=False;self.target=None
         self.setMouseTracking(True)
-        self.setToolTip('Drag strips to reorder · Ctrl-click selects multiple · drag scrubhead/ruler to seek the sequence · green is cached, red is rebuilding · Ctrl-drop a movie to replace a shot')
-        self.scrubbing=False
+        self.setToolTip('Drag strip edges to trim linked video/audio · drag strips to reorder · right-click to split at the playhead · Ctrl-click selects multiple · drag scrubhead/ruler to seek · green is cached, red is rebuilding · Ctrl-drop replaces a shot')
+        self.scrubbing=False;self.trimming=None
+
+    def trim_handle(self,point):
+        index=self.hit(point)
+        if index is None:return None
+        audio=self.timeline.clip_rect(index,True).contains(point)
+        rect=self.timeline.clip_rect(index,audio)
+        band=min(8,max(2,rect.width()/3))
+        if abs(point.x()-rect.left())<=band:return index,'start'
+        if abs(point.x()-rect.right())<=band:return index,'end'
+        return None
+
+    def cancel_trim(self):
+        if self.trimming is None:return
+        edit=self.trimming;self.trimming=None;t=self.timeline;t._fit=edit['fit']
+        t.set_shots(edit['shots'],edit['options']);t.set_statuses(t.statuses,t.status_tags)
+        self.unsetCursor()
 
     def hit(self,point):
         for i in range(len(self.timeline.clips)-1,-1,-1):
@@ -317,6 +347,10 @@ class TimelineCanvas(QWidget):
                     p.fillRect(fade,QColor(234,185,101,40));p.setPen(QPen(QColor('#e7b46c'),1))
                     p.drawLine(fade.bottomLeft(),fade.topRight())
                 p.restore()
+                # Video and audio edges edit one linked source interval.
+                grip=min(6,max(2,rect.width()/4))
+                for edge in (rect.left(),rect.right()-grip):
+                    p.fillRect(QRectF(edge,rect.top()+3,grip,rect.height()-6),QColor('#c1d6e8' if selected else '#8299ae'))
         if not t.clips:
             p.setPen(QColor('#acbacb'));p.drawText(QRectF(t.LEFT+20,t.TOP+25,self.width()-t.LEFT-40,100),Qt.AlignmentFlag.AlignCenter,'Drop completed movies here to build your sequence')
         x=t.LEFT+min(t.total,t.playhead)*t.scale
@@ -338,6 +372,14 @@ class TimelineCanvas(QWidget):
         t=self.timeline;t.setFocus()
         if event.button()!=Qt.MouseButton.LeftButton:return
         point=event.position()
+        handle=self.trim_handle(point) if not event.modifiers()&Qt.KeyboardModifier.ControlModifier else None
+        if handle is not None:
+            index,edge=handle;t.setCurrentRow(index)
+            clip=t.clips[index]
+            self.trimming=dict(index=index,edge=edge,x=point.x(),scale=t.scale,fit=t._fit,
+                               start=clip['source_start'],end=clip['source_end'],limit=clip['source_frames'],
+                               shots=[copy.copy(s) for s in t._shots],options=t._options,values=None)
+            t._fit=False;t.trim_started.emit();self.setCursor(Qt.CursorShape.SizeHorCursor);return
         head=t.LEFT+t.playhead*t.scale
         if point.y()<t.TOP or abs(point.x()-head)<5:
             self.scrubbing=True;t.scrub_started.emit();t.scrub(point.x());return
@@ -354,12 +396,30 @@ class TimelineCanvas(QWidget):
         self.press=point;self.dragging=False;self.update()
 
     def mouseMoveEvent(self,event):
+        if self.trimming is not None:
+            edit=self.trimming;t=self.timeline
+            delta=round((event.position().x()-edit['x'])/edit['scale']*FPS)
+            start,end=edit['start'],edit['end']
+            if edit['edge']=='start':start=max(0,min(end-1,start+delta))
+            else:end=max(start+1,min(edit['limit'],end+delta))
+            shots=[copy.copy(s) for s in edit['shots']];shot=shots[edit['index']]
+            shot.trim_start=start;shot.duration=(end-start)/FPS
+            edit['values']=(shot.id,start,end)
+            t.set_shots(shots,edit['options']);t.set_statuses(t.statuses,t.status_tags)
+            self.setToolTip(f'Source in {start/FPS:.3f}s · out {end/FPS:.3f}s · {(end-start)/FPS:.3f}s')
+            return
         if self.scrubbing:self.timeline.scrub(event.position().x());return
         if self.press is not None and (event.position()-self.press).manhattanLength()>6:
             self.dragging=True;self.timeline.set_drop_active(True);self.target=self.insertion(event.position().x());self.update()
+        elif self.press is None:
+            self.setCursor(Qt.CursorShape.SizeHorCursor if self.trim_handle(event.position()) else Qt.CursorShape.ArrowCursor)
 
     def mouseReleaseEvent(self,event):
         t=self.timeline
+        if self.trimming is not None:
+            values=self.trimming['values'];self.cancel_trim()
+            if values:t.trim_requested.emit(*values)
+            self.unsetCursor();return
         if self.scrubbing:t.scrub_finished.emit()
         if self.dragging and self.target is not None:
             indices=[i for i in range(t.count()) if t.item(i).isSelected()]

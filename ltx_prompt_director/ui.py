@@ -118,6 +118,9 @@ def _export_segment_source(segment: Segment, target: Path):
     source = Path(materialize_source(segment))
     if not source.is_file():
         raise FileNotFoundError("The complete source media for this segment is not available.")
+    if segment.kind == 'video' and segment.shot_trimmed:
+        from .segment_export import copy_video_interval
+        return copy_video_interval(source,target,(segment.trim_start or 0)/24,segment.duration)
     return shutil.copy2(source, target)
 
 
@@ -5224,7 +5227,7 @@ class MainWindow(QMainWindow):
         if self.workspace_engine == "shot_sequence":
             # Recover full imported movies if an older build applied a generation cap.
             for shot in self.segments:
-                if shot.media_duration_frames:
+                if shot.media_duration_frames and not shot.shot_trimmed:
                     shot.duration = shot.media_duration_frames / 24
                     shot.trim_start = 0
             self.shot_sequence_panel.refresh()

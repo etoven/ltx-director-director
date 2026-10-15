@@ -6,6 +6,7 @@ Reusable blocks live in the platform cache; the assembled player buffer lives in
 """
 from __future__ import annotations
 from collections import OrderedDict
+import copy
 from dataclasses import dataclass
 from fractions import Fraction
 import hashlib
@@ -76,14 +77,17 @@ def make_plan(shots,options):
     sources={};clips=[]
     for shot in shots:
         count=max(1,round(shot.duration*FPS))
-        key=_hash((source_identity(shot),count,width,height))
-        sources[key]=shot
-        clips.append({'frames':count,'key':key})
+        start=max(0,int(shot.trim_start or 0))
+        full_count=max(start+count,int(shot.media_duration_frames or 0))
+        key=_hash((source_identity(shot),full_count,width,height))
+        source=copy.copy(shot);source.duration=full_count/FPS;source.trim_start=0
+        sources[key]=source
+        clips.append({'frames':count,'key':key,'start':start})
     join_options=transitions([shot.id for shot in shots],opts)
     joins,count=overlaps(clips,[join['overlap'] for join in join_options])
     frames=[]
     for index,clip in enumerate(clips):
-        destination=[('source',clip['key'],i) for i in range(clip['frames'])]
+        destination=[('source',clip['key'],clip['start']+i) for i in range(clip['frames'])]
         amount=joins[index-1] if index else 0
         join=join_options[index-1] if index else None
         if not amount:frames+=destination

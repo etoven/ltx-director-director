@@ -31,6 +31,7 @@ def render_shots(shots,options,output=None,preview=False,cancel=None,progress=No
         if cancel is not None and cancel.is_set():raise RuntimeError('Shot sequence operation cancelled.')
         paths.append(materialize_source(shot))
     options={**options,'_frame_limits':[max(1,round(s.duration*24)) for s in shots],
+             '_trim_starts':[max(0,int(s.trim_start or 0)) for s in shots],
              '_shot_ids':[s.id for s in shots]}
     return render_sequence(paths,options,output,preview,cancel,progress)
 
@@ -114,6 +115,9 @@ class ShotSequencePanel(QWidget):
         self.shots.movies_replaced.connect(self.replace_paths)
         self.shots.status_requested.connect(self.set_shot_status)
         self.shots.export_requested.connect(self.export_segment)
+        self.shots.trim_started.connect(self.pause_for_edit)
+        self.shots.trim_requested.connect(self.trim_shot)
+        self.shots.split_requested.connect(self.split_shot)
         self.shots.remove_requested.connect(self.remove)
         self.shots.order_changed.connect(self.order_changed)
         self.shots.items.currentRowChanged.connect(self.sync_transition_controls)
@@ -215,7 +219,9 @@ class ShotSequencePanel(QWidget):
         self.shots.clear()
         for index,shot in enumerate(self.owner.segments):
             item=QListWidgetItem(f'{index+1:02d} · {shot.name}\n{shot.duration:.2f}s')
-            item.setData(Qt.ItemDataRole.UserRole,shot.id);item.setToolTip(shot.media_path)
+            item.setData(Qt.ItemDataRole.UserRole,shot.id)
+            start=int(shot.trim_start or 0)/24
+            item.setToolTip(f'{shot.media_path}\nSource in {start:.3f}s · out {start+shot.duration:.3f}s')
             from PySide6.QtGui import QIcon
             item.setIcon(QIcon(shot.preview_path))
             self.shots.addItem(item)
@@ -231,12 +237,15 @@ class ShotSequencePanel(QWidget):
         joins,total=shot_layout(self.owner.segments,opts)
         self.summary.setText(f'{len(self.owner.segments)} shots · {total/24:.2f}s · per-shot transitions · audio included')
         plan=make_plan(copy.deepcopy(self.owner.segments),opts)
-        if self._plan is None or plan.signature!=self._plan.signature:
-            self._plan=plan
+        changed=self._plan is None or plan.signature!=self._plan.signature
+        self._plan=plan
+        # A split can leave the assembled frames identical while introducing a
+        # new strip ID. Populate its thumbnails/waveform without rebuilding.
+        for key,(images,peaks) in self.cache.thumbnails(plan).items():self.install_thumbnails(plan,key,images,peaks)
+        if changed:
             self._pending_position=min(self._pending_position,round(plan.count/24*1000))
             self.invalidate()
             self.shots.set_coverage(self.cache.coverage(plan))
-            for key,(images,peaks) in self.cache.thumbnails(plan).items():self.install_thumbnails(plan,key,images,peaks)
             self._pending=bool(plan.parts)
             if self._active and self._pending:self._build_timer.start()
 
@@ -369,6 +378,38 @@ class ShotSequencePanel(QWidget):
                 self.owner.export_segment(shot,index+1)
                 return
 
+    def pause_for_edit(self):
+        self._desired_playing=False
+        self._audio_scrub.cancel()
+        self.preview.player.pause()
+
+    def trim_shot(self,ident,start,end):
+        shot=next((shot for shot in self.owner.segments if shot.id==ident),None)
+        if shot is None:return
+        total=shot.media_duration_frames or (int(shot.trim_start or 0)+round(shot.duration*24))
+        start=max(0,min(int(start),total-1));end=max(start+1,min(int(end),total))
+        if start==int(shot.trim_start or 0) and end-start==round(shot.duration*24):return
+        shot.trim_start=start;shot.duration=(end-start)/24;shot.shot_trimmed=True
+        self.owner.refresh_timeline();self.owner.mark_dirty()
+
+    def split_shot(self,ident,frame):
+        index=next((i for i,shot in enumerate(self.owner.segments) if shot.id==ident),-1)
+        if index<0:return
+        shot=self.owner.segments[index];count=round(shot.duration*24);frame=int(frame)
+        if not 0<frame<count:return
+        self.pause_for_edit()
+        right=copy.deepcopy(shot);right.id=str(uuid4())
+        right.trim_start=int(shot.trim_start or 0)+frame;right.duration=(count-frame)/24;right.shot_trimmed=True
+        shot.duration=frame/24;shot.shot_trimmed=True
+        opts=independent_transitions([s.id for s in self.owner.segments],self.owner.shot_sequence_settings)
+        joins=dict(opts['shot_transitions']);joins[right.id]=dict(joins[shot.id])
+        joins[shot.id]=dict(blend='cut',overlap=0.0,side='source')
+        statuses=dict(opts.get('shot_statuses',{}))
+        if shot.id in statuses:statuses[right.id]=statuses[shot.id]
+        self.owner.shot_sequence_settings={**opts,'shot_transitions':joins,'shot_statuses':statuses}
+        self.owner.segments.insert(index+1,right)
+        self.owner.refresh_timeline();self.shots.setCurrentRow(index+1);self.owner.mark_dirty()
+
     def scrub_sequence(self,milliseconds):
         self.seek_sequence(milliseconds,audible=True)
 
@@ -413,7 +454,15 @@ class ShotSequencePanel(QWidget):
         if identity is None:return
         for shot in self.owner.segments:
             if source_identity(shot)==source_identity(identity):
-                self.shots.set_thumbnails(shot.id,images);self.shots.set_waveform(shot.id,peaks)
+                total=max(1,round(identity.duration*24))
+                start=int(shot.trim_start or 0);end=start+max(1,round(shot.duration*24))
+                # Source workfiles are shared by all trims and split pieces.
+                first=min(len(images)-1,start//24) if images else 0
+                last=max(first+1,(end+23)//24)
+                self.shots.set_thumbnails(shot.id,images[first:last])
+                first_peak=min(len(peaks),round(start/total*len(peaks)))
+                last_peak=max(first_peak+1,round(end/total*len(peaks)))
+                self.shots.set_waveform(shot.id,peaks[first_peak:last_peak])
 
     def install_preview(self,data,frames):
         if not data:return
@@ -437,7 +486,7 @@ class ShotSequencePanel(QWidget):
             by_id=dict(lengths)
             for shot in self.owner.segments:
                 if shot.id in by_id:
-                    shot.media_duration_frames=by_id[shot.id];shot.duration=by_id[shot.id]/24;shot.trim_start=0
+                    shot.media_duration_frames=by_id[shot.id];shot.duration=by_id[shot.id]/24;shot.trim_start=0;shot.shot_trimmed=False
             self.owner.refresh_timeline();self.owner.mark_dirty()
         self.owner.start_disk_job(scan,(),ready,lambda message:QMessageBox.warning(self,'Restore full clips',message))
 

@@ -171,7 +171,7 @@ def _frames(clip, width, height, cancel):
         for index in range(clip['frames']):
             if cancel is not None and cancel.is_set():
                 raise RuntimeError('Shot sequence operation cancelled.')
-            while following is not None and (following.time or 0)-origin <= index/FPS:
+            while following is not None and (following.time or 0)-origin <= (index+clip.get('trim_start',0))/FPS:
                 current, following = following, next(decoded,None)
             # Fit the common canvas without stretching the source aspect ratio.
             scale = min(width/current.width, height/current.height)
@@ -212,7 +212,7 @@ def _audio(clip, cancel):
         def place(frame):
             nonlocal cursor
             samples = frame.to_ndarray()
-            start = round((frame.time-clip.get('start_time',0))*RATE) if frame.time is not None else cursor
+            start = round((frame.time-clip.get('start_time',0)-clip.get('trim_start',0)/FPS)*RATE) if frame.time is not None else cursor
             if start < 0:
                 samples=samples[:,-start:];start=0
             size=max(0,min(samples.shape[1],result.shape[1]-start))
@@ -247,8 +247,13 @@ def render_sequence(paths, options, output=None, preview=False, cancel=None, pro
     for index,path in enumerate(paths):
         clips.append(probe(path,cancel))
         report(round(10*(index+1)/len(paths)), 'Reading source movies')
-    for clip,limit in zip(clips,opts.get('_frame_limits',[])):
-        clip['frames']=max(1,min(clip['frames'],int(limit)))
+    for index,clip in enumerate(clips):
+        starts=opts.get('_trim_starts',[])
+        start=max(0,min(clip['frames']-1,int(starts[index]))) if index<len(starts) else 0
+        limits=opts.get('_frame_limits',[])
+        limit=int(limits[index]) if index<len(limits) else clip['frames']
+        clip['trim_start']=start
+        clip['frames']=max(1,min(clip['frames']-start,limit))
     join_options=transitions(opts.get('_shot_ids',range(len(clips))),opts)
     if len(join_options)!=len(clips)-1:raise ValueError('Shot identities must match the source movies.')
     joins,count=overlaps(clips,[join['overlap'] for join in join_options])
