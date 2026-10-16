@@ -37,10 +37,10 @@ jobs:
           python -m pip install --upgrade pip build pytest
           python -m pip install -e .
 
-      - name: Test project duplication and ChatGPT OAuth
+      - name: Test project, OAuth and live AI streaming
         env:
           QT_QPA_PLATFORM: offscreen
-        run: python -m pytest -q tests/test_project_duplicate.py tests/test_chatgpt_oauth.py
+        run: python -m pytest -q tests/test_project_duplicate.py tests/test_chatgpt_oauth.py tests/test_live_generation.py
 
       - name: Build the wheel
         run: python -m build --wheel --outdir dist
