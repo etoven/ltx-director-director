@@ -143,13 +143,13 @@ panel = LiveOutputPane()
 panel.show()
 app.processEvents()
 panel.begin("Generating", "gpt-test")
-panel.event("reasoning", "Provider summary.")
-panel.event("output", '{"prompt":"hello"}')
+panel.receive_stream("reasoning", "Provider summary.")
+panel.receive_stream("output", '{"prompt":"hello"}')
 assert panel.reasoning.toPlainText() == "Provider summary."
 assert panel.output.toPlainText() == '{"prompt":"hello"}'
-panel.event("reset", "Retrying")
+panel.receive_stream("reset", "Retrying")
 assert panel.output.toPlainText() == ""
-panel.event("output", "valid")
+panel.receive_stream("output", "valid")
 panel.finish(True)
 assert panel.status.text() == "Complete"
 panel.toggle_content()
