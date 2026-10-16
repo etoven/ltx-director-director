@@ -340,8 +340,8 @@ def _duplicate_library_project_files(source_meta: dict, root: Path, new_id: str)
             destination = destination_dir / (
                 f"{new_id}_{uuid4().hex[:8]}_{safe_media_filename(file_name, 'attachment')}"
             )
-            shutil.copy2(source, destination)
             created.append(destination)
+            shutil.copy2(source, destination)
             return str(destination)
 
         if clone.get("previewVideoPath"):

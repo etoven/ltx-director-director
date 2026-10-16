@@ -107,6 +107,27 @@ class ProjectDuplicateTests(unittest.TestCase):
         self.assertEqual(contents["library"]["name"], "Moonlight (Copy)")
         self.assertEqual(json.loads(self.archive.read_text())["library"]["id"], "original")
 
+    def test_attachment_copy_failure_rolls_back_partial_files(self):
+        from unittest.mock import patch
+        from ltx_prompt_director import ui
+
+        self.make_archive()
+        real_copy = ui.shutil.copy2
+
+        def interrupted_copy(source, destination, *args, **kwargs):
+            result = real_copy(source, destination, *args, **kwargs)
+            if Path(destination).parent.name == "previews":
+                raise OSError("interrupted attachment copy")
+            return result
+
+        with patch.object(ui.shutil, "copy2", side_effect=interrupted_copy):
+            with self.assertRaisesRegex(OSError, "interrupted attachment"):
+                _duplicate_library_project_files(self.metadata, self.root, "copy1")
+        self.assertFalse((self.root / "copy1.LTXD").exists())
+        self.assertFalse((self.root / "copy1.meta.json").exists())
+        self.assertEqual(list((self.root / "previews").glob("copy1_*")), [])
+        self.assertEqual(self.preview.read_bytes(), b"preview-video-original")
+
     def test_missing_archive_leaves_no_incomplete_duplicate(self):
         with self.assertRaises(FileNotFoundError):
             _duplicate_library_project_files(self.metadata, self.root, "copy1")
