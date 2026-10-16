@@ -101,7 +101,7 @@ class LiveOutputPane(QFrame):
             self.toggle.setText("▴ Hide")
         self.show()
 
-    def event(self, kind: str, text: str):
+    def receive_stream(self, kind: str, text: str):
         if kind == "reset":
             self.reasoning.clear()
             self.output.clear()
