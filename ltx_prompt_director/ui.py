@@ -6,7 +6,6 @@ import json
 import math
 import os
 import re
-import requests
 import shutil
 import subprocess
 import sys
@@ -31,7 +30,7 @@ from PySide6.QtWidgets import (
 )
 
 from . import __version__
-from .chatgpt_auth import ChatGPTAuth, ChatGPTAuthError
+from .chatgpt_auth import ChatGPTAuth
 from .chatgpt_widgets import ChatGPTSettingsPanel
 from .cache_maintenance import cover_path, mark_ready, needs_refresh, warm_metadata
 from .ai import AIResponseFormatError, GEMINI_MODELS, build_minimax_h3_prompt, build_minimax_h3_reference_prompt, build_prompts, minimax_h3_cache_key, provider_error_message, WORKSPACE_INSTRUCTIONS, refine_minimax_text_prompt, refine_minimax_h3_prompt, refine_minimax_h3_reference_prompt, refine_segment_prompt, refine_global_prompt, refine_timing, retryable_connection_error
@@ -5868,23 +5867,19 @@ class MainWindow(QMainWindow):
         )
         return "\n\n".join(line for line in lines if line)
 
-    def ai_credentials(self) -> tuple[str, str, str] | None:
+    def ai_credentials(self) -> tuple[str, str, object] | None:
         provider = self.settings.value("provider", "gemini")
         if provider == "chatgpt":
-            try:
-                key = self.chatgpt_auth.access_token()
-            except (ChatGPTAuthError, requests.RequestException) as error:
-                QMessageBox.information(self, "ChatGPT connection", str(error))
-                self.open_settings()
-                try:
-                    key = self.chatgpt_auth.access_token()
-                except (ChatGPTAuthError, requests.RequestException):
-                    return None
+            profile = self.chatgpt_auth.active_profile()
             model = str(self.settings.value("chatgpt_model", ""))
-            if not model:
+            if not (profile and profile["connected"] and profile["enabled"] and model):
                 self.open_settings()
+                profile = self.chatgpt_auth.active_profile()
                 model = str(self.settings.value("chatgpt_model", ""))
-            return (provider, model, key) if model else None
+            if not (profile and profile["connected"] and profile["enabled"] and model):
+                return None
+            # Access tokens are refreshed by the AI worker to avoid blocking Qt.
+            return provider, model, self.chatgpt_auth
         key = self.session_keys.get(provider) or self.settings.value(f"{provider}_key", "")
         if not key:
             self.open_settings()
