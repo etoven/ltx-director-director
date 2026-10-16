@@ -1,0 +1,56 @@
+name: Build and publish experimental wheel
+
+on:
+  push:
+    branches: [experimental]
+    paths:
+      - "pyproject.toml"
+      - "ltx_prompt_director/**"
+      - "tests/**"
+      - ".github/workflows/experimental-wheel.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  wheel:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out experimental
+        uses: actions/checkout@v4
+        with:
+          ref: experimental
+          persist-credentials: true
+
+      - name: Configure Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install build and test dependencies
+        run: |
+          python -m pip install --upgrade pip build pytest
+          python -m pip install -e .
+
+      - name: Test project duplication
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m pytest -q tests/test_project_duplicate.py
+
+      - name: Build the wheel
+        run: python -m build --wheel --outdir dist
+
+      - name: Publish wheel to experimental
+        run: |
+          set -e
+          VERSION=$(python -c 'from ltx_prompt_director import __version__; print(__version__)')
+          WHEEL="dist/ltx_prompt_director-${VERSION}-py3-none-any.whl"
+          test -s "$WHEEL"
+          python -m zipfile -t "$WHEEL"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f "$WHEEL"
+          if ! git diff --cached --quiet; then
+            git commit -m "Publish experimental wheel ${VERSION}"
+            git push origin HEAD:experimental
+          fi
