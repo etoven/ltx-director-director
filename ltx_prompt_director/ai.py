@@ -36,6 +36,9 @@ def build_prompts(segments: list[Segment], provider: str, model: str, api_key: s
     rules += f'\n\nRequired transport: exactly {len(segments)} segment records in input order. Return JSON with segments (each duration, prompt) and globalPrompt. Each duration must be positive and finite. Preserve all media and segment identities.'
     if provider == "openai":
         return _openai(images, api_key, rules, timeout, sfx, spoken_dialog)
+    if provider == "chatgpt":
+        raw = _openai_raw(images, api_key, rules, timeout, model=model, chatgpt=True)
+        return _validate(raw, len(images), sfx, spoken_dialog)
     return _gemini(images, api_key, model, rules, timeout, sfx, spoken_dialog)
 
 
@@ -370,7 +373,7 @@ def _minimax_h3_inputs(segments: list[Segment], provider: str = "gemini", refine
                     f"; only source time {source_start:.3f}s to {source_start + item.duration:.3f}s "
                     "belongs to this timeline item; preceding source footage is context, not an earlier timeline cue"
                 )
-            if provider != "openai" and source.stat().st_size <= MAX_INLINE_VIDEO_BYTES:
+            if provider not in {"openai", "chatgpt"} and source.stat().st_size <= MAX_INLINE_VIDEO_BYTES:
                 value["video"] = data_url(str(source))
                 value["video_analysis_mode"] = "full source video"
             else:
@@ -638,6 +641,8 @@ def _gemini(images: list[dict], key: str, model: str, rules: str, timeout: int, 
 def _provider_raw(images: list[dict], provider: str, model: str, key: str, rules: str, timeout: int) -> str:
     if provider == "openai":
         return _openai_raw(images, key, rules, timeout)
+    if provider == "chatgpt":
+        return _openai_raw(images, key, rules, timeout, model=model, chatgpt=True)
     return _gemini_raw(images, key, model, rules, timeout)
 
 
@@ -722,7 +727,8 @@ def _openai(images: list[dict], key: str, rules: str, timeout: int, sfx: bool, s
     return _validate(raw, len(images), sfx, spoken_dialog)
 
 
-def _openai_raw(images: list[dict], key: str, rules: str, timeout: int) -> str:
+def _openai_raw(images: list[dict], key: str, rules: str, timeout: int, *,
+                model: str = "gpt-5.4-mini", chatgpt: bool = False) -> str:
     content: list[dict] = [{"type": "input_text", "text": rules}]
     for index, item in enumerate(images, 1):
         label = (
@@ -752,10 +758,16 @@ def _openai_raw(images: list[dict], key: str, rules: str, timeout: int) -> str:
             content.append({"type": "input_text", "text": f"{authority}:\n{item.get('prompt') or '[empty]'}"})
         if item.get("image_prompt"):
             content.append({"type": "input_text", "text": f"AUDIO-FREE VISUAL CONTEXT FOR THIS SEGMENT:\n{item['image_prompt']}"})
+    payload = {"model": model, "input": [{"role": "user", "content": content}]}
+    if chatgpt:
+        # ChatGPT plan usage requires streaming and non-persistent responses.
+        payload.update({"store": False, "stream": True})
+        return _chatgpt_stream(key, payload, timeout)
+    payload["text"] = {"format": {"type": "json_object"}}
     response = requests.post(
         "https://api.openai.com/v1/responses",
         headers={"authorization": f"Bearer {key}", "content-type": "application/json"},
-        json={"model": "gpt-5.4-mini", "input": [{"role": "user", "content": content}], "text": {"format": {"type": "json_object"}}},
+        json=payload,
         timeout=timeout,
     )
     response.raise_for_status()
@@ -763,6 +775,50 @@ def _openai_raw(images: list[dict], key: str, rules: str, timeout: int) -> str:
     raw = data.get("output_text") or "".join(c.get("text", "") for item in data.get("output", []) for c in item.get("content", []) if c.get("type") == "output_text")
     if not str(raw).strip():
         raise AIResponseFormatError("OpenAI returned no generated text. The operation will retry.")
+    return raw
+
+
+def _chatgpt_stream(token: str, payload: dict, timeout: int) -> str:
+    """Consume the public Responses SSE stream to the terminal completed event."""
+    chunks: list[str] = []
+    completed = False
+    with requests.post(
+        "https://api.openai.com/v1/responses",
+        headers={"authorization": f"Bearer {token}", "content-type": "application/json"},
+        json=payload, timeout=timeout, stream=True,
+    ) as response:
+        response.raise_for_status()
+        for line in response.iter_lines(decode_unicode=True):
+            if not line or not line.startswith("data: "):
+                continue
+            body = line[6:]
+            if body == "[DONE]":
+                continue
+            try:
+                event = json.loads(body)
+            except ValueError:
+                continue
+            kind = event.get("type")
+            if kind == "response.output_text.delta":
+                chunks.append(event.get("delta", ""))
+            elif kind == "response.completed":
+                completed = True
+                # Some clients send a complete output object without text deltas.
+                if not chunks:
+                    for item in event.get("response", {}).get("output", []):
+                        for part in item.get("content", []):
+                            if part.get("type") == "output_text":
+                                chunks.append(part.get("text", ""))
+                break
+            elif kind in ("response.failed", "response.incomplete", "error"):
+                err = event.get("response", {}).get("error") or event.get("error") or {}
+                detail = err.get("message") or err.get("code") or kind if isinstance(err, dict) else kind
+                raise RuntimeError(f"ChatGPT inference failed: {detail}")
+    if not completed:
+        raise AIResponseFormatError("ChatGPT response ended before completion. The operation will retry.")
+    raw = "".join(chunks).strip()
+    if not raw:
+        raise AIResponseFormatError("ChatGPT returned empty generated text. The operation will retry.")
     return raw
 
 
@@ -882,8 +938,8 @@ def provider_error_message(error: Exception) -> str:
                 "Gemini model in Settings."
             )
             return f"{message}\n\nGoogle response (HTTP {status}): {detail}" if detail else f"{message}\n\nHTTP {status}"
-        message = f"Google Gemini returned HTTP {status}."
+        message = f"AI provider returned HTTP {status}."
         if detail:
-            message = f"{message}\n\nGoogle response: {detail}"
+            message = f"{message}\n\nProvider response: {detail}"
         return message
     return str(error)
