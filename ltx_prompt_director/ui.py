@@ -30,6 +30,8 @@ from PySide6.QtWidgets import (
 )
 
 from . import __version__
+from .chatgpt_auth import ChatGPTAuth, ChatGPTAuthError
+from .chatgpt_widgets import ChatGPTSettingsPanel
 from .cache_maintenance import cover_path, mark_ready, needs_refresh, warm_metadata
 from .ai import AIResponseFormatError, GEMINI_MODELS, build_minimax_h3_prompt, build_minimax_h3_reference_prompt, build_prompts, minimax_h3_cache_key, provider_error_message, WORKSPACE_INSTRUCTIONS, refine_minimax_text_prompt, refine_minimax_h3_prompt, refine_minimax_h3_reference_prompt, refine_segment_prompt, refine_global_prompt, refine_timing, retryable_connection_error
 from .media import APP_CACHE, TIMELINE_VIDEO_SUFFIXES, comfy_input_references, copy_media_for_export, data_url, extract_audio_for_export, prepare_media, safe_media_filename, thumbnail_for_image, unique_media_filename, video_source_dimensions, write_data_url
@@ -2104,13 +2106,14 @@ class SettingsDialog(QDialog):
         general = QWidget()
         form = QFormLayout(general)
         tabs.addTab(general, "Application")
+        tabs.addTab(ChatGPTSettingsPanel(parent.chatgpt_auth, settings, tabs), "ChatGPT plan")
         tabs.addTab(WorkspaceEditor(parent.workspace_store, parent, tabs), "Workspaces")
         from .storage_widgets import StorageSettingsPanel
         self.storage_panel=StorageSettingsPanel(parent,tabs)
         tabs.addTab(self.storage_panel,"Storage and backups")
         self.resize(850, 760)
         self.provider = QComboBox()
-        self.provider.addItems(["gemini", "openai"])
+        self.provider.addItems(["gemini", "openai", "chatgpt"])
         self.provider.setCurrentText(settings.value("provider", "gemini"))
         self.model = QComboBox()
         self.model.addItems(GEMINI_MODELS)
@@ -2961,6 +2964,7 @@ class MainWindow(QMainWindow):
         self._settings_sync_timer.setInterval(250)
         self._settings_sync_timer.timeout.connect(self.settings.sync)
         self.session_keys = {"gemini": self.settings.value("gemini_key", ""), "openai": self.settings.value("openai_key", "")}
+        self.chatgpt_auth = ChatGPTAuth()
         self.segments: list[Segment] = []
         self.current_project_id: str | None = None
         self.current_project_name = "Untitled"
@@ -5635,7 +5639,10 @@ class MainWindow(QMainWindow):
 
     def update_provider_button(self) -> None:
         provider = self.settings.value("provider", "gemini")
-        label = self.settings.value("gemini_model", GEMINI_MODELS[0]) if provider == "gemini" else "OpenAI"
+        label = (
+            self.settings.value("gemini_model", GEMINI_MODELS[0]) if provider == "gemini" else
+            self.settings.value("chatgpt_model", "ChatGPT") if provider == "chatgpt" else "OpenAI"
+        )
         self.provider_button.setText(f"✦ {label.replace('gemini-', 'Gemini ').replace('-', ' ').title() if provider == 'gemini' else label}")
 
     def timeline_menu(self, point) -> None:
@@ -5862,6 +5869,21 @@ class MainWindow(QMainWindow):
 
     def ai_credentials(self) -> tuple[str, str, str] | None:
         provider = self.settings.value("provider", "gemini")
+        if provider == "chatgpt":
+            try:
+                key = self.chatgpt_auth.access_token()
+            except (ChatGPTAuthError, requests.RequestException) as error:
+                QMessageBox.information(self, "ChatGPT connection", str(error))
+                self.open_settings()
+                try:
+                    key = self.chatgpt_auth.access_token()
+                except (ChatGPTAuthError, requests.RequestException):
+                    return None
+            model = str(self.settings.value("chatgpt_model", ""))
+            if not model:
+                self.open_settings()
+                model = str(self.settings.value("chatgpt_model", ""))
+            return (provider, model, key) if model else None
         key = self.session_keys.get(provider) or self.settings.value(f"{provider}_key", "")
         if not key:
             self.open_settings()
