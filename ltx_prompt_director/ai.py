@@ -731,8 +731,9 @@ def _gemini_stream(parts: list[dict], key: str, model: str, timeout: int) -> str
                     continue
                 if isinstance(data.get("error"), dict):
                     raise AIResponseFormatError("Gemini stream failed: " + str(data["error"].get("message", "unknown error")))
-                if data.get("promptFeedback", {}).get("blockReason"):
-                    raise AIResponseFormatError("Gemini blocked this request: " + str(data["promptFeedback"]["blockReason"]))
+                feedback = data.get("promptFeedback") or {}
+                if isinstance(feedback, dict) and feedback.get("blockReason"):
+                    raise AIResponseFormatError("Gemini blocked this request: " + str(feedback["blockReason"]))
                 for candidate in data.get("candidates", []):
                     for part in candidate.get("content", {}).get("parts", []):
                         content = part.get("text", "")
@@ -842,6 +843,7 @@ def _chatgpt_stream(token: str, payload: dict, timeout: int) -> str:
     """Consume the public Responses SSE stream to the terminal completed event."""
     chunks: list[str] = []
     completed = False
+    received_summary_delta = False
     headers = {"authorization": f"Bearer {token}", "content-type": "application/json"}
     response = requests.post("https://api.openai.com/v1/responses",
                              headers=headers, json=payload, timeout=timeout, stream=True)
@@ -872,7 +874,10 @@ def _chatgpt_stream(token: str, payload: dict, timeout: int) -> str:
                 chunks.append(delta)
                 send_stream("output", delta)
             elif kind == "response.reasoning_summary_text.delta":
+                received_summary_delta = True
                 send_stream("reasoning", event.get("delta", ""))
+            elif kind == "response.reasoning_summary_text.done" and not received_summary_delta:
+                send_stream("reasoning", event.get("text", ""))
             elif kind == "response.completed":
                 completed = True
                 # Some clients send a complete output object without text deltas.
@@ -880,7 +885,9 @@ def _chatgpt_stream(token: str, payload: dict, timeout: int) -> str:
                     for item in event.get("response", {}).get("output", []):
                         for part in item.get("content", []):
                             if part.get("type") == "output_text":
-                                chunks.append(part.get("text", ""))
+                                text = part.get("text", "")
+                                chunks.append(text)
+                                send_stream("output", text)
                 break
             elif kind in ("response.failed", "response.incomplete", "error"):
                 err = event.get("response", {}).get("error") or event.get("error") or {}
