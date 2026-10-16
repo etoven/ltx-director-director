@@ -135,6 +135,8 @@ class ProviderStreams(unittest.TestCase):
         from ltx_prompt_director.stream_widgets import LiveOutputPane
         app = QApplication.instance() or QApplication([])
         panel = LiveOutputPane()
+        panel.show()
+        app.processEvents()
         panel.begin("Generating", "gpt-test")
         panel.event("reasoning", "Provider summary.")
         panel.event("output", '{"prompt":"hello"}')
