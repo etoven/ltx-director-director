@@ -789,6 +789,8 @@ def _chatgpt_stream(token: str, payload: dict, timeout: int) -> str:
     ) as response:
         response.raise_for_status()
         for line in response.iter_lines(decode_unicode=True):
+            if isinstance(line, bytes):
+                line = line.decode("utf-8", errors="replace")
             if not line or not line.startswith("data: "):
                 continue
             body = line[6:]
@@ -931,7 +933,7 @@ def provider_error_message(error: Exception) -> str:
                 detail = " ".join(str(provider_error.get("message") or "").split())
         except (ValueError, requests.JSONDecodeError):
             detail = ""
-        if status == 503:
+        if status == 503 and "generativelanguage.googleapis.com" in str(response.url):
             message = (
                 "Google Gemini is temporarily overloaded for the selected model. This is a provider-capacity issue, "
                 "not a problem with your timeline or prompt. Wait a few minutes and try again, or choose another "
