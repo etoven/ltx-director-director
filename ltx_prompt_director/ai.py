@@ -762,7 +762,8 @@ def _openai_raw(images: list[dict], key: str, rules: str, timeout: int, *,
     if chatgpt:
         # ChatGPT plan usage requires streaming and non-persistent responses.
         payload.update({"store": False, "stream": True})
-        return _chatgpt_stream(key, payload, timeout)
+        token = key.access_token() if hasattr(key, "access_token") else key
+        return _chatgpt_stream(token, payload, timeout)
     payload["text"] = {"format": {"type": "json_object"}}
     response = requests.post(
         "https://api.openai.com/v1/responses",
