@@ -1597,7 +1597,6 @@ class MagicBuildOverlay(QWidget):
         self.panel = QFrame(self)
         self.panel.setObjectName("magicOverlayPanel")
         self.panel_layout = QVBoxLayout(self.panel)
-        self.panel_layout.addStretch()
         self.spinner = MagicSpinner(self.panel)
         self.spinner.timer.stop()
         self.panel_layout.addWidget(self.spinner, 0, Qt.AlignmentFlag.AlignCenter)
