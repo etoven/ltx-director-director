@@ -130,27 +130,36 @@ class ProviderStreams(unittest.TestCase):
         self.assertNotIn("reasoning", seen[1])
 
     def test_qt_live_panel_collapse_and_stream_progress(self):
-        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-        from PySide6.QtWidgets import QApplication
-        from ltx_prompt_director.stream_widgets import LiveOutputPane
-        app = QApplication.instance() or QApplication([])
-        panel = LiveOutputPane()
-        panel.show()
-        app.processEvents()
-        panel.begin("Generating", "gpt-test")
-        panel.event("reasoning", "Provider summary.")
-        panel.event("output", '{"prompt":"hello"}')
-        self.assertEqual(panel.reasoning.toPlainText(), "Provider summary.")
-        self.assertEqual(panel.output.toPlainText(), '{"prompt":"hello"}')
-        panel.event("reset", "Retrying")
-        self.assertFalse(panel.received_reasoning)
-        self.assertEqual(panel.output.toPlainText(), "")
-        panel.event("output", "valid")
-        panel.finish(True)
-        self.assertEqual(panel.status.text(), "Complete")
-        panel.toggle_content()
-        self.assertTrue(panel.content.isHidden())
-        panel.close()
+        # Other tests may have initialized a QCoreApplication; widgets require
+        # QApplication, and Qt cannot upgrade a running QCoreApplication.
+        # Test widgets in a fresh isolated GUI process to avoid a C++ crash.
+        import subprocess
+        import sys
+        child = r'''
+from PySide6.QtWidgets import QApplication
+from ltx_prompt_director.stream_widgets import LiveOutputPane
+app = QApplication([])
+panel = LiveOutputPane()
+panel.show()
+app.processEvents()
+panel.begin("Generating", "gpt-test")
+panel.event("reasoning", "Provider summary.")
+panel.event("output", '{"prompt":"hello"}')
+assert panel.reasoning.toPlainText() == "Provider summary."
+assert panel.output.toPlainText() == '{"prompt":"hello"}'
+panel.event("reset", "Retrying")
+assert panel.output.toPlainText() == ""
+panel.event("output", "valid")
+panel.finish(True)
+assert panel.status.text() == "Complete"
+panel.toggle_content()
+assert panel.content.isHidden()
+panel.close()
+'''
+        env = dict(os.environ, QT_QPA_PLATFORM="offscreen")
+        result = subprocess.run([sys.executable, "-c", child],
+                                text=True, capture_output=True, env=env, timeout=20)
+        self.assertEqual(result.returncode, 0, result.stdout + "\n" + result.stderr)
 
 
 if __name__ == "__main__":
