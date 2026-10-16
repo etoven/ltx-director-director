@@ -13,6 +13,7 @@ import requests
 from .media import data_url, video_storyboard_data_urls
 from .project_archive import materialize_source
 from .models import Segment
+from .ai_stream import send_stream, streaming_enabled
 from .minimax_reference import reference_image_for_provider, reference_inventory, reference_rules, reference_slots, WORKFLOW_NAMES, WORKFLOW_DIRECTIONS, detect_workflow
 
 
@@ -684,6 +685,8 @@ def _gemini_raw(images: list[dict], key: str, model: str, rules: str, timeout: i
             parts.append({"text": f"{authority}:\n{item.get('prompt') or '[empty]'}"})
         if item.get("image_prompt"):
             parts.append({"text": f"AUDIO-FREE VISUAL CONTEXT FOR THIS SEGMENT:\n{item['image_prompt']}"})
+    if streaming_enabled():
+        return _gemini_stream(parts, key, model, timeout)
     response = requests.post(
         f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
         headers={"x-goog-api-key": key, "content-type": "application/json"},
@@ -693,6 +696,59 @@ def _gemini_raw(images: list[dict], key: str, model: str, rules: str, timeout: i
     response.raise_for_status()
     data = response.json()
     return _gemini_response_text(data)
+
+
+
+def _gemini_stream(parts: list[dict], key: str, model: str, timeout: int) -> str:
+    """Stream public Gemini text and opt-in thought summaries when supported."""
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:streamGenerateContent?alt=sse"
+    base = {"contents": [{"role": "user", "parts": parts}],
+            "generationConfig": {"temperature": 0.25, "responseMimeType": "application/json"}}
+    payload = json.loads(json.dumps(base))
+    payload["generationConfig"]["thinkingConfig"] = {"includeThoughts": True}
+    chunks: list[str] = []
+    # A non-thinking model may reject includeThoughts; retry transparently.
+    for pass_number in range(2):
+        with requests.post(url, headers={"x-goog-api-key": key, "content-type": "application/json"},
+                           json=payload, timeout=timeout, stream=True) as response:
+            if getattr(response, "status_code", 200) == 400 and pass_number == 0:
+                payload = base
+                send_stream("status", "This model does not expose thinking summaries; streaming generated text.")
+                continue
+            response.raise_for_status()
+            saw_payload = False
+            for line in response.iter_lines(decode_unicode=True):
+                if isinstance(line, bytes):
+                    line = line.decode("utf-8", errors="replace")
+                if not line or not line.startswith("data:"):
+                    continue
+                body = line[5:].strip()
+                if body == "[DONE]":
+                    break
+                try:
+                    data = json.loads(body)
+                except ValueError:
+                    continue
+                if isinstance(data.get("error"), dict):
+                    raise AIResponseFormatError("Gemini stream failed: " + str(data["error"].get("message", "unknown error")))
+                feedback = data.get("promptFeedback") or {}
+                if isinstance(feedback, dict) and feedback.get("blockReason"):
+                    raise AIResponseFormatError("Gemini blocked this request: " + str(feedback["blockReason"]))
+                for candidate in data.get("candidates", []):
+                    for part in candidate.get("content", {}).get("parts", []):
+                        content = part.get("text", "")
+                        if not content:
+                            continue
+                        saw_payload = True
+                        if part.get("thought") is True:
+                            send_stream("reasoning", content)
+                        else:
+                            chunks.append(content)
+                            send_stream("output", content)
+            if not saw_payload or not "".join(chunks).strip():
+                raise AIResponseFormatError("Gemini streamed no final generated text.")
+            return "".join(chunks)
+    raise AIResponseFormatError("Gemini did not accept the streaming request.")
 
 
 def _gemini_response_text(data: object) -> str:
@@ -759,9 +815,13 @@ def _openai_raw(images: list[dict], key: str, rules: str, timeout: int, *,
         if item.get("image_prompt"):
             content.append({"type": "input_text", "text": f"AUDIO-FREE VISUAL CONTEXT FOR THIS SEGMENT:\n{item['image_prompt']}"})
     payload = {"model": model, "input": [{"role": "user", "content": content}]}
-    if chatgpt:
-        # ChatGPT plan usage requires streaming and non-persistent responses.
-        payload.update({"store": False, "stream": True})
+    if chatgpt or streaming_enabled():
+        # Plan OAuth requires streaming and store=false; API-key mode streams too.
+        payload.update({"stream": True, "reasoning": {"summary": "auto"}})
+        if chatgpt:
+            payload["store"] = False
+        else:
+            payload["text"] = {"format": {"type": "json_object"}}
         token = key.access_token() if hasattr(key, "access_token") else key
         return _chatgpt_stream(token, payload, timeout)
     payload["text"] = {"format": {"type": "json_object"}}
@@ -783,11 +843,18 @@ def _chatgpt_stream(token: str, payload: dict, timeout: int) -> str:
     """Consume the public Responses SSE stream to the terminal completed event."""
     chunks: list[str] = []
     completed = False
-    with requests.post(
-        "https://api.openai.com/v1/responses",
-        headers={"authorization": f"Bearer {token}", "content-type": "application/json"},
-        json=payload, timeout=timeout, stream=True,
-    ) as response:
+    received_summary_delta = False
+    headers = {"authorization": f"Bearer {token}", "content-type": "application/json"}
+    response = requests.post("https://api.openai.com/v1/responses",
+                             headers=headers, json=payload, timeout=timeout, stream=True)
+    # Some listed models don't implement summaries. Keep streaming their text.
+    if getattr(response, "status_code", 200) == 400 and payload.get("reasoning"):
+        response.close()
+        payload = {k: v for k, v in payload.items() if k != "reasoning"}
+        send_stream("status", "Thinking summaries unavailable for this model; streaming generated output.")
+        response = requests.post("https://api.openai.com/v1/responses",
+                                 headers=headers, json=payload, timeout=timeout, stream=True)
+    with response:
         response.raise_for_status()
         for line in response.iter_lines(decode_unicode=True):
             if isinstance(line, bytes):
@@ -803,7 +870,14 @@ def _chatgpt_stream(token: str, payload: dict, timeout: int) -> str:
                 continue
             kind = event.get("type")
             if kind == "response.output_text.delta":
-                chunks.append(event.get("delta", ""))
+                delta = event.get("delta", "")
+                chunks.append(delta)
+                send_stream("output", delta)
+            elif kind == "response.reasoning_summary_text.delta":
+                received_summary_delta = True
+                send_stream("reasoning", event.get("delta", ""))
+            elif kind == "response.reasoning_summary_text.done" and not received_summary_delta:
+                send_stream("reasoning", event.get("text", ""))
             elif kind == "response.completed":
                 completed = True
                 # Some clients send a complete output object without text deltas.
@@ -811,7 +885,9 @@ def _chatgpt_stream(token: str, payload: dict, timeout: int) -> str:
                     for item in event.get("response", {}).get("output", []):
                         for part in item.get("content", []):
                             if part.get("type") == "output_text":
-                                chunks.append(part.get("text", ""))
+                                text = part.get("text", "")
+                                chunks.append(text)
+                                send_stream("output", text)
                 break
             elif kind in ("response.failed", "response.incomplete", "error"):
                 err = event.get("response", {}).get("error") or event.get("error") or {}

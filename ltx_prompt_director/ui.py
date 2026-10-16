@@ -32,6 +32,8 @@ from PySide6.QtWidgets import (
 from . import __version__
 from .chatgpt_auth import ChatGPTAuth
 from .chatgpt_widgets import ChatGPTSettingsPanel
+from .ai_stream import STREAM_SINK
+from .stream_widgets import LiveOutputPane
 from .cache_maintenance import cover_path, mark_ready, needs_refresh, warm_metadata
 from .ai import AIResponseFormatError, GEMINI_MODELS, build_minimax_h3_prompt, build_minimax_h3_reference_prompt, build_prompts, minimax_h3_cache_key, provider_error_message, WORKSPACE_INSTRUCTIONS, refine_minimax_text_prompt, refine_minimax_h3_prompt, refine_minimax_h3_reference_prompt, refine_segment_prompt, refine_global_prompt, refine_timing, retryable_connection_error
 from .media import APP_CACHE, TIMELINE_VIDEO_SUFFIXES, comfy_input_references, copy_media_for_export, data_url, extract_audio_for_export, prepare_media, safe_media_filename, thumbnail_for_image, unique_media_filename, video_source_dimensions, write_data_url
@@ -203,6 +205,7 @@ class WorkerSignals(QObject):
     finished = Signal(object)
     failed = Signal(str)
     progress = Signal(int, int, str)
+    stream = Signal(str, str)
 
 
 class MagicWorker(QRunnable):
@@ -219,6 +222,7 @@ class MagicWorker(QRunnable):
         attempts = max(0, int(self.retries)) + 1
         for attempt in range(1, attempts + 1):
             try:
+                self.signals.stream.emit("reset", f"{self.activity} · attempt {attempt}/{attempts}")
                 self.signals.progress.emit(attempt, attempts, self.activity)
                 self.signals.finished.emit(self.operation(*self.args))
                 return
@@ -1593,7 +1597,6 @@ class MagicBuildOverlay(QWidget):
         self.panel = QFrame(self)
         self.panel.setObjectName("magicOverlayPanel")
         self.panel_layout = QVBoxLayout(self.panel)
-        self.panel_layout.addStretch()
         self.spinner = MagicSpinner(self.panel)
         self.spinner.timer.stop()
         self.panel_layout.addWidget(self.spinner, 0, Qt.AlignmentFlag.AlignCenter)
@@ -1609,16 +1612,20 @@ class MagicBuildOverlay(QWidget):
         self.panel_layout.addWidget(self.title)
         self.panel_layout.addWidget(self.detail)
         self.panel_layout.addWidget(self.attempt)
-        self.panel_layout.addStretch()
-        layout.addWidget(self.panel, 0, Qt.AlignmentFlag.AlignCenter)
+        self.live_stream = LiveOutputPane(self.panel, collapsible=False)
+        self.panel_layout.addWidget(self.live_stream, 1)
+        layout.addWidget(self.panel, 1, Qt.AlignmentFlag.AlignCenter)
         scale = parent.settings.value("ui_text_scale", 100, int) / 100 if parent and hasattr(parent, "settings") else 1.0
         self.set_scale(scale)
         self.hide()
 
     def set_scale(self, scale: float) -> None:
         scale = max(.75, min(2.0, scale))
-        self.panel.setFixedSize(round(390 * scale), round(290 * scale))
-        self.panel_layout.setContentsMargins(round(28 * scale), round(20 * scale), round(28 * scale), round(24 * scale))
+        self.panel.setMinimumSize(0, 0)
+        self.panel.setMaximumSize(round(1100 * scale), round(720 * scale))
+        self.panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.layout().setContentsMargins(round(12 * scale), round(12 * scale), round(12 * scale), round(12 * scale))
+        self.panel_layout.setContentsMargins(round(18 * scale), round(12 * scale), round(18 * scale), round(14 * scale))
         self.spinner.set_scale(scale)
 
     def update_attempt(self, current: int, total: int, detail: str) -> None:
@@ -3558,6 +3565,10 @@ class MainWindow(QMainWindow):
             editor.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Ignored)
         self.minimax_panel = MiniMaxPromptPanel(self)
         unified_layout.addWidget(self.minimax_panel)
+        self.live_activity = LiveOutputPane(self.unified_panel)
+        self.live_activity.setMaximumHeight(265)
+        self.live_activity.hide()
+        unified_layout.addWidget(self.live_activity)
         unified_layout.addWidget(self.unified_prompt, 1)
         self.unified_count = QLabel("0 characters")
         self.unified_count.setObjectName("muted")
@@ -5923,11 +5934,17 @@ class MainWindow(QMainWindow):
                         else copy.deepcopy(self.workspace_definition.get("generation_prompts", {})))
         def workspace_operation(*values):
             token = WORKSPACE_INSTRUCTIONS.set(instructions)
+            stream_token = STREAM_SINK.set(worker.signals.stream.emit)
             try:
                 return operation(*values)
             finally:
+                STREAM_SINK.reset(stream_token)
                 WORKSPACE_INSTRUCTIONS.reset(token)
         worker = MagicWorker(workspace_operation, args, retries, retry_cooldown, activity)
+        model = str(args[1] if args and isinstance(args[0], str) else args[2])
+        self.active_live_panel = self.magic_overlay.live_stream if show_main_overlay else self.live_activity
+        self.active_live_panel.begin(activity, model)
+        worker.signals.stream.connect(self.ai_stream_received)
         worker.signals.progress.connect(self.magic_progress)
         self.ai_request_workspace = (self.workspace_revision, self.current_project_id, self.project_type)
         self.ai_finished_callback = finished
@@ -5953,16 +5970,27 @@ class MainWindow(QMainWindow):
         self.magic_overlay.hide_overlay()
         self.statusBar().showMessage("AI result discarded because the project or workflow changed.")
 
+    def ai_stream_received(self, kind: str, text: str) -> None:
+        if not self.ai_request_is_current():
+            return
+        pane = getattr(self, "active_live_panel", None)
+        if pane is not None:
+            pane.event(kind, text)
+
     def ai_result_received(self, result) -> None:
         if not self.ai_request_is_current():
             self.discard_obsolete_ai_result()
             return
+        if getattr(self, "active_live_panel", None) is not None:
+            self.active_live_panel.finish(True)
         self.ai_finished_callback(result)
 
     def ai_failure_received(self, error: str) -> None:
         if not self.ai_request_is_current():
             self.discard_obsolete_ai_result()
             return
+        if getattr(self, "active_live_panel", None) is not None:
+            self.active_live_panel.finish(False)
         self.magic_failed(error)
 
     def refine_selected_timing(self) -> None:
