@@ -2,7 +2,7 @@
 
 ## Your desktop workspace for AI video planning
 
-Install Prompt Director, open a project and start arranging your sequence. Timeline editing and project organization work locally. Connect Gemini or OpenAI when you want help generating or refining prompts.
+Install Prompt Director, open a project and start arranging your sequence. Timeline editing and project organization work locally. Connect Gemini, OpenAI API, or your eligible ChatGPT plan when you want help generating or refining prompts.
 
 ![The Prompt Director startup screen](docs/images/aurora-startup.png)
 
@@ -16,7 +16,7 @@ You need **Python 3.10 or newer** and a desktop environment supported by Qt 6. A
 python3 -m venv ~/.venvs/ltx-director
 source ~/.venvs/ltx-director/bin/activate
 python -m pip install --upgrade pip
-python -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a52-py3-none-any.whl'
+python -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a53-py3-none-any.whl'
 prompt-director
 ```
 
@@ -26,7 +26,7 @@ prompt-director
 py -m venv "$env:USERPROFILE\ltx-director-venv"
 & "$env:USERPROFILE\ltx-director-venv\Scripts\Activate.ps1"
 python -m pip install --upgrade pip
-python -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a52-py3-none-any.whl'
+python -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a53-py3-none-any.whl'
 prompt-director
 ```
 
@@ -36,7 +36,7 @@ The package installs Qt components, image handling and the bundled FFmpeg helper
 
 ## Connect your prompt-writing provider
 
-Open **Settings → Application**, select **Gemini** or **OpenAI**, and enter the corresponding API key. Choose a Gemini model when using Gemini. Set the request timeout, additional retry attempts and cooldown to fit your provider.
+Open **Settings → Application** to choose **Gemini**, **OpenAI**, or **chatgpt**. Gemini and OpenAI API use their existing API keys. For ChatGPT-plan authentication, open the new **ChatGPT plan** tab, select **Continue with ChatGPT**, approve plan usage in your browser, then choose a model from your account-specific model catalog. Return to the Application tab to select the **chatgpt** provider. No API key is required for the ChatGPT-plan route. Set the request timeout, additional retry attempts and cooldown to fit your provider.
 
 ![Application Settings with provider selection, request controls, display scale and folders](docs/images/application-settings.png)
 
@@ -77,3 +77,9 @@ For inline spelling suggestions, install an Enchant provider and a dictionary fo
 If startup reports missing PySide6 modules, activate the environment used to run Director and reinstall the wheel with `python -m pip install --force-reinstall` followed by the wheel URL above. For a provider error, check the selected model, API key, quota and connection in Settings.
 
 **Ready for the first sequence? [Open the complete feature and usage guide →](usage.md)**
+
+## ChatGPT plan OAuth
+
+The ChatGPT-plan provider is for eligible Plus/Pro accounts on locally installed open-source clients. Requests are made to the official Responses API with `store=false` and `stream=true`, using a model listed for your authenticated account. The app stores its account tokens in `~/.config/PromptDirector/chatgpt-oauth.json` (owner-only permissions on Unix), separate from project exports and QSettings API keys. You can switch accounts, refresh the live model list, sign out, and manage plan usage in ChatGPT Settings. API-key providers are unchanged. The app's workspace prompts, selected timeline references and images are sent to the selected provider when generating AI content; the ChatGPT sign-in itself does not grant access to your conversation history.
+
+ChatGPT-plan usage is subject to your account limits and selected-model eligibility. If authorization or permissions expire, reconnect from the ChatGPT plan tab. Documentation: https://developers.openai.com/siwc/token-sharing-open-source/sign-in

@@ -3,3 +3,4 @@ Pillow>=10.4,<12
 requests>=2.32,<3
 imageio-ffmpeg>=0.5,<1
 pyenchant>=3.2,<4
+PyJWT[crypto]>=2.10,<3
