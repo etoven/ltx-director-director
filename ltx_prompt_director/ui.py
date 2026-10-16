@@ -292,6 +292,107 @@ def _write_library_archive(path: str, payload: dict, segments: list[Segment], me
     metadata_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
 
+
+def _duplicate_library_project_files(source_meta: dict, root: Path, new_id: str) -> dict:
+    """Clone a saved project and its attachments without sharing deletable files."""
+    source_id = str(source_meta["id"])
+    source_metadata = root / f"{source_id}.meta.json"
+    if source_metadata.is_file():
+        source_meta = json.loads(source_metadata.read_text(encoding="utf-8"))
+    source_path = Path(str(source_meta.get("projectPath", "")))
+    if not source_path.is_file():
+        raise FileNotFoundError(f"Saved project not found: {source_path}")
+
+    original_name = str(source_meta.get("name") or "Untitled project").strip()
+    existing = {str(item.get("name", "")).casefold()
+                for path in root.glob("*.meta.json")
+                for item in _read_duplicate_name(path)}
+    new_name = f"{original_name} (Copy)"
+    index = 2
+    while new_name.casefold() in existing:
+        new_name = f"{original_name} (Copy {index})"
+        index += 1
+
+    archive_path = root / f"{new_id}.LTXD"
+    metadata_path = root / f"{new_id}.meta.json"
+    if archive_path.exists() or metadata_path.exists():
+        raise FileExistsError("The duplicate project ID already exists.")
+    clone = copy.deepcopy(source_meta)
+    clone.pop("kind", None)
+    clone.pop("members", None)
+    clone.update({"id": new_id, "name": new_name, "projectPath": str(archive_path),
+                  "savedAt": datetime.now(timezone.utc).isoformat(), "archived": False})
+    normalize_project_labels(clone)
+
+    created: list[Path] = []
+    temporary = root / f".{new_id}.copying"
+    try:
+        shutil.copy2(source_path, temporary)
+        os.replace(temporary, archive_path)
+        created.append(archive_path)
+
+        def copy_attachment(path_value: str, folder: str, file_name: str) -> str:
+            source = Path(str(path_value)) if path_value else None
+            if source is None or not source.is_file():
+                return ""
+            destination_dir = root / folder
+            destination_dir.mkdir(parents=True, exist_ok=True)
+            destination = destination_dir / (
+                f"{new_id}_{uuid4().hex[:8]}_{safe_media_filename(file_name, 'attachment')}"
+            )
+            shutil.copy2(source, destination)
+            created.append(destination)
+            return str(destination)
+
+        if clone.get("previewVideoPath"):
+            clone["previewVideoPath"] = copy_attachment(
+                clone["previewVideoPath"], "previews",
+                str(clone.get("previewVideoName") or "preview.webm")
+            )
+        attached = clone.get("projectFiles", clone.get("workflowFiles", []))
+        clone["projectFiles"] = [
+            {**item, "path": duplicated}
+            for item in attached if isinstance(item, dict)
+            if (duplicated := copy_attachment(
+                item.get("path", ""), "project_files",
+                str(item.get("name") or "project_file")
+            ))
+        ]
+        clone.pop("workflowFiles", None)
+
+        if zipfile.is_zipfile(archive_path):
+            _persist_library_archive(clone, metadata_path)
+        else:
+            payload = json.loads(archive_path.read_text(encoding="utf-8"))
+            payload["library"] = {
+                key: clone.get(key, "") for key in
+                ("id", "name", "description", "collection", "savedAt", "status", "tags",
+                 "tag", "archived", "notes", "previewVideoPath", "previewVideoName",
+                 "projectFiles", "workflowFiles", "downloadDirectory")
+            }
+            archive_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+        metadata_temp = root / f".{new_id}.meta.tmp"
+        metadata_temp.write_text(json.dumps(clone, indent=2), encoding="utf-8")
+        os.replace(metadata_temp, metadata_path)
+        created.append(metadata_path)
+        return clone
+    except Exception:
+        for path in reversed(created):
+            path.unlink(missing_ok=True)
+        raise
+    finally:
+        temporary.unlink(missing_ok=True)
+        (root / f".{new_id}.meta.tmp").unlink(missing_ok=True)
+
+
+def _read_duplicate_name(path: Path) -> list[dict]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+        return [value] if isinstance(value, dict) else []
+    except (OSError, ValueError, TypeError):
+        return []
+
 def _prepare_media_batch(paths: list[str]) -> tuple[list[tuple[str, str, str, int | None, int | None]], list[str]]:
     prepared, errors = [], []
     for path in paths:
@@ -4377,9 +4478,35 @@ class MainWindow(QMainWindow):
             return
         menu.addSeparator()
         menu.addAction("Open project", self.open_library_project)
+        menu.addAction("Duplicate project", self.duplicate_library_project)
         menu.addAction("Edit project details", self.edit_library_project)
         menu.addAction("Delete project", self.delete_library_project)
         menu.exec(self.project_list.viewport().mapToGlobal(point))
+
+    def duplicate_library_project(self) -> None:
+        """Make an independently editable copy of the right-clicked project."""
+        meta = self.selected_library_project()
+        if not meta or meta.get("kind") != "project":
+            return
+        project_id = str(meta["id"])
+        if project_id == self.current_project_id and self.project_dirty:
+            # The serialized disk pool saves this snapshot before it copies the archive.
+            self.save_library_project(automatic=True)
+        new_id = uuid4().hex
+        self.statusBar().showMessage(f"Duplicating project in background: {meta.get('name', 'Untitled project')}…")
+
+        def finished(clone: dict) -> None:
+            self.refresh_project_library(str(clone["id"]))
+            self.statusBar().showMessage(f"Project duplicated: {clone['name']}")
+
+        def failed(message: str) -> None:
+            QMessageBox.critical(self, "Project duplication failed", message)
+
+        self.start_disk_job(
+            _duplicate_library_project_files,
+            (copy.deepcopy(meta), project_library_path(), new_id),
+            finished, failed, serialized=True
+        )
 
     def persist_library_metadata(self, meta: dict) -> None:
         clean = {key: value for key, value in meta.items() if key not in {"kind", "members"}}
