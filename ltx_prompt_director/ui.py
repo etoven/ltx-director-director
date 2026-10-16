@@ -5975,7 +5975,7 @@ class MainWindow(QMainWindow):
             return
         pane = getattr(self, "active_live_panel", None)
         if pane is not None:
-            pane.event(kind, text)
+            pane.receive_stream(kind, text)
 
     def ai_result_received(self, result) -> None:
         if not self.ai_request_is_current():
