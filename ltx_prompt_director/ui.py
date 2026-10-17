@@ -3423,14 +3423,17 @@ class MainWindow(QMainWindow):
         director_panel.setObjectName("directorPanel")
         self.director_controls = QVBoxLayout(director_panel)
         self.director_controls.setContentsMargins(10, 8, 10, 8)
-        self.director_controls.setSpacing(7)
+        self.director_controls.setSpacing(5)
+        # Editing is the primary content: the selector and title occupy their
+        # own compact header, never a column beside the editable prose.
         intent_row = QHBoxLayout()
-        intent_row.setContentsMargins(0, 0, 0, 0)
-        intent_row.setSpacing(8)
+        intent_row.setContentsMargins(2, 0, 2, 0)
+        intent_row.setSpacing(9)
         intent_label = QLabel("DIRECTOR'S INTENT")
         self.director_intent_label = intent_label
         intent_label.setObjectName("panelTitle")
         intent_row.addWidget(intent_label)
+        intent_row.addStretch(1)
         self.director_intent_row = intent_row
         self.intent = PromptTextEdit()
         self.intent.setAcceptRichText(False)
@@ -3445,8 +3448,9 @@ class MainWindow(QMainWindow):
         # selector switches underlying documents without changing their data.
         self.director_intent_stack = QStackedWidget()
         self.director_intent_stack.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored
         )
+        self.director_intent_stack.setMinimumWidth(0)
         self.director_intent_stack.addWidget(self.intent)
         self.intent_segment_prompt = PromptTextEdit()
         self.intent_segment_prompt.setObjectName("directorSegmentEditor")
@@ -3456,6 +3460,15 @@ class MainWindow(QMainWindow):
         )
         self.intent_segment_prompt.textChanged.connect(self.save_director_segment_prompt)
         self.director_intent_stack.addWidget(self.intent_segment_prompt)
+        for editor in (self.intent, self.intent_segment_prompt):
+            editor.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
+            editor.setWordWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
+            editor.document().setDocumentMargin(10)
+            editor.setMinimumWidth(0)
+        self.director_intent_stack.setToolTip(
+            "Edit the full-width prompt here. Choose Director's Intent or "
+            "Selected Segment above; the Refine button remains on the timeline."
+        )
         self.sfx = QPushButton("SFX")
         self.sfx.setCheckable(True)
         self.sfx.setObjectName("audioToggle")
@@ -3483,14 +3496,14 @@ class MainWindow(QMainWindow):
         self.primary_ai_command = "generate"
         for button in (self.sfx, self.spoken_dialog, self.hdr, self.reduce_music, self.magic_button):
             button.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
-        intent_row.addWidget(self.director_intent_stack, 1)
         self.ai_workflow_row = workflow_row
         workflow_row.addWidget(self.magic_button)
-        self.director_controls.addLayout(intent_row, 1)
+        self.director_controls.addLayout(intent_row)
+        self.director_controls.addWidget(self.director_intent_stack, 1)
         planning_row = ControlRow()
         planning_row.setContentsMargins(0, 0, 0, 0)
         planning_row.setSpacing(6)
-        planning_label = QLabel("DIRECTION SETTINGS")
+        planning_label = QLabel("DIALOG VOICE")
         self.planning_label = planning_label
         planning_label.setObjectName("groupLabel")
         planning_row.addWidget(planning_label)
@@ -3531,8 +3544,6 @@ class MainWindow(QMainWindow):
         self.speaker_accent.setToolTip("Exact regional accent used when Spoken Dialog is enabled; this field is editable")
         self.speaker_accent.currentTextChanged.connect(self.mark_dirty)
         self.speaker_accent.setEnabled(False)
-        planning_row.addWidget(length_label)
-        planning_row.addWidget(self.requested_length)
         self.language_label = language_label
         self.accent_label = accent_label
         planning_row.addWidget(language_label)
@@ -3540,19 +3551,25 @@ class MainWindow(QMainWindow):
         planning_row.addWidget(accent_label)
         planning_row.addWidget(self.speaker_accent)
         planning_row.addStretch()
-        self.director_controls.addLayout(planning_row)
+        self.planning_row = planning_row
         options_row = ControlRow()
         options_row.setContentsMargins(0, 0, 0, 0)
         options_row.setSpacing(6)
         options_label = QLabel("PROMPT OPTIONS")
         options_label.setObjectName("groupLabel")
         options_row.addWidget(options_label)
+        options_row.addWidget(length_label)
+        options_row.addWidget(self.requested_length)
         options_row.addWidget(self.sfx)
         options_row.addWidget(self.spoken_dialog)
         options_row.addWidget(self.hdr)
         options_row.addWidget(self.reduce_music)
         options_row.addStretch()
+        self.options_row = options_row
+        # Keep settings below the full-width editor. Voice details consume a
+        # second toolbar line only while Spoken Dialog is enabled.
         self.director_controls.addLayout(options_row)
+        self.director_controls.addLayout(planning_row)
 
         segment_panel = QFrame()
         self.segment_panel = segment_panel
@@ -3572,11 +3589,12 @@ class MainWindow(QMainWindow):
             "Choose the text shown in the Director's Intent editor. "
             "This does not change AI refinement scope."
         )
-        self.prompt_scope.setMinimumWidth(142)
+        self.prompt_scope.setMinimumWidth(136)
+        self.prompt_scope.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.prompt_scope.currentIndexChanged.connect(self.prompt_scope_changed)
-        self.director_intent_row.insertWidget(
-            1, self.prompt_scope, 0, Qt.AlignmentFlag.AlignTop
-        )
+        # Selector sits in the header's right edge; the editor occupies the
+        # entire row beneath it even in a narrow or scaled window.
+        self.director_intent_row.addWidget(self.prompt_scope)
         self.timeline_controls.addWidget(self.magic_button)
         self.timeline_controls.addWidget(self.ai_timeline_status)
         # Image tools are chosen from connected providers as needed; no toggle.
@@ -4148,7 +4166,8 @@ class MainWindow(QMainWindow):
         self.speaker_accent.setMinimumWidth(metric(170))
         for field in (self.speaker_language,self.speaker_accent):
             field.setMinimumWidth(90);field.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Fixed)
-        self.director_controls.setSpacing(metric(8))
+        self.director_controls.setSpacing(metric(5))
+        self.director_intent_row.setSpacing(metric(9))
         self.segment_header.setSpacing(metric(8))
         self.ruler.setFixedHeight(metric(28))
         self.timeline_height_handle.set_scale(scale)
@@ -6687,6 +6706,14 @@ class MainWindow(QMainWindow):
             return
         sizes = self.intent_prompt_splitter.sizes()
         height = self.settings.value("director_intent_height", 164, int)
+        if not self.settings.value("director_intent_fullwidth_v2", False, bool):
+            # One-time upgrade: the old 164px split left almost no readable
+            # editor below the two lines of controls. Keep larger custom
+            # heights and the user's collapsed/expanded preference.
+            height = max(240, height)
+            self.settings.setValue("director_intent_height", height)
+            self.settings.setValue("director_intent_fullwidth_v2", True)
+            self.queue_settings_sync()
         # Let the native splitter allocate the current viewport; saved sizes
         # must never impose a minimum height on the whole window.
         self.intent_prompt_splitter.setMinimumHeight(0)
@@ -6798,7 +6825,7 @@ class MainWindow(QMainWindow):
     def update_spoken_dialog_visibility(self) -> None:
         if not hasattr(self, "language_label"):
             return
-        self.planning_label.setVisible(True)
+        self.planning_label.setVisible(self.spoken_dialog.isChecked())
         for widget in (self.speaker_language, self.speaker_accent, self.language_label, self.accent_label):
             widget.setVisible(self.spoken_dialog.isChecked())
 

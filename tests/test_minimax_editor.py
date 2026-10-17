@@ -82,6 +82,35 @@ class UnifiedEditorTests(unittest.TestCase):
         self.assertEqual(w.unified_prompt.toPlainText(), "My unified production prompt")
         self.assertEqual(w.combined_focus if hasattr(w, "combined_focus") else "all", "all")
 
+    def test_full_width_segment_prompt_layout_and_compact_options(self):
+        w = self.make_window('minimax_frames')
+        w.resize(1080, 850)
+        w.show()
+        self.app.processEvents()
+        w.set_director_intent_expanded(True)
+        self.app.processEvents()
+        panel = w.director_panel
+        stack = w.director_intent_stack
+        label = w.director_intent_label
+        selector = w.prompt_scope
+        self.assertGreaterEqual(stack.geometry().top(), label.geometry().bottom())
+        self.assertGreaterEqual(stack.width(), panel.width() - 24)
+        self.assertGreater(selector.geometry().left(), label.geometry().right())
+        self.assertIn(w.requested_length, [w.options_row.itemAt(i).widget()
+                    for i in range(w.options_row.count())])
+        self.assertEqual(w.planning_row.heightForWidth(700), 0)
+        w.prompt_scope.setCurrentIndex(1)
+        self.assertIs(stack.currentWidget(), w.intent_segment_prompt)
+        w.intent_segment_prompt.setPlainText("A wide editor\\n/refine Keep scene continuity")
+        self.assertIn("/refine", w.segments[0].prompt)
+        self.assertEqual(w.intent_segment_prompt.lineWrapMode(),
+                         w.intent_segment_prompt.LineWrapMode.WidgetWidth)
+        w.spoken_dialog.setChecked(True)
+        self.app.processEvents()
+        self.assertGreater(w.planning_row.heightForWidth(700), 0)
+        self.assertTrue(w.speaker_language.isVisible())
+        self.assertIn("/refine", w.intent_segment_prompt.toPlainText())
+
     def test_ltx_segment_editor_remains_authoritative(self):
         w = self.make_window('ltx')
         self.assertTrue(w.prompt_scope.isHidden())

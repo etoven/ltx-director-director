@@ -16,7 +16,7 @@ You need **Python 3.10 or newer** and a desktop environment supported by Qt 6. A
 python3 -m venv ~/.venvs/ltx-director
 source ~/.venvs/ltx-director/bin/activate
 python -m pip install --upgrade pip
-python -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a60-py3-none-any.whl'
+python -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a61-py3-none-any.whl'
 prompt-director
 ```
 
@@ -26,7 +26,7 @@ prompt-director
 py -m venv "$env:USERPROFILE\ltx-director-venv"
 & "$env:USERPROFILE\ltx-director-venv\Scripts\Activate.ps1"
 python -m pip install --upgrade pip
-python -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a60-py3-none-any.whl'
+python -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a61-py3-none-any.whl'
 prompt-director
 ```
 
@@ -114,12 +114,12 @@ Completed segment JSON records preview proposed timeline operations as they stre
 
 The AI activity dock continues to show provider-published reasoning summaries, while project identity checks still prevent stale worker output from overwriting a different project.
 
-## Single-button slash refinement and automatic image tools (1.13.0a60)
+## Single-button slash refinement and automatic image tools (1.13.0a61)
 
 Write `/refine` or `/refine-global` in the unified prompt, current segment prompt, director intent, or global direction, and click the only **Refine** button. In unified modes the model returns both the revised production prompt and the appended `segments` JSON for automatic timeline diff/application; there are no separate Generate Timeline or segment-operation actions in a dropdown. Gemini Flash text models can provide this JSON too.
 
 If the returned JSON requests frame artwork, the app automatically uses an available supported image backend. Its default ChatGPT OAuth fallback is the separate paid `gemini-3.1-flash-lite-image` API with a Gemini key; an OpenAI API key is another option. Image generation is **not** included in ChatGPT subscription OAuth. Before the first paid generation with each provider, a one-time approval warning appears. Both approvals and declines are remembered once per provider; declining leaves the artwork tile pending. Right-click a pending tile to explicitly revisit a declined decision. At most four automatic image requests are submitted in a single refinement.
 
-## Director's Intent selector correction (1.13.0a60)
+## Director's Intent selector correction (1.13.0a61)
 
 The two-item selector next to the **Director's Intent** text area chooses the **visible editor contents**, NOT an AI target or separate generation command. Choose **Director's Intent** to edit the persistent overall creative intent, or **Selected Segment** to edit the actual prompt belonging to whichever timeline segment is selected. The selector occupies the same editor position, so there are no additional duplicate prompt boxes. Edits and inline `/refine` annotations are saved on their corresponding segment; changing timeline selection updates the visible text. Switching back preserves the original creative intent and unified production prompt. The one Generate/Refine button remains in the shared timeline controls; refinements always read /refine annotations from all existing prompts and return a unified production prompt and segment JSON together when supported.
