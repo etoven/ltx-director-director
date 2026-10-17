@@ -35,6 +35,7 @@ from .chatgpt_widgets import ChatGPTSettingsPanel
 from .ai_stream import STREAM_SINK
 from .stream_widgets import ReasoningActivityDock, LiveOutputPane
 from .ai_inline_diff import LiveTypingPreview
+from .diff_review import ParagraphDiffReview
 from .segment_plan import (supports_structured_edit, generate_combined, preview_operations,
                            build_segment_objects, stream_operations, completed_stream_records,
                            explicit_existing_image_edit)
@@ -3224,6 +3225,7 @@ class MainWindow(QMainWindow):
         self._apply_theme()
         self.magic_overlay = MagicBuildOverlay(self)
         self.inline_typing = LiveTypingPreview(self)
+        self.paragraph_review = ParagraphDiffReview(self)
         self.reasoning_dock = ReasoningActivityDock(self)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.reasoning_dock)
         geometry = self.settings.value("window/geometry")
@@ -6320,6 +6322,9 @@ class MainWindow(QMainWindow):
         )
         self.active_live_panel = self.reasoning_dock
         self.active_live_panel.begin(activity, model)
+        # A new refinement supersedes earlier review controls; any already
+        # rejected paragraphs remain in the authoritative draft.
+        self.paragraph_review.finish()
         self.inline_typing.finish()
         target = None
         kind = "unified"
@@ -6411,6 +6416,10 @@ class MainWindow(QMainWindow):
                 self._ai_plan_timer.start()
 
     def ai_result_received(self, result) -> None:
+        # Keep the exact pre-generation draft for paragraph-level review.
+        review_editor = (self.inline_typing.editor if self.inline_typing.active
+                         and not self.inline_typing.suspended else None)
+        review_baseline = self.inline_typing.baseline if review_editor else ""
         self.inline_typing.finish()
         self.ai_plan_stream_active = False
         if hasattr(self, "_ai_plan_timer"):
@@ -6421,6 +6430,12 @@ class MainWindow(QMainWindow):
         if getattr(self, "active_live_panel", None) is not None:
             self.active_live_panel.finish(True)
         self.ai_finished_callback(result)
+        if (review_editor is not None and review_baseline.strip()
+                and review_editor.isVisible() and not self.ai_busy
+                and self.ai_request_is_current()):
+            self.paragraph_review.begin(
+                review_editor, review_baseline, review_editor.toPlainText()
+            )
 
     def ai_failure_received(self, error: str) -> None:
         self.inline_typing.finish()
@@ -6764,6 +6779,7 @@ class MainWindow(QMainWindow):
         (self.minimax_panel.header if prompt_only else self.timeline_controls).addWidget(self.magic_button)
         self.refine_prompt_button.hide()
         self.refine_timing_button.hide()
+        self.paragraph_review.finish()
         self.minimax_panel.prompt_label.setText("PROMPT REFINEMENT" if prompt_only else "UNIFIED PROMPT")
         self.unified_prompt.setPlaceholderText("Write or paste a MiniMax prompt. Use / to add refinement annotations…" if prompt_only else
             "Generate the unified prompt from your segments, or write and refine your own…")
@@ -7004,6 +7020,8 @@ class MainWindow(QMainWindow):
         self.refresh_primary_ai_action()
 
     def refresh_shared_editor(self) -> None:
+        if hasattr(self, "paragraph_review"):
+            self.paragraph_review.finish()
         # Workspace navigation and prompt-scope changes must never replace an
         # editor's live diff projection and later restore the wrong document.
         if hasattr(self, "inline_typing") and self.inline_typing.active:

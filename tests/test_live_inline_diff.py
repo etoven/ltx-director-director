@@ -5,9 +5,53 @@ import sys
 import unittest
 
 from ltx_prompt_director.ai_inline_diff import line_diff, select_streamed_text
+from ltx_prompt_director.diff_review import paragraph_changes, reviewed_text
 
 
 class LiveInlineDiffTests(unittest.TestCase):
+
+    def test_paragraph_review_reject_keeps_other_paragraphs(self):
+        before = "One original.\\n\\nTwo original.\\n\\nThree original."
+        after = "One revised.\\n\\nTwo original.\\n\\nThree revised."
+        changes = paragraph_changes(before, after)
+        self.assertEqual(sum(c.decision == "pending" for c in changes), 2)
+        self.assertEqual(reviewed_text(changes), after)
+        changes[0].decision = "rejected"
+        self.assertEqual(reviewed_text(changes), "One original.\\n\\nTwo original.\\n\\nThree revised.")
+
+    def test_paragraph_review_is_compact_inside_editor(self):
+        script = r'''
+from PySide6.QtWidgets import QApplication, QTextEdit
+from ltx_prompt_director.diff_review import ParagraphDiffReview
+app = QApplication([])
+editor = QTextEdit()
+editor.resize(470, 400)
+editor.show()
+editor.setPlainText("First revised.\\n\\nSecond original.\\n\\nThird revised.")
+review = ParagraphDiffReview()
+assert review.begin(editor,
+                    "First original.\\n\\nSecond original.\\n\\nThird original.",
+                    editor.toPlainText())
+app.processEvents()
+assert review.pending_count == 2
+assert review.approve_all.text().endswith("Approve all")
+assert review.approve_all.parent() is editor
+assert len(review.buttons) == 2
+review.decide(0, False)
+assert review.pending_count == 1
+assert editor.toPlainText().startswith("First original.")
+assert editor.toPlainText().endswith("Third revised.")
+review.approve_all.setChecked(True)
+assert review.editor is None
+assert editor.toPlainText() == "First original.\\n\\nSecond original.\\n\\nThird revised."
+editor.close()
+'''
+        env = dict(os.environ, QT_QPA_PLATFORM="offscreen")
+        process = subprocess.run([sys.executable, "-c", script], timeout=30,
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                 text=True, env=env)
+        self.assertEqual(process.returncode, 0, process.stdout + process.stderr)
+
     def test_only_changed_sections_are_marked_not_entire_original(self):
         base = "subject_definitions\nPreserve identity\n\n00:00:01:00 - 00:00:02:00\nOriginal motion\n"
         new = "subject_definitions\nPreserve identity\n\n00:00:01:00 - 00:00:02:00\nRevised motion\n"
