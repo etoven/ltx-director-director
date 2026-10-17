@@ -146,7 +146,7 @@ class SegmentPlanTests(unittest.TestCase):
             data = artwork_tools._gemini_image("Photographic forest", tool)
         self.assertEqual(data[:8], b"\x89PNG\r\n\x1a\n")
         self.assertIn("gemini-3.1-flash-lite-image:generateContent", post.call_args.args[0])
-        self.assertEqual(post.call_args.kwargs["json"]["generationConfig"]["imageConfig"],
+        self.assertEqual(post.call_args.kwargs["json"]["generationConfig"]["responseFormat"]["image"],
                          {"aspectRatio": "16:9", "imageSize": "1K"})
         self.assertEqual(post.call_args.kwargs["headers"]["x-goog-api-key"], "gemini-api")
 
