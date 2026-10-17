@@ -11,7 +11,7 @@ from __future__ import annotations
 from difflib import SequenceMatcher
 
 from PySide6.QtCore import QEvent, QObject, QSignalBlocker, QTimer
-from PySide6.QtGui import QColor, QTextCharFormat, QTextCursor
+from PySide6.QtGui import QColor, QTextCharFormat, QTextCursor, QTextDocument
 
 from .stream_json import live_fields
 
@@ -73,6 +73,8 @@ class LiveTypingPreview(QObject):
         self.timer.timeout.connect(self.render)
         self.last_candidate = ""
         self.rendered_candidate = ""
+        self.original_document = None
+        self.preview_document = None
 
     def start(self, editor, original: str, target: str = "unified", index: int = 0):
         self.finish()
@@ -126,12 +128,20 @@ class LiveTypingPreview(QObject):
         if not candidate or candidate == self.rendered_candidate:
             return
         self.rendered_candidate = candidate
-        self.showing = True
         text = self.editor
         pos = text.verticalScrollBar().value()
+        self._busy_render = True
+        if not self.showing:
+            self.original_document = text.document()
+            # Ownership must leave the editor before swapping documents; Qt
+            # otherwise destroys its old child document and the undo history.
+            self.original_document.setParent(self)
+            self.preview_document = QTextDocument(self)
+            with QSignalBlocker(text):
+                text.setDocument(self.preview_document)
+            self.showing = True
         # Block textChanged; otherwise the preview would be committed as an
         # actual user edit into the project/cache/timeline.
-        self._busy_render = True
         try:
             with QSignalBlocker(text):
                 document = text.document()
@@ -157,9 +167,14 @@ class LiveTypingPreview(QObject):
             self._busy_render = True
             try:
                 with QSignalBlocker(self.editor):
-                    self.editor.setPlainText(self.baseline)
+                    self.editor.setDocument(self.original_document)
+                    self.original_document.setParent(self.editor)
             finally:
                 self._busy_render = False
+            if self.preview_document is not None:
+                self.preview_document.deleteLater()
+            self.preview_document = None
+            self.original_document = None
         self.showing = False
 
     def suspend(self):
