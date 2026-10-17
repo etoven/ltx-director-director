@@ -2132,6 +2132,11 @@ class SettingsDialog(QDialog):
         self.openai = QLineEdit(settings.value("openai_key", ""))
         self.gemini.setEchoMode(QLineEdit.EchoMode.Password)
         self.openai.setEchoMode(QLineEdit.EchoMode.Password)
+        self.openai_model = QComboBox()
+        self.openai_model.setEditable(True)
+        self.openai_model.addItems(["gpt-6", "gpt-6-mini", "gpt-5.4-mini"])
+        self.openai_model.setCurrentText(str(settings.value("openai_model", "gpt-5.4-mini")))
+        self.openai_model.setToolTip("OpenAI API-key model; enter any model available to your API account")
         self.remember = QCheckBox("Store API keys persistently on this computer")
         self.remember.setChecked(settings.value("remember_keys", False, bool))
         self.timeout = QSpinBox()
@@ -2194,6 +2199,7 @@ class SettingsDialog(QDialog):
         form.addRow("Gemini model", self.model)
         form.addRow("Gemini API key", self.gemini)
         form.addRow("OpenAI API key", self.openai)
+        form.addRow("OpenAI model", self.openai_model)
         form.addRow("API timeout", self.timeout)
         form.addRow("Connection retries", self.retries)
         form.addRow("Retry cooldown", self.retry_cooldown)
@@ -2223,6 +2229,7 @@ class SettingsDialog(QDialog):
             return
         self.settings.setValue("provider", self.provider.currentText())
         self.settings.setValue("gemini_model", self.model.currentText())
+        self.settings.setValue("openai_model", self.openai_model.currentText())
         self.settings.setValue("remember_keys", self.remember.isChecked())
         self.settings.setValue("api_timeout", self.timeout.value())
         self.settings.setValue("api_retries", self.retries.value())
@@ -5960,7 +5967,10 @@ class MainWindow(QMainWindow):
             key = self.session_keys.get(provider) or self.settings.value(f"{provider}_key", "")
         if not key:
             return None
-        return provider, self.settings.value("gemini_model", GEMINI_MODELS[0]), key
+        return provider, (
+            self.settings.value("openai_model", "gpt-5.4-mini") if provider == "openai"
+            else self.settings.value("gemini_model", GEMINI_MODELS[0])
+        ), key
 
     def set_ai_controls_enabled(self, enabled: bool) -> None:
         self.magic_button.setEnabled(enabled and self.workspace_engine != "shot_sequence")
@@ -6684,13 +6694,6 @@ class MainWindow(QMainWindow):
             return
         if not hasattr(self, "unified_prompt") or not hasattr(self, "segment_prompt"):
             return
-        model = str(self.settings.value(
-            "chatgpt_model" if self.settings.value("provider", "gemini") == "chatgpt" else "gemini_model",
-            ""
-        ))
-        can_structure = self.unified_workspace and supports_structured_edit(
-            str(self.settings.value("provider", "gemini")), model
-        )
         selected = self.current_segment() if hasattr(self, "timeline") else None
         has_segments = bool(getattr(self, "segments", ()))
         has_unified = bool(self.minimax_prompt_text.strip())
@@ -6743,7 +6746,8 @@ class MainWindow(QMainWindow):
     def _combined_enabled(self) -> bool:
         provider = str(self.settings.value("provider", "gemini"))
         model = str(self.settings.value(
-            "chatgpt_model" if provider == "chatgpt" else "gemini_model", ""
+            "chatgpt_model" if provider == "chatgpt" else
+            "openai_model" if provider == "openai" else "gemini_model", ""
         ))
         return supports_structured_edit(provider, model)
 
