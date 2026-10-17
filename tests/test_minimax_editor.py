@@ -33,14 +33,14 @@ class UnifiedEditorTests(unittest.TestCase):
     def test_single_ai_button_follows_active_prompt_editor(self):
         from PySide6.QtWidgets import QPushButton
         w = self.make_window('ltx')
-        self.assertEqual(len([x for x in w.findChildren(QPushButton, 'timelineButton') if x is w.magic_button]), 1)
-        self.assertTrue(w.timeline_controls.indexOf(w.magic_button) >= 0)
+        self.assertEqual(len([x for x in w.findChildren(QPushButton, 'promptAction') if x is w.magic_button]), 1)
+        self.assertTrue(w.segment_header.indexOf(w.magic_button) >= 0)
         self.assertTrue(w.refine_prompt_button.isHidden())
         self.assertTrue(w.refine_timing_button.isHidden())
         self.assertIsNone(w.magic_button.menu())
         w.set_project_type('minimax_frames')
-        self.assertTrue(w.timeline_controls.indexOf(w.magic_button) >= 0)
-        self.assertEqual(len([x for x in w.findChildren(QPushButton, 'timelineButton') if x is w.magic_button]), 1)
+        self.assertTrue(w.director_intent_row.indexOf(w.magic_button) >= 0)
+        self.assertEqual(len([x for x in w.findChildren(QPushButton, 'promptAction') if x is w.magic_button]), 1)
         w.unified_prompt.setPlainText('Existing unified draft')
         w.refresh_primary_ai_action()
         self.assertEqual(w.primary_ai_command, 'refine')
@@ -54,7 +54,7 @@ class UnifiedEditorTests(unittest.TestCase):
         w.refresh_primary_ai_action()
         self.assertTrue(w.magic_button.isEnabled())
         w.set_project_type('ltx')
-        self.assertTrue(w.timeline_controls.indexOf(w.magic_button) >= 0)
+        self.assertTrue(w.segment_header.indexOf(w.magic_button) >= 0)
 
     def test_image_generation_model_setting_persists_and_selects_backend(self):
         import tempfile
@@ -116,7 +116,15 @@ class UnifiedEditorTests(unittest.TestCase):
         self.assertIsNotNone(bar)
         self.assertIs(w.project_type_combo.parent(), bar)
         self.assertIs(w.references_button.parent(), bar)
-        self.assertEqual(w.references_button.text(), "Refs")
+        self.assertEqual(w.references_button.text(), "")
+        self.assertFalse(w.references_button.icon().isNull())
+        self.assertEqual(w.references_button.accessibleName(), "Reference media")
+        self.assertLess(
+            next(i for i, action in enumerate(bar.actions())
+                 if bar.widgetForAction(action) is w.references_button),
+            next(i for i, action in enumerate(bar.actions())
+                 if bar.widgetForAction(action) is w.project_type_combo)
+        )
         self.assertTrue(w.workflow_label.isHidden())
         self.assertEqual(w.project_type_combo.accessibleName(), "Project type")
         self.assertFalse(any(
@@ -208,37 +216,41 @@ class UnifiedEditorTests(unittest.TestCase):
         self.assertIn("Auto-fit", w.timeline_fit_button.toolTip())
         self.assertEqual(w.timeline_fit_button.accessibleName(), "Fit timeline")
 
-    def test_timeline_header_compacts_to_one_label_free_navigation_row(self):
-        from PySide6.QtWidgets import QHBoxLayout, QLabel, QToolButton
+    def test_timeline_controls_relocated_into_main_toolbar_and_top_row_removed(self):
+        from PySide6.QtWidgets import QLabel, QToolBar, QToolButton
         w = self.make_window("minimax_frames")
-        w.resize(1010, 780)
+        w.resize(1120, 780)
         w.show()
         self.app.processEvents()
-        self.assertIsInstance(w.timeline_controls, QHBoxLayout)
-        self.assertLessEqual(w.timeline_controls.geometry().height(), 40)
-        widgets = [w.timeline_controls.itemAt(i).widget()
-                   for i in range(w.timeline_controls.count())
-                   if w.timeline_controls.itemAt(i).widget()]
-        self.assertEqual(widgets,
-                         [w.timeline_scale, w.timeline_fit_button,
-                          w.output_size_control, w.magic_button])
-        self.assertFalse(any(label.text() in {"TIMELINE", "OUTPUT", "SCALE"}
-                             for label in w.timeline_shell.findChildren(QLabel)))
-        self.assertIs(w.ai_timeline_status.parent(), w.statusBar())
+        toolbar = w.findChild(QToolBar, "mainToolbar")
+        self.assertIsNotNone(toolbar)
+        self.assertFalse(hasattr(w, "timeline_controls"))
+        self.assertIs(w.timeline_scale.parent(), toolbar)
+        self.assertIs(w.timeline_fit_button.parent(), toolbar)
+        self.assertIs(w.output_size_control.parent(), toolbar)
+        self.assertIs(w.timeline_shell.layout().itemAt(0).widget(), w.ruler)
+        toolbar_widgets = [toolbar.widgetForAction(action)
+                           for action in toolbar.actions()]
+        positions = [toolbar_widgets.index(widget) for widget in (
+            w.project_type_combo, w.timeline_scale,
+            w.timeline_fit_button, w.output_size_control, w.downloads_button)]
+        self.assertEqual(positions, sorted(positions))
         self.assertEqual(w.output_size_control.accessibleName(), "Output resolution")
         self.assertEqual(w.timeline_scale.accessibleName(), "Timeline zoom")
         self.assertIsInstance(w.timeline_fit_button, QToolButton)
         self.assertEqual(w.timeline_fit_button.text(), "↔")
-        self.assertTrue(w.timeline_fit_button.isEnabled())
-        w.ai_timeline_status.setText("✦ 2 edits")
-        w.ai_timeline_status.show()
-        self.app.processEvents()
-        self.assertLessEqual(w.timeline_controls.geometry().height(), 40)
-        self.assertTrue(w.ai_timeline_status.isVisibleTo(w.statusBar()))
+        self.assertIn("Auto-fit", w.timeline_fit_button.toolTip())
+        self.assertIs(w.ai_timeline_status.parent(), w.statusBar())
+        self.assertTrue(w.director_intent_row.indexOf(w.magic_button) >= 0)
+        self.assertEqual(w.magic_button.objectName(), "promptAction")
         w.set_project_type("minimax_prompt_refinement")
         self.assertGreaterEqual(w.minimax_panel.header.indexOf(w.magic_button), 0)
+        w.set_project_type("ltx")
+        self.assertGreaterEqual(w.segment_header.indexOf(w.magic_button), 0)
         w.set_project_type("minimax_frames")
-        self.assertGreaterEqual(w.timeline_controls.indexOf(w.magic_button), 0)
+        self.assertGreaterEqual(w.director_intent_row.indexOf(w.magic_button), 0)
+        self.assertFalse(any(label.text() in {"TIMELINE", "OUTPUT", "SCALE"}
+                             for label in w.timeline_shell.findChildren(QLabel)))
 
     def test_dense_timeline_gutter_add_rail_and_refinement_styles(self):
         from ltx_prompt_director.ui import AIWorkingMarquee
@@ -415,9 +427,9 @@ class UnifiedEditorTests(unittest.TestCase):
         w = self.make_window('minimax_frames')
         self.assertTrue(w.segment_panel.isHidden())
         self.assertFalse(w.unified_panel.isHidden())
-        self.assertTrue(w.timeline_controls.indexOf(w.magic_button) >= 0)
+        self.assertTrue(w.director_intent_row.indexOf(w.magic_button) >= 0)
         self.assertTrue(w.director_intent_row.indexOf(w.prompt_scope) >= 0)
-        self.assertEqual(len([x for x in w.findChildren(QPushButton, 'timelineButton') if x is w.magic_button]), 1)
+        self.assertEqual(len([x for x in w.findChildren(QPushButton, 'promptAction') if x is w.magic_button]), 1)
 
     def test_timeline_plan_rewrite_typing_matches_prompt_and_rolls_back(self):
         w = self.make_window("minimax_frames")
