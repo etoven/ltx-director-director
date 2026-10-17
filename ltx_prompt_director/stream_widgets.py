@@ -1,34 +1,44 @@
-"""Live AI activity panels for both overlay and inline prompt workspaces."""
+"""Polished live AI summaries and progressive parsed-JSON generation previews."""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QTextCursor
+from importlib.resources import files
+
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QIcon, QTextCursor
 from PySide6.QtWidgets import (
     QCheckBox, QFrame, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton,
-    QSizePolicy, QSplitter, QVBoxLayout, QWidget,
+    QSizePolicy, QSplitter, QTextEdit, QVBoxLayout, QWidget,
 )
+
+from .stream_json import structured_stream_html
 
 REASONING_HELP = (
     "Waiting for provider-published reasoning summaries…\n"
-    "Some models only stream their generated output. Internal reasoning is not exposed."
+    "Some models only stream generated text. Internal reasoning is not exposed."
 )
-OUTPUT_HELP = "Waiting for the first generated text…"
+OUTPUT_HELP = "Waiting for the first structured field…"
 
 
 class LiveOutputPane(QFrame):
-    """Streaming display only; never writes to the production prompt editor."""
+    """Display provider-published summaries and decoded output, without applying it."""
 
     def __init__(self, parent=None, *, collapsible=True):
         super().__init__(parent)
         self.setObjectName("liveOutputPanel")
         self.setStyleSheet(
             "#liveOutputPanel{background:#111c2b;border:1px solid #385b88;border-radius:8px}"
-            "QPlainTextEdit{background:#0a1420;color:#e2ecfa;border:1px solid #263a52;"
+            "QPlainTextEdit,QTextEdit{background:#0a1420;color:#e2ecfa;border:1px solid #263a52;"
             "border-radius:5px;padding:6px;font-family:monospace}"
             "QLabel{color:#cddbeb}"
         )
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.received_reasoning = False
+        self.raw_output = ""
+        self._complete = False
+        self._render_timer = QTimer(self)
+        self._render_timer.setSingleShot(True)
+        self._render_timer.setInterval(65)
+        self._render_timer.timeout.connect(self._render_output)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 8, 10, 9)
         layout.setSpacing(6)
@@ -37,7 +47,6 @@ class LiveOutputPane(QFrame):
         self.title.setStyleSheet("font-weight:600")
         header.addWidget(self.title)
         self.status = QLabel("Ready")
-        self.status.setObjectName("muted")
         header.addWidget(self.status)
         header.addStretch()
         self.auto_scroll = QCheckBox("Auto-scroll")
@@ -56,10 +65,10 @@ class LiveOutputPane(QFrame):
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
         self.splitter.setChildrenCollapsible(False)
         self.reasoning, reasoning_section = self._make_column(
-            "Reasoning summary · when provided", REASONING_HELP
+            "Reasoning summary", REASONING_HELP, "ai-reasoning", reasoning=True,
         )
         self.output, output_section = self._make_column(
-            "Generated prompt · streaming", OUTPUT_HELP
+            "Generated prompt · parsed live", OUTPUT_HELP, "ai-prompt", reasoning=False,
         )
         self.splitter.addWidget(reasoning_section)
         self.splitter.addWidget(output_section)
@@ -68,17 +77,26 @@ class LiveOutputPane(QFrame):
         body.addWidget(self.splitter)
         layout.addWidget(self.content, 1)
 
-    def _make_column(self, title: str, placeholder: str):
+    def _make_column(self, title: str, placeholder: str, symbol: str, *, reasoning: bool):
         column = QFrame()
         column.setFrameShape(QFrame.Shape.NoFrame)
         vertical = QVBoxLayout(column)
         vertical.setContentsMargins(0, 0, 0, 0)
         vertical.setSpacing(4)
+        heading = QHBoxLayout()
+        image = QLabel()
+        asset = files("ltx_prompt_director").joinpath(f"assets/{symbol}.svg")
+        image.setPixmap(QIcon(str(asset)).pixmap(17, 17))
+        heading.addWidget(image)
         label = QLabel(title)
         label.setStyleSheet("font-weight:600;color:#9bc8ff")
-        vertical.addWidget(label)
-        view = QPlainTextEdit()
+        heading.addWidget(label)
+        heading.addStretch()
+        vertical.addLayout(heading)
+        view = QPlainTextEdit() if reasoning else QTextEdit()
         view.setReadOnly(True)
+        if not reasoning:
+            view.setAcceptRichText(True)
         view.setPlaceholderText(placeholder)
         view.setMinimumHeight(80)
         vertical.addWidget(view, 1)
@@ -90,6 +108,9 @@ class LiveOutputPane(QFrame):
         self.toggle.setText("▴ Hide" if visible else "▾ Show")
 
     def begin(self, activity: str, model: str):
+        self._render_timer.stop()
+        self.raw_output = ""
+        self._complete = False
         self.received_reasoning = False
         self.reasoning.clear()
         self.output.clear()
@@ -103,35 +124,50 @@ class LiveOutputPane(QFrame):
 
     def receive_stream(self, kind: str, text: str):
         if kind == "reset":
+            self._render_timer.stop()
+            self.raw_output = ""
+            self._complete = False
             self.reasoning.clear()
             self.output.clear()
             self.received_reasoning = False
             self.status.setText(text or "Retrying…")
         elif kind == "reasoning":
             self.received_reasoning = True
-            self._append(self.reasoning, text)
+            self._append_reasoning(text)
         elif kind == "output":
-            self._append(self.output, text)
+            self.raw_output += text
+            if not self._render_timer.isActive():
+                self._render_timer.start()
         elif kind == "status":
             self.status.setText(text)
 
-    def _append(self, editor: QPlainTextEdit, value: str):
+    def _append_reasoning(self, value: str):
         if not value:
             return
-        scroll = editor.verticalScrollBar()
+        scroll = self.reasoning.verticalScrollBar()
         previous = scroll.value()
-        cursor = editor.textCursor()
+        cursor = self.reasoning.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
         cursor.insertText(value)
         if self.auto_scroll.isChecked():
-            editor.setTextCursor(cursor)
+            self.reasoning.setTextCursor(cursor)
             scroll.setValue(scroll.maximum())
         else:
             scroll.setValue(previous)
 
+    def _render_output(self):
+        scroll = self.output.verticalScrollBar()
+        at = scroll.value()
+        self.output.setHtml(structured_stream_html(self.raw_output, complete=self._complete))
+        if self.auto_scroll.isChecked():
+            scroll.setValue(scroll.maximum())
+        else:
+            scroll.setValue(at)
+
     def finish(self, success: bool):
+        self._render_timer.stop()
+        self._complete = success
+        self._render_output()
         self.status.setText("Complete" if success else "Generation failed")
         if not self.received_reasoning:
-            self.reasoning.setPlaceholderText(
-                "This model did not publish a reasoning summary."
-            )
+            self.reasoning.setPlaceholderText("This model did not publish a reasoning summary.")
