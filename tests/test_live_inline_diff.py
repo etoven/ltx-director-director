@@ -4,7 +4,7 @@ import subprocess
 import sys
 import unittest
 
-from ltx_prompt_director.ai_inline_diff import line_diff, select_streamed_text
+from ltx_prompt_director.ai_inline_diff import line_diff, select_streamed_text, rich_diff_html, typing_batch_size
 from ltx_prompt_director.diff_review import paragraph_changes, reviewed_text
 
 
@@ -51,6 +51,15 @@ editor.close()
                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                  text=True, env=env)
         self.assertEqual(process.returncode, 0, process.stdout + process.stderr)
+
+    def test_timeline_rich_diff_has_same_colors_and_typing_speed_as_prompt(self):
+        self.assertEqual(typing_batch_size(200), 28)
+        self.assertEqual(typing_batch_size(99999), 160)
+        html = rich_diff_html("Older text\n", "New text\n")
+        self.assertIn("#a7edbf", html)
+        self.assertIn("#ed969e", html)
+        self.assertIn("line-through", html)
+        self.assertIn("New&nbsp;text", html)
 
     def test_only_changed_sections_are_marked_not_entire_original(self):
         base = "subject_definitions\nPreserve identity\n\n00:00:01:00 - 00:00:02:00\nOriginal motion\n"

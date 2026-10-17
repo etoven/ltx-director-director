@@ -34,7 +34,7 @@ from .chatgpt_auth import ChatGPTAuth
 from .chatgpt_widgets import ChatGPTSettingsPanel
 from .ai_stream import STREAM_SINK
 from .stream_widgets import ReasoningActivityDock, LiveOutputPane
-from .ai_inline_diff import LiveTypingPreview
+from .ai_inline_diff import LiveTypingPreview, rich_diff_html, typing_batch_size
 from .diff_review import ParagraphDiffReview
 from .segment_plan import (supports_structured_edit, generate_combined, preview_operations,
                            build_segment_objects, stream_operations, completed_stream_records,
@@ -1965,6 +1965,25 @@ class SegmentCard(QFrame):
         self.artwork_overlay.setObjectName("artworkOverlay")
         self.artwork_overlay.move(7, 26)
         self.artwork_overlay.hide()
+        # A proposed timeline rewrite uses the same 80-ms, batched red/green
+        # typing/diff treatment as the unified prompt editor. It is ONLY a
+        # preview; project segment text is never mutated by the animation.
+        self.rewrite_overlay = QLabel(self.preview)
+        self.rewrite_overlay.setObjectName("timelineRewriteOverlay")
+        self.rewrite_overlay.setWordWrap(True)
+        self.rewrite_overlay.setTextFormat(Qt.TextFormat.RichText)
+        self.rewrite_overlay.setStyleSheet(
+            "QLabel#timelineRewriteOverlay{background:rgba(10,25,37,235);"
+            "border:0;border-radius:4px;color:#e8f5ff;padding:3px 5px}"
+        )
+        self.rewrite_overlay.hide()
+        self.rewrite_timer = QTimer(self)
+        self.rewrite_timer.setInterval(80)
+        self.rewrite_timer.timeout.connect(self._advance_rewrite_preview)
+        self.rewrite_base = ""
+        self.rewrite_target = ""
+        self.rewrite_shown = ""
+        self.rewrite_active = False
         if segment.artwork_status == "generating":
             self.artwork_timer.start()
             self._advance_artwork_shimmer()
@@ -2036,6 +2055,64 @@ class SegmentCard(QFrame):
         self.artwork_frame += 1
         self._show_artwork_placeholder()
 
+    def begin_rewrite_preview(self, before: str, after: str) -> None:
+        """Stream a read-only proposed rewrite over the unchanged timeline tile."""
+        if not after or before == after:
+            self.stop_rewrite_preview()
+            return
+        if self.rewrite_active and (before, after) == (self.rewrite_base, self.rewrite_target):
+            return  # Do not restart on every completed JSON record.
+        self.stop_rewrite_preview()
+        self.rewrite_base = before
+        self.rewrite_target = after
+        self.rewrite_shown = ""
+        self.rewrite_active = True
+        self._advance_rewrite_preview()
+
+    def _advance_rewrite_preview(self) -> None:
+        if not self.rewrite_active:
+            return
+        available = self.rewrite_target
+        remaining = len(available) - len(self.rewrite_shown)
+        if remaining <= 0:
+            self.rewrite_timer.stop()
+            return
+        self.rewrite_shown = available[:len(self.rewrite_shown) +
+                                       typing_batch_size(remaining)]
+        # For media, leave the source image uncovered except a small caption.
+        before, current = self.rewrite_base, self.rewrite_shown
+        if self.segment.kind == "text":
+            self.preview.setTextFormat(Qt.TextFormat.RichText)
+            self.preview.setText(rich_diff_html(before, current))
+        else:
+            self.rewrite_overlay.setText(rich_diff_html(before[-260:], current[-260:]))
+            self._position_rewrite_overlay()
+            self.rewrite_overlay.show()
+            self.rewrite_overlay.raise_()
+        if self.rewrite_shown != available:
+            self.rewrite_timer.start()
+
+    def _position_rewrite_overlay(self) -> None:
+        if not self.rewrite_active or self.segment.kind == "text":
+            return
+        width = max(40, self.preview.width() - 12)
+        self.rewrite_overlay.setFixedWidth(width)
+        self.rewrite_overlay.setMaximumHeight(58)
+        self.rewrite_overlay.adjustSize()
+        self.rewrite_overlay.move(6, max(3, self.preview.height() -
+                                          self.rewrite_overlay.height() - 4))
+
+    def stop_rewrite_preview(self) -> None:
+        if not self.rewrite_active:
+            return
+        self.rewrite_timer.stop()
+        self.rewrite_active = False
+        self.rewrite_target = self.rewrite_base = self.rewrite_shown = ""
+        self.rewrite_overlay.hide()
+        if self.segment.kind == "text":
+            self.preview.setTextFormat(Qt.TextFormat.PlainText)
+            self.preview.setText(self.segment.prompt or "Enter text prompt…")
+
     def set_timeline_edges(self, first: bool, last: bool) -> None:
         self.outer_layout.setContentsMargins(0 if first else 1, 0, 0 if last else 1, 0)
 
@@ -2081,6 +2158,7 @@ class SegmentCard(QFrame):
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         self.position_resolution_badge()
+        self._position_rewrite_overlay()
 
     def _preview_duration(self, value: float) -> None:
         self.duration_label.setText(f"{value:.2f}s")
@@ -7342,6 +7420,7 @@ class MainWindow(QMainWindow):
             for row in range(self.timeline.count()):
                 card = self.timeline.itemWidget(self.timeline.item(row))
                 if isinstance(card, SegmentCard):
+                    card.stop_rewrite_preview()
                     card.setStyleSheet("")
 
     def preview_ai_timeline_operations(self, operations):
@@ -7356,18 +7435,34 @@ class MainWindow(QMainWindow):
         )
         self.ai_edit_feed.setText("AI TIMELINE PLAN  " + (summary or "Reading segment JSON…"))
         self.ai_edit_feed.show()
-        by_id = {o["id"]: o["kind"] for o in operations if o.get("id")}
+        # A segment may move/retime AND be rewritten. Keep all operations
+        # rather than overwriting rewrite with the last operation kind.
+        by_id = {}
+        for op in operations:
+            if op.get("id"):
+                by_id.setdefault(op["id"], []).append(op)
         for row in range(self.timeline.count()):
             item = self.timeline.item(row)
             card = self.timeline.itemWidget(item)
             if isinstance(card, SegmentCard):
-                kind = by_id.get(item.data(Qt.ItemDataRole.UserRole))
-                color = "#76d5b6" if kind in {"add", "move"} else (
-                    "#f1ac66" if kind == "timing" else "#ed858a"
-                )
+                edits = by_id.get(item.data(Qt.ItemDataRole.UserRole), [])
+                rewrite = next((op for op in edits if op["kind"] == "rewrite"), None)
+                if rewrite is not None:
+                    old = card.segment
+                    if old.prompt != rewrite.get("prompt", old.prompt):
+                        card.begin_rewrite_preview(old.prompt, rewrite["prompt"])
+                    elif old.image_prompt != rewrite.get("imagePrompt", old.image_prompt):
+                        card.begin_rewrite_preview(old.image_prompt, rewrite["imagePrompt"])
+                else:
+                    card.stop_rewrite_preview()
+                kinds = {op["kind"] for op in edits}
+                # Rewrites use animated green/red text, NOT another tile border.
+                color = ("#76d5b6" if "move" in kinds or "add" in kinds else
+                         "#f1ac66" if "timing" in kinds else
+                         "#a9b6c0" if "role" in kinds else "")
                 card.setStyleSheet(
-                    f"QFrame#segmentCard{{border:2px solid {color};border-radius:7px}}"
-                    if kind else ""
+                    f"QFrame#segmentCard{{border:1px solid {color};border-radius:6px}}"
+                    if color else ""
                 )
         self.ai_timeline_status.setText(f"✦ {len(operations)} edits")
         self.ai_timeline_status.setToolTip(

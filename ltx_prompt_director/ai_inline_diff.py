@@ -9,6 +9,7 @@ before running the normal completion validator or rollback handling.
 from __future__ import annotations
 
 from difflib import SequenceMatcher
+from html import escape
 
 from PySide6.QtCore import QEvent, QObject, QSignalBlocker, QTimer
 from PySide6.QtGui import QColor, QTextCharFormat, QTextCursor, QTextDocument
@@ -51,6 +52,27 @@ def line_diff(base: str, candidate: str) -> list[tuple[str, str]]:
             if text:
                 spans.append(("added", text))
     return spans
+
+
+def typing_batch_size(remaining: int) -> int:
+    """Shared live-typing cadence for prompt editor and timeline card."""
+    return max(24, min(160, remaining // 7))
+
+
+def rich_diff_html(before: str, candidate: str) -> str:
+    """Use the SAME red/green inline diff colors on compact timeline tiles."""
+    styles = {
+        "equal": "color:#dbe7f5",
+        "added": "color:#a7edbf;background-color:#183f2c",
+        "removed": "color:#ed969e;background-color:#41242b;text-decoration:line-through",
+    }
+    content = "".join(
+        '<span style="' + styles[state] + '">' +
+        escape(chunk).replace("\n", "<br/>").replace(" ", "&nbsp;") +
+        "</span>"
+        for state, chunk in line_diff(before, candidate)
+    )
+    return '<div style="font-size:10px">' + content + "</div>"
 
 
 class LiveTypingPreview(QObject):
@@ -118,7 +140,7 @@ class LiveTypingPreview(QObject):
         if not available.startswith(self.rendered_candidate):
             self.rendered_candidate = ""
         remaining = len(available) - len(self.rendered_candidate)
-        step = max(24, min(160, remaining // 7))
+        step = typing_batch_size(remaining)
         candidate = available[:len(self.rendered_candidate) + step]
         self.rendered_candidate = candidate
         text = self.editor

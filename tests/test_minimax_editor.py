@@ -419,6 +419,39 @@ class UnifiedEditorTests(unittest.TestCase):
         self.assertTrue(w.director_intent_row.indexOf(w.prompt_scope) >= 0)
         self.assertEqual(len([x for x in w.findChildren(QPushButton, 'timelineButton') if x is w.magic_button]), 1)
 
+    def test_timeline_plan_rewrite_typing_matches_prompt_and_rolls_back(self):
+        w = self.make_window("minimax_frames")
+        w.resize(1200, 800)
+        w.show()
+        self.app.processEvents()
+        target = w.segments[0]
+        original = target.prompt
+        altered = original + "\nAdded transformation action and a close-up."
+        card = w.timeline.itemWidget(w.timeline.item(0))
+        self.assertFalse(card.rewrite_active)
+        w.preview_ai_timeline_operations([
+            {"kind": "rewrite", "id": target.id, "name": target.name,
+             "prompt": altered, "imagePrompt": target.image_prompt}
+        ])
+        self.assertTrue(card.rewrite_active)
+        self.assertEqual(card.rewrite_timer.interval(), w.inline_typing.timer.interval())
+        self.assertEqual(target.prompt, original)
+        self.assertGreater(len(card.rewrite_shown), 0)
+        self.assertLess(len(card.rewrite_shown), len(altered))
+        self.assertIn("#a7edbf", card.rewrite_overlay.text())
+        # Read-only diff disappears on provider rejection or workspace reset.
+        w._clear_ai_timeline_preview()
+        self.assertFalse(card.rewrite_active)
+        self.assertTrue(card.rewrite_overlay.isHidden())
+        self.assertEqual(target.prompt, original)
+        w.preview_ai_timeline_operations([
+            {"kind": "move", "id": target.id, "name": target.name, "position": 1},
+            {"kind": "rewrite", "id": target.id, "name": target.name,
+             "prompt": altered, "imagePrompt": target.image_prompt}
+        ])
+        self.assertTrue(card.rewrite_active)
+        w._clear_ai_timeline_preview()
+
     def test_combined_json_inserts_animated_artwork_placeholder_without_deleting_media(self):
         from unittest.mock import patch
         w = self.make_window('minimax_frames')
