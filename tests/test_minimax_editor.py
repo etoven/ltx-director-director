@@ -459,6 +459,27 @@ class UnifiedEditorTests(unittest.TestCase):
         self.assertTrue(card.rewrite_active)
         w._clear_ai_timeline_preview()
 
+        # The same text-diff animation also appears in a small overlay over
+        # image/video thumbnails; no project content changes until validation.
+        from ltx_prompt_director.models import Segment
+        from ltx_prompt_director.ui import SegmentCard
+        visual = Segment("Visual", "", "", "image", "start",
+                         "Maintain the original camera", 3.0)
+        media_card = SegmentCard(visual, 0.0, 115, 90)
+        media_card.resize(230, 172)
+        media_card.show()
+        media_card.begin_rewrite_preview(
+            visual.prompt, visual.prompt + "\nChange only the moonlight.")
+        self.assertTrue(media_card.rewrite_active)
+        self.assertEqual(media_card.rewrite_timer.interval(), 80)
+        while media_card.rewrite_shown != media_card.rewrite_target:
+            media_card._advance_rewrite_preview()
+        self.assertIn("#a7edbf", media_card.rewrite_overlay.text())
+        self.assertEqual(visual.prompt, "Maintain the original camera")
+        media_card.stop_rewrite_preview()
+        self.assertTrue(media_card.rewrite_overlay.isHidden())
+        media_card.close()
+
     def test_combined_json_inserts_animated_artwork_placeholder_without_deleting_media(self):
         from unittest.mock import patch
         w = self.make_window('minimax_frames')
