@@ -174,6 +174,8 @@ class UnifiedEditorTests(unittest.TestCase):
             self.assertEqual(w.segments[1].kind, "text")
             self.assertEqual(w.segments[1].artwork_status, "generating")
             w._artwork_jobs = 0
+            with patch.object(w, "save_library_project"):
+                w.close()
 
     def test_manual_image_artwork_uses_original_as_edit_source(self):
         from tempfile import TemporaryDirectory
@@ -209,6 +211,8 @@ class UnifiedEditorTests(unittest.TestCase):
             self.assertEqual(w.segments[0].media_path, str(before))
             self.assertEqual(w.segments[0].role, "start")
             w._artwork_jobs = 0
+            with patch.object(w, "save_library_project"):
+                w.close()
 
     def test_manual_artwork_denied_approval_does_not_start(self):
         from ltx_prompt_director.artwork_tools import ArtworkTool
