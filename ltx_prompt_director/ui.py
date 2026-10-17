@@ -7311,6 +7311,9 @@ class MainWindow(QMainWindow):
         """Run an AI-backed one-way alignment, never a unified refinement."""
         if self.ai_busy or not self.unified_workspace or self.prompt_only_workspace:
             return
+        # Finish any visual diff projection before reading the authoritative
+        # editor; rejected paragraphs must not leak into the AI request.
+        self.paragraph_review.finish()
         self.minimax_editor_changed()
         if not self.minimax_prompt_text.strip():
             self.minimax_panel.show_message(
@@ -7353,7 +7356,7 @@ class MainWindow(QMainWindow):
         )
 
     def sync_timeline_finished(self, result: dict) -> None:
-        """Apply validated timeline-only output and retain the source verbatim."""
+        """Reload AI-produced timeline JSON without touching the combined prompt."""
         before = self.ai_segment_snapshot
         self._clear_ai_timeline_preview()
         if (self.minimax_prompt_text != self.sync_timeline_source
@@ -7376,7 +7379,28 @@ class MainWindow(QMainWindow):
             return
         current = self.current_segment()
         selected_id = current.id if current else None
-        inserted = {item.id for item in updated} - {item.id for item in before}
+        original_ids = {item.id for item in before}
+        inserted = {item.id for item in updated} - original_ids
+
+        # Rendering is optional and ONLY for newly proposed image checkpoints.
+        # Retimed existing image segments keep precisely their original pixels.
+        requests = []
+        for row, item in zip(records, updated):
+            if row["id"] not in original_ids and str(row.get("artworkPrompt") or "").strip():
+                item.artwork_prompt = row["artworkPrompt"]
+                requests.append((item, row))
+        tool = None
+        to_render = []
+        if requests:
+            candidates = self._available_artwork_tools()
+            tool = candidates[0] if candidates else None
+            allow = bool(tool and self._approve_artwork_cost(tool))
+            for item, row in requests:
+                auto = allow and len(to_render) < 4
+                item.artwork_status = "generating" if auto else "awaiting"
+                if auto:
+                    to_render.append((item.id, dict(row)))
+
         self.timeline_review_pending = set()
         self.segments = updated
         selected = next(
@@ -7391,6 +7415,15 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             f"⇄ Timeline synchronized: {len(changes)} proposed changes; "
             "combined prompt unchanged", 8000)
+        for segment_id, row in to_render:
+            self._start_segment_artwork(segment_id, row, tool)
+        waiting = sum(item.artwork_status == "awaiting" for item in updated)
+        if waiting:
+            self.ai_edit_feed.setText(
+                f"✦ {waiting} new image checkpoint(s) awaiting rendering"
+                + (f" · {len(to_render)} rendering" if to_render else "")
+            )
+            self.ai_edit_feed.show()
 
     def refresh_primary_ai_action(self) -> None:
         """One button. Slash-marked edits and existing prose mean Refine."""
