@@ -365,10 +365,11 @@ def stream_operations(original: list[Segment], raw: str) -> list[dict]:
 
 
 def normalize_timeline_sync(raw, current, authoritative_prompt):
-    """Validate a full replacement timeline; never apply model-authored prompt text.
+    """Validate replacement timeline JSON; preserve real image/video assets.
 
-    New/missing beats become ordinary text tiles. Media assets keep their UUIDs,
-    roles and relative ordering; obsolete text tiles may be dropped.
+    Existing checkpoints can be retimed and rewritten, but never deleted or
+    replaced with an invented file. Unmatched beats can add text or proposed
+    image placeholders through the existing artwork rendering workflow.
     """
     response = ai._parse_json(raw)
     if not isinstance(response, dict) or not isinstance(response.get("segments"), list):
@@ -429,14 +430,27 @@ def sync_timeline_to_prompt(segments, provider, model, api_key, combined_prompt,
     ]
     rules = (
         "ONE-WAY TIMELINE SYNC. The combined prompt below is final and IMMUTABLE. "
-        "Do NOT rewrite, summarize, extend, correct or return it. Do not generate "
-        "artwork. Produce an entirely NEW ordered timeline JSON describing its "
-        "timed action and wording. Use the exact timecodes and scene order from "
-        "the combined prompt; preserve all explicitly requested dialogue, "
-        "identity and motion details in their matching intervals. "
-        "Create as many missing segments as needed (IDs new:1, new:2, ...). "
-        "Use text segments for timed motion beats. For a genuinely missing "
-        "image checkpoint explicitly required by the master prompt, propose "
+        "Do NOT rewrite, summarize, extend, correct or return it. "
+        "You are provided the CURRENT TIMELINE JSON and the ACTUAL CURRENT "
+        "IMAGE AND VIDEO CHECKPOINTS as multimodal inputs, each labeled with "
+        "its original segment position, ID, current timing and start/end role. "
+        "Look at the supplied pictures to match them to visual stages and "
+        "timestamps in the combined prompt; don't guess frame appearances "
+        "from text or invent unseen media. The old timeline times are "
+        "SUGGESTIONS ONLY. FIRST match each EXISTING image/video checkpoint "
+        "to the correct source prompt beat, retaining its original UUID and "
+        "actual media. Retime its duration and revise its segment prompt to "
+        "match the timecoded beat precisely. This INCLUDES existing image "
+        "segments: they may shorten or lengthen substantially. Their image "
+        "files and roles are unchanged. Produce an entirely NEW ordered "
+        "timeline JSON with exact times and matched wording. "
+        "Preserve all explicitly requested dialogue, identity and motion "
+        "details in their matching intervals. Add missing segments ONLY "
+        "when the source prompt contains an uncovered beat "
+        "(IDs new:1, new:2, ...). "
+        "Use text segments for timed motion beats. ONLY if a genuinely "
+        "missing image checkpoint cannot be represented by retiming ANY "
+        "existing image segment and is required by the master prompt, propose "
         "kind=image, role=start or end, with a detailed, nonempty artworkPrompt "
         "and imagePrompt describing the desired image. The application "
         "renders real pixels separately, and until then the new image is "
@@ -450,8 +464,11 @@ def sync_timeline_to_prompt(segments, provider, model, api_key, combined_prompt,
         "request kind=image role=start|end and a detailed artworkPrompt. "
         "Never invent audio attachments, video files, external media paths "
         "or source observations. Existing image/video assets are never edited. "
-        "Include every retained existing item only once. Give every segment "
-        "a meaningful action prompt and duration in seconds (0.01 to 3600). "
+        "Include every retained existing item only once. Preserve existing "
+        "imagePrompt wording unless an adjustment is essential to reflect "
+        "the authoritative combined prompt, and never return an artworkPrompt "
+        "for an existing media ID. Give every segment a meaningful action "
+        "prompt and duration in seconds (0.01 to 3600). "
         "An explicit time range controls duration; split into extra segments "
         "when required instead of losing timed beats. Preserve continuity "
         "and total time from the master combined prompt, with no gaps. "
@@ -460,10 +477,11 @@ def sync_timeline_to_prompt(segments, provider, model, api_key, combined_prompt,
         '"prompt":"timed action wording","imagePrompt":"","artworkPrompt":""}]}. '
         "For requested images use kind=image, role=start|end, nonempty "
         "artworkPrompt and imagePrompt; no media path. "
-        "NO combined prompt field and NO commentary.\\n"
-        "EXISTING TIMELINE AND MEDIA IDs:\\n"
+        "NO combined prompt field and NO commentary.\n"
+        "EXISTING TIMELINE AND MEDIA IDs (actual associated images are included "
+        "as separate labeled multimodal parts):\n"
         + json.dumps(current, ensure_ascii=False)
-        + "\\n\\nAUTHORITATIVE COMBINED PROMPT (READ ONLY):\\n"
+        + "\n\nAUTHORITATIVE COMBINED PROMPT (READ ONLY):\n"
         + combined_prompt
     )
     raw = ai._provider_raw(inputs, provider, model, api_key, rules, timeout)
