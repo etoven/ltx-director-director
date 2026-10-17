@@ -166,6 +166,10 @@ def generate_combined(segments, provider, model, api_key, intent, global_prompt,
                 "current_prompt": current_prompt, "refinement_instructions": refinement_instructions})
     # Preserve the original unified response contract in the provider prompt.
     # The new segment JSON is appended AFTER it and overrides transport only.
+    if workspace_engine != "generic":
+        # Exact same media-contract suffix as the existing MiniMax generation
+        # and refinement functions. No creative prompt text is rewritten.
+        rules += "\nCURRENT MEDIA CONTRACT: The asset map may include uploaded reference audio and video soundtracks. Audio-only video samples condition sound only. Follow the supplied labels and observation availability. Never invent unheard audio or visual observations. This overrides legacy template text saying audio references are unavailable."
     rules += ai.UNIFIED_PROMPT_TRANSPORT
     rules += response_contract(segments, current_prompt, refine=refine, focus=focus)
     raw = ai._provider_raw(inputs, provider, model, api_key, rules, timeout)
