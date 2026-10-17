@@ -374,7 +374,7 @@ class UnifiedEditorTests(unittest.TestCase):
             Image.new("RGB", (16, 9)).save(source)
             w.segments[0].kind = "image"
             w.segments[0].media_path = w.segments[0].preview_path = str(source)
-            w.segments[0].prompt = "Keep composition\\n/refine Edit this image to remove the fog"
+            w.segments[0].prompt = "Keep composition\n/refine Edit this image to remove the fog"
             w.refresh_timeline(0)
             w.ai_segment_snapshot = list(w.segments)
             w.minimax_operation_kind = "refine_frames"

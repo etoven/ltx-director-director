@@ -114,7 +114,7 @@ class SegmentPlanTests(unittest.TestCase):
     def test_explicit_refine_edit_not_regular_image_prose(self):
         self.assertEqual(
             segment_plan.explicit_existing_image_edit(
-                "Continue story\\n/refine Edit this image: remove the background object"),
+                "Continue story\n/refine Edit this image: remove the background object"),
             "Edit this image: remove the background object"
         )
         self.assertEqual(segment_plan.explicit_existing_image_edit(
@@ -330,7 +330,7 @@ class SegmentPlanTests(unittest.TestCase):
             source.write_bytes(output.getvalue())
             with patch.object(artwork_tools.requests, "post", return_value=Reply()) as post:
                 result = artwork_tools._gemini_image("Edit fur", tool, str(source))
-            self.assertTrue(result.startswith(b"\\x89PNG"))
+            self.assertTrue(result.startswith(b"\x89PNG"))
             parts = post.call_args.kwargs["json"]["contents"][0]["parts"]
             self.assertEqual(parts[0]["text"], "Edit fur")
             self.assertEqual(base64.b64decode(parts[1]["inlineData"]["data"]),
@@ -351,7 +351,7 @@ class SegmentPlanTests(unittest.TestCase):
             source.write_bytes(output.getvalue())
             with patch.object(artwork_tools.requests, "post", return_value=Reply()) as post:
                 result = artwork_tools._openai_image("Edit frame", tool, str(source))
-            self.assertTrue(result.startswith(b"\\x89PNG"))
+            self.assertTrue(result.startswith(b"\x89PNG"))
             self.assertTrue(post.call_args.args[0].endswith("/images/edits"))
             self.assertIn("image", post.call_args.kwargs["files"])
             self.assertEqual(post.call_args.kwargs["data"]["model"], "gpt-image-2")

@@ -186,11 +186,11 @@ def explicit_existing_image_edit(text: str) -> str:
     Never turn ordinary story prose mentioning images into billable image work.
     This reads ONLY explicit inline edit instructions from the user.
     """
-    for match in re.finditer(r"(?im)^\\s*/refine(?:-global)?\\s*:?[ \\t]+([^\\n]+)", text or ""):
+    for match in re.finditer(r"(?im)^\s*/refine(?:-global)?\s*:?[ \t]+([^\n]+)", text or ""):
         instruction = match.group(1).strip()
-        if (re.search(r"\\b(image|frame|picture|photo|still|artwork)\\b", instruction, re.I)
-                and re.search(r"\\b(edit|generate|regenerate|render|create|change|modify|"
-                              r"replace|remove|add|fix|alter|make|update)\\b", instruction, re.I)):
+        if (re.search(r"\b(image|frame|picture|photo|still|artwork)\b", instruction, re.I)
+                and re.search(r"\b(edit|generate|regenerate|render|create|change|modify|"
+                              r"replace|remove|add|fix|alter|make|update)\b", instruction, re.I)):
             return instruction
     return ""
 

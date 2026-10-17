@@ -2905,6 +2905,63 @@ class ProjectLibraryDock(QDockWidget):
             self.user_resized.emit(self.width(), self.height())
 
 
+class AIWorkingMarquee(QFrame):
+    """A small animated striped status, visible only during real AI work."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("aiWorkMarquee")
+        self.setFixedHeight(28)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self._phase = 0
+        self._title = "✦ AI working…"
+        self._clock = QTimer(self)
+        self._clock.setInterval(65)
+        self._clock.timeout.connect(self._animate)
+        self.hide()
+
+    def begin(self, title="✦ AI working…"):
+        self._title = title
+        self.setAccessibleName(title)
+        self._phase = 0
+        self.show()
+        if not self._clock.isActive():
+            self._clock.start()
+        self.update()
+
+    def finish(self):
+        self._clock.stop()
+        self.hide()
+
+    def _animate(self):
+        self._phase = (self._phase + 2) % 22
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        outer = self.rect().adjusted(1, 1, -1, -1)
+        painter.setPen(QPen(QColor("#42677d"), 1))
+        painter.setBrush(QColor("#152732"))
+        painter.drawRoundedRect(outer, 5, 5)
+        painter.save()
+        painter.setClipRect(outer.adjusted(2, 2, -2, -2))
+        painter.setPen(QPen(QColor("#42809e"), 1.6))
+        for x in range(-34 + self._phase, self.width() + 34, 22):
+            painter.drawLine(x, self.height() - 2, x + 16, 2)
+        painter.restore()
+        width = min(self.width() - 16,
+                    max(126, painter.fontMetrics().horizontalAdvance(self._title) + 28))
+        left = (self.width() - width) / 2
+        center = QRectF(left, 3, width, self.height() - 6)
+        painter.setPen(QPen(QColor("#548cab"), 1))
+        painter.setBrush(QColor("#172e3c"))
+        painter.drawRoundedRect(center, 5, 5)
+        painter.setPen(QColor("#d0eaff"))
+        painter.drawText(center, Qt.AlignmentFlag.AlignCenter, self._title)
+        painter.end()
+
+
 class MiniMaxPromptPanel(QFrame):
     """Inline MiniMax controls. The production editor belongs to MainWindow."""
 
@@ -2931,6 +2988,8 @@ class MiniMaxPromptPanel(QFrame):
         header.addWidget(self.cache_state)
         header.addStretch()
         layout.addLayout(header)
+        self.ai_marquee = AIWorkingMarquee(self)
+        layout.addWidget(self.ai_marquee)
         self.message_panel = QFrame()
         self.message_panel.setObjectName("minimaxMessagePanel")
         message_layout = QHBoxLayout(self.message_panel)
@@ -3016,6 +3075,12 @@ class MiniMaxPromptPanel(QFrame):
         self.cache_state.setToolTip(text)
 
     def show_message(self, text: str, level: str = "info", retry: bool = False) -> None:
+        if level == "timeline":
+            # This used to insert a permanent "Segment changes available"
+            # callout. The one Refine button already handles synchronization.
+            return
+        if level in {"error", "warning"}:
+            self.ai_marquee.finish()
         self.message_banner.setText(text)
         self.message_banner.setToolTip(text)
         self.message_panel.setProperty("level", level)
@@ -3041,6 +3106,10 @@ class MiniMaxPromptPanel(QFrame):
         self.busy = busy
         if status:
             self.set_cache_state(status)
+        if busy:
+            self.ai_marquee.begin("✦ " + (status or "AI working…"))
+        elif not getattr(self.owner, "_artwork_jobs", 0):
+            self.ai_marquee.finish()
         self.update_actions()
 
     def update_actions(self) -> None:
@@ -5316,9 +5385,8 @@ class MainWindow(QMainWindow):
         changed = signature != self._timeline_signature
         self._timeline_signature = signature
         self.update_conditioning_guide()
-        if changed and self.unified_workspace and not self.prompt_only_workspace and self.minimax_prompt_text.strip() and self.minimax_panel:
-            self.minimax_panel.set_cache_state("Segment changes available")
-            self.minimax_panel.show_message("Segment changes available. Regenerate to rebuild the unified draft from the timeline, or keep editing your draft.", "timeline")
+        # Segment edits remain authoritative. Do not occupy writing space with
+        # a persistent "Segment changes available" warning or extra button.
         if self.current_project_id:
             session = self.project_sessions.setdefault(self.current_project_id, {"name": self.current_project_name})
             session["dirty"] = True
@@ -7428,6 +7496,8 @@ class MainWindow(QMainWindow):
         item = next((item for item in self.segments if item.id == segment_id), None)
         if not item or tool is None or not item.artwork_prompt:
             return
+        self._artwork_jobs = getattr(self, "_artwork_jobs", 0) + 1
+        self.minimax_panel.ai_marquee.begin("✦ Rendering image…")
         item.artwork_status = "generating"
         row = next((i for i, s in enumerate(self.segments) if s.id == segment_id), -1)
         if row >= 0 and row < self.timeline.count():
@@ -7444,6 +7514,10 @@ class MainWindow(QMainWindow):
             request["sourceImage"] = item.media_path
 
         def ready(images):
+            self._artwork_jobs = max(0, getattr(self, "_artwork_jobs", 1) - 1)
+            if not self._artwork_jobs and not self.ai_busy:
+                self.minimax_panel.ai_marquee.finish()
+                self.ai_edit_feed.hide()
             if workspace != (self.workspace_revision, self.current_project_id, self.project_type):
                 return
             segment = next((s for s in self.segments if s.id == segment_id), None)
