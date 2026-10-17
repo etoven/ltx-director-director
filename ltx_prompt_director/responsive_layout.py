@@ -1,6 +1,6 @@
 """Compact native control rows that wrap within their panel's available width."""
 from PySide6.QtCore import QRect,QSize,Qt
-from PySide6.QtWidgets import QLayout
+from PySide6.QtWidgets import QLayout, QWidgetItem
 
 
 class ControlRow(QLayout):
@@ -8,6 +8,15 @@ class ControlRow(QLayout):
         super().__init__(parent);self._items=[];self.setSpacing(6)
 
     def addItem(self,item):self._items.append(item)
+    def insertWidget(self, index, widget):
+        """Insert a widget at a precise position in this compact flow row."""
+        if widget is None:
+            return
+        self.addChildWidget(widget)
+        position = max(0, min(int(index), len(self._items)))
+        self._items.insert(position, QWidgetItem(widget))
+        self.invalidate()
+
     def count(self):return len(self._items)
     def itemAt(self,index):return self._items[index] if 0<=index<len(self._items) else None
     def takeAt(self,index):return self._items.pop(index) if 0<=index<len(self._items) else None
