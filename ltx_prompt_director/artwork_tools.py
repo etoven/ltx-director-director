@@ -36,7 +36,7 @@ def available_artwork_tools(keys: dict[str, str], preferred: str = "") -> list[A
     for entitlement, billing, quota, and the model's live availability.
     """
     providers = {
-        "gemini": ArtworkTool("gemini", "gemini-nano-banana-2.1", str(keys.get("gemini") or "")),
+        "gemini": ArtworkTool("gemini", "gemini-3.1-flash-lite-image", str(keys.get("gemini") or "")),
         "openai": ArtworkTool("openai", "gpt-image-2.5-flare", str(keys.get("openai") or "")),
     }
     # ChatGPT OAuth is intentionally NOT a source of image-generation credentials.
@@ -78,53 +78,28 @@ def _openai_image(prompt: str, tool: ArtworkTool) -> bytes:
 
 
 def _gemini_image(prompt: str, tool: ArtworkTool) -> bytes:
-    headers = {"x-goog-api-key": tool.api_key, "Content-Type": "application/json"}
-    # Google currently recommends Nano Banana 2.1 via the Interactions API.
+    """Nano Banana 2 Lite using Google's documented generateContent REST API."""
     response = requests.post(
-        "https://generativelanguage.googleapis.com/v1beta/interactions",
-        headers=headers,
+        f"https://generativelanguage.googleapis.com/v1beta/models/"
+        f"{tool.model}:generateContent",
+        headers={"x-goog-api-key": tool.api_key,
+                 "Content-Type": "application/json"},
         json={
-            "model": tool.model,
-            "input": [{"type": "text", "text": prompt}],
-            "response_format": {"type": "image", "aspect_ratio": "16:9",
-                                "image_size": "1K"},
+            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+            "generationConfig": {
+                "responseModalities": ["IMAGE"],
+                "imageConfig": {"aspectRatio": "16:9", "imageSize": "1K"},
+            },
         },
         timeout=240,
     )
-    if response.status_code in (400, 404):
-        # Older accounts/API tiers may support Nano Banana 2 via generateContent
-        # even when 2.1's Interactions surface isn't enabled.
-        fallback = requests.post(
-            "https://generativelanguage.googleapis.com/v1beta/models/"
-            "gemini-3.1-flash-image:generateContent",
-            headers=headers,
-            json={
-                "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-                "generationConfig": {
-                    "responseModalities": ["TEXT", "IMAGE"],
-                    "imageConfig": {"aspectRatio": "16:9", "imageSize": "1K"},
-                },
-            },
-            timeout=240,
-        )
-        fallback.raise_for_status()
-        for candidate in fallback.json().get("candidates") or []:
-            for part in (candidate.get("content") or {}).get("parts") or []:
-                image = part.get("inlineData") or part.get("inline_data") or {}
-                if image.get("data"):
-                    return _decode(image["data"])
-        raise ValueError("Gemini returned no image data.")
     response.raise_for_status()
-    document = response.json()
-    interaction = document.get("interaction") or document
-    image = interaction.get("output_image") or interaction.get("outputImage") or {}
-    if image.get("data"):
-        return _decode(image["data"])
-    for step in interaction.get("steps") or []:
-        for content in step.get("output") or []:
-            if content.get("type") == "image" and content.get("data"):
-                return _decode(content["data"])
-    raise ValueError("Nano Banana returned no output image.")
+    for candidate in response.json().get("candidates", []):
+        for part in (candidate.get("content") or {}).get("parts", []):
+            image = part.get("inlineData") or part.get("inline_data") or {}
+            if image.get("data"):
+                return _decode(image["data"])
+    raise ValueError("Gemini Flash Lite returned no image data.")
 
 
 def render_artwork(records: list[dict], tool: ArtworkTool) -> dict[str, str]:
