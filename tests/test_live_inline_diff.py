@@ -11,13 +11,13 @@ from ltx_prompt_director.diff_review import paragraph_changes, reviewed_text
 class LiveInlineDiffTests(unittest.TestCase):
 
     def test_paragraph_review_reject_keeps_other_paragraphs(self):
-        before = "One original.\\n\\nTwo original.\\n\\nThree original."
-        after = "One revised.\\n\\nTwo original.\\n\\nThree revised."
+        before = "One original.\n\nTwo original.\n\nThree original."
+        after = "One revised.\n\nTwo original.\n\nThree revised."
         changes = paragraph_changes(before, after)
         self.assertEqual(sum(c.decision == "pending" for c in changes), 2)
         self.assertEqual(reviewed_text(changes), after)
         changes[0].decision = "rejected"
-        self.assertEqual(reviewed_text(changes), "One original.\\n\\nTwo original.\\n\\nThree revised.")
+        self.assertEqual(reviewed_text(changes), "One original.\n\nTwo original.\n\nThree revised.")
 
     def test_paragraph_review_is_compact_inside_editor(self):
         script = r'''
@@ -27,10 +27,10 @@ app = QApplication([])
 editor = QTextEdit()
 editor.resize(470, 400)
 editor.show()
-editor.setPlainText("First revised.\\n\\nSecond original.\\n\\nThird revised.")
+editor.setPlainText("First revised.\n\nSecond original.\n\nThird revised.")
 review = ParagraphDiffReview()
 assert review.begin(editor,
-                    "First original.\\n\\nSecond original.\\n\\nThird original.",
+                    "First original.\n\nSecond original.\n\nThird original.",
                     editor.toPlainText())
 app.processEvents()
 assert review.pending_count == 2
@@ -43,7 +43,7 @@ assert editor.toPlainText().startswith("First original.")
 assert editor.toPlainText().endswith("Third revised.")
 review.approve_all.setChecked(True)
 assert review.editor is None
-assert editor.toPlainText() == "First original.\\n\\nSecond original.\\n\\nThird revised."
+assert editor.toPlainText() == "First original.\n\nSecond original.\n\nThird revised."
 editor.close()
 '''
         env = dict(os.environ, QT_QPA_PLATFORM="offscreen")
