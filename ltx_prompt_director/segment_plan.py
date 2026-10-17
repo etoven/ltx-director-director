@@ -170,3 +170,57 @@ def generate_combined(segments, provider, model, api_key, intent, global_prompt,
     rules += response_contract(segments, current_prompt, refine=refine, focus=focus)
     raw = ai._provider_raw(inputs, provider, model, api_key, rules, timeout)
     return normalize_plan(raw, segments)
+
+
+
+def completed_stream_records(raw: str) -> list[dict]:
+    """Return only fully received segment objects from an unfinished JSON stream.
+
+    Never treats an incomplete field as an authoritative mutation.
+    """
+    matched = re.search(r'"segments"\s*:\s*\[', raw)
+    if not matched:
+        return []
+    decoder = json.JSONDecoder()
+    cursor = matched.end()
+    records = []
+    while len(records) < MAX_SEGMENTS:
+        while cursor < len(raw) and raw[cursor] in " \t\r\n,":
+            cursor += 1
+        if cursor >= len(raw) or raw[cursor] == "]":
+            break
+        try:
+            obj, amount = decoder.raw_decode(raw[cursor:])
+        except json.JSONDecodeError:
+            break
+        if not isinstance(obj, dict) or not isinstance(obj.get("id"), str):
+            break
+        records.append(obj)
+        cursor += amount
+    return records
+
+
+def stream_operations(original: list[Segment], raw: str) -> list[dict]:
+    """Progressive preview for fully decoded records, before final validation."""
+    by_id = {item.id: item for item in original}
+    indices = {item.id: i for i, item in enumerate(original)}
+    changes = []
+    for pos, item in enumerate(completed_stream_records(raw)):
+        before = by_id.get(item["id"])
+        if before is None:
+            if re.fullmatch(r"new:\d+", item["id"]):
+                changes.append({"kind": "add", "id": item["id"], "name": str(item.get("name", "New segment")), "position": pos})
+            continue
+        if indices[before.id] != pos:
+            changes.append({"kind": "move", "id": before.id, "name": before.name, "position": pos})
+        try:
+            duration = float(item.get("duration", before.duration))
+        except (TypeError, ValueError):
+            duration = before.duration
+        if math.isfinite(duration) and abs(duration-before.duration) > 0.005:
+            changes.append({"kind": "timing", "id": before.id, "name": before.name, "duration": duration})
+        if item.get("role", before.role) != before.role:
+            changes.append({"kind": "role", "id": before.id, "name": before.name, "role": item["role"]})
+        if item.get("prompt", before.prompt) != before.prompt:
+            changes.append({"kind": "rewrite", "id": before.id, "name": before.name})
+    return changes
