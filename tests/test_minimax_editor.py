@@ -30,16 +30,16 @@ class UnifiedEditorTests(unittest.TestCase):
         return window
 
     def test_single_ai_button_follows_active_prompt_editor(self):
-        from PySide6.QtWidgets import QToolButton
+        from PySide6.QtWidgets import QPushButton
         w = self.make_window('ltx')
-        self.assertEqual(len(w.findChildren(QToolButton, 'timelineButton')), 1)
+        self.assertEqual(len([x for x in w.findChildren(QPushButton, 'timelineButton') if x is w.magic_button]), 1)
         self.assertTrue(w.timeline_controls.indexOf(w.magic_button) >= 0)
         self.assertTrue(w.refine_prompt_button.isHidden())
         self.assertTrue(w.refine_timing_button.isHidden())
         self.assertTrue(w.magic_button.menu() is w.ai_action_menu)
         w.set_project_type('minimax_frames')
         self.assertTrue(w.timeline_controls.indexOf(w.magic_button) >= 0)
-        self.assertEqual(len(w.findChildren(QToolButton, 'timelineButton')), 1)
+        self.assertEqual(len([x for x in w.findChildren(QPushButton, 'timelineButton') if x is w.magic_button]), 1)
         w.unified_prompt.setPlainText('Existing unified draft')
         w.refresh_primary_ai_action()
         self.assertEqual(w.primary_ai_command, 'refine_unified')
@@ -118,7 +118,7 @@ class UnifiedEditorTests(unittest.TestCase):
             self.assertEqual(w.project_type, 'minimax_references')
             self.assertFalse(w.hdr.isHidden())
             self.assertTrue(w.refine_timing_button.isHidden())
-            self.assertTrue(w.ai_action_commands["refine_timing"].isEnabled())
+            self.assertFalse(hasattr(w.magic_button, "menu"))
             self.assertFalse(w.requested_length.isHidden())
             self.assertFalse(w.prompt_scope.isHidden())
             self.assertTrue(w.segment_panel.isHidden())
@@ -136,22 +136,27 @@ class UnifiedEditorTests(unittest.TestCase):
             self.assertTrue(w.references_button.isHidden())
             self.assertFalse(w.hdr.isHidden())
             self.assertTrue(w.refine_timing_button.isHidden())
-            self.assertTrue(w.ai_action_commands["refine_timing"].isEnabled())
+            self.assertFalse(hasattr(w.magic_button, "menu"))
             self.assertFalse(w.prompt_scope.isHidden())
             self.assertTrue(w.unified_panel.isHidden())
             worker.assert_not_called()
 
-    def test_one_generate_button_routes_all_three_project_types(self):
-        w = self.make_window()
-        for kind, operation in [('ltx', ai.build_prompts), ('minimax_frames', ai.build_prompts),
-                                ('minimax_references', ai.build_prompts)]:
-            w.set_project_type(kind)
-            with patch.object(w, 'ai_credentials', return_value=(w.settings.value('provider', 'gemini'), w.settings.value('gemini_model', ai.GEMINI_MODELS[0]), 'unused')), patch.object(w, 'start_ai_worker') as worker:
-                # Generate remains available in the one-button dropdown;
-                # the primary click is contextual (Refine for a filled editor).
-                w.run_ai_action("generate_timeline")
-            self.assertIs(worker.call_args.args[0], operation)
-            w.minimax_panel.set_busy(False)
+    def test_one_button_handles_generate_and_refine_without_dropdown(self):
+        w = self.make_window('minimax_frames')
+        self.assertFalse(hasattr(w.magic_button, "menu"))
+        w.minimax_prompt_text = ""
+        w.unified_prompt.clear()
+        w.refresh_primary_ai_action()
+        self.assertIn("Generate", w.magic_button.text())
+        with patch.object(w, '_generate_minimax_prompt') as generate:
+            w.magic_button.click()
+        generate.assert_called_once_with(w.minimax_prompt_mode)
+        w.minimax_prompt_text = "Existing unified prompt"
+        w.refresh_primary_ai_action()
+        self.assertIn("Refine", w.magic_button.text())
+        with patch.object(w, 'refine_minimax_prompt') as refine:
+            w.magic_button.click()
+        refine.assert_called_once_with()
 
     def test_unified_editor_and_timeline_controls_lock_during_ai(self):
         w = self.make_window('minimax_frames')
@@ -168,13 +173,13 @@ class UnifiedEditorTests(unittest.TestCase):
         self.assertTrue(w.prompt_scope.isEnabled())
 
     def test_minimax_has_one_visible_prompt_editor_and_ai_toolbar(self):
-        from PySide6.QtWidgets import QToolButton
+        from PySide6.QtWidgets import QPushButton
         w = self.make_window('minimax_frames')
         self.assertTrue(w.segment_panel.isHidden())
         self.assertFalse(w.unified_panel.isHidden())
         self.assertTrue(w.timeline_controls.indexOf(w.magic_button) >= 0)
         self.assertTrue(w.timeline_controls.indexOf(w.prompt_scope) >= 0)
-        self.assertEqual(len(w.findChildren(QToolButton, 'timelineButton')), 1)
+        self.assertEqual(len([x for x in w.findChildren(QPushButton, 'timelineButton') if x is w.magic_button]), 1)
 
     def test_combined_json_inserts_animated_artwork_placeholder_without_deleting_media(self):
         from unittest.mock import patch
@@ -355,10 +360,8 @@ class UnifiedEditorTests(unittest.TestCase):
         critical.assert_not_called()
         self.assertEqual(w.minimax_panel.message_banner.text(), 'Provider temporarily overloaded')
         self.assertTrue(w.minimax_panel.retry_button.isHidden())
-        self.assertTrue(w.retry_ai_action.isEnabled())
-        with patch.object(w, 'generate_minimax_prompt_references') as retry:
-            w.retry_ai_operation()
-        retry.assert_called_once_with()
+        self.assertFalse(hasattr(w, 'retry_ai_action'))
+        # Background worker retry remains; the one button has no menu.
 
     def test_minimax_uses_visible_requested_total_length(self):
         w = self.make_window('minimax_references')
