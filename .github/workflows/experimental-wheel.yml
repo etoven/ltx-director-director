@@ -68,11 +68,14 @@ jobs:
               ]
               code = (
                   "import os,sys,pytest; "
-                  f"rc=pytest.main({['-q', *selections]!r}); "
+                  f"rc=pytest.main({['-vv', *selections]!r}); "
                   "sys.stdout.flush(); sys.stderr.flush(); os._exit(rc)"
               )
               print(f"Qt regression batch {first // 6 + 1}: {len(selections)} tests", flush=True)
-              result = subprocess.run([sys.executable, "-X", "faulthandler", "-c", code])
+              result = subprocess.run(
+                  [sys.executable, "-X", "faulthandler", "-c", code],
+                  timeout=45,
+              )
               if result.returncode:
                   raise SystemExit(result.returncode)
           print(f"All {len(tests)} Qt editor tests passed.", flush=True)
