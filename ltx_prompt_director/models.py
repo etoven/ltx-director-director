@@ -22,6 +22,7 @@ class Segment:
     shot_trimmed: bool = False
     artwork_prompt: str = ""
     artwork_status: str = ""  # awaiting, generating, failed, complete
+    artwork_target_role: str = "start"
 
     def __post_init__(self) -> None:
         self.id = self.id or str(uuid4())
