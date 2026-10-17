@@ -1954,6 +1954,15 @@ class SegmentCard(QFrame):
             self.preview.setMargin(8)
             self.preview.setWordWrap(True)
             self.set_text_preview(segment.prompt)
+        self.artwork_frame = 0
+        self.artwork_timer = QTimer(self)
+        self.artwork_timer.setInterval(95)
+        self.artwork_timer.timeout.connect(self._advance_artwork_shimmer)
+        if segment.artwork_status == "generating":
+            self.artwork_timer.start()
+            self._advance_artwork_shimmer()
+        elif segment.artwork_status in {"awaiting", "failed"}:
+            self._show_artwork_placeholder()
         layout.addWidget(self.preview, 1)
         title = QLabel(segment.name if segment.kind == "text" else (segment.prompt or segment.name))
         title.setToolTip(segment.name)
@@ -1978,6 +1987,34 @@ class SegmentCard(QFrame):
         self.resize_handle.finished.connect(self.resize_finished)
         self.outer_layout.addWidget(self.resize_handle)
         self.update_layout(preview_height, pixels_per_second)
+
+    def _show_artwork_placeholder(self):
+        if self.segment.kind != "text" or not self.segment.artwork_prompt:
+            return
+        state = self.segment.artwork_status
+        label = ("✦  Generating artwork" if state == "generating" else
+                 "◌  Artwork failed · right-click to retry" if state == "failed" else
+                 "✦  Artwork requested · ready to render")
+        if state == "generating":
+            dots = "." * (self.artwork_frame % 4)
+            self.preview.setText(label + dots + "\n\n" + self.segment.prompt[:130])
+        else:
+            self.preview.setText(label + "\n\n" + self.segment.prompt[:130])
+        glow = (self.artwork_frame % 12) / 12
+        light = round(32 + glow * 35)
+        self.preview.setStyleSheet(
+            "QLabel#segmentPreview{border:1px solid #517ac0;border-radius:7px;"
+            f"background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #101b31,"
+            f"stop:0.40 rgb({light},{light+13},{light+49}),stop:0.65 #294c83,"
+            "stop:1 #111f37);color:#e4f0ff;padding:7px}"
+        )
+
+    def _advance_artwork_shimmer(self):
+        if self.segment.artwork_status != "generating":
+            self.artwork_timer.stop()
+            return
+        self.artwork_frame += 1
+        self._show_artwork_placeholder()
 
     def set_timeline_edges(self, first: bool, last: bool) -> None:
         self.outer_layout.setContentsMargins(0 if first else 1, 0, 0 if last else 1, 0)
