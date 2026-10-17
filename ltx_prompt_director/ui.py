@@ -6519,6 +6519,11 @@ class MainWindow(QMainWindow):
         self.segment_prompt.inline_cue_mode = False
         self.prompt_scope.setVisible(not prompt_only and self.workspace_engine != "shot_sequence")
         self.prompt_scope.model().item(2).setEnabled(self.unified_workspace)
+        if self.unified_workspace and not prompt_only and not getattr(self, "_prompt_scope_initialized", False):
+            self.prompt_scope.blockSignals(True)
+            self.prompt_scope.setCurrentIndex(2)
+            self.prompt_scope.blockSignals(False)
+            self._prompt_scope_initialized = True
         if not self.unified_workspace and self.prompt_scope.currentData() == "unified":
             self.prompt_scope.setCurrentIndex(0)
         self.render_artwork_toggle.setVisible(self.unified_workspace and not prompt_only)
@@ -7202,8 +7207,11 @@ class MainWindow(QMainWindow):
                 inserted.add(item.id)
                 item.artwork_prompt = data.get("artworkPrompt", "")
                 if item.artwork_prompt:
-                    item.artwork_status = "generating" if should_render else "awaiting"
-                    if should_render:
+                    # Limit paid automatic image requests to four per pass.
+                    # Remaining artwork directions stay visible and retryable.
+                    auto_render = should_render and len(to_render) < 4
+                    item.artwork_status = "generating" if auto_render else "awaiting"
+                    if auto_render:
                         to_render.append((item.id, dict(data)))
         if fit_sequence([item.duration for item in updated],
                         self.maximum_sequence_duration) != [item.duration for item in updated]:
@@ -7235,8 +7243,13 @@ class MainWindow(QMainWindow):
         self.ai_timeline_status.hide()
         for segment_id, data in to_render:
             self._start_segment_artwork(segment_id, data, image_key)
-        if any(row["id"].startswith("new:") and row.get("artworkPrompt")
-               for row in records) and not should_render:
+        waiting = sum(1 for seg in self.segments if seg.artwork_status == "awaiting")
+        if waiting and should_render:
+            self.ai_edit_feed.setText(
+                f"✦ {len(to_render)} artwork requests running · {waiting} awaiting manual render "
+                "(automatic batch limited to four images)"
+            )
+        if waiting and not should_render:
             self.ai_edit_feed.setText(
                 "✦ Artwork prompts saved. Enable Render artwork and configure "
                 "an OpenAI API key to generate the requested frames."
