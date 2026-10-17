@@ -42,13 +42,37 @@ jobs:
           QT_QPA_PLATFORM: offscreen
         run: |
           python -m pytest -q tests/test_project_duplicate.py tests/test_chatgpt_oauth.py tests/test_live_generation.py tests/test_stream_json.py tests/test_live_inline_diff.py tests/test_segment_plan.py
-          # Older Qt/PySide combinations can abort in Python's interpreter finalizer
-          # after tests have already completed. Preserve pytest's actual exit code
-          # but skip destructors for this isolated offscreen GUI test subprocess.
-          # Keep this Qt-toolbar reparenting test separate from GUI state
-          # retained by other QApplication-backed test cases.
-          python -X faulthandler -c 'import os,sys,pytest; rc=pytest.main(["-vv","tests/test_minimax_editor.py","-k","test_timeline_controls_relocated_into_main_toolbar_and_top_row_removed"]); sys.stdout.flush(); sys.stderr.flush(); os._exit(rc)'
-          python -X faulthandler -c 'import os,sys,pytest; rc=pytest.main(["-q","tests/test_minimax_editor.py","-k","not test_timeline_controls_relocated_into_main_toolbar_and_top_row_removed"]); sys.stdout.flush(); sys.stderr.flush(); os._exit(rc)'
+          # Qt objects and native animation timers can outlive a test method.
+          # Run every regression while keeping QApplication lifetimes bounded;
+          # retain each test's real exit status (never ignore crashes/failures).
+          python - <<'PY'
+          import ast
+          import subprocess
+          import sys
+          from pathlib import Path
+          
+          path = Path("tests/test_minimax_editor.py")
+          tree = ast.parse(path.read_text(encoding="utf-8"))
+          tests = sorted(
+              node.name for node in ast.walk(tree)
+              if isinstance(node, ast.FunctionDef) and node.name.startswith("test_")
+          )
+          for first in range(0, len(tests), 6):
+              selections = [
+                  f"tests/test_minimax_editor.py::UnifiedEditorTests::{name}"
+                  for name in tests[first:first + 6]
+              ]
+              code = (
+                  "import os,sys,pytest; "
+                  f"rc=pytest.main({['-q', *selections]!r}); "
+                  "sys.stdout.flush(); sys.stderr.flush(); os._exit(rc)"
+              )
+              print(f"Qt regression batch {first // 6 + 1}: {len(selections)} tests", flush=True)
+              result = subprocess.run([sys.executable, "-X", "faulthandler", "-c", code])
+              if result.returncode:
+                  raise SystemExit(result.returncode)
+          print(f"All {len(tests)} Qt editor tests passed.", flush=True)
+          PY
 
       - name: Build the wheel
         run: python -m build --wheel --outdir dist
