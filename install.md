@@ -16,7 +16,7 @@ You need **Python 3.10 or newer** and a desktop environment supported by Qt 6. A
 python3 -m venv ~/.venvs/ltx-director
 source ~/.venvs/ltx-director/bin/activate
 python -m pip install --upgrade pip
-python -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a55-py3-none-any.whl'
+python -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a56-py3-none-any.whl'
 prompt-director
 ```
 
@@ -26,7 +26,7 @@ prompt-director
 py -m venv "$env:USERPROFILE\ltx-director-venv"
 & "$env:USERPROFILE\ltx-director-venv\Scripts\Activate.ps1"
 python -m pip install --upgrade pip
-python -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a55-py3-none-any.whl'
+python -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a56-py3-none-any.whl'
 prompt-director
 ```
 
@@ -95,3 +95,11 @@ Gemini is streamed through `streamGenerateContent` with `includeThoughts` when a
 The Live AI Activity panel decodes JSON prompt content incrementally into readable field cards rather than showing escaped JSON syntax. Custom SVG icons identify reasoning summaries and generated prompt output. Live generated text is presentation-only until the AI response finishes validation.
 
 A completion is fingerprinted using the same provider and model that originally generated it. This fixes false "inputs changed" rejection when ChatGPT OAuth uses a model different from the Gemini default. Genuine concurrent timeline or editor changes preserve the completed prompt in a reviewable state: choose **Use generated result** to apply it explicitly or **Copy generated** to copy it without replacing your edits.
+
+## One contextual AI control and live in-editor diff
+
+Each active prompt editor now displays one contextual **Generate** or **Refine** split-button. Its dropdown exposes the available operations for that workspace: generate timeline prompts, generate unified prompt, refine unified prompt, refine selected segment, refine global direction and refine timing. There are no duplicate visible refine buttons or regenerate controls. The existing actions and worker paths are reused.
+
+Generated prompt text animates *inside the active text box*, with newly arriving text tinted red and removed/replaced passages struck through in muted red. Unchanged lines remain visible as anchors. This temporary diff does not enter project state, and the original QTextDocument/undo history is preserved. On completion or error the original editor document is restored before validating/applying the finished response. When a user begins to edit, inline animation suspends immediately, restores the original editor and yields to the user, with the existing result-conflict recovery available if necessary.
+
+Reasoning summaries and provider progress are displayed in a separate **AI ACTIVITY** Qt dock. The panel can be floated or docked; open it through the primary AI button dropdown. It automatically opens when the selected model publishes a reasoning summary. JSON model output is parsed incrementally so red typing shows decoded prompt prose rather than escape sequences or schema keys. If a model provides no text until completion, the normal validated result application still works.

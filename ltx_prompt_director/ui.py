@@ -26,14 +26,15 @@ from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
     QColorDialog, QDateTimeEdit, QDockWidget, QGraphicsOpacityEffect, QFileDialog, QFormLayout, QFrame, QHBoxLayout, QLabel, QLayout, QLineEdit,
     QListWidget, QListWidgetItem, QSplitter, QTabBar, QTabWidget, QMainWindow, QMenu, QMessageBox, QPushButton, QScrollArea,
-    QSizePolicy, QSlider, QSpinBox, QProgressBar, QStatusBar, QStyle, QStyledItemDelegate, QStyleOptionSlider, QStyleOptionViewItem, QTextEdit, QToolBar, QToolTip, QVBoxLayout, QWidget,
+    QSizePolicy, QSlider, QSpinBox, QProgressBar, QStatusBar, QStyle, QStyledItemDelegate, QStyleOptionSlider, QStyleOptionViewItem, QTextEdit, QToolBar, QToolButton, QToolTip, QVBoxLayout, QWidget,
 )
 
 from . import __version__
 from .chatgpt_auth import ChatGPTAuth
 from .chatgpt_widgets import ChatGPTSettingsPanel
 from .ai_stream import STREAM_SINK
-from .stream_widgets import LiveOutputPane
+from .stream_widgets import ReasoningActivityDock
+from .ai_inline_diff import LiveTypingPreview
 from .cache_maintenance import cover_path, mark_ready, needs_refresh, warm_metadata
 from .ai import AIResponseFormatError, GEMINI_MODELS, build_minimax_h3_prompt, build_minimax_h3_reference_prompt, build_prompts, minimax_h3_cache_key, provider_error_message, WORKSPACE_INSTRUCTIONS, refine_minimax_text_prompt, refine_minimax_h3_prompt, refine_minimax_h3_reference_prompt, refine_segment_prompt, refine_global_prompt, refine_timing, retryable_connection_error
 from .media import APP_CACHE, TIMELINE_VIDEO_SUFFIXES, comfy_input_references, copy_media_for_export, data_url, extract_audio_for_export, prepare_media, safe_media_filename, thumbnail_for_image, unique_media_filename, video_source_dimensions, write_data_url
@@ -2940,8 +2941,9 @@ class MiniMaxPromptPanel(QFrame):
         recovery = bool(getattr(self.owner, "pending_minimax_result", ""))
         self.recover_button.setVisible(recovery)
         self.copy_recovered_button.setVisible(recovery)
-        self.retry_button.setVisible(retry)
-        self.timeline_refine_button.setVisible(level == "timeline")
+        # One primary AI control owns all generation/refinement actions.
+        self.retry_button.hide()
+        self.timeline_refine_button.hide()
         self.message_panel.show()
 
     def clear_message(self) -> None:
@@ -3058,6 +3060,9 @@ class MainWindow(QMainWindow):
             QApplication.processEvents()
         self._apply_theme()
         self.magic_overlay = MagicBuildOverlay(self)
+        self.inline_typing = LiveTypingPreview(self)
+        self.reasoning_dock = ReasoningActivityDock(self)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.reasoning_dock)
         geometry = self.settings.value("window/geometry")
         state = self.settings.value("window/state")
         if geometry:
@@ -3393,12 +3398,34 @@ class MainWindow(QMainWindow):
         self.reduce_music.setObjectName("qualityToggle")
         self.reduce_music.setToolTip("Ask Magic Build for setting-specific ambient sound to discourage generated music")
         self.reduce_music.toggled.connect(self.mark_dirty)
-        self.magic_button = QPushButton("✦ Magic Build")
+        self.magic_button = QToolButton()
+        self.magic_button.setText("✦ Generate")
         self.magic_button.setObjectName("magicButton")
-        self.magic_button.clicked.connect(self.generate_project_prompt)
+        self.magic_button.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
+        self.magic_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        self.magic_button.clicked.connect(self.run_primary_ai_action)
+        self.ai_action_menu = QMenu(self.magic_button)
+        self.magic_button.setMenu(self.ai_action_menu)
+        self.ai_action_commands = {}
+        for key, label in (
+            ("generate_timeline", "✦ Generate timeline prompts"),
+            ("generate_unified", "✦ Generate unified prompt"),
+            ("refine_unified", "✎ Refine unified prompt"),
+            ("refine_segment", "✎ Refine selected segment"),
+            ("refine_global", "✎ Refine global direction"),
+            ("refine_timing", "⏱ Refine selected timing"),
+        ):
+            action = self.ai_action_menu.addAction(label)
+            action.triggered.connect(lambda checked=False, command=key: self.run_ai_action(command))
+            self.ai_action_commands[key] = action
+        self.ai_action_menu.addSeparator()
+        self.show_ai_activity_action = self.ai_action_menu.addAction("◈ Show AI Activity")
+        self.show_ai_activity_action.triggered.connect(self.toggle_ai_activity)
+        self.primary_ai_command = "generate_timeline"
         for button in (self.sfx, self.spoken_dialog, self.hdr, self.reduce_music, self.magic_button):
             button.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         intent_row.addWidget(self.intent, 1)
+        self.ai_workflow_row = workflow_row
         workflow_row.addWidget(self.magic_button)
         self.director_controls.addLayout(intent_row, 1)
         planning_row = ControlRow()
@@ -3494,8 +3521,10 @@ class MainWindow(QMainWindow):
         self.refine_prompt_button.setToolTip("Refine only the selected segment prompt using adjacent frames for continuity; may also adjust its duration; MiniMax then generates the unified prompt")
         self.refine_prompt_button.clicked.connect(self.refine_project_prompt)
         self.refine_prompt_button.setEnabled(False)
-        self.segment_header.addWidget(self.refine_timing_button)
-        self.segment_header.addWidget(self.refine_prompt_button)
+        # Compatibility-only controls; actions now live in the one AI menu.
+        # No duplicate refine buttons remain in prompt headers.
+        self.refine_timing_button.hide()
+        self.refine_prompt_button.hide()
         self.frame_number = QLabel("Frame —")
         self.frame_number.setObjectName("muted")
         self.start_button = QPushButton("Start frame")
@@ -3579,10 +3608,6 @@ class MainWindow(QMainWindow):
             editor.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Ignored)
         self.minimax_panel = MiniMaxPromptPanel(self)
         unified_layout.addWidget(self.minimax_panel)
-        self.live_activity = LiveOutputPane(self.unified_panel)
-        self.live_activity.setMaximumHeight(265)
-        self.live_activity.hide()
-        unified_layout.addWidget(self.live_activity)
         unified_layout.addWidget(self.unified_prompt, 1)
         self.unified_count = QLabel("0 characters")
         self.unified_count.setObjectName("muted")
@@ -5914,13 +5939,14 @@ class MainWindow(QMainWindow):
         return provider, self.settings.value("gemini_model", GEMINI_MODELS[0]), key
 
     def set_ai_controls_enabled(self, enabled: bool) -> None:
-        self.magic_button.setEnabled(enabled and not self.prompt_only_workspace)
+        self.magic_button.setEnabled(enabled and self.workspace_engine != "shot_sequence")
         self.ai_busy = not enabled
         segment = self.current_segment()
         self.refine_timing_button.setEnabled(enabled and not self.prompt_only_workspace and bool(segment))
         self.update_refine_prompt_enabled()
         if self.minimax_panel:
             self.minimax_panel.set_busy(not enabled)
+        self.refresh_primary_ai_action()
 
     def start_ai_worker(self, operation, args: tuple, activity: str, finished, show_main_overlay: bool = True) -> None:
         if self.ai_busy:
@@ -5941,9 +5967,9 @@ class MainWindow(QMainWindow):
             "Refine Prompt"
         )
         self.ai_activity_in_minimax = not show_main_overlay
-        if show_main_overlay:
-            self.magic_overlay.update_attempt(1, retries + 1, activity)
-            self.magic_overlay.show_overlay()
+        # Never cover the real prompt editor with a duplicate streaming window.
+        # All text edits animate inline; reasoning is in a dockable side panel.
+        self.magic_overlay.hide_overlay()
         instructions = (None if self.unified_workspace and operation in {build_prompts, refine_segment_prompt, refine_global_prompt, refine_timing}
                         else copy.deepcopy(self.workspace_definition.get("generation_prompts", {})))
         def workspace_operation(*values):
@@ -5961,8 +5987,34 @@ class MainWindow(QMainWindow):
             str(args[2]) if len(args) >= 3 else
             "Background task"
         )
-        self.active_live_panel = self.magic_overlay.live_stream if show_main_overlay else self.live_activity
+        self.active_live_panel = self.reasoning_dock
         self.active_live_panel.begin(activity, model)
+        self.inline_typing.finish()
+        target = None
+        kind = "unified"
+        selected_index = 0
+        if operation in {
+            build_minimax_h3_prompt, build_minimax_h3_reference_prompt,
+            refine_minimax_h3_prompt, refine_minimax_h3_reference_prompt,
+            refine_minimax_text_prompt, build_generic_prompt, refine_generic_prompt,
+        } and self.unified_workspace:
+            target = self.unified_prompt
+        elif operation in {refine_segment_prompt, refine_generic_segment}:
+            target = self.segment_prompt
+            kind = "segment"
+        elif operation is refine_global_prompt:
+            target = self.segment_prompt
+            kind = "global"
+        elif operation in {build_prompts, build_generic_segments} and self.segments:
+            target = self.segment_prompt
+            kind = "global" if self.prompt_scope.currentData() == "global" else "segment"
+            selected_index = max(0, self.timeline.currentRow()) if kind == "segment" else 0
+        if target is not None and target.isVisible():
+            # Save the authoritative text before any temporary red diff is shown.
+            baseline = (self.minimax_prompt_text if target is self.unified_prompt else
+                        self.global_prompt.toPlainText() if kind == "global" else
+                        self.segment_prompt.toPlainText())
+            self.inline_typing.start(target, baseline, kind, selected_index)
         worker.signals.stream.connect(self.ai_stream_received)
         worker.signals.progress.connect(self.magic_progress)
         self.ai_request_workspace = (self.workspace_revision, self.current_project_id, self.project_type)
@@ -5985,6 +6037,7 @@ class MainWindow(QMainWindow):
         return getattr(self, "ai_request_workspace", None) == (self.workspace_revision, self.current_project_id, self.project_type)
 
     def discard_obsolete_ai_result(self) -> None:
+        self.inline_typing.finish()
         self.set_ai_controls_enabled(True)
         self.magic_overlay.hide_overlay()
         self.statusBar().showMessage("AI result discarded because the project or workflow changed.")
@@ -5995,8 +6048,12 @@ class MainWindow(QMainWindow):
         pane = getattr(self, "active_live_panel", None)
         if pane is not None:
             pane.receive_stream(kind, text)
+            if kind == "reasoning" and text and not pane.isVisible():
+                pane.show()
+        self.inline_typing.receive(kind, text)
 
     def ai_result_received(self, result) -> None:
+        self.inline_typing.finish()
         if not self.ai_request_is_current():
             self.discard_obsolete_ai_result()
             return
@@ -6005,6 +6062,7 @@ class MainWindow(QMainWindow):
         self.ai_finished_callback(result)
 
     def ai_failure_received(self, error: str) -> None:
+        self.inline_typing.finish()
         if not self.ai_request_is_current():
             self.discard_obsolete_ai_result()
             return
@@ -6327,16 +6385,15 @@ class MainWindow(QMainWindow):
         self.segment_meta.setVisible(not prompt_only)
         self.segment_panel.setVisible(not prompt_only)
         self.director_panel.setVisible(not prompt_only)
-        self.magic_button.setVisible(not prompt_only)
-        if prompt_only:
-            self.segment_header.removeWidget(self.refine_prompt_button)
-            self.minimax_panel.header.addWidget(self.refine_prompt_button)
-        else:
-            self.minimax_panel.header.removeWidget(self.refine_prompt_button)
-            self.segment_header.addWidget(self.refine_prompt_button)
-        self.refine_prompt_button.show()
-        self.refine_prompt_button.setToolTip("Refine the current prompt using its inline annotations" if prompt_only else
-            "Refine the selected segment or global direction; MiniMax then generates the unified prompt")
+        self.magic_button.setVisible(True)
+        # Put the ONE contextual AI control immediately above the active
+        # editor. The Director's Intent bar remains free of duplicate actions.
+        self.ai_workflow_row.removeWidget(self.magic_button)
+        self.segment_header.removeWidget(self.magic_button)
+        self.minimax_panel.header.removeWidget(self.magic_button)
+        (self.minimax_panel.header if self.unified_workspace else self.segment_header).addWidget(self.magic_button)
+        self.refine_prompt_button.hide()
+        self.refine_timing_button.hide()
         self.minimax_panel.prompt_label.setText("PROMPT REFINEMENT" if prompt_only else "UNIFIED PROMPT")
         self.unified_prompt.setPlaceholderText("Write or paste a MiniMax prompt. Use / to add refinement annotations…" if prompt_only else
             "Generate the unified prompt from your segments, or write and refine your own…")
@@ -6354,14 +6411,13 @@ class MainWindow(QMainWindow):
         self.length_label.setVisible(True)
         self.output_size_control.setVisible(True)
         self.output_label.setVisible(True)
-        self.refine_timing_button.setVisible(not prompt_only)
-        self.magic_button.setText("✦ Magic Build")
-        self.magic_button.setToolTip("Build all segment prompts from the timeline")
+        self.refine_timing_button.hide()
+        self.magic_button.setToolTip("Primary AI action; use the adjacent arrow to select any generation/refinement mode")
         self.comfy_export_action.setVisible(self.workspace_engine in {"minimax_frames","minimax_references","minimax_prompt"})
         self.workflow_export_action.setVisible(ltx)
         self.timeline_import_action.setVisible(not prompt_only)
         self.delete_segment_action.setVisible(not prompt_only)
-        self.magic_button.setEnabled(not self.ai_busy and bool(self.workspace_definition) and not prompt_only)
+        self.refresh_primary_ai_action()
         visual = bool(self.current_segment() and self.current_segment().kind != "text")
         self.start_button.setVisible(visual)
         self.end_button.setVisible(visual)
@@ -6519,8 +6575,13 @@ class MainWindow(QMainWindow):
         text = self.unified_prompt.toPlainText() if self.prompt_only_workspace else self.segment_prompt.toPlainText()
         self.refine_prompt_button.setEnabled(not self.ai_busy and bool(text.strip()) and
                                             (self.prompt_only_workspace or bool(self.segments)))
+        self.refresh_primary_ai_action()
 
     def refresh_shared_editor(self) -> None:
+        # Workspace navigation and prompt-scope changes must never replace an
+        # editor's live diff projection and later restore the wrong document.
+        if hasattr(self, "inline_typing") and self.inline_typing.active:
+            self.inline_typing.suspend()
         if self.prompt_scope.currentData() == "global":
             value = self.global_prompt.toPlainText()
         else:
@@ -6571,6 +6632,88 @@ class MainWindow(QMainWindow):
     def show_reference_images(self) -> None:
         self.set_reference_panel_open(True)
         self.minimax_panel.reference_dock.raise_()
+
+    def refresh_primary_ai_action(self) -> None:
+        """The only visible Generate/Refine button adapts to the current editor."""
+        if not hasattr(self, "magic_button") or not hasattr(self, "ai_action_commands"):
+            return
+        try:
+            unified = self.unified_workspace
+            prompt_only = self.prompt_only_workspace
+            sequence = self.workspace_engine == "shot_sequence"
+        except (AttributeError, KeyError):
+            return
+        if not hasattr(self, "unified_prompt") or not hasattr(self, "segment_prompt"):
+            return
+        selected = self.current_segment() if hasattr(self, "timeline") else None
+        has_segments = bool(getattr(self, "segments", ()))
+        has_unified = bool(self.minimax_prompt_text.strip())
+        has_selected_prompt = bool(selected and selected.prompt.strip())
+        has_global = bool(self.global_prompt.toPlainText().strip())
+        scope = self.prompt_scope.currentData() if hasattr(self, "prompt_scope") else "segment"
+        if sequence:
+            primary = ""
+        elif unified:
+            primary = ("refine_unified" if has_unified else
+                       "generate_unified" if not prompt_only else "")
+        elif scope == "global" and has_global:
+            primary = "refine_global"
+        elif has_selected_prompt:
+            primary = "refine_segment"
+        else:
+            primary = "generate_timeline"
+        self.primary_ai_command = primary
+        choices = {
+            "generate_timeline": has_segments and not prompt_only and not sequence,
+            "generate_unified": unified and has_segments and not prompt_only and not sequence,
+            "refine_unified": unified and has_unified and not sequence,
+            "refine_segment": has_selected_prompt and not prompt_only and not sequence,
+            "refine_global": has_global and not prompt_only and not sequence,
+            "refine_timing": selected is not None and not prompt_only and not sequence,
+        }
+        for command, action in self.ai_action_commands.items():
+            action.setVisible(choices[command] or command in {"generate_timeline", "generate_unified"})
+            action.setEnabled(not self.ai_busy and choices[command])
+        labels = {
+            "generate_timeline": "✦ Generate",
+            "generate_unified": "✦ Generate",
+            "refine_unified": "✦ Refine",
+            "refine_segment": "✦ Refine",
+            "refine_global": "✦ Refine",
+            "": "✦ Generate / Refine",
+        }
+        self.magic_button.setText(labels[primary])
+        self.magic_button.setEnabled(bool(primary) and not self.ai_busy and not sequence)
+
+    def run_primary_ai_action(self) -> None:
+        self.run_ai_action(getattr(self, "primary_ai_command", ""))
+
+    def run_ai_action(self, command: str) -> None:
+        """Single entry point for all modes, preserving their established workers."""
+        if self.ai_busy:
+            return
+        if command == "generate_timeline":
+            self.magic_build()
+        elif command == "generate_unified" and self.unified_workspace and not self.prompt_only_workspace:
+            self._generate_minimax_prompt(self.minimax_prompt_mode)
+        elif command == "refine_unified" and self.unified_workspace:
+            self.refine_minimax_prompt()
+        elif command == "refine_segment" and not self.prompt_only_workspace:
+            if self.prompt_scope.currentData() == "global":
+                self.prompt_scope.setCurrentIndex(0)
+            self.refine_selected_prompt()
+        elif command == "refine_global" and not self.prompt_only_workspace:
+            if self.prompt_scope.isVisible():
+                self.prompt_scope.setCurrentIndex(1)
+            self.refine_global_direction()
+        elif command == "refine_timing" and not self.prompt_only_workspace:
+            self.refine_selected_timing()
+
+    def toggle_ai_activity(self) -> None:
+        dock = self.reasoning_dock
+        dock.setVisible(not dock.isVisible())
+        if dock.isVisible():
+            dock.raise_()
 
     def generate_project_prompt(self) -> None:
         if not self.ai_busy:
