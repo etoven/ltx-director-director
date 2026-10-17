@@ -5776,6 +5776,8 @@ class MainWindow(QMainWindow):
         self.provider_button.setText(f"✦ {label.replace('gemini-', 'Gemini ').replace('-', ' ').title() if provider == 'gemini' else label}")
 
     def timeline_menu(self, point) -> None:
+        if self.ai_busy:
+            return
         item = self.timeline.itemAt(point)
         if not item:
             return
@@ -5783,7 +5785,15 @@ class MainWindow(QMainWindow):
         segment = self.current_segment()
         menu = QMenu(self)
         if segment and segment.kind == "text":
-            menu.addAction("Edit text prompt", self.focus_segment_prompt)
+            if segment.artwork_prompt and segment.artwork_status in {"awaiting", "failed"}:
+                artwork_action = menu.addAction(
+                    "✦ Render requested artwork" if segment.artwork_status == "awaiting"
+                    else "↻ Retry artwork generation", self.retry_selected_artwork
+                )
+                artwork_action.setToolTip("Use separately billed OpenAI Images API")
+                menu.addSeparator()
+            if not self.unified_workspace:
+                menu.addAction("Edit text prompt", self.focus_segment_prompt)
             menu.addAction("Convert to image segment…", self.convert_text_segment_to_image)
         else:
             menu.addAction("Replace media", self.replace_selected)
@@ -5800,7 +5810,7 @@ class MainWindow(QMainWindow):
 
     def focus_segment_prompt(self) -> None:
         self.prompt_scope.setCurrentIndex(0)
-        self.segment_prompt.setFocus()
+        (self.unified_prompt if self.unified_workspace else self.segment_prompt).setFocus()
 
     def copy_selected_image(self) -> None:
         segment = self.current_segment()
@@ -7123,9 +7133,10 @@ class MainWindow(QMainWindow):
             if item.id in original else target_widths[i]
             for i, item in enumerate(self.segments)
         ]
-        height = max(80, self.timeline.height() - 32)
+        heights = [self.timeline.item(i).sizeHint().height()
+                   for i in range(self.timeline.count())]
         for index, width in enumerate(starting):
-            self.timeline.item(index).setSizeHint(QSize(width, height))
+            self.timeline.item(index).setSizeHint(QSize(width, heights[index]))
         self.timeline.doItemsLayout()
         animation = QVariantAnimation(self)
         animation.setDuration(1150)
@@ -7137,7 +7148,7 @@ class MainWindow(QMainWindow):
             for index, (left, right) in enumerate(zip(starting, target_widths)):
                 item = self.timeline.item(index)
                 if item:
-                    item.setSizeHint(QSize(round(left + (right-left) * value), height))
+                    item.setSizeHint(QSize(round(left + (right-left) * value), heights[index]))
             self.timeline.doItemsLayout()
             self.timeline.viewport().update()
 
