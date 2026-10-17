@@ -36,7 +36,7 @@ from .ai_stream import STREAM_SINK
 from .stream_widgets import ReasoningActivityDock, LiveOutputPane
 from .ai_inline_diff import LiveTypingPreview, rich_diff_html, typing_batch_size
 from .diff_review import ParagraphDiffReview
-from .segment_plan import (supports_structured_edit, generate_combined, preview_operations,
+from .segment_plan import (supports_structured_edit, generate_combined, sync_timeline_to_prompt, preview_operations,
                            build_segment_objects, stream_operations, completed_stream_records,
                            explicit_existing_image_edit)
 from .artwork_tools import IMAGE_MODEL_CHOICES, available_artwork_tools, render_artwork
@@ -4013,6 +4013,17 @@ class MainWindow(QMainWindow):
         self.unified_count.setObjectName("muted")
         # Heading, character count, cache state and copy share ONE title bar.
         self.minimax_panel.header.insertWidget(1, self.unified_count)
+        self.sync_timeline_button = QPushButton("⇄ Sync Timeline")
+        self.sync_timeline_button.setObjectName("refineButton")
+        self.sync_timeline_button.setToolTip(
+            "Match timeline segment wording and timing to the combined prompt below. "
+            "The combined prompt is never regenerated or changed. "
+            "Existing frames and videos are preserved.")
+        self.sync_timeline_button.setAccessibleName("Sync timeline from combined prompt")
+        self.sync_timeline_button.clicked.connect(self.sync_timeline_from_prompt)
+        self.sync_timeline_button.setSizePolicy(
+            QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.minimax_panel.header.addWidget(self.sync_timeline_button)
         self.minimax_panel.header.addWidget(self.minimax_panel.copy_button)
         unified_layout.addWidget(self.minimax_panel)
         unified_layout.addWidget(self.unified_prompt, 1)
@@ -6416,6 +6427,7 @@ class MainWindow(QMainWindow):
     def set_ai_controls_enabled(self, enabled: bool) -> None:
         self.magic_button.setEnabled(enabled and self.workspace_engine != "shot_sequence")
         self.ai_busy = not enabled
+        self.update_sync_timeline_enabled()
         # While streaming, every text source and timeline mutation control is
         # locked. Viewing/scrolling the timeline is still allowed.
         for editor in (self.unified_prompt, self.segment_prompt,
@@ -6468,6 +6480,7 @@ class MainWindow(QMainWindow):
             "MiniMax H3 Reference Refine" if operation is refine_minimax_h3_reference_prompt else
             "MiniMax H3 Frame Refine" if operation is refine_minimax_h3_prompt else
             "MiniMax Prompt Refinement" if operation is refine_minimax_text_prompt else
+            "MiniMax Timeline Sync" if operation is sync_timeline_to_prompt else
             "Refine Timing" if operation is refine_timing else
             "Refine Prompt"
         )
@@ -6965,6 +6978,7 @@ class MainWindow(QMainWindow):
         else:
             destination.insertWidget(index, self.magic_button)
         self.magic_button.show()
+        self.update_sync_timeline_enabled()
         self.refine_prompt_button.hide()
         self.refine_timing_button.hide()
         if hasattr(self, "paragraph_review"):
@@ -7279,12 +7293,113 @@ class MainWindow(QMainWindow):
         ]
         return any("/refine" in text.lower() for text in sources if text)
 
+
+    def update_sync_timeline_enabled(self) -> None:
+        """One dedicated sync action in any unified+timeline workspace."""
+        if not hasattr(self, "sync_timeline_button"):
+            return
+        available = (
+            self.unified_workspace and not self.prompt_only_workspace
+            and self.workspace_engine != "shot_sequence"
+        )
+        self.sync_timeline_button.setVisible(available)
+        self.sync_timeline_button.setEnabled(
+            available and not self.ai_busy and bool(self.segments)
+            and bool(self.minimax_prompt_text.strip())
+        )
+
+    def sync_timeline_from_prompt(self) -> None:
+        """Run an AI-backed one-way alignment, never a unified refinement."""
+        if self.ai_busy or not self.unified_workspace or self.prompt_only_workspace:
+            return
+        self.minimax_editor_changed()
+        if not self.segments or not self.minimax_prompt_text.strip():
+            self.minimax_panel.show_message(
+                "Write a combined prompt and add timeline segments before syncing.",
+                "warning")
+            return
+        credentials = self.ai_credentials()
+        if not credentials:
+            return
+        provider, model, key = credentials
+        if not supports_structured_edit(provider, model):
+            self.minimax_panel.show_message(
+                "Timeline synchronization requires a structured-capable GPT-6+ "
+                "or Gemini Flash model. Choose one in Settings.", "warning")
+            return
+        self.sync_timeline_source = self.minimax_prompt_text
+        self.ai_segment_snapshot = copy.deepcopy(self.segments)
+        self.ai_plan_raw = ""
+        self.ai_plan_record_count = 0
+        self.ai_plan_stream_active = True
+        if not hasattr(self, "_ai_plan_timer"):
+            self._ai_plan_timer = QTimer(self)
+            self._ai_plan_timer.setSingleShot(True)
+            self._ai_plan_timer.setInterval(90)
+            self._ai_plan_timer.timeout.connect(self._flush_ai_plan_preview)
+        self._clear_ai_timeline_preview()
+        self.ai_timeline_status.setText("⇄ Syncing timeline…")
+        self.ai_timeline_status.setToolTip(
+            "Aligning timeline wording and timecodes with the read-only combined prompt")
+        self.ai_timeline_status.show()
+        self.start_ai_worker(
+            sync_timeline_to_prompt,
+            (self.ai_segment_snapshot, provider, model, key,
+             self.sync_timeline_source,
+             self.settings.value("api_timeout", 400, int),
+             self.active_reference_images(), self.workspace_engine,
+             self.minimax_prompt_mode),
+            "Matching timeline timings and wording to the combined prompt…",
+            self.sync_timeline_finished, show_main_overlay=False,
+        )
+
+    def sync_timeline_finished(self, result: dict) -> None:
+        """Apply validated timeline-only output and retain the source verbatim."""
+        before = self.ai_segment_snapshot
+        self._clear_ai_timeline_preview()
+        if (self.minimax_prompt_text != self.sync_timeline_source
+                or self.unified_prompt.toPlainText() != self.sync_timeline_source):
+            self.set_ai_controls_enabled(True)
+            self.minimax_panel.show_message(
+                "The combined prompt changed during synchronization; no timeline "
+                "edits were applied.", "warning")
+            return
+        records = result["segments"]
+        changes = preview_operations(before, records)
+        updated = build_segment_objects(before, records)
+        durations = [item.duration for item in updated]
+        if fit_sequence(durations, self.maximum_sequence_duration) != durations:
+            self.set_ai_controls_enabled(True)
+            self.minimax_panel.show_message(
+                "Synchronized timing exceeds the workspace limit. "
+                "The existing timeline and combined prompt were not changed.",
+                "warning")
+            return
+        current = self.current_segment()
+        selected_id = current.id if current else None
+        inserted = {item.id for item in updated} - {item.id for item in before}
+        self.timeline_review_pending = set()
+        self.segments = updated
+        selected = next(
+            (i for i, item in enumerate(updated) if item.id == selected_id), 0)
+        self.refresh_timeline(selected)
+        self._animate_ai_timeline(before, inserted)
+        self._start_segment_review(before, updated, changes)
+        self.set_ai_controls_enabled(True)
+        self.ai_timeline_status.hide()
+        self.ai_edit_feed.hide()
+        self.mark_dirty()
+        self.statusBar().showMessage(
+            f"⇄ Timeline synchronized: {len(changes)} proposed changes; "
+            "combined prompt unchanged", 8000)
+
     def refresh_primary_ai_action(self) -> None:
         """One button. Slash-marked edits and existing prose mean Refine."""
         if not hasattr(self, "magic_button") or not hasattr(self, "prompt_scope"):
             return
         if not hasattr(self, "unified_prompt") or not hasattr(self, "segment_prompt"):
             return
+        self.update_sync_timeline_enabled()
         if self.workspace_engine == "shot_sequence":
             self.magic_button.setEnabled(False)
             self.magic_button.setText("✦ Generate")
@@ -7392,6 +7507,7 @@ class MainWindow(QMainWindow):
         self.minimax_prompt_updated_at = datetime.now(timezone.utc).isoformat()
         self.minimax_panel.update_actions()
         self.unified_count.setText(f"{len(value)} characters")
+        self.update_sync_timeline_enabled()
         self.update_refine_prompt_enabled()
         self.mark_dirty()
 
