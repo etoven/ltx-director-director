@@ -35,6 +35,8 @@ from .chatgpt_widgets import ChatGPTSettingsPanel
 from .ai_stream import STREAM_SINK
 from .stream_widgets import ReasoningActivityDock, LiveOutputPane
 from .ai_inline_diff import LiveTypingPreview
+from .segment_plan import (supports_structured_edit, generate_combined, preview_operations,
+                           build_segment_objects, stream_operations)
 from .cache_maintenance import cover_path, mark_ready, needs_refresh, warm_metadata
 from .ai import AIResponseFormatError, GEMINI_MODELS, build_minimax_h3_prompt, build_minimax_h3_reference_prompt, build_prompts, minimax_h3_cache_key, provider_error_message, WORKSPACE_INSTRUCTIONS, refine_minimax_text_prompt, refine_minimax_h3_prompt, refine_minimax_h3_reference_prompt, refine_segment_prompt, refine_global_prompt, refine_timing, retryable_connection_error
 from .media import APP_CACHE, TIMELINE_VIDEO_SUFFIXES, comfy_input_references, copy_media_for_export, data_url, extract_audio_for_export, prepare_media, safe_media_filename, thumbnail_for_image, unique_media_filename, video_source_dimensions, write_data_url
@@ -3270,6 +3272,10 @@ class MainWindow(QMainWindow):
         autofit.setObjectName("timelineButton")
         autofit.clicked.connect(self.autofit_timeline)
         self.timeline_controls.addWidget(autofit)
+        self.ai_timeline_status = QLabel("")
+        self.ai_timeline_status.setObjectName("timelineControlLabel")
+        self.ai_timeline_status.setToolTip("Live AI timeline edit preview; changes apply only after validated completion")
+        self.ai_timeline_status.hide()
         timeline_layout.addLayout(self.timeline_controls)
         ruler_row = QHBoxLayout()
         ruler_row.setContentsMargins(0, 0, 0, 0)
@@ -3515,8 +3521,20 @@ class MainWindow(QMainWindow):
         self.prompt_scope = QComboBox()
         self.prompt_scope.addItem("Selected segment", "segment")
         self.prompt_scope.addItem("Global prompt", "global")
+        self.prompt_scope.addItem("Unified prompt", "unified")
+        self.prompt_scope.setToolTip("AI editing target: selected segment, global direction or full unified prompt")
         self.prompt_scope.currentIndexChanged.connect(self.prompt_scope_changed)
-        self.segment_header.addWidget(self.prompt_scope)
+        self.timeline_controls.addWidget(self.magic_button)
+        self.timeline_controls.addWidget(self.prompt_scope)
+        self.timeline_controls.addWidget(self.ai_timeline_status)
+        self.render_artwork_toggle = QCheckBox("Render artwork")
+        self.render_artwork_toggle.setToolTip(
+            "Optional paid OpenAI Images API. Requires a separate OpenAI API key; ChatGPT OAuth does not support image generation."
+        )
+        self.render_artwork_toggle.setChecked(False)
+        self.timeline_controls.addWidget(self.render_artwork_toggle)
+        # Never create another prompt editor or a second Generate/Refine button.
+        self.magic_button.setObjectName("timelineButton")
         self.refine_timing_button = QPushButton("⏱ Refine Timing")
         self.refine_timing_button.setObjectName("refineButton")
         self.refine_timing_button.setToolTip("Analyze the existing sequence and retime only the selected segment; MiniMax then generates the unified prompt")
@@ -6383,22 +6401,20 @@ class MainWindow(QMainWindow):
         self.project_type_combo.blockSignals(False)
         self.prompt_label.setText("SEGMENT PROMPT")
         self.segment_prompt.inline_cue_mode = False
-        self.prompt_scope.setVisible(self.workspace_definition.get("global_prompt", False))
-        if not self.workspace_definition.get("global_prompt", False):
+        self.prompt_scope.setVisible(not prompt_only and self.workspace_engine != "shot_sequence")
+        self.prompt_scope.model().item(2).setEnabled(self.unified_workspace)
+        if not self.unified_workspace and self.prompt_scope.currentData() == "unified":
             self.prompt_scope.setCurrentIndex(0)
+        self.render_artwork_toggle.setVisible(self.unified_workspace and not prompt_only)
         self.unified_panel.setVisible(not ltx)
         self.timeline_shell.setVisible(not prompt_only)
         self.sequence_bar.setVisible(not prompt_only)
         self.segment_meta.setVisible(not prompt_only)
-        self.segment_panel.setVisible(not prompt_only)
+        self.segment_panel.setVisible(ltx and not prompt_only)
         self.director_panel.setVisible(not prompt_only)
         self.magic_button.setVisible(True)
-        # Put the ONE contextual AI control immediately above the active
-        # editor. The Director's Intent bar remains free of duplicate actions.
-        self.ai_workflow_row.removeWidget(self.magic_button)
-        self.segment_header.removeWidget(self.magic_button)
-        self.minimax_panel.header.removeWidget(self.magic_button)
-        (self.minimax_panel.header if self.unified_workspace else self.segment_header).addWidget(self.magic_button)
+        # Exactly one AI split-button lives in the shared Timeline control row.
+        # No per-editor duplicates: it is accessible in every supported mode.
         self.refine_prompt_button.hide()
         self.refine_timing_button.hide()
         self.minimax_panel.prompt_label.setText("PROMPT REFINEMENT" if prompt_only else "UNIFIED PROMPT")
@@ -6419,7 +6435,7 @@ class MainWindow(QMainWindow):
         self.output_size_control.setVisible(True)
         self.output_label.setVisible(True)
         self.refine_timing_button.hide()
-        self.magic_button.setToolTip("Primary AI action; use the adjacent arrow to select any generation/refinement mode")
+        self.magic_button.setToolTip("Generate / Refine for the target selected in the timeline toolbar")
         self.comfy_export_action.setVisible(self.workspace_engine in {"minimax_frames","minimax_references","minimax_prompt"})
         self.workflow_export_action.setVisible(ltx)
         self.timeline_import_action.setVisible(not prompt_only)
