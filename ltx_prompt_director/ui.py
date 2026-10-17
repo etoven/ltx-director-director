@@ -2166,8 +2166,12 @@ class SettingsDialog(QDialog):
         self.model = QComboBox()
         self.model.addItems(GEMINI_MODELS)
         self.model.setCurrentText(settings.value("gemini_model", GEMINI_MODELS[0]))
-        self.gemini = QLineEdit(settings.value("gemini_key", ""))
-        self.openai = QLineEdit(settings.value("openai_key", ""))
+        # Session-only keys remain available when reopening Settings even if
+        # the user declined persistent on-disk credential storage.
+        self.gemini = QLineEdit(str(parent.session_keys.get("gemini") or
+                                     settings.value("gemini_key", "") or ""))
+        self.openai = QLineEdit(str(parent.session_keys.get("openai") or
+                                     settings.value("openai_key", "") or ""))
         self.gemini.setEchoMode(QLineEdit.EchoMode.Password)
         self.openai.setEchoMode(QLineEdit.EchoMode.Password)
         self.openai_model = QComboBox()
