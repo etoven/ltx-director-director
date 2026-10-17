@@ -7125,34 +7125,37 @@ class MainWindow(QMainWindow):
             keys, str(self.settings.value("provider", "gemini"))
         )
 
-    def _approve_artwork_cost(self, tool):
-        """One-time per-backend informed approval, before any paid API call."""
-        setting = f"artwork/cost_approved/{tool.provider}"
-        if self.settings.value(setting, False, bool):
+    def _approve_artwork_cost(self, tool, *, manual=False):
+        """Ask once per provider; remember both approval and rejection."""
+        setting = f"artwork/cost_decision/{tool.provider}"
+        decision = str(self.settings.value(setting, ""))
+        if decision == "allow":
+            return True
+        if decision == "deny" and not manual:
+            return False
+        # Preserve previously granted approval from earlier builds.
+        if self.settings.value(f"artwork/cost_approved/{tool.provider}", False, bool):
             return True
         notice = QMessageBox(self)
         notice.setIcon(QMessageBox.Icon.Warning)
-        notice.setWindowTitle("Enable paid artwork generation")
+        notice.setWindowTitle("One-time paid artwork approval")
         notice.setText(f"Allow {tool.label} to generate timeline artwork?")
         notice.setInformativeText(
-            "A model may request artwork automatically in its segment JSON. "
-            "Each image is a separate API request billed to your "
-            f"{'Google Gemini' if tool.provider == 'gemini' else 'OpenAI API'} account, "
-            "not your ChatGPT subscription. Up to four images may be generated "
-            "per refinement; actual cost depends on model, image size, and usage. "
-            "You can decline and keep the artwork request for later."
+            "Artwork requested by your model's segment JSON is rendered using "
+            "a separately billed Gemini or OpenAI API key, NOT your ChatGPT plan. "
+            "Up to four images can be requested per refinement; charges depend "
+            "on the selected model and image size. Your choice is remembered "
+            "for this provider. If you decline, the artwork remains pending. "
+            "To change your mind, right-click a pending artwork tile and "
+            "choose Render requested artwork."
         )
         notice.setStandardButtons(
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         notice.setDefaultButton(QMessageBox.StandardButton.No)
-        remember = QCheckBox("Remember my approval; don't ask again for this provider")
-        remember.setChecked(True)
-        notice.setCheckBox(remember)
         approved = notice.exec() == QMessageBox.StandardButton.Yes
-        if approved and remember.isChecked():
-            self.settings.setValue(setting, True)
-            self.queue_settings_sync()
+        self.settings.setValue(setting, "allow" if approved else "deny")
+        self.queue_settings_sync()
         return approved
 
     def combined_refinement_finished(self, result):
@@ -7288,7 +7291,7 @@ class MainWindow(QMainWindow):
             )
             return
         tool = tools[0]
-        if not self._approve_artwork_cost(tool):
+        if not self._approve_artwork_cost(tool, manual=True):
             return
         self._start_segment_artwork(
             segment.id,
