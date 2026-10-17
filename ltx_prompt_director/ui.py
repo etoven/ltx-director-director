@@ -7304,8 +7304,7 @@ class MainWindow(QMainWindow):
         )
         self.sync_timeline_button.setVisible(available)
         self.sync_timeline_button.setEnabled(
-            available and not self.ai_busy and bool(self.segments)
-            and bool(self.minimax_prompt_text.strip())
+            available and not self.ai_busy and bool(self.minimax_prompt_text.strip())
         )
 
     def sync_timeline_from_prompt(self) -> None:
@@ -7313,9 +7312,9 @@ class MainWindow(QMainWindow):
         if self.ai_busy or not self.unified_workspace or self.prompt_only_workspace:
             return
         self.minimax_editor_changed()
-        if not self.segments or not self.minimax_prompt_text.strip():
+        if not self.minimax_prompt_text.strip():
             self.minimax_panel.show_message(
-                "Write a combined prompt and add timeline segments before syncing.",
+                "Write a combined prompt before syncing the timeline.",
                 "warning")
             return
         credentials = self.ai_credentials()
@@ -7737,12 +7736,31 @@ class MainWindow(QMainWindow):
         original = {item.id: item for item in before}
         target_widths = [self.timeline.item(i).sizeHint().width()
                          for i in range(self.timeline.count())]
-        starting = [
-            30 if item.id in inserted else
-            max(40, round(original[item.id].duration * self.pixels_per_second))
-            if item.id in original else target_widths[i]
-            for i, item in enumerate(self.segments)
-        ]
+        # A new beat grows from the nearest retained timeline tile. This
+        # permits a completely fresh JSON timeline without special insert
+        # logic; all tiles use the same existing smooth width interpolation.
+        def start_width(index, segment):
+            if segment.id in original:
+                return max(40, round(original[segment.id].duration * self.pixels_per_second))
+            candidates = [
+                (abs(other_index - index), other_index, original[other.id])
+                for other_index, other in enumerate(self.segments)
+                if other.id in original
+            ]
+            if candidates:
+                closest = min(candidates, key=lambda item: (item[0], item[1]))[2]
+                return min(target_widths[index], max(30, round(closest.duration * self.pixels_per_second * 0.35)))
+            return 30
+        starting = [start_width(i, item) for i, item in enumerate(self.segments)]
+        arriving = []
+        for i, item in enumerate(self.segments):
+            if item.id in inserted:
+                card = self.timeline.itemWidget(self.timeline.item(i))
+                if card is not None:
+                    effect = QGraphicsOpacityEffect(card)
+                    effect.setOpacity(0.03)
+                    card.setGraphicsEffect(effect)
+                    arriving.append((card, effect))
         heights = [self.timeline.item(i).sizeHint().height()
                    for i in range(self.timeline.count())]
         for index, width in enumerate(starting):
@@ -7759,11 +7777,19 @@ class MainWindow(QMainWindow):
                 item = self.timeline.item(index)
                 if item:
                     item.setSizeHint(QSize(round(left + (right-left) * value), heights[index]))
+            for _card, effect in arriving:
+                effect.setOpacity(max(0.03, float(value)))
             self.timeline.doItemsLayout()
             self.timeline.viewport().update()
 
+        def finished():
+            for card, effect in arriving:
+                card.setGraphicsEffect(None)
+                effect.deleteLater()
+            self.update_timeline_layout()
+
         animation.valueChanged.connect(update)
-        animation.finished.connect(self.update_timeline_layout)
+        animation.finished.connect(finished)
         self._ai_tile_animation = animation
         animation.start()
 
