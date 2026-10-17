@@ -5,7 +5,7 @@ import sys
 import unittest
 
 from ltx_prompt_director.ai_inline_diff import line_diff, select_streamed_text, rich_diff_html, typing_batch_size
-from ltx_prompt_director.diff_review import paragraph_changes, reviewed_text
+from ltx_prompt_director.diff_review import paragraph_changes, reviewed_text, removed_paragraph_html
 
 
 class LiveInlineDiffTests(unittest.TestCase):
@@ -18,6 +18,15 @@ class LiveInlineDiffTests(unittest.TestCase):
         self.assertEqual(reviewed_text(changes), after)
         changes[0].decision = "rejected"
         self.assertEqual(reviewed_text(changes), "One original.\n\nTwo original.\n\nThree revised.")
+
+    def test_removed_diff_renders_escaped_original_struck_out_in_red(self):
+        html = removed_paragraph_html("Old <Picture 1> & action\n")
+        self.assertIn("#ed969e", html)
+        self.assertIn("#41242b", html)
+        self.assertIn("text-decoration:line-through", html)
+        self.assertIn("&lt;Picture 1&gt;", html)
+        self.assertIn("&amp;", html)
+        self.assertNotIn("<Picture 1>", html)
 
     def test_paragraph_review_is_compact_inside_editor(self):
         script = r'''
@@ -37,12 +46,23 @@ assert review.pending_count == 2
 assert review.approve_all.text().endswith("Approve all")
 assert review.approve_all.parent() is editor
 assert len(review.buttons) == 2
+assert len(review.removed_labels) == 2
+assert all(lbl.isVisible() for lbl, _, _ in review.removed_labels)
+assert all("#ed969e" in lbl.text() and "line-through" in lbl.text()
+           for lbl, _, _ in review.removed_labels)
+assert all(editor.toPlainText().find("original.") != -1
+           for _ in review.removed_labels)
+assert "−" not in editor.toPlainText()
+# Green additions remain actual editable source, not HTML markup.
+assert "First revised." in editor.toPlainText()
 review.decide(0, False)
 assert review.pending_count == 1
+assert len(review.removed_labels) == 1
 assert editor.toPlainText().startswith("First original.")
 assert editor.toPlainText().endswith("Third revised.")
 review.approve_all.setChecked(True)
 assert review.editor is None
+assert not review.removed_labels
 assert editor.toPlainText() == "First original.\n\nSecond original.\n\nThird revised."
 editor.close()
 '''

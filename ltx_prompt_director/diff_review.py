@@ -8,11 +8,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from difflib import SequenceMatcher
+from html import escape
 import re
 
 from PySide6.QtCore import QEvent, QObject, QTimer, Qt
-from PySide6.QtGui import QColor, QTextCharFormat, QTextCursor
-from PySide6.QtWidgets import QCheckBox, QToolButton, QTextEdit
+from PySide6.QtGui import QColor, QTextBlockFormat, QTextCharFormat, QTextCursor
+from PySide6.QtWidgets import QCheckBox, QLabel, QToolButton, QTextEdit
 
 
 def paragraphs(text: str) -> list[str]:
@@ -54,6 +55,17 @@ def reviewed_text(parts: list[ParagraphChange]) -> str:
                    for piece in parts)
 
 
+def removed_paragraph_html(original: str) -> str:
+    """Red strikethrough deletion, matching the live red/green inline diff.
+
+    Escaping is required: prompts often contain <Picture 1> and JSON.
+    Display markup is NEVER inserted into the saved user prompt.
+    """
+    safe = escape(original.rstrip("\n")).replace("\n", "<br/>")
+    return ('<span style="color:#ed969e;background-color:#41242b;'
+            'text-decoration:line-through">− ' + safe + '</span>')
+
+
 def _utf16_len(text: str) -> int:
     """Qt QTextCursor indexes UTF-16 code units, including non-BMP characters."""
     return len(text.encode("utf-16-le")) // 2
@@ -72,6 +84,8 @@ class ParagraphDiffReview(QObject):
         self.editor = None
         self.parts: list[ParagraphChange] = []
         self.buttons = []
+        self.removed_labels = []
+        self._block_margins = []
         self.approve_all = None
         self._applying = False
 
@@ -149,12 +163,69 @@ class ParagraphDiffReview(QObject):
         scroll = scrollbar.value()
         self._applying = True
         try:
-            # Emits normal editor change signals so the existing project,
-            # cache, dirty flag and timeline are kept in sync.
+            # QTextEdit will replace the document. Remove transient block
+            # spacing first; neither those margins nor diff HTML are saved.
+            self._clear_deleted_previews()
+            # Emits the usual signals for cache, dirty flag and timeline.
             self.editor.setPlainText(new_value)
         finally:
             self._applying = False
         scrollbar.setValue(min(scroll, scrollbar.maximum()))
+
+    def _clear_deleted_previews(self):
+        editor = self.editor
+        for label, _offset, _space in self.removed_labels:
+            label.hide()
+            label.deleteLater()
+        self.removed_labels = []
+        if editor is not None and self._block_margins:
+            self._applying = True
+            try:
+                for offset, block_format in self._block_margins:
+                    cursor = QTextCursor(editor.document())
+                    cursor.setPosition(min(offset, editor.document().characterCount()-1))
+                    cursor.setBlockFormat(block_format)
+            finally:
+                self._applying = False
+        self._block_margins = []
+
+    def _add_deleted_preview(self, old: str, offset: int):
+        """Reserve space ABOVE the addition for its old red struck-out text.
+
+        This is only Qt paragraph formatting plus a read-only viewport label,
+        not new characters in the document or a second diff editor.
+        """
+        if not self.editor or not old.strip():
+            return
+        editor = self.editor
+        label = QLabel(editor.viewport())
+        label.setObjectName("diffRemovedLine")
+        label.setTextFormat(Qt.TextFormat.RichText)
+        label.setWordWrap(True)
+        label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        label.setText(removed_paragraph_html(old))
+        label.setToolTip("Removed text (original):\n" + old.rstrip())
+        label.setStyleSheet(
+            "QLabel#diffRemovedLine{background:#2f2027;border:0;"
+            "border-left:2px solid #b94e59;border-radius:2px;"
+            "color:#ed969e;font-size:10px;padding:2px 4px}"
+        )
+        width = max(100, editor.viewport().width()-55)
+        label.setFixedWidth(width)
+        height = max(21, label.heightForWidth(width))
+        label.setFixedHeight(height)
+        cursor = QTextCursor(editor.document())
+        cursor.setPosition(min(offset, editor.document().characterCount()-1))
+        fmt = QTextBlockFormat(cursor.blockFormat())
+        modified = QTextBlockFormat(fmt)
+        modified.setTopMargin(fmt.topMargin() + height + 3)
+        self._applying = True
+        try:
+            cursor.setBlockFormat(modified)
+        finally:
+            self._applying = False
+        self._block_margins.append((offset, fmt))
+        self.removed_labels.append((label, offset, height))
 
     def _refresh(self):
         editor = self.editor
@@ -164,6 +235,7 @@ class ParagraphDiffReview(QObject):
             accept.deleteLater()
             reject.deleteLater()
         self.buttons = []
+        self._clear_deleted_previews()
         selections = []
         offset = 0
         for index, part in enumerate(self.parts):
@@ -184,9 +256,14 @@ class ParagraphDiffReview(QObject):
                     "#47272d" if part.decision == "rejected" else
                     "#193b2b" if part.decision == "approved" else "#1b4530"
                 ))
+                if part.decision == "pending":
+                    highlight.format.setForeground(QColor("#a7edbf"))
                 selections.append(highlight)
             if part.decision != "pending":
                 continue
+            # Make the deletion truly visible in the diff, not just a
+            # tooltip: red struck-out original ABOVE green replacement.
+            self._add_deleted_preview(part.old, first)
             approve = QToolButton(editor.viewport())
             reject = QToolButton(editor.viewport())
             for control, label, accessible, tooltip, color in (
@@ -225,6 +302,22 @@ class ParagraphDiffReview(QObject):
             self.approve_all.move(max(2, editor.width() - self.approve_all.width() - 9), 2)
             self.approve_all.raise_()
         viewport = editor.viewport()
+        for label, offset, height in self.removed_labels:
+            cursor = QTextCursor(editor.document())
+            cursor.setPosition(min(offset, editor.document().characterCount()-1))
+            rect = editor.cursorRect(cursor)
+            y = rect.top() - height - 3
+            width = max(100, viewport.width()-55)
+            if width != label.width():
+                # Height changes only when the view changes width. Keep
+                # original formatting stable until the next refresh.
+                label.setFixedWidth(width)
+            if -height <= y < viewport.height():
+                label.move(4, y)
+                label.show()
+                label.raise_()
+            else:
+                label.hide()
         for approve, reject, offset in self.buttons:
             cursor = QTextCursor(editor.document())
             cursor.setPosition(min(offset, editor.document().characterCount() - 1))
@@ -245,6 +338,7 @@ class ParagraphDiffReview(QObject):
         if editor is None:
             self.parts = []
             return
+        self._clear_deleted_previews()
         self.editor = None
         editor.viewport().removeEventFilter(self)
         editor.removeEventFilter(self)
