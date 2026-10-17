@@ -112,7 +112,71 @@ class SegmentPlanTests(unittest.TestCase):
         self.assertIn("CURRENT SEGMENTS:", text)
         self.assertIn("Existing unified prompt", text)
         self.assertIn("ADDITIVE STRUCTURED", text)
-        self.assertLess(text.index(segment_plan.ai.UNIFIED_PROMPT_TRANSPORT.strip()), text.index("ADDITIVE STRUCTURED"))
+        self.assertNotIn("Do not return timed_actions, segment records", text)
+        self.assertNotIn("Prompt editing never rebuilds the timeline", text)
+        self.assertIn("ALWAYS include the complete nonempty segments array", text)
+
+    def test_image_only_combined_reply_gets_one_schema_repair_with_original_prose(self):
+        items = seeded()
+        original = "Original production brief, with requested generated artwork."
+        missing = json.dumps({"prompt": original})
+        new = {"id": "new:1", "name": "Requested frame", "kind": "image",
+               "role": "end", "duration": 2.5,
+               "prompt": "Continue the same shot to the generated frame",
+               "imagePrompt": "Lioness reference frame",
+               "artworkPrompt": "Render a photorealistic lioness at night"}
+        repaired = json.dumps({"prompt": "Unwanted replacement text",
+                               "segments": [record(items[0]), new, record(items[1])]})
+        with patch.object(segment_plan.ai, "_provider_raw", side_effect=[missing, repaired]) as provider, \
+             patch.object(segment_plan.ai, "_minimax_frames_inputs", return_value=[]):
+            result = segment_plan.generate_combined(
+                items, "openai", "gpt-6", "key", "intent: render an image",
+                "global", True, True, True, "Current draft",
+                "/refine create an image", 30, [], "minimax_frames",
+                "frames", True
+            )
+        self.assertEqual(provider.call_count, 2)
+        self.assertEqual(result["prompt"], original)
+        self.assertEqual([s["id"] for s in result["segments"]],
+                         ["seg-a", "new:1", "seg-b"])
+        self.assertEqual(result["segments"][1]["artworkPrompt"],
+                         "Render a photorealistic lioness at night")
+        self.assertEqual(result["segments"][1]["artworkRole"], "end")
+        self.assertIn("SCHEMA-ONLY REPAIR", provider.call_args.args[4])
+        built = segment_plan.build_segment_objects(items, result["segments"])
+        self.assertEqual([built[0].media_path, built[2].media_path],
+                         ["/tmp/a.png", "/tmp/b.png"])
+        self.assertIn("artwork", [x["kind"] for x in
+                                  segment_plan.preview_operations(items, result["segments"])])
+
+    def test_genuinely_invalid_segment_plan_is_not_silently_repaired(self):
+        items = seeded()
+        invalid = json.dumps({"prompt": "Untouched", "segments": [
+            dict(record(items[0]), id="invented-file"), record(items[1])]})
+        with patch.object(segment_plan.ai, "_provider_raw", return_value=invalid) as provider, \
+             patch.object(segment_plan.ai, "_minimax_frames_inputs", return_value=[]):
+            with self.assertRaises(segment_plan.ai.AIResponseFormatError):
+                segment_plan.generate_combined(
+                    items, "openai", "gpt-6", "key", "intent", "",
+                    True, True, True, "Current draft", "", 30, [],
+                    "minimax_frames", "frames", True
+                )
+        provider.assert_called_once()
+
+    def test_missing_segment_list_repair_fails_safely_without_looping(self):
+        items = seeded()
+        prompt_only = json.dumps({"prompt": "A complete production prompt."})
+        with patch.object(segment_plan.ai, "_provider_raw", side_effect=[
+                prompt_only, prompt_only]) as provider, \
+             patch.object(segment_plan.ai, "_minimax_frames_inputs", return_value=[]):
+            with self.assertRaisesRegex(segment_plan.ai.AIResponseFormatError,
+                                        "after one repair"):
+                segment_plan.generate_combined(
+                    items, "openai", "gpt-6", "key", "intent", "",
+                    True, True, True, "Current draft", "", 30, [],
+                    "minimax_frames", "frames", True
+                )
+        self.assertEqual(provider.call_count, 2)
 
     def test_gemini_flash_lite_is_preferred_when_chatgpt_oauth_is_selected(self):
         tools = artwork_tools.available_artwork_tools(

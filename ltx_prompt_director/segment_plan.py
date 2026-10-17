@@ -54,6 +54,11 @@ def response_contract(segments, current_prompt, *, refine, focus="all"):
         "Never provide external media paths or URLs, and do not change existing "
         "media kinds. Text items cannot use start/end role. "
         "The unified prompt and segments must describe exactly the same sequence. "
+        "ALWAYS include the complete nonempty segments array, including when "
+        "the request is only to generate an image; an artwork request is not "
+        "a substitute for the segment list. The array is REQUIRED for the "
+        "application to render the artwork and must contain every unchanged "
+        "existing segment alongside any new image proposal. "
         "Do not output anything outside JSON.\nCURRENT SEGMENTS:\n"
         + json.dumps(plan, ensure_ascii=False) + "\n"
         + "FOCUS: " + focus + "\n"
@@ -188,18 +193,61 @@ def generate_combined(segments, provider, model, api_key, intent, global_prompt,
             from .prompt_templates import render_workspace_prompt
             rules += render_workspace_prompt("minimax_frames", "refine", {
                 "current_prompt": current_prompt, "refinement_instructions": refinement_instructions})
-    # Preserve the original unified response contract in the provider prompt.
-    # The new segment JSON is appended AFTER it and overrides transport only.
+    # Retain the workspace production rules verbatim, but use ONE consistent
+    # response schema. The legacy UNIFIED_PROMPT_TRANSPORT explicitly forbids
+    # segment records and therefore cannot precede this combined contract.
     if workspace_engine != "generic":
         # Exact same media-contract suffix as the existing MiniMax generation
         # and refinement functions. No creative prompt text is rewritten.
         rules += "\nCURRENT MEDIA CONTRACT: The asset map may include uploaded reference audio and video soundtracks. Audio-only video samples condition sound only. Follow the supplied labels and observation availability. Never invent unheard audio or visual observations. This overrides legacy template text saying audio references are unavailable."
-    rules += ai.UNIFIED_PROMPT_TRANSPORT
     rules += response_contract(segments, current_prompt, refine=refine, focus=focus)
     raw = ai._provider_raw(inputs, provider, model, api_key, rules, timeout)
     # Return the validated plan immediately. Image rendering runs AFTER the
     # proposed segments have slid into the UI so the user sees progress.
-    return normalize_plan(raw, segments)
+    try:
+        return normalize_plan(raw, segments)
+    except ai.AIResponseFormatError as error:
+        if str(error) != "Invalid combined segment list.":
+            # Do not conceal invalid IDs, unsafe invented media or other
+            # genuinely malformed timeline mutations with a silent fallback.
+            raise
+        initial = ai._parse_json(raw)
+        original_prompt = initial.get("prompt") if isinstance(initial, dict) else None
+        if not isinstance(original_prompt, str) or not original_prompt.strip():
+            raise
+
+        # A model may obey its historical prompt-only JSON response format and
+        # omit the timeline array. Give it ONE schema-only repair opportunity,
+        # not another user-visible action, and preserve its original prose.
+        from .ai_stream import send_stream
+        send_stream("reset", "Completing missing combined segment JSON")
+        repair_rules = (
+            rules
+            + "\n\nSCHEMA-ONLY REPAIR: The previous output provided a unified "
+              "production prompt but omitted the REQUIRED nonempty ordered "
+              "segments array. Preserve the previous unified prompt VERBATIM; "
+              "do not rewrite it or reinterpret the creative request. Return "
+              "one JSON object with the unchanged prompt and a complete "
+              "segments array containing all retained current IDs, in order, "
+              "plus any requested new artwork tiles. To request artwork, add "
+              "a new:1/new:2 kind=image row with a detailed artworkPrompt and "
+              "imagePrompt; use the correct start/end role. Do not invent media "
+              "paths. This is a response format repair, not a second creative "
+              "refinement.\nPREVIOUS PROMPT-ONLY RESPONSE:\n"
+            + json.dumps(initial, ensure_ascii=False)
+        )
+        repaired_raw = ai._provider_raw(inputs, provider, model, api_key, repair_rules, timeout)
+        repaired = ai._parse_json(repaired_raw)
+        if not isinstance(repaired, dict) or not isinstance(repaired.get("segments"), list):
+            raise ai.AIResponseFormatError(
+                "Combined response was missing its segment plan even after one repair. "
+                "The existing prompt and timeline were left unchanged."
+            ) from error
+        # Never let the format-repair request silently replace the production
+        # text authored by the first response.
+        return normalize_plan(json.dumps({
+            "prompt": original_prompt, "segments": repaired["segments"]
+        }, ensure_ascii=False), segments)
 
 
 

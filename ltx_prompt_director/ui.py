@@ -6172,6 +6172,14 @@ class MainWindow(QMainWindow):
             if kind == "reasoning" and text and not pane.isVisible():
                 pane.show()
         self.inline_typing.receive(kind, text)
+        if kind == "reset" and getattr(self, "ai_plan_stream_active", False):
+            # An automatic format repair is a fresh provider stream. Do not
+            # concatenate its JSON with the previous incomplete reply.
+            self.ai_plan_raw = ""
+            self.ai_plan_record_count = 0
+            if hasattr(self, "_ai_plan_timer"):
+                self._ai_plan_timer.stop()
+            self._clear_ai_timeline_preview()
         if kind == "output" and getattr(self, "ai_plan_stream_active", False):
             self.ai_plan_raw += text
             if '"segments"' in self.ai_plan_raw and not self._ai_plan_timer.isActive():
