@@ -62,7 +62,7 @@ def word_diff(base: str, candidate: str) -> list[tuple[str, str]]:
     """
     import re
 
-    tokens = lambda text: re.findall(r"\\w+|[^\\w\\s]+|\\s+", text)
+    tokens = lambda text: re.findall(r"\w+|[^\w\s]+|\s+", text)
     previous, proposed = tokens(base), tokens(candidate)
     pieces: list[tuple[str, str]] = []
     for tag, i, j, m, n in SequenceMatcher(
