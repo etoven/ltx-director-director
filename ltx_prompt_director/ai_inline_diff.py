@@ -90,7 +90,7 @@ class LiveTypingPreview(QObject):
         editor.viewport().installEventFilter(self)
 
     def eventFilter(self, source, event):
-        if self.active and self.showing and not self._busy_render:
+        if self.active and not self._busy_render:
             if event.type() in (
                 QEvent.Type.KeyPress, QEvent.Type.InputMethod,
                 QEvent.Type.MouseButtonPress, QEvent.Type.Drop,
