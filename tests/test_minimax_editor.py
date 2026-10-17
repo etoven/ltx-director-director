@@ -228,7 +228,8 @@ class UnifiedEditorTests(unittest.TestCase):
         self.assertIs(w.timeline_scale.parent(), toolbar)
         self.assertIs(w.timeline_fit_button.parent(), toolbar)
         self.assertIs(w.output_size_control.parent(), toolbar)
-        self.assertIs(w.timeline_shell.layout().itemAt(0).widget(), w.ruler)
+        self.assertIs(w.timeline_shell.layout().itemAt(1).layout().itemAt(1).widget(),
+                      w.ruler)
         toolbar_widgets = [toolbar.widgetForAction(action)
                            for action in toolbar.actions()]
         positions = [toolbar_widgets.index(widget) for widget in (
