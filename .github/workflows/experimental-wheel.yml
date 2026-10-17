@@ -61,20 +61,21 @@ jobs:
               node.name for node in ast.walk(tree)
               if isinstance(node, ast.FunctionDef) and node.name.startswith("test_")
           )
-          for first in range(0, len(tests), 6):
+          # Per-test subprocesses prevent Qt native dialogs and timers from
+          # surviving into an unrelated editor regression.
+          for first in range(len(tests)):
               selections = [
-                  f"tests/test_minimax_editor.py::UnifiedEditorTests::{name}"
-                  for name in tests[first:first + 6]
+                  f"tests/test_minimax_editor.py::UnifiedEditorTests::{tests[first]}"
               ]
               code = (
                   "import os,sys,pytest; "
                   f"rc=pytest.main({['-vv', *selections]!r}); "
                   "sys.stdout.flush(); sys.stderr.flush(); os._exit(rc)"
               )
-              print(f"Qt regression batch {first // 6 + 1}: {len(selections)} tests", flush=True)
+              print(f"Qt regression {first + 1}/{len(tests)}: {tests[first]}", flush=True)
               result = subprocess.run(
                   [sys.executable, "-X", "faulthandler", "-c", code],
-                  timeout=45,
+                  timeout=25,
               )
               if result.returncode:
                   raise SystemExit(result.returncode)
