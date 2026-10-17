@@ -16,7 +16,7 @@ You need **Python 3.10 or newer** and a desktop environment supported by Qt 6. A
 python3 -m venv ~/.venvs/ltx-director
 source ~/.venvs/ltx-director/bin/activate
 python -m pip install --upgrade pip
-python -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a54-py3-none-any.whl'
+python -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a55-py3-none-any.whl'
 prompt-director
 ```
 
@@ -26,7 +26,7 @@ prompt-director
 py -m venv "$env:USERPROFILE\ltx-director-venv"
 & "$env:USERPROFILE\ltx-director-venv\Scripts\Activate.ps1"
 python -m pip install --upgrade pip
-python -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a54-py3-none-any.whl'
+python -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a55-py3-none-any.whl'
 prompt-director
 ```
 
@@ -89,3 +89,9 @@ ChatGPT-plan usage is subject to your account limits and selected-model eligibil
 Every prompt-generation and refinement action now displays the in-progress model output. Magic Build and segment/global refinements use a two-column generation overlay; MiniMax/Generic unified prompts display a collapsible Live AI Activity panel immediately above the editable prompt. The left column shows only provider-published reasoning **summaries** when the model provides them; the right column streams generated prompt text. Both columns have an Auto-scroll control. On retries the stream resets to avoid mixing separate attempts. The finished prompt is applied to the editable project only once the provider response passes its normal validation.
 
 Gemini is streamed through `streamGenerateContent` with `includeThoughts` when accepted. OpenAI API and ChatGPT OAuth use Responses streaming and request `reasoning.summary=auto` when supported. Non-thinking models still stream generated text; unsupported summary options automatically fall back to text-only streaming. Private reasoning and cryptographic thought signatures are never displayed.
+
+## Structured streaming and completed-draft recovery
+
+The Live AI Activity panel decodes JSON prompt content incrementally into readable field cards rather than showing escaped JSON syntax. Custom SVG icons identify reasoning summaries and generated prompt output. Live generated text is presentation-only until the AI response finishes validation.
+
+A completion is fingerprinted using the same provider and model that originally generated it. This fixes false "inputs changed" rejection when ChatGPT OAuth uses a model different from the Gemini default. Genuine concurrent timeline or editor changes preserve the completed prompt in a reviewable state: choose **Use generated result** to apply it explicitly or **Copy generated** to copy it without replacing your edits.

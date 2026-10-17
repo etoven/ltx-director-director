@@ -2857,6 +2857,12 @@ class MiniMaxPromptPanel(QFrame):
         self.message_banner.setMaximumHeight(40)
         self.message_banner.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         message_layout.addWidget(self.message_banner, 1)
+        self.recover_button = QPushButton("✓ Use generated result")
+        self.recover_button.clicked.connect(owner.apply_pending_minimax_result)
+        message_layout.addWidget(self.recover_button)
+        self.copy_recovered_button = QPushButton("□ Copy generated")
+        self.copy_recovered_button.clicked.connect(owner.copy_pending_minimax_result)
+        message_layout.addWidget(self.copy_recovered_button)
         self.retry_button = QPushButton("↻ Retry")
         self.retry_button.clicked.connect(owner.retry_minimax_operation)
         message_layout.addWidget(self.retry_button)
@@ -2931,6 +2937,9 @@ class MiniMaxPromptPanel(QFrame):
         self.message_panel.setProperty("level", level)
         self.message_panel.style().unpolish(self.message_panel)
         self.message_panel.style().polish(self.message_panel)
+        recovery = bool(getattr(self.owner, "pending_minimax_result", ""))
+        self.recover_button.setVisible(recovery)
+        self.copy_recovered_button.setVisible(recovery)
         self.retry_button.setVisible(retry)
         self.timeline_refine_button.setVisible(level == "timeline")
         self.message_panel.show()
@@ -2938,6 +2947,8 @@ class MiniMaxPromptPanel(QFrame):
     def clear_message(self) -> None:
         self.message_banner.clear()
         self.retry_button.hide()
+        self.recover_button.hide()
+        self.copy_recovered_button.hide()
         self.timeline_refine_button.hide()
         self.message_panel.hide()
 
@@ -2950,6 +2961,8 @@ class MiniMaxPromptPanel(QFrame):
     def update_actions(self) -> None:
         self.copy_button.setEnabled(bool(self.editor.toPlainText().strip()))
         self.retry_button.setEnabled(not self.busy)
+        self.recover_button.setEnabled(not self.busy)
+        self.copy_recovered_button.setEnabled(bool(getattr(self.owner, "pending_minimax_result", "")))
         self.timeline_refine_button.setEnabled(not self.busy)
 
     def focus_prompt_editor(self) -> None:
@@ -2985,6 +2998,7 @@ class MainWindow(QMainWindow):
         self.minimax_prompt_updated_at = ""
         self.minimax_prompt_mode = "frames"
         self.minimax_reference_images = [None] * 4
+        self.pending_minimax_result = ""
         self.minimax_panel: MiniMaxPromptPanel | None = None
         self.workspace_store = WorkspaceStore()
         self.workspace_definitions = self.workspace_store.load()
@@ -6753,6 +6767,7 @@ class MainWindow(QMainWindow):
         provider, model, key = credentials
         signature = self.current_minimax_cache_key(provider, model)
         self.minimax_operation_signature = signature
+        self.minimax_operation_provider_model = (provider, model)
         self.minimax_operation_kind = f"generate_{mode}"
         self.minimax_operation_editor_snapshot = (
             self.minimax_prompt_text,
@@ -6778,23 +6793,33 @@ class MainWindow(QMainWindow):
 
     def minimax_h3_finished(self, prompt: str) -> None:
         signature = str(getattr(self, "minimax_operation_signature", ""))
-        if not signature or signature != self.current_minimax_cache_key():
+        # Compare the exact provider/model used to start the request. The old
+        # default-model comparison rejected successful ChatGPT completions.
+        provider_model = getattr(self, "minimax_operation_provider_model", None)
+        current_signature = self.current_minimax_cache_key(*provider_model) if provider_model else self.current_minimax_cache_key()
+        if not signature or signature != current_signature:
+            self.pending_minimax_result = prompt
             self.set_ai_controls_enabled(True)
             self.magic_overlay.hide_overlay()
             if self.minimax_panel:
-                self.minimax_panel.set_busy(False, "Inputs changed • generate again")
-                self.minimax_panel.show_message("The MiniMax result was not applied because the timeline or references changed while it was running. Generate again.", "warning")
+                self.minimax_panel.set_busy(False, "Completed prompt ready for review")
+                self.minimax_panel.show_message(
+                    "The completed result was not applied automatically because the input fingerprint differs. "
+                    "The generated text is preserved and can be used or copied below.", "warning")
             return
         editor_snapshot = (
             self.minimax_prompt_text,
             self.minimax_refinement_instructions,
         )
         if editor_snapshot != getattr(self, "minimax_operation_editor_snapshot", editor_snapshot):
+            self.pending_minimax_result = prompt
             self.set_ai_controls_enabled(True)
             self.magic_overlay.hide_overlay()
             if self.minimax_panel:
-                self.minimax_panel.set_busy(False, "Editor changed • result not applied")
-                self.minimax_panel.show_message("The MiniMax result was not applied because you edited the prompt while it was running. Refine again when ready.", "warning")
+                self.minimax_panel.set_busy(False, "Completed prompt ready for review")
+                self.minimax_panel.show_message(
+                    "The completed result was not applied automatically because the editor changed. "
+                    "The generated text is preserved and can be used or copied below.", "warning")
             return
         operation = str(getattr(self, "minimax_operation_kind", "generate_frames"))
         if operation.startswith("refine_"):
@@ -6804,6 +6829,7 @@ class MainWindow(QMainWindow):
         if unchanged:
             prompt = self.minimax_prompt_text
         self.minimax_prompt_text = prompt
+        self.pending_minimax_result = ""
         self.minimax_prompt_updated_at = datetime.now(timezone.utc).isoformat()
         self.set_ai_controls_enabled(True)
         self.magic_overlay.hide_overlay()
@@ -6829,6 +6855,33 @@ class MainWindow(QMainWindow):
             "success",
         )
 
+    def copy_pending_minimax_result(self) -> None:
+        prompt = str(getattr(self, "pending_minimax_result", ""))
+        if prompt:
+            QApplication.clipboard().setText(prompt)
+            self.statusBar().showMessage("Generated prompt copied to clipboard", 4500)
+
+    def apply_pending_minimax_result(self) -> None:
+        prompt = str(getattr(self, "pending_minimax_result", ""))
+        if not prompt or self.ai_busy:
+            return
+        response = QMessageBox.question(
+            self, "Use generated result",
+            "The generated prompt was held for review. Replace the current unified prompt with it? "
+            "Choose No to retain your edits, or Copy generated to keep both.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if response != QMessageBox.StandardButton.Yes:
+            return
+        # Deliberate user approval permits using an otherwise stale generation.
+        provider_model = getattr(self, "minimax_operation_provider_model", None)
+        self.minimax_operation_signature = self.current_minimax_cache_key(*provider_model) if provider_model else self.current_minimax_cache_key()
+        self.minimax_operation_editor_snapshot = (
+            self.minimax_prompt_text, self.minimax_refinement_instructions,
+        )
+        self.minimax_h3_finished(prompt)
+
     def refine_minimax_prompt(self) -> None:
         if self.ai_busy:
             return
@@ -6845,6 +6898,7 @@ class MainWindow(QMainWindow):
         provider, model, key = credentials
         signature = self.current_minimax_cache_key(provider, model)
         self.minimax_operation_signature = signature
+        self.minimax_operation_provider_model = (provider, model)
         reference_mode = self.minimax_prompt_mode == "references"
         self.minimax_operation_kind = "refine_references" if reference_mode else "refine_frames"
         self.minimax_operation_editor_snapshot = (

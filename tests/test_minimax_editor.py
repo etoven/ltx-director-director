@@ -141,6 +141,40 @@ class UnifiedEditorTests(unittest.TestCase):
         self.assertIn('not applied', w.minimax_panel.message_banner.text())
 
 
+    def test_unchanged_timeline_accepts_chatgpt_model_completion(self):
+        w = self.make_window('minimax_frames')
+        w.unified_prompt.setPlainText('Original draft')
+        # The old completion code recomputed the signature using the Gemini
+        # model even though the request was sent through ChatGPT.
+        w.minimax_operation_provider_model = ('chatgpt', 'gpt-6')
+        w.minimax_operation_signature = w.current_minimax_cache_key('chatgpt', 'gpt-6')
+        w.minimax_operation_editor_snapshot = ('Original draft', '')
+        w.minimax_operation_kind = 'generate_frames'
+        w.minimax_h3_finished('Successful generated result')
+        self.assertEqual(w.minimax_prompt_text, 'Successful generated result')
+        self.assertIn('Successful generated result', w.unified_prompt.toPlainText())
+        self.assertFalse(w.pending_minimax_result)
+
+    def test_actual_input_change_preserves_generated_result_for_explicit_use(self):
+        w = self.make_window('minimax_frames')
+        w.unified_prompt.setPlainText('Existing draft')
+        w.minimax_operation_provider_model = ('chatgpt', 'gpt-6')
+        w.minimax_operation_signature = w.current_minimax_cache_key('chatgpt', 'gpt-6')
+        w.minimax_operation_editor_snapshot = ('Existing draft', '')
+        w.minimax_operation_kind = 'generate_frames'
+        w.segments[0].prompt = 'Changed while generating'
+        w.minimax_h3_finished('Generated result to recover')
+        self.assertEqual(w.minimax_prompt_text, 'Existing draft')
+        self.assertEqual(w.pending_minimax_result, 'Generated result to recover')
+        self.assertTrue(w.minimax_panel.recover_button.isVisible() or
+                        not w.minimax_panel.recover_button.isHidden())
+        w.copy_pending_minimax_result()
+        self.assertEqual(QApplication.clipboard().text(), 'Generated result to recover')
+        with patch.object(QMessageBox, 'question', return_value=QMessageBox.StandardButton.Yes):
+            w.apply_pending_minimax_result()
+        self.assertEqual(w.minimax_prompt_text, 'Generated result to recover')
+        self.assertFalse(w.pending_minimax_result)
+
     def test_refine_uses_edited_prompt_and_notes_for_selected_mode(self):
         for kind, expected in [('minimax_frames', ai.refine_minimax_h3_prompt), ('minimax_references', ai.refine_minimax_h3_reference_prompt)]:
             w = self.make_window(kind)
