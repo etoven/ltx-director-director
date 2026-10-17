@@ -118,7 +118,7 @@ class UnifiedEditorTests(unittest.TestCase):
             self.assertEqual(w.project_type, 'minimax_references')
             self.assertFalse(w.hdr.isHidden())
             self.assertTrue(w.refine_timing_button.isHidden())
-            self.assertFalse(hasattr(w.magic_button, "menu"))
+            self.assertIsNone(w.magic_button.menu())
             self.assertFalse(w.requested_length.isHidden())
             self.assertFalse(w.prompt_scope.isHidden())
             self.assertTrue(w.segment_panel.isHidden())
@@ -136,14 +136,14 @@ class UnifiedEditorTests(unittest.TestCase):
             self.assertTrue(w.references_button.isHidden())
             self.assertFalse(w.hdr.isHidden())
             self.assertTrue(w.refine_timing_button.isHidden())
-            self.assertFalse(hasattr(w.magic_button, "menu"))
+            self.assertIsNone(w.magic_button.menu())
             self.assertFalse(w.prompt_scope.isHidden())
             self.assertTrue(w.unified_panel.isHidden())
             worker.assert_not_called()
 
     def test_one_button_handles_generate_and_refine_without_dropdown(self):
         w = self.make_window('minimax_frames')
-        self.assertFalse(hasattr(w.magic_button, "menu"))
+        self.assertIsNone(w.magic_button.menu())
         w.minimax_prompt_text = ""
         w.unified_prompt.clear()
         w.refresh_primary_ai_action()
@@ -157,6 +157,18 @@ class UnifiedEditorTests(unittest.TestCase):
         with patch.object(w, 'refine_minimax_prompt') as refine:
             w.magic_button.click()
         refine.assert_called_once_with()
+
+    def test_slash_tags_anywhere_activate_refine_without_a_menu(self):
+        w = self.make_window('minimax_frames')
+        w.minimax_prompt_text = ""
+        w.unified_prompt.clear()
+        w.segments[0].prompt = "Keep composition\\n/refine Adjust segment timing"
+        w.refresh_primary_ai_action()
+        self.assertIn("Refine", w.magic_button.text())
+        self.assertIsNone(w.magic_button.menu())
+        with patch.object(w, '_generate_minimax_prompt') as generate:
+            w.magic_button.click()
+        generate.assert_called_once_with(w.minimax_prompt_mode)
 
     def test_unified_editor_and_timeline_controls_lock_during_ai(self):
         w = self.make_window('minimax_frames')
