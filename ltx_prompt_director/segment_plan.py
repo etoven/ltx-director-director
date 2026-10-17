@@ -361,3 +361,101 @@ def stream_operations(original: list[Segment], raw: str) -> list[dict]:
         if before.kind == "image" and str(item.get("artworkPrompt") or "").strip():
             changes.append({"kind": "artwork", "id": before.id, "name": before.name})
     return changes
+
+
+def normalize_timeline_sync(raw, current, authoritative_prompt):
+    """Validate a timeline-only AI update without accepting creative prompt edits.
+
+    Every existing segment and its media/frame role must survive. Additional
+    TEXT segments may fill new timecoded intervals; no imagery is generated,
+    deleted or reclassified by a synchronization request.
+    """
+    response = ai._parse_json(raw)
+    if not isinstance(response, dict) or not isinstance(response.get("segments"), list):
+        raise ai.AIResponseFormatError("Timeline sync requires an ordered segments array.")
+    entries = response["segments"]
+    existing = {segment.id: segment for segment in current}
+    existing_ids = [segment.id for segment in current]
+    received = [entry.get("id") for entry in entries if isinstance(entry, dict)]
+    if len(received) != len(entries) or not set(existing_ids).issubset(set(received)):
+        raise ai.AIResponseFormatError("Timeline sync must retain every existing segment.")
+    for entry in entries:
+        sid = entry.get("id")
+        original = existing.get(sid)
+        if str(entry.get("artworkPrompt") or "").strip():
+            raise ai.AIResponseFormatError("Timeline sync cannot create or modify artwork.")
+        if original:
+            if entry.get("kind", original.kind) != original.kind:
+                raise ai.AIResponseFormatError("Timeline sync cannot change existing media types.")
+            if entry.get("role", original.role) != original.role:
+                raise ai.AIResponseFormatError("Timeline sync cannot change frame roles.")
+        elif entry.get("kind") != "text" or entry.get("role") != "text":
+            raise ai.AIResponseFormatError("New synchronized intervals must be text-only.")
+    # The existing media ordering is a visual continuity constraint. Text
+    # intervals can be inserted between checkpoints without moving images.
+    visual_before = [item.id for item in current if item.kind != "text"]
+    visual_after = [sid for sid in received if sid in existing and existing[sid].kind != "text"]
+    if visual_after != visual_before:
+        raise ai.AIResponseFormatError("Timeline sync cannot reorder existing media.")
+    result = normalize_plan(
+        json.dumps({"prompt": authoritative_prompt, "segments": entries}, ensure_ascii=False),
+        current,
+    )
+    # Never propagate result['prompt'] to a UI, export or project store.
+    return {"segments": result["segments"]}
+
+
+def sync_timeline_to_prompt(segments, provider, model, api_key, combined_prompt,
+                            timeout, reference_images, workspace_engine, mode):
+    """One-way AI sync: combined editor -> timeline timing and direction only."""
+    if not supports_structured_edit(provider, model):
+        raise ValueError("Timeline sync requires a structured-capable GPT-6+ or Gemini Flash model.")
+    if not segments or not str(combined_prompt).strip():
+        raise ValueError("Timeline sync requires an existing timeline and combined prompt.")
+    # Reuse the same actual frames, video observations and references as normal
+    # combined workflows. Never invent media or rely on a new asset mapping.
+    if mode == "references" or workspace_engine == "generic":
+        inputs = ai._minimax_reference_inputs(segments, provider, reference_images, refinement=True)
+    else:
+        inputs = ai._minimax_frames_inputs(segments, provider, reference_images, refinement=True)
+    current = [
+        {"id": item.id, "name": item.name, "kind": item.kind,
+         "role": item.role, "duration": item.duration, "prompt": item.prompt,
+         "imagePrompt": item.image_prompt, "hasMedia": bool(item.media_path)}
+        for item in segments
+    ]
+    rules = (
+        "DEDICATED ONE-WAY TIMELINE SYNCHRONIZATION. The COMBINED PROMPT below "
+        "is fully authored and IMMUTABLE. Do not rewrite, correct, summarize, "
+        "extend or return it. This action updates ONLY timeline segment "
+        "timings and segment wording so they faithfully match the combined "
+        "prompt. This is NOT creative refinement and NOT image generation. "
+        "Read explicit time ranges in the combined prompt as authoritative, "
+        "including HH:MM:SS:FF, MM:SS.mmm, and other existing timecode "
+        "notations; respect their precise boundaries and contiguous order. "
+        "Match wording to the corresponding interval, keeping the complete "
+        "motion and continuity direction with only necessary splitting. "
+        "Do not fabricate missing actions or new picture/video references. "
+        "Preserve EVERY existing segment ID, media kind, and start/end/text "
+        "role, including segment text that must be adapted. Preserve the "
+        "relative order of image/video checkpoints. Keep edits as small as "
+        "possible and preserve existing imagePrompt unless required to align "
+        "its description with the immutable combined prompt. "
+        "When the combined prompt contains extra distinct intervals that cannot "
+        "be represented by existing timeline items, you MAY insert TEXT-only "
+        "segments with IDs new:1, new:2, etc; never create images, videos or "
+        "artwork requests. The duration of every item must be finite and "
+        "positive, expressed in SECONDS. The ordered timeline must be "
+        "consistent with the complete timing of the combined prompt. "
+        "Return only strict JSON as {\\\"segments\\\":[{\\\"id\\\":\\\"...\\\","
+        "\\\"name\\\":\\\"...\\\",\\\"kind\\\":\\\"image|video|text\\\","
+        "\\\"role\\\":\\\"start|end|text\\\",\\\"duration\\\":2.5,"
+        "\\\"prompt\\\":\\\"...\\\",\\\"imagePrompt\\\":\\\"...\\\","
+        "\\\"artworkPrompt\\\":\\\"\\\"}]}; NO prompt field, no commentary. "
+        "\\nCURRENT TIMELINE (retain all IDs):\\n"
+        + json.dumps(current, ensure_ascii=False)
+        + "\\n\\nAUTHORITATIVE COMBINED PROMPT (READ ONLY; EXACT SOURCE):\\n"
+        + combined_prompt
+    )
+    raw = ai._provider_raw(inputs, provider, model, api_key, rules, timeout)
+    return normalize_timeline_sync(raw, segments, combined_prompt)
