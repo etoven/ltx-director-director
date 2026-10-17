@@ -3377,18 +3377,15 @@ class MainWindow(QMainWindow):
         timeline_layout = QVBoxLayout(timeline_shell)
         timeline_layout.setContentsMargins(0, 0, 0, 0)
         timeline_layout.setSpacing(0)
-        self.timeline_controls = ControlRow()
+        # A single, non-wrapping timeline toolbar. Numeric dimensions,
+        # zoom and the icon-only fit control need tooltips, not redundant
+        # TIMELINE / OUTPUT / SCALE labels or a second header row.
+        self.timeline_controls = QHBoxLayout()
         self.timeline_controls.setContentsMargins(6, 2, 6, 2)
         self.timeline_controls.setSpacing(4)
-        timeline_title = QLabel("TIMELINE")
-        timeline_title.setObjectName("timelineTitle")
-        self.timeline_controls.addWidget(timeline_title)
-        self.timeline_controls.addStretch()
-        output_label = QLabel("OUTPUT")
-        self.output_label = output_label
-        output_label.setObjectName("timelineControlLabel")
-        self.timeline_controls.addWidget(output_label)
         self.output_size_control = QFrame()
+        self.output_size_control.setToolTip("Output resolution (width × height, pixels)")
+        self.output_size_control.setAccessibleName("Output resolution")
         self.output_size_control.setObjectName("outputSizeControl")
         output_size_layout = QHBoxLayout(self.output_size_control)
         output_size_layout.setContentsMargins(0, 0, 0, 0)
@@ -3398,8 +3395,7 @@ class MainWindow(QMainWindow):
         self.output_width.setRange(256, 4096)
         self.output_width.setSingleStep(32)
         self.output_width.setValue(1280)
-        self.output_width.setSuffix(" px")
-        self.output_width.setToolTip("Output width")
+        self.output_width.setToolTip("Output width in pixels")
         self.output_width.valueChanged.connect(self.mark_dirty)
         self.output_width.editingFinished.connect(self.normalize_output_dimensions)
         self.output_height = QSpinBox()
@@ -3407,8 +3403,7 @@ class MainWindow(QMainWindow):
         self.output_height.setRange(256, 4096)
         self.output_height.setSingleStep(32)
         self.output_height.setValue(704)
-        self.output_height.setSuffix(" px")
-        self.output_height.setToolTip("Output height")
+        self.output_height.setToolTip("Output height in pixels")
         self.output_height.valueChanged.connect(self.mark_dirty)
         self.output_height.editingFinished.connect(self.normalize_output_dimensions)
         resolution_separator = QLabel("×")
@@ -3417,27 +3412,31 @@ class MainWindow(QMainWindow):
         output_size_layout.addWidget(self.output_width)
         output_size_layout.addWidget(resolution_separator)
         output_size_layout.addWidget(self.output_height)
-        self.timeline_controls.addWidget(self.output_size_control)
-        scale_label = QLabel("SCALE")
-        scale_label.setObjectName("timelineControlLabel")
-        self.timeline_controls.addWidget(scale_label)
         self.timeline_scale = QSlider(Qt.Orientation.Horizontal)
+        self.timeline_scale.setAccessibleName("Timeline zoom")
         self.timeline_scale.setRange(0, 160)
         self.timeline_scale.setValue(self.pixels_per_second)
-        self.timeline_scale.setMinimumWidth(60)
-        self.timeline_scale.setMaximumWidth(150)
-        self.timeline_scale.setToolTip("Timeline scale (far left fits the full sequence)")
+        self.timeline_scale.setMinimumWidth(70)
+        self.timeline_scale.setMaximumWidth(135)
+        self.timeline_scale.setToolTip("Timeline zoom — move left to fit more of the sequence")
         self.timeline_scale.valueChanged.connect(self.set_timeline_scale)
         self.timeline_controls.addWidget(self.timeline_scale)
-        autofit = QPushButton("Fit")
-        autofit.setObjectName("timelineButton")
-        autofit.setToolTip("Auto-fit all timeline segments")
-        autofit.clicked.connect(self.autofit_timeline)
-        self.timeline_controls.addWidget(autofit)
+        self.timeline_fit_button = QToolButton()
+        self.timeline_fit_button.setObjectName("timelineFitButton")
+        self.timeline_fit_button.setText("↔")
+        self.timeline_fit_button.setAccessibleName("Fit timeline")
+        self.timeline_fit_button.setToolTip("Auto-fit the complete timeline")
+        self.timeline_fit_button.clicked.connect(self.autofit_timeline)
+        self.timeline_controls.addWidget(self.timeline_fit_button)
+        self.timeline_controls.addSpacing(8)
+        self.timeline_controls.addWidget(self.output_size_control)
+        # The primary Generate/Refine action belongs at the far right, not
+        # interleaved with navigation and output settings.
+        self.timeline_controls.addStretch(1)
         self.ai_timeline_status = QLabel("")
         self.ai_timeline_status.setObjectName("timelineControlLabel")
         self.ai_timeline_status.setToolTip("Live AI timeline edit preview; changes apply only after validated completion")
-        self.ai_timeline_status.setMaximumWidth(172)
+        self.ai_timeline_status.setMaximumWidth(205)
         self.ai_timeline_status.hide()
         timeline_layout.addLayout(self.timeline_controls)
         self.ai_edit_feed = QLabel()
@@ -3720,7 +3719,8 @@ class MainWindow(QMainWindow):
         # entire row beneath it even in a narrow or scaled window.
         self.director_intent_row.addWidget(self.prompt_scope)
         self.timeline_controls.addWidget(self.magic_button)
-        self.timeline_controls.addWidget(self.ai_timeline_status)
+        # AI progress is in the existing status bar, never in a wrapping
+        # timeline toolbar. The same QLabel is still updated by the planner.
         # Image tools are chosen from connected providers as needed; no toggle.
         # Never create another prompt editor or a second Generate/Refine button.
         self.magic_button.setObjectName("timelineButton")
@@ -3861,6 +3861,7 @@ class MainWindow(QMainWindow):
         root.installEventFilter(self)
         self.setCentralWidget(root)
         self.setStatusBar(QStatusBar())
+        self.statusBar().addPermanentWidget(self.ai_timeline_status)
         self.apply_project_type_ui()
         self.update_summary()
 
@@ -4259,6 +4260,10 @@ class MainWindow(QMainWindow):
         # Compact controls: retain visible checked/hover states without
         # consuming another line of writing space for padded buttons.
         theme += """
+        #timelineFitButton{background:transparent;border:1px solid #3f6679;
+                           border-radius:4px;color:#b2def2;padding:0;
+                           min-height:0;font-weight:bold}
+        #timelineFitButton:hover{background:#243b46;border-color:#65a7c7;color:#fff}
         #voiceOptions{background:transparent;border:1px solid #455057;border-radius:4px;
                       color:#bfccd2;padding:0;min-height:0}
         #voiceOptions:hover{background:#2b3940;border-color:#7195a8;color:#f0f8fb}
@@ -4298,8 +4303,10 @@ class MainWindow(QMainWindow):
             theme = theme.replace(f"font-size:{size}px", f"font-size:{scaled(size)}px")
         self.setStyleSheet(theme)
         self.timeline_controls.setSpacing(metric(4))
-        self.output_width.setFixedWidth(metric(94))
-        self.output_height.setFixedWidth(metric(94))
+        self.timeline_scale.setFixedWidth(metric(110))
+        self.timeline_fit_button.setFixedSize(metric(26), metric(25))
+        self.output_width.setFixedWidth(metric(79))
+        self.output_height.setFixedWidth(metric(79))
         self.ui_scale_spin.setFixedWidth(metric(82))
         self.intent.setMinimumHeight(metric(40))
         self.intent.setMaximumHeight(16777215)
@@ -4330,8 +4337,8 @@ class MainWindow(QMainWindow):
         for button in (self.provider_button, self.magic_button, self.refine_timing_button,
                        self.refine_prompt_button, self.start_button, self.end_button):
             button.setMinimumWidth(button.fontMetrics().horizontalAdvance(button.text()) + metric(18))
-        self.output_width.setMinimumWidth(metric(88))
-        self.output_height.setMinimumWidth(metric(88))
+        self.output_width.setMinimumWidth(metric(74))
+        self.output_height.setMinimumWidth(metric(74))
         self.duration_spin.setFixedWidth(metric(76))
         self.add_tile_wrap.setFixedWidth(metric(128))
         self.add_tile_layout.setContentsMargins(metric(8), 0, metric(8), 0)
@@ -6735,7 +6742,6 @@ class MainWindow(QMainWindow):
         self.voice_options_button.setVisible(audio and not prompt_only)
         self.update_spoken_dialog_visibility()
         self.output_size_control.setVisible(True)
-        self.output_label.setVisible(True)
         self.refine_timing_button.hide()
         self.magic_button.setToolTip("Generate / Refine for the target selected in the timeline toolbar")
         self.comfy_export_action.setVisible(self.workspace_engine in {"minimax_frames","minimax_references","minimax_prompt"})
@@ -7304,8 +7310,10 @@ class MainWindow(QMainWindow):
                     f"QFrame#segmentCard{{border:2px solid {color};border-radius:7px}}"
                     if kind else ""
                 )
-        self.ai_timeline_status.setText(
-            f"✦ {len(operations)} proposed timeline edit(s)"
+        self.ai_timeline_status.setText(f"✦ {len(operations)} edits")
+        self.ai_timeline_status.setToolTip(
+            f"{len(operations)} proposed timeline edit(s); "
+            "changes apply after validated completion"
         )
         self.ai_timeline_status.show()
 
@@ -7321,7 +7329,10 @@ class MainWindow(QMainWindow):
             self._ai_plan_timer.setInterval(90)
             self._ai_plan_timer.timeout.connect(self._flush_ai_plan_preview)
         self._clear_ai_timeline_preview()
-        self.ai_timeline_status.setText("✦ Reading unified prompt and segment JSON…")
+        self.ai_timeline_status.setText("✦ Planning…")
+        self.ai_timeline_status.setToolTip(
+            "Reading the unified production prompt and ordered segment JSON"
+        )
         self.ai_timeline_status.show()
         self.start_ai_worker(
             generate_combined,

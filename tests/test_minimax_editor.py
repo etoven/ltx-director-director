@@ -204,11 +204,40 @@ class UnifiedEditorTests(unittest.TestCase):
         self.assertEqual(w.length_label.text(), "Len")
         self.assertNotIn("DURATION", [label.text() for label
                          in w.centralWidget().findChildren(QLabel) if label.isVisible()])
-        autofit = next(w.timeline_controls.itemAt(i).widget()
-                       for i in range(w.timeline_controls.count())
-                       if isinstance(w.timeline_controls.itemAt(i).widget(), QPushButton)
-                       and w.timeline_controls.itemAt(i).widget().text() == "Fit")
-        self.assertIn("Auto-fit", autofit.toolTip())
+        self.assertIn("Auto-fit", w.timeline_fit_button.toolTip())
+        self.assertEqual(w.timeline_fit_button.accessibleName(), "Fit timeline")
+
+    def test_timeline_header_compacts_to_one_label_free_navigation_row(self):
+        from PySide6.QtWidgets import QHBoxLayout, QLabel, QToolButton
+        w = self.make_window("minimax_frames")
+        w.resize(1010, 780)
+        w.show()
+        self.app.processEvents()
+        self.assertIsInstance(w.timeline_controls, QHBoxLayout)
+        self.assertLessEqual(w.timeline_controls.geometry().height(), 40)
+        widgets = [w.timeline_controls.itemAt(i).widget()
+                   for i in range(w.timeline_controls.count())
+                   if w.timeline_controls.itemAt(i).widget()]
+        self.assertEqual(widgets,
+                         [w.timeline_scale, w.timeline_fit_button,
+                          w.output_size_control, w.magic_button])
+        self.assertFalse(any(label.text() in {"TIMELINE", "OUTPUT", "SCALE"}
+                             for label in w.timeline_shell.findChildren(QLabel)))
+        self.assertIs(w.ai_timeline_status.parent(), w.statusBar())
+        self.assertEqual(w.output_size_control.accessibleName(), "Output resolution")
+        self.assertEqual(w.timeline_scale.accessibleName(), "Timeline zoom")
+        self.assertIsInstance(w.timeline_fit_button, QToolButton)
+        self.assertEqual(w.timeline_fit_button.text(), "↔")
+        self.assertTrue(w.timeline_fit_button.isEnabled())
+        w.ai_timeline_status.setText("✦ 2 edits")
+        w.ai_timeline_status.show()
+        self.app.processEvents()
+        self.assertLessEqual(w.timeline_controls.geometry().height(), 40)
+        self.assertTrue(w.ai_timeline_status.isVisibleTo(w.statusBar()))
+        w.set_project_type("minimax_prompt_refinement")
+        self.assertGreaterEqual(w.minimax_panel.header.indexOf(w.magic_button), 0)
+        w.set_project_type("minimax_frames")
+        self.assertGreaterEqual(w.timeline_controls.indexOf(w.magic_button), 0)
 
     def test_ltx_segment_editor_remains_authoritative(self):
         w = self.make_window('ltx')
