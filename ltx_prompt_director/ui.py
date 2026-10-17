@@ -6031,6 +6031,7 @@ class MainWindow(QMainWindow):
         kind = "unified"
         selected_index = 0
         if operation in {
+            generate_combined,
             build_minimax_h3_prompt, build_minimax_h3_reference_prompt,
             refine_minimax_h3_prompt, refine_minimax_h3_reference_prompt,
             refine_minimax_text_prompt, build_generic_prompt, refine_generic_prompt,
@@ -6391,7 +6392,7 @@ class MainWindow(QMainWindow):
         if self.unified_workspace:
             self.load_minimax_draft(("frames" if self.workspace_engine == "generic" else self.workspace_engine.removeprefix("minimax_")))
         self.prompt_scope.blockSignals(True)
-        self.prompt_scope.setCurrentIndex(0)
+        self.prompt_scope.setCurrentIndex(2 if self.unified_workspace else 0)
         self.prompt_scope.blockSignals(False)
         self.minimax_panel.clear_message()
         self.sync_minimax_panel()
@@ -6683,6 +6684,13 @@ class MainWindow(QMainWindow):
             return
         if not hasattr(self, "unified_prompt") or not hasattr(self, "segment_prompt"):
             return
+        model = str(self.settings.value(
+            "chatgpt_model" if self.settings.value("provider", "gemini") == "chatgpt" else "gemini_model",
+            ""
+        ))
+        can_structure = self.unified_workspace and supports_structured_edit(
+            str(self.settings.value("provider", "gemini")), model
+        )
         selected = self.current_segment() if hasattr(self, "timeline") else None
         has_segments = bool(getattr(self, "segments", ()))
         has_unified = bool(self.minimax_prompt_text.strip())
@@ -6732,6 +6740,13 @@ class MainWindow(QMainWindow):
             not self.ai_busy and bool(getattr(self, "retry_ai_available", False))
         )
 
+    def _combined_enabled(self) -> bool:
+        provider = str(self.settings.value("provider", "gemini"))
+        model = str(self.settings.value(
+            "chatgpt_model" if provider == "chatgpt" else "gemini_model", ""
+        ))
+        return supports_structured_edit(provider, model)
+
     def run_primary_ai_action(self) -> None:
         self.run_ai_action(getattr(self, "primary_ai_command", ""))
 
@@ -6740,6 +6755,8 @@ class MainWindow(QMainWindow):
         if self.ai_busy or not command:
             return
         self.last_ai_command = command
+        if command in {"generate_unified", "refine_unified"}:
+            self.combined_focus = "all"
         self.retry_ai_available = False
         if command == "generate_timeline":
             self.magic_build()
@@ -6747,6 +6764,15 @@ class MainWindow(QMainWindow):
             self._generate_minimax_prompt(self.minimax_prompt_mode)
         elif command == "refine_unified" and self.unified_workspace:
             self.refine_minimax_prompt()
+        elif command in {"refine_segment", "refine_global", "refine_timing"} and self.unified_workspace and not self.prompt_only_workspace and self._combined_enabled():
+            self.combined_focus = (
+                f"{command} selected id={self.current_segment().id if self.current_segment() else 'none'}; "
+                "preserve all other timeline content unless required for continuity"
+            )
+            if self.minimax_prompt_text.strip():
+                self.refine_minimax_prompt()
+            else:
+                self._generate_minimax_prompt(self.minimax_prompt_mode)
         elif command == "refine_segment" and not self.prompt_only_workspace:
             if self.prompt_scope.currentData() == "global":
                 self.prompt_scope.setCurrentIndex(0)
