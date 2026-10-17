@@ -179,6 +179,7 @@ class ParagraphDiffReview(QObject):
             label.deleteLater()
         self.removed_labels = []
         if editor is not None and self._block_margins:
+            was_applying = self._applying
             self._applying = True
             try:
                 for offset, block_format in self._block_margins:
@@ -186,7 +187,9 @@ class ParagraphDiffReview(QObject):
                     cursor.setPosition(min(offset, editor.document().characterCount()-1))
                     cursor.setBlockFormat(block_format)
             finally:
-                self._applying = False
+                # Called inside _apply() during a rejection: never unset its
+                # guard before QTextEdit emits textChanged for the replacement.
+                self._applying = was_applying
         self._block_margins = []
 
     def _add_deleted_preview(self, old: str, offset: int):
