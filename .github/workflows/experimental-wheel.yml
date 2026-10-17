@@ -42,7 +42,10 @@ jobs:
           QT_QPA_PLATFORM: offscreen
         run: |
           python -m pytest -q tests/test_project_duplicate.py tests/test_chatgpt_oauth.py tests/test_live_generation.py tests/test_stream_json.py
-          python -m pytest -q tests/test_minimax_editor.py
+          # Older Qt/PySide combinations can abort in Python's interpreter finalizer
+          # after tests have already completed. Preserve pytest's actual exit code
+          # but skip destructors for this isolated offscreen GUI test subprocess.
+          python -c 'import os,sys,pytest; rc=pytest.main(["-q","tests/test_minimax_editor.py"]); sys.stdout.flush(); sys.stderr.flush(); os._exit(rc)'
 
       - name: Build the wheel
         run: python -m build --wheel --outdir dist
