@@ -406,6 +406,23 @@ class UnifiedEditorTests(unittest.TestCase):
         with patch.object(w, "save_library_project"):
             w.close()
 
+    def test_provider_bad_request_keeps_failed_frame_and_shows_detailed_error(self):
+        w = self.make_window("minimax_frames")
+        w.session_keys["gemini"] = "image-key"
+        tool = w._available_artwork_tools()[0]
+        w.segments[0].artwork_prompt = "Make a reference frame"
+        w.minimax_panel.clear_message()
+        with patch.object(w, "start_disk_job") as worker:
+            w._start_segment_artwork(w.segments[0].id, {
+                "id": w.segments[0].id, "artworkPrompt": "Make a reference frame"
+            }, tool)
+        worker.assert_called_once()
+        callback = worker.call_args.args[3]
+        callback("Gemini image model: HTTP 400 INVALID_ARGUMENT — Invalid imageSize")
+        self.assertEqual(w.segments[0].artwork_status, "failed")
+        self.assertIn("INVALID_ARGUMENT", w.minimax_panel.message_banner.text())
+        self.assertFalse(w.minimax_panel.message_panel.isHidden())
+
     def test_existing_image_edit_renders_with_original_reference_and_retries(self):
         from io import BytesIO
         from PIL import Image

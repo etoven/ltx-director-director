@@ -7632,8 +7632,16 @@ class MainWindow(QMainWindow):
 
         def failed(message):
             ready({})
+            detail = str(message).strip()
             self.statusBar().showMessage(
-                f"Artwork request failed: {message}", 9000
+                f"Image failed ({tool.model}); details in prompt panel", 15000
+            )
+            # Persist the actionable API reason until dismissed, instead of
+            # losing the only useful error in a nine-second status bar.
+            self.minimax_panel.show_message(
+                "Image generation failed for " + segment_id
+                + " using " + tool.model + ": " + detail[:950],
+                "error",
             )
 
         self.start_disk_job(

@@ -295,6 +295,60 @@ class SegmentPlanTests(unittest.TestCase):
                          {"aspectRatio": "16:9", "imageSize": "1K"})
         self.assertEqual(post.call_args.kwargs["headers"]["x-goog-api-key"], "gemini-api")
 
+    def test_gemini_images_use_documented_v1beta_route(self):
+        from io import BytesIO
+        from PIL import Image
+        import base64
+        buffer = BytesIO()
+        Image.new("RGB", (6, 4)).save(buffer, "PNG")
+        encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+        class Reply:
+            def raise_for_status(self): pass
+            def json(self): return {"candidates":[{"content":{"parts":[{
+                "inlineData": {"mimeType": "image/png", "data": encoded}
+            }]}}]}
+        tool = artwork_tools.ArtworkTool("gemini", "gemini-3.1-flash-lite-image", "api")
+        with patch.object(artwork_tools.requests, "post", return_value=Reply()) as post:
+            artwork_tools._gemini_image("A 16:9 still", tool)
+        self.assertIn("/v1beta/models/gemini-3.1-flash-lite-image:generateContent",
+                      post.call_args.args[0])
+        config = post.call_args.kwargs["json"]["generationConfig"]
+        self.assertEqual(config["responseModalities"], ["IMAGE"])
+        self.assertEqual(config["responseFormat"]["image"]["aspectRatio"], "16:9")
+
+    def test_openai_400_reports_provider_error_code_message_and_safe_model(self):
+        import requests
+        tool = artwork_tools.ArtworkTool("openai", "gpt-image-2.5-flare", "sk-secret")
+        class Reply:
+            status_code = 400
+            def raise_for_status(self):
+                raise requests.HTTPError("400 Client Error: Bad Request for url")
+            def json(self):
+                return {"error": {"message": "Unsupported image size 9999x9999",
+                                  "type":"invalid_request_error",
+                                  "code":"invalid_size", "param":"size"}}
+        with patch.object(artwork_tools.requests, "post", return_value=Reply()):
+            with self.assertRaisesRegex(artwork_tools.ArtworkAPIError,
+                                        "invalid_size.*parameter: size.*Unsupported image size"):
+                artwork_tools._openai_image("new frame", tool)
+
+    def test_gemini_400_reports_actual_provider_detail_without_api_key(self):
+        import requests
+        tool = artwork_tools.ArtworkTool("gemini", "gemini-3.1-flash-lite-image", "secret-key")
+        class Reply:
+            status_code = 400
+            def raise_for_status(self):
+                raise requests.HTTPError("400 Client Error")
+            def json(self):
+                return {"error":{"message":"Invalid field 'imageSize'; secret-key",
+                                 "status":"INVALID_ARGUMENT"}}
+        with patch.object(artwork_tools.requests, "post", return_value=Reply()):
+            with self.assertRaises(artwork_tools.ArtworkAPIError) as raised:
+                artwork_tools._gemini_image("make a still", tool)
+        self.assertIn("INVALID_ARGUMENT", str(raised.exception))
+        self.assertIn("Invalid field", str(raised.exception))
+        self.assertNotIn("secret-key", str(raised.exception))
+
     def test_artwork_tools_return_png_and_use_provider_api_not_chatgpt(self):
         from PIL import Image
         from io import BytesIO

@@ -76,6 +76,46 @@ def available_artwork_tools(
     ]
 
 
+class ArtworkAPIError(RuntimeError):
+    """A human-readable image-provider failure; no API keys or image payloads."""
+
+
+def _check_image_response(response, tool: ArtworkTool) -> None:
+    """Show the actual provider JSON error instead of '400 Bad Request for URL'.
+
+    Do not log response bodies or request JSON: both may contain private
+    reference artwork or bearer credentials.
+    """
+    try:
+        response.raise_for_status()
+        return
+    except requests.HTTPError as error:
+        try:
+            body = response.json()
+        except (ValueError, TypeError):
+            body = {}
+        details = body.get("error") if isinstance(body, dict) else None
+        if not isinstance(details, dict):
+            details = {}
+        message = str(details.get("message") or "").strip()
+        code = str(details.get("code") or details.get("status") or "").strip()
+        parameter = str(details.get("param") or "").strip()
+        status = getattr(response, "status_code", "") or getattr(
+            getattr(error, "response", None), "status_code", ""
+        )
+        readable = message or "The provider rejected this image-generation request."
+        readable = readable.replace(tool.api_key, "[redacted]") if tool.api_key else readable
+        # Provider errors may be verbose; do not expose entire unknown bodies.
+        readable = readable[:850]
+        context = f" {code}" if code else ""
+        if parameter:
+            context += f" (parameter: {parameter[:70]})"
+        raise ArtworkAPIError(
+            f"{tool.provider.title()} image model {tool.model}: "
+            f"HTTP {status or 'error'}{context} — {readable}"
+        ) from error
+
+
 def _png_payload(payload: bytes) -> bytes:
     if not payload or len(payload) > 35 * 1024 * 1024:
         raise ValueError("Generated image is empty or too large.")
@@ -127,7 +167,9 @@ def _reference_bytes(reference: dict) -> bytes:
         source.load()
         if source.width * source.height > 50_000_000:
             raise ValueError("Reference image dimensions are too large.")
-        source.thumbnail((2048, 2048), Image.Resampling.LANCZOS)
+        # Seven 2K PNGs can exhaust multipart or Gemini inline limits.
+        # Project originals remain untouched; provider references are reduced.
+        source.thumbnail((1280, 1280), Image.Resampling.LANCZOS)
         output = BytesIO()
         source.convert("RGB").save(output, format="PNG")
         return output.getvalue()
@@ -188,7 +230,7 @@ def _openai_image(
             json={"model": tool.model, "size": "1536x1024", "n": 1, "prompt": prompt},
             timeout=240,
         )
-    response.raise_for_status()
+    _check_image_response(response, tool)
     return _decode(response.json()["data"][0]["b64_json"])
 
 
@@ -203,7 +245,7 @@ def _gemini_image(
         parts.append({"inlineData": {"mimeType": "image/png",
                                      "data": base64.b64encode(data).decode("ascii")}})
     response = requests.post(
-        f"https://generativelanguage.googleapis.com/v1/models/"
+        f"https://generativelanguage.googleapis.com/v1beta/models/"
         f"{tool.model}:generateContent",
         headers={"x-goog-api-key": tool.api_key,
                  "Content-Type": "application/json"},
@@ -216,7 +258,7 @@ def _gemini_image(
         },
         timeout=240,
     )
-    response.raise_for_status()
+    _check_image_response(response, tool)
     for candidate in response.json().get("candidates", []):
         for part in (candidate.get("content") or {}).get("parts", []):
             image = part.get("inlineData") or part.get("inline_data") or {}
