@@ -457,7 +457,7 @@ class UnifiedEditorTests(unittest.TestCase):
         # while image/video tiles display a compact overlay over the media.
         rich = (card.preview.text() if target.kind == "text"
                 else card.rewrite_overlay.text())
-        self.assertIn("#a7edbf", rich)
+        self.assertIn("#80e991", rich)
         self.assertEqual(card.rewrite_timer.interval(), 80)
         # Read-only diff disappears on provider rejection or workspace reset.
         w._clear_ai_timeline_preview()
@@ -487,7 +487,7 @@ class UnifiedEditorTests(unittest.TestCase):
         self.assertEqual(media_card.rewrite_timer.interval(), 80)
         while media_card.rewrite_shown != media_card.rewrite_target:
             media_card._advance_rewrite_preview()
-        self.assertIn("#a7edbf", media_card.rewrite_overlay.text())
+        self.assertIn("#80e991", media_card.rewrite_overlay.text())
         self.assertEqual(visual.prompt, "Maintain the original camera")
         media_card.stop_rewrite_preview()
         self.assertTrue(media_card.rewrite_overlay.isHidden())
@@ -557,8 +557,8 @@ class UnifiedEditorTests(unittest.TestCase):
             card._advance_rewrite_preview()
         rich = (card.preview.text() if card.segment.kind == "text"
                 else card.rewrite_overlay.text())
-        self.assertIn("#a7edbf", rich)
-        self.assertIn("#ed969e", rich)
+        self.assertIn("#80e991", rich)
+        self.assertIn("#9c3f4b", rich)
         w.resolve_segment_review(before[0].id, False)
         self.assertEqual(next(s.prompt for s in w.segments if s.id == before[0].id),
                          before[0].prompt)
