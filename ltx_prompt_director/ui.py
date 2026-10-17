@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
     QColorDialog, QDateTimeEdit, QDockWidget, QGraphicsOpacityEffect, QFileDialog, QFormLayout, QFrame, QHBoxLayout, QLabel, QLayout, QLineEdit,
     QListWidget, QListWidgetItem, QSplitter, QStackedWidget, QTabBar, QTabWidget, QMainWindow, QMenu, QMessageBox, QPushButton, QScrollArea,
-    QSizePolicy, QSlider, QSpinBox, QProgressBar, QStatusBar, QStyle, QStyledItemDelegate, QStyleOptionSlider, QStyleOptionViewItem, QTextEdit, QToolBar, QToolButton, QToolTip, QVBoxLayout, QWidget,
+    QSizePolicy, QSlider, QSpinBox, QProgressBar, QStatusBar, QStyle, QStyledItemDelegate, QStyleOptionSlider, QStyleOptionViewItem, QTextEdit, QToolBar, QToolButton, QToolTip, QVBoxLayout, QWidget, QWidgetAction,
 )
 
 from . import __version__
@@ -3267,6 +3267,7 @@ class MainWindow(QMainWindow):
         toolbar.addAction(files_action)
         properties_action = self.project_properties_dock.toggleViewAction()
         properties_action.setText("Properties")
+        properties_action.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogDetailedView))
         toolbar.addAction(properties_action)
         catalog_action = self.catalog_dock.toggleViewAction()
         catalog_action.setIcon(toolbar_icon("catalog"))
@@ -3297,7 +3298,7 @@ class MainWindow(QMainWindow):
                 self.comfy_export_action.setToolTip("Export a MiniMax ComfyUI workflow and copy its media to the configured ComfyUI input folder")
                 self.comfy_export_action.triggered.connect(self.export_comfy_workflow)
                 toolbar.addAction(self.comfy_export_action)
-                toolbar.widgetForAction(self.comfy_export_action).setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+                toolbar.widgetForAction(self.comfy_export_action).setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
             if group_index < len(action_groups) - 1:
                 toolbar.addSeparator()
         # The workspace selector is a global choice and belongs with the
@@ -3347,7 +3348,7 @@ class MainWindow(QMainWindow):
         self.ui_scale_label = QLabel("TEXT")
         self.ui_scale_label.setObjectName("timelineControlLabel")
         self.ui_scale_label.setToolTip("Interface text scale")
-        toolbar.addWidget(self.ui_scale_label)
+        # The percentage field conveys text scale without an extra toolbar label.
         self.ui_scale_control = QFrame()
         self.ui_scale_control.setObjectName("outputSizeControl")
         ui_scale_layout = QHBoxLayout(self.ui_scale_control)
@@ -3377,8 +3378,8 @@ class MainWindow(QMainWindow):
         timeline_layout.setContentsMargins(0, 0, 0, 0)
         timeline_layout.setSpacing(0)
         self.timeline_controls = ControlRow()
-        self.timeline_controls.setContentsMargins(10, 6, 10, 5)
-        self.timeline_controls.setSpacing(8)
+        self.timeline_controls.setContentsMargins(6, 2, 6, 2)
+        self.timeline_controls.setSpacing(4)
         timeline_title = QLabel("TIMELINE")
         timeline_title.setObjectName("timelineTitle")
         self.timeline_controls.addWidget(timeline_title)
@@ -3428,8 +3429,9 @@ class MainWindow(QMainWindow):
         self.timeline_scale.setToolTip("Timeline scale (far left fits the full sequence)")
         self.timeline_scale.valueChanged.connect(self.set_timeline_scale)
         self.timeline_controls.addWidget(self.timeline_scale)
-        autofit = QPushButton("↔  Auto fit")
+        autofit = QPushButton("Fit")
         autofit.setObjectName("timelineButton")
+        autofit.setToolTip("Auto-fit all timeline segments")
         autofit.clicked.connect(self.autofit_timeline)
         self.timeline_controls.addWidget(autofit)
         self.ai_timeline_status = QLabel("")
@@ -3515,13 +3517,12 @@ class MainWindow(QMainWindow):
         self.conditioning_guide = QScrollArea()
         self.conditioning_guide.setObjectName("conditioningGuide")
         self.conditioning_guide.setWidgetResizable(True)
-        self.conditioning_guide.setMinimumHeight(52)
-        self.conditioning_guide.setMaximumHeight(68)
+        self.conditioning_guide.setFixedHeight(38)
         self.conditioning_guide.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.conditioning_content = QWidget()
         self.conditioning_row = QHBoxLayout(self.conditioning_content)
-        self.conditioning_row.setContentsMargins(7, 3, 7, 3)
-        self.conditioning_row.setSpacing(7)
+        self.conditioning_row.setContentsMargins(4, 1, 4, 1)
+        self.conditioning_row.setSpacing(4)
         self.conditioning_guide.setWidget(self.conditioning_content)
         outer.addWidget(self.conditioning_guide)
 
@@ -3612,21 +3613,17 @@ class MainWindow(QMainWindow):
         self.magic_button.setObjectName("timelineButton")
         self.magic_button.clicked.connect(self.run_primary_ai_action)
         self.primary_ai_command = "generate"
-        for button in (self.sfx, self.spoken_dialog, self.hdr, self.reduce_music, self.magic_button):
-            button.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+        for button in (self.sfx, self.spoken_dialog, self.hdr, self.reduce_music):
+            button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.magic_button.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         # The only Generate/Refine control stays in the timeline toolbar.
         # No redundant prompt or project-type row is created.
         self.ai_workflow_row = self.timeline_controls
         self.director_controls.addLayout(intent_row)
         self.director_controls.addWidget(self.director_intent_stack, 1)
-        planning_row = ControlRow()
-        planning_row.setContentsMargins(0, 0, 0, 0)
-        planning_row.setSpacing(6)
-        planning_label = QLabel("VOICE")
-        self.planning_label = planning_label
-        planning_label.setObjectName("groupLabel")
-        planning_row.addWidget(planning_label)
-        length_label = QLabel("LENGTH")
+        # Length and the quality/audio options sit directly below the
+        # conditioning preview, not underneath the text editor.
+        length_label = QLabel("Len")
         self.length_label = length_label
         length_label.setObjectName("groupLabel")
         self.requested_length = QDoubleSpinBox()
@@ -3665,15 +3662,26 @@ class MainWindow(QMainWindow):
         self.speaker_accent.setEnabled(False)
         self.language_label = language_label
         self.accent_label = accent_label
-        planning_row.addWidget(language_label)
-        planning_row.addWidget(self.speaker_language)
-        planning_row.addWidget(accent_label)
-        planning_row.addWidget(self.speaker_accent)
-        planning_row.addStretch()
-        self.planning_row = planning_row
-        options_row = ControlRow()
-        options_row.setContentsMargins(0, 0, 0, 0)
-        options_row.setSpacing(6)
+        voice_panel = QWidget()
+        voice_form = QFormLayout(voice_panel)
+        voice_form.setContentsMargins(8, 6, 8, 6)
+        voice_form.setSpacing(6)
+        voice_form.addRow(language_label, self.speaker_language)
+        voice_form.addRow(accent_label, self.speaker_accent)
+        self.voice_options_button = QToolButton()
+        self.voice_options_button.setObjectName("voiceOptions")
+        self.voice_options_button.setText("⚙")
+        self.voice_options_button.setAccessibleName("Spoken dialog language and accent")
+        self.voice_options_button.setToolTip("Language and accent for spoken dialogue")
+        self.voice_options_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.voice_options_menu = QMenu(self.voice_options_button)
+        voice_action = QWidgetAction(self.voice_options_menu)
+        voice_action.setDefaultWidget(voice_panel)
+        self.voice_options_menu.addAction(voice_action)
+        self.voice_options_button.setMenu(self.voice_options_menu)
+        # A single horizontal strip shares space with sequence metadata.
+        options_row = self.sequence_controls
+        options_row.setSpacing(4)
         # Time → image quality → sound → speech → music. No duplicate
         # "PROMPT OPTIONS" label or oversized form-style action buttons.
         options_row.addWidget(length_label)
@@ -3681,13 +3689,10 @@ class MainWindow(QMainWindow):
         options_row.addWidget(self.hdr)
         options_row.addWidget(self.sfx)
         options_row.addWidget(self.spoken_dialog)
+        options_row.addWidget(self.voice_options_button)
         options_row.addWidget(self.reduce_music)
-        options_row.addStretch()
         self.options_row = options_row
-        # Keep settings below the full-width editor. Voice details consume a
-        # second toolbar line only while Spoken Dialog is enabled.
-        self.director_controls.addLayout(options_row)
-        self.director_controls.addLayout(planning_row)
+        # The Director editor below has only a small scope selector, then text.
 
         segment_panel = QFrame()
         self.segment_panel = segment_panel
@@ -3701,13 +3706,14 @@ class MainWindow(QMainWindow):
         segment_label.setObjectName("sectionLabel")
         self.segment_header.addWidget(segment_label)
         self.prompt_scope = QComboBox()
-        self.prompt_scope.addItem("Director's Intent", "global")
-        self.prompt_scope.addItem("Selected Segment", "segment")
+        self.prompt_scope.addItem("Intent", "global")
+        self.prompt_scope.addItem("Segment", "segment")
         self.prompt_scope.setToolTip(
             "Choose the text shown in the Director's Intent editor. "
             "This does not change AI refinement scope."
         )
-        self.prompt_scope.setMinimumWidth(136)
+        self.prompt_scope.setMinimumWidth(0)
+        self.prompt_scope.setAccessibleName("Prompt editor scope")
         self.prompt_scope.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.prompt_scope.currentIndexChanged.connect(self.prompt_scope_changed)
         # Selector sits in the header's right edge; the editor occupies the
@@ -3734,8 +3740,10 @@ class MainWindow(QMainWindow):
         self.refine_prompt_button.hide()
         self.frame_number = QLabel("Frame —")
         self.frame_number.setObjectName("muted")
-        self.start_button = QPushButton("Start frame")
-        self.end_button = QPushButton("End frame")
+        self.start_button = QPushButton("Start")
+        self.end_button = QPushButton("End")
+        self.start_button.setToolTip("Set selected image as start frame")
+        self.end_button.setToolTip("Set selected image as end frame")
         self.start_button.setObjectName("frameToggle")
         self.end_button.setObjectName("frameToggle")
         self.start_button.setCheckable(True)
@@ -3767,7 +3775,7 @@ class MainWindow(QMainWindow):
         segment_meta_layout.addWidget(self.end_button)
         duration_label = QLabel("DURATION")
         duration_label.setObjectName("timelineControlLabel")
-        segment_meta_layout.addWidget(duration_label)
+        duration_label.hide()  # Units in the spinner make this label redundant.
         segment_meta_layout.addWidget(self.duration_control)
         self.sequence_controls.addWidget(segment_meta)
         segment_layout.addLayout(self.segment_header)
@@ -3814,15 +3822,13 @@ class MainWindow(QMainWindow):
             editor.setMinimumHeight(32)
             editor.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Ignored)
         self.minimax_panel = MiniMaxPromptPanel(self)
+        self.unified_count = QLabel("0 chars")
+        self.unified_count.setObjectName("muted")
+        # Heading, character count, cache state and copy share ONE title bar.
+        self.minimax_panel.header.insertWidget(1, self.unified_count)
+        self.minimax_panel.header.addWidget(self.minimax_panel.copy_button)
         unified_layout.addWidget(self.minimax_panel)
         unified_layout.addWidget(self.unified_prompt, 1)
-        self.unified_count = QLabel("0 characters")
-        self.unified_count.setObjectName("muted")
-        footer = QHBoxLayout()
-        footer.addWidget(self.unified_count)
-        footer.addStretch()
-        footer.addWidget(self.minimax_panel.copy_button)
-        unified_layout.addLayout(footer)
         self.prompt_splitter = QSplitter(Qt.Orientation.Vertical)
         self.prompt_splitter.setObjectName("promptEditorSplitter")
         self.prompt_splitter.addWidget(segment_panel)
@@ -4234,7 +4240,7 @@ class MainWindow(QMainWindow):
         #timelineHeightHandle{background:transparent;border:0} #timelineHeightHandle:hover{background:rgba(88,118,134,35);border:0}
         #promptSplitter::handle{background:transparent;border:0} #promptSplitter::handle:hover{background:rgba(88,118,134,35);border:0}
         #segmentPreview{background:#17191a;border-top:1px solid #34383a}
-        #addTileBox{border:1px dashed #596065;background:#111415} #addTile,#addTextTile{border:0;border-radius:0;background:transparent;color:#828b90;font-size:10px;text-align:center} #addTile:hover,#addTextTile:hover{background:#1c2326;color:#b7d7e6} #sequenceBar{background:#181e21;border:1px solid #303a3f;border-left:3px solid #4e91b4;border-radius:5px;padding:10px 12px;color:#cbd7dd;font-weight:bold}
+        #addTileBox{border:1px dashed #596065;background:#111415} #addTile,#addTextTile{border:0;border-radius:0;background:transparent;color:#828b90;font-size:10px;text-align:center} #addTile:hover,#addTextTile:hover{background:#1c2326;color:#b7d7e6} #sequenceBar{background:#181e21;border:1px solid #303a3f;border-left:3px solid #4e91b4;border-radius:4px;padding:3px 8px;color:#cbd7dd;font-weight:bold}
         #directorPanel{background:#1d2326;border:1px solid #354047;border-radius:6px} #panelTitle{background:transparent;color:#b8d9e9;border:0;font-size:10px;font-weight:bold;letter-spacing:1px} #groupLabel{background:transparent;color:#71838c;border:0;font-size:8px;font-weight:bold;letter-spacing:1px;padding-right:4px}
         #sectionLabel{color:#8ebbd1;font-size:8px;font-weight:bold;letter-spacing:1px} #muted{color:#879095;font-size:9px} #promptPanel{background:#202527;border:1px solid #374044;border-radius:6px} #segmentMetaBar{background:#1a2023;border:1px solid #303a3f;border-radius:5px} #refineButton{background:#252d31;border:1px solid #45545b;color:#c9dce5;padding-left:9px;padding-right:9px} #refineButton:hover{background:#31414a;border-color:#6590a7;color:#f2fbff} #refineButton:pressed{background:#1d2b32;border-color:#7ca9bf} #refineButton:disabled{background:#202527;border-color:#31393d;color:#606a6f}
         QTextEdit{background:#252728;border:0;color:#e1e4e5;font:11px 'Courier New';padding:4px} #promptEditor{background:#202527;border:0;color:#e1e4e5;padding:7px} #magicButton{background:#3b78a5;border:1px solid #5b9bc6;border-radius:5px;color:#f4fbff;font-weight:bold;padding-left:12px;padding-right:12px} #magicButton:hover{background:#4b8dbd;border-color:#8bc6ea} #magicButton:pressed{background:#285b7c}
@@ -4253,6 +4259,10 @@ class MainWindow(QMainWindow):
         # Compact controls: retain visible checked/hover states without
         # consuming another line of writing space for padded buttons.
         theme += """
+        #voiceOptions{background:transparent;border:1px solid #455057;border-radius:4px;
+                      color:#bfccd2;padding:0;min-height:0}
+        #voiceOptions:hover{background:#2b3940;border-color:#7195a8;color:#f0f8fb}
+        #voiceOptions:disabled{color:#5b6871;border-color:#333d42}
         #directorOption{background:transparent;border:1px solid #46535b;border-radius:4px;
                         color:#b9c5cb;padding:1px 6px;min-height:16px}
         #directorOption:hover{background:#2b3940;border-color:#7195a8;color:#f0f8fb}
@@ -4287,40 +4297,42 @@ class MainWindow(QMainWindow):
         for size in (15, 10, 9, 8):
             theme = theme.replace(f"font-size:{size}px", f"font-size:{scaled(size)}px")
         self.setStyleSheet(theme)
-        self.timeline_controls.setSpacing(metric(8))
-        self.output_width.setFixedWidth(metric(104))
-        self.output_height.setFixedWidth(metric(104))
+        self.timeline_controls.setSpacing(metric(4))
+        self.output_width.setFixedWidth(metric(94))
+        self.output_height.setFixedWidth(metric(94))
         self.ui_scale_spin.setFixedWidth(metric(82))
         self.intent.setMinimumHeight(metric(40))
         self.intent.setMaximumHeight(16777215)
-        self.requested_length.setFixedWidth(metric(82))
+        self.requested_length.setFixedWidth(metric(72))
         self.speaker_language.setMinimumWidth(metric(170))
         self.speaker_accent.setMinimumWidth(metric(170))
         for field in (self.speaker_language,self.speaker_accent):
             field.setMinimumWidth(90);field.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Fixed)
-        self.director_controls.setContentsMargins(metric(7), metric(5), metric(7), metric(5))
+        self.director_controls.setContentsMargins(metric(6), metric(4), metric(6), metric(4))
         self.director_controls.setSpacing(metric(3))
         self.director_intent_row.setSpacing(metric(4))
         self.options_row.setSpacing(metric(4))
-        self.planning_row.setSpacing(metric(4))
-        self.segment_header.setSpacing(metric(8))
+        self.segment_header.setSpacing(metric(6))
         self.project_type_combo.setFixedWidth(min(252, max(160, metric(198))))
         self.project_type_combo.setFixedHeight(max(metric(24), self.project_type_combo.fontMetrics().height() + metric(7)))
         self.references_button.setFixedHeight(max(metric(23), self.references_button.fontMetrics().height() + metric(6)))
         self.references_button.setFixedWidth(self.references_button.fontMetrics().horizontalAdvance(self.references_button.text()) + metric(18))
         for option in (self.hdr, self.sfx, self.spoken_dialog, self.reduce_music):
             option.setMinimumWidth(0)
-            option.setFixedWidth(option.fontMetrics().horizontalAdvance(option.text()) + metric(15))
-            option.setFixedHeight(max(metric(22), option.fontMetrics().height() + metric(5)))
+            option.setFixedWidth(option.fontMetrics().horizontalAdvance(option.text()) + metric(12))
+            option.setFixedHeight(max(metric(20), option.fontMetrics().height() + metric(4)))
+        self.voice_options_button.setFixedSize(metric(24), metric(23))
+        self.prompt_scope.setFixedWidth(metric(94))
+        self.prompt_scope.setFixedHeight(metric(23))
         self.ruler.setFixedHeight(metric(28))
         self.timeline_height_handle.set_scale(scale)
         self.project_list.setSpacing(metric(4))
         for button in (self.provider_button, self.magic_button, self.refine_timing_button,
                        self.refine_prompt_button, self.start_button, self.end_button):
             button.setMinimumWidth(button.fontMetrics().horizontalAdvance(button.text()) + metric(18))
-        self.output_width.setMinimumWidth(metric(92))
-        self.output_height.setMinimumWidth(metric(92))
-        self.duration_spin.setFixedWidth(metric(82))
+        self.output_width.setMinimumWidth(metric(88))
+        self.output_height.setMinimumWidth(metric(88))
+        self.duration_spin.setFixedWidth(metric(76))
         self.add_tile_wrap.setFixedWidth(metric(128))
         self.add_tile_layout.setContentsMargins(metric(8), 0, metric(8), 0)
         for button in (self.copy_segment,):
@@ -5906,7 +5918,11 @@ class MainWindow(QMainWindow):
         if self.minimax_panel:
             self.minimax_panel.refresh_references()
         total = self.total_duration()
-        self.sequence_bar.setText(f"SEQUENCE  ·  {total:.2f}s  ·  {len(self.segments)} segments")
+        self.sequence_bar.setText(f"{total:.2f}s · {len(self.segments)}")
+        self.sequence_bar.setToolTip(
+            f"Sequence begins at 0.00 seconds and ends at {total:.2f} seconds "
+            f"({len(self.segments)} segments)."
+        )
         self.add_tile.setText("＋\nAdd media")
         self.add_tile.setEnabled(True)
         self.add_text_tile.setEnabled(True)
@@ -5916,8 +5932,8 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"{visual_count} visual · {text_count} text · {total:.2f}s")
 
     def update_counts(self) -> None:
-        self.segment_count.setText(f"{len(self.segment_prompt.toPlainText())} characters")
-        self.unified_count.setText(f"{len(self.minimax_prompt_text)} characters")
+        self.segment_count.setText(f"{len(self.segment_prompt.toPlainText()):,} chars")
+        self.unified_count.setText(f"{len(self.minimax_prompt_text):,} chars")
         self.global_count.setText(f"{len(self.global_prompt.toPlainText())} characters")
 
     def update_provider_button(self) -> None:
@@ -6194,7 +6210,7 @@ class MainWindow(QMainWindow):
                        self.global_prompt, self.intent, self.intent_segment_prompt):
             editor.setReadOnly(not enabled)
         for widget in (self.prompt_scope, self.project_type_combo, self.duration_spin,
-                       self.start_button, self.end_button, self.requested_length,
+                       self.start_button, self.end_button, self.voice_options_button, self.requested_length,
                        self.add_tile, self.add_text_tile,
                        self.hdr, self.sfx, self.spoken_dialog, self.reduce_music,
                        self.output_width, self.output_height, self.references_button):
@@ -6715,7 +6731,9 @@ class MainWindow(QMainWindow):
                 control.setChecked(False)
         self.hdr.setVisible(True)
         self.requested_length.setVisible(True)
-        self.length_label.setVisible(True)
+        self.length_label.setVisible(not prompt_only)
+        self.voice_options_button.setVisible(audio and not prompt_only)
+        self.update_spoken_dialog_visibility()
         self.output_size_control.setVisible(True)
         self.output_label.setVisible(True)
         self.refine_timing_button.hide()
@@ -6790,7 +6808,8 @@ class MainWindow(QMainWindow):
                 else 'Keyframes')
         self.conditioning_records = inventory
         self.conditioning_fixes = []
-        heading = QLabel(f"{mode} · {total:.2f}s\nCONDITIONING SETUP")
+        heading = QLabel(f"{mode} · {total:.2f}s")
+        heading.setToolTip("Conditioning setup: click the timeline to edit frames and roles")
         heading.setObjectName("conditioningHeading")
         self.conditioning_row.addWidget(heading)
         for record in inventory:
@@ -6799,10 +6818,10 @@ class MainWindow(QMainWindow):
             tile = QFrame()
             tile.setObjectName("conditioningTile")
             row = QHBoxLayout(tile)
-            row.setContentsMargins(4, 2, 6, 2)
-            row.setSpacing(5)
+            row.setContentsMargins(3, 1, 3, 1)
+            row.setSpacing(3)
             thumbnail = QLabel()
-            thumbnail.setFixedSize(44, 32)
+            thumbnail.setFixedSize(27, 22)
             if 'timeline_index' in record:
                 segment = self.segments[record['timeline_index']]
                 preview = QPixmap(segment.preview_path)
@@ -6828,7 +6847,9 @@ class MainWindow(QMainWindow):
             else:
                 detail = f"{record['role'].title()} · untimed"
             value_text = f" · value {record['checkpoint_time']:.2f}" if 'checkpoint_time' in record else ''
-            label = QLabel(f"{record['label']}{value_text}\n{detail}" + (f" · ⚠ {fix}" if fix else ''))
+            label = QLabel(f"{record['label']}{value_text} · {detail}" +
+                           (f" ⚠ {fix}" if fix else ""))
+            label.setMaximumHeight(27)
             label.setObjectName("conditioningFix" if fix else "conditioningLabel")
             row.addWidget(label)
             tile.setToolTip(f"{record['name']}\n{detail}" +
@@ -6969,11 +6990,12 @@ class MainWindow(QMainWindow):
             self.refresh_shared_editor()
 
     def update_spoken_dialog_visibility(self) -> None:
-        if not hasattr(self, "language_label"):
+        if not hasattr(self, "voice_options_button"):
             return
-        self.planning_label.setVisible(self.spoken_dialog.isChecked())
-        for widget in (self.speaker_language, self.speaker_accent, self.language_label, self.accent_label):
-            widget.setVisible(self.spoken_dialog.isChecked())
+        self.voice_options_button.setEnabled(
+            self.spoken_dialog.isChecked() and not self.ai_busy
+        )
+        self.voice_options_button.setVisible(self.spoken_dialog.isVisible())
 
     def set_reference_panel_open(self, opened: bool) -> None:
         self.settings.setValue("reference_panel_open", bool(opened))

@@ -156,7 +156,10 @@ class UnifiedEditorTests(unittest.TestCase):
                          if isinstance(x, QLabel)])
         self.assertTrue(all(x.height() <= 30 for x in (w.hdr, w.sfx,
                                                        w.spoken_dialog, w.reduce_music)))
-        self.assertEqual(w.planning_row.heightForWidth(700), 0)
+        self.assertIs(w.options_row, w.sequence_controls)
+        self.assertFalse(hasattr(w, "planning_row"))
+        self.assertFalse(w.voice_options_button.isEnabled())
+        self.assertLessEqual(w.prompt_scope.width(), 100)
         w.prompt_scope.setCurrentIndex(1)
         self.assertIs(stack.currentWidget(), w.intent_segment_prompt)
         w.intent_segment_prompt.setPlainText("A wide editor\\n/refine Keep scene continuity")
@@ -165,9 +168,46 @@ class UnifiedEditorTests(unittest.TestCase):
                          w.intent_segment_prompt.LineWrapMode.WidgetWidth)
         w.spoken_dialog.setChecked(True)
         self.app.processEvents()
-        self.assertGreater(w.planning_row.heightForWidth(700), 0)
-        self.assertTrue(w.speaker_language.isVisible())
+        self.assertTrue(w.voice_options_button.isEnabled())
+        self.assertIsNotNone(w.voice_options_button.menu())
+        w.speaker_language.setCurrentText("English")
+        w.speaker_accent.setCurrentText("British RP")
+        self.assertIn("English", w.build_director_request())
+        self.assertIn("British RP", w.build_director_request())
+        w.spoken_dialog.setChecked(False)
+        self.assertFalse(w.voice_options_button.isEnabled())
+        self.assertEqual(w.speaker_accent.currentText(), "British RP")
         self.assertIn("/refine", w.intent_segment_prompt.toPlainText())
+
+    def test_single_row_sequence_options_and_unified_prompt_header(self):
+        from PySide6.QtWidgets import QLabel, QPushButton
+        w = self.make_window('minimax_frames')
+        w.resize(1320, 830)
+        w.show()
+        self.app.processEvents()
+        self.assertIs(w.options_row, w.sequence_controls)
+        self.assertLessEqual(w.prompt_scope.width(), 100)
+        self.assertEqual(w.conditioning_guide.height(), 38)
+        self.assertEqual(w.start_button.text(), "Start")
+        self.assertEqual(w.end_button.text(), "End")
+        self.assertEqual(w.director_controls.count(), 2)
+        self.assertIn("chars", w.unified_count.text())
+        self.assertEqual(w.minimax_panel.header.indexOf(w.unified_count),
+                         w.minimax_panel.header.indexOf(w.minimax_panel.prompt_label) + 1)
+        self.assertEqual(w.minimax_panel.header.indexOf(w.minimax_panel.copy_button),
+                         w.minimax_panel.header.count() - 1)
+        self.assertNotIn("CONDITIONING SETUP", [
+            label.text() for label in w.conditioning_content.findChildren(QLabel)
+        ])
+        self.assertNotIn("SEQUENCE", w.sequence_bar.text())
+        self.assertEqual(w.length_label.text(), "Len")
+        self.assertNotIn("DURATION", [label.text() for label
+                         in w.centralWidget().findChildren(QLabel) if label.isVisible()])
+        autofit = next(w.timeline_controls.itemAt(i).widget()
+                       for i in range(w.timeline_controls.count())
+                       if isinstance(w.timeline_controls.itemAt(i).widget(), QPushButton)
+                       and w.timeline_controls.itemAt(i).widget().text() == "Fit")
+        self.assertIn("Auto-fit", autofit.toolTip())
 
     def test_ltx_segment_editor_remains_authoritative(self):
         w = self.make_window('ltx')
