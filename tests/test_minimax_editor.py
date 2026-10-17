@@ -113,27 +113,30 @@ class UnifiedEditorTests(unittest.TestCase):
         self.assertEqual(w.paragraph_review.pending_count, 0)
 
     def test_segment_context_menu_has_manual_generate_artwork(self):
-        from PySide6.QtWidgets import QMenu
         w = self.make_window("minimax_frames")
         w.resize(1150, 820)
         w.show()
         self.app.processEvents()
-        actions = []
-        def capture(menu, *_):
-            actions.extend((item.text(), item.isEnabled()) for item in menu.actions())
-        with patch.object(QMenu, "exec", capture):
+        # A fake menu avoids QMenu.exec()'s native modal event loop in CI.
+        with patch("ltx_prompt_director.ui.QMenu") as menu_class:
             point = w.timeline.visualItemRect(w.timeline.item(0)).center()
             w.timeline_menu(point)
-        self.assertIn(("✦ Generate Artwork", True), actions)
+            menu = menu_class.return_value
+            names = [call.args[0] for call in menu.addAction.call_args_list]
+            self.assertIn("✦ Generate Artwork", names)
+            menu.addAction.return_value.setEnabled.assert_any_call(True)
+            menu.exec.assert_called_once()
 
         w.segments[0].kind = "video"
         w.segments[0].role = "start"
         w.refresh_timeline(0)
-        actions.clear()
-        with patch.object(QMenu, "exec", capture):
+        with patch("ltx_prompt_director.ui.QMenu") as menu_class:
             point = w.timeline.visualItemRect(w.timeline.item(0)).center()
             w.timeline_menu(point)
-        self.assertIn(("✦ Generate Artwork", False), actions)
+            menu = menu_class.return_value
+            self.assertIn("✦ Generate Artwork",
+                          [call.args[0] for call in menu.addAction.call_args_list])
+            menu.addAction.return_value.setEnabled.assert_any_call(False)
 
     def test_manual_text_artwork_uses_neighbor_images_and_prompt_context(self):
         from tempfile import TemporaryDirectory
