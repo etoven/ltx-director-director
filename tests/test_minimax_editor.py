@@ -45,7 +45,10 @@ class UnifiedEditorTests(unittest.TestCase):
         self.assertEqual(w.primary_ai_command, 'refine')
         w.set_project_type('minimax_prompt_refinement')
         self.assertEqual(w.minimax_panel.header.indexOf(w.magic_button) >= 0, True)
-        self.assertFalse(w.magic_button.isEnabled())  # no text to refine
+        w.unified_prompt.clear()
+        w.minimax_prompt_text = ''
+        w.refresh_primary_ai_action()
+        self.assertFalse(w.magic_button.isEnabled())  # empty prompt
         w.unified_prompt.setPlainText('Text to refine')
         w.refresh_primary_ai_action()
         self.assertTrue(w.magic_button.isEnabled())
