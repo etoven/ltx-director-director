@@ -3460,36 +3460,11 @@ class MainWindow(QMainWindow):
         self.reduce_music.setObjectName("qualityToggle")
         self.reduce_music.setToolTip("Ask Magic Build for setting-specific ambient sound to discourage generated music")
         self.reduce_music.toggled.connect(self.mark_dirty)
-        self.magic_button = QToolButton()
-        self.magic_button.setText("✦ Generate")
-        self.magic_button.setObjectName("magicButton")
-        self.magic_button.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
-        self.magic_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        # One ordinary contextual action button, no menu or secondary choices.
+        self.magic_button = QPushButton("✦ Generate")
+        self.magic_button.setObjectName("timelineButton")
         self.magic_button.clicked.connect(self.run_primary_ai_action)
-        self.ai_action_menu = QMenu(self.magic_button)
-        self.magic_button.setMenu(self.ai_action_menu)
-        self.ai_action_commands = {}
-        for key, label in (
-            ("generate_timeline", "✦ Generate timeline prompts"),
-            ("generate_unified", "✦ Generate unified prompt"),
-            ("refine_unified", "✎ Refine unified prompt"),
-            ("refine_segment", "✎ Refine selected segment"),
-            ("refine_global", "✎ Refine global direction"),
-            ("refine_timing", "⏱ Refine selected timing"),
-        ):
-            action = self.ai_action_menu.addAction(label)
-            action.triggered.connect(lambda checked=False, command=key: self.run_ai_action(command))
-            self.ai_action_commands[key] = action
-        self.ai_action_menu.addSeparator()
-        self.retry_ai_action = self.ai_action_menu.addAction("↻ Retry last request")
-        self.retry_ai_action.triggered.connect(self.retry_ai_operation)
-        self.retry_ai_action.setEnabled(False)
-        self.ai_action_menu.addSeparator()
-        self.show_ai_activity_action = self.ai_action_menu.addAction("◈ Show AI Activity")
-        self.show_ai_activity_action.triggered.connect(self.toggle_ai_activity)
         self.primary_ai_command = "generate_timeline"
-        self.last_ai_command = ""
-        self.retry_ai_available = False
         for button in (self.sfx, self.spoken_dialog, self.hdr, self.reduce_music, self.magic_button):
             button.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         intent_row.addWidget(self.intent, 1)
@@ -6063,7 +6038,6 @@ class MainWindow(QMainWindow):
         retries = self.settings.value("api_retries", 2, int)
         retry_cooldown = self.settings.value("api_retry_cooldown", 10, int)
         self.set_ai_controls_enabled(False)
-        self.retry_ai_available = False
         self.ai_activity_title = (
             "Generic Generate" if operation in {build_generic_prompt, build_generic_segments} else
             "Generic Refine" if operation in {refine_generic_prompt, refine_generic_segment} else
@@ -6775,70 +6749,42 @@ class MainWindow(QMainWindow):
         self.minimax_panel.reference_dock.raise_()
 
     def refresh_primary_ai_action(self) -> None:
-        """The only visible Generate/Refine button adapts to the current editor."""
-        if not hasattr(self, "magic_button") or not hasattr(self, "ai_action_commands"):
-            return
-        try:
-            unified = self.unified_workspace
-            prompt_only = self.prompt_only_workspace
-            sequence = self.workspace_engine == "shot_sequence"
-        except (AttributeError, KeyError):
+        """Only one context-driven action, without menu or task selection."""
+        if not hasattr(self, "magic_button") or not hasattr(self, "prompt_scope"):
             return
         if not hasattr(self, "unified_prompt") or not hasattr(self, "segment_prompt"):
             return
+        if self.workspace_engine == "shot_sequence":
+            self.primary_ai_command = ""
+            self.magic_button.setText("✦ Generate")
+            self.magic_button.setEnabled(False)
+            return
+        scope = self.prompt_scope.currentData()
         selected = self.current_segment() if hasattr(self, "timeline") else None
-        has_segments = bool(getattr(self, "segments", ()))
-        has_unified = bool(self.minimax_prompt_text.strip())
-        has_selected_prompt = bool(selected and selected.prompt.strip())
-        has_global = bool(self.global_prompt.toPlainText().strip())
-        scope = self.prompt_scope.currentData() if hasattr(self, "prompt_scope") else "segment"
-        if sequence:
-            primary = ""
-        elif unified:
-            if prompt_only:
-                primary = "refine_unified" if has_unified else ""
-            elif scope == "segment" and selected:
-                primary = ("refine_segment" if has_selected_prompt or self._combined_enabled()
-                           else "generate_unified")
-            elif scope == "global":
-                primary = ("refine_global" if has_global or self._combined_enabled()
-                           else "generate_unified")
+        if self.prompt_only_workspace:
+            has_text = bool(self.minimax_prompt_text.strip())
+            self.primary_ai_command = "refine_unified" if has_text else ""
+            allow = has_text
+        elif self.unified_workspace:
+            has_text = bool(self.minimax_prompt_text.strip())
+            if scope == "segment" and selected and self._combined_enabled():
+                self.primary_ai_command = "refine_segment" if has_text else "generate_unified"
+            elif scope == "global" and self._combined_enabled():
+                self.primary_ai_command = "refine_global" if has_text else "generate_unified"
             else:
-                primary = "refine_unified" if has_unified else "generate_unified"
-        elif scope == "global" and has_global:
-            primary = "refine_global"
-        elif has_selected_prompt:
-            primary = "refine_segment"
+                self.primary_ai_command = "refine_unified" if has_text else "generate_unified"
+            allow = bool(self.segments)
         else:
-            primary = "generate_timeline"
-        self.primary_ai_command = primary
-        choices = {
-            "generate_timeline": has_segments and not prompt_only and not sequence,
-            "generate_unified": unified and has_segments and not prompt_only and not sequence,
-            "refine_unified": unified and has_unified and not sequence,
-            "refine_segment": bool(selected) and (has_selected_prompt or (unified and self._combined_enabled())) and not prompt_only and not sequence,
-            "refine_global": (has_global or (unified and self._combined_enabled())) and not prompt_only and not sequence,
-            "refine_timing": selected is not None and not prompt_only and not sequence,
-        }
-        for command, action in self.ai_action_commands.items():
-            action.setVisible(choices[command] or command in {"generate_timeline", "generate_unified"})
-            action.setEnabled(not self.ai_busy and choices[command])
-        labels = {
-            "generate_timeline": "✦ Generate",
-            "generate_unified": "✦ Generate",
-            "refine_unified": "✦ Refine",
-            "refine_segment": "✦ Refine",
-            "refine_global": "✦ Refine",
-            "": "✦ Generate / Refine",
-        }
-        if primary == "refine_segment" and not has_selected_prompt:
-            labels["refine_segment"] = "✦ Generate"
-        if primary == "refine_global" and not has_global:
-            labels["refine_global"] = "✦ Generate"
-        self.magic_button.setText(labels[primary])
-        self.magic_button.setEnabled(bool(primary) and not self.ai_busy and not sequence)
-        self.retry_ai_action.setEnabled(
-            not self.ai_busy and bool(getattr(self, "retry_ai_available", False))
+            has_text = (bool(self.global_prompt.toPlainText().strip())
+                        if scope == "global" else bool(selected and selected.prompt.strip()))
+            self.primary_ai_command = ("refine_global" if scope == "global" else
+                                       "refine_segment") if has_text else "generate_timeline"
+            allow = bool(self.segments)
+        self.magic_button.setText("✦ Refine" if has_text else "✦ Generate")
+        self.magic_button.setEnabled(bool(allow) and not self.ai_busy)
+        self.magic_button.setToolTip(
+            "Uses the Segment / Global / Unified target selected in the toolbar. "
+            "The model's segment JSON automatically determines timeline changes."
         )
 
     def _combined_enabled(self) -> bool:
@@ -6850,57 +6796,29 @@ class MainWindow(QMainWindow):
         return supports_structured_edit(provider, model)
 
     def run_primary_ai_action(self) -> None:
-        self.run_ai_action(getattr(self, "primary_ai_command", ""))
-
-    def run_ai_action(self, command: str) -> None:
-        """Single entry point for all modes, preserving their established workers."""
-        if self.ai_busy or not command:
-            return
-        self.last_ai_command = command
-        if command in {"generate_unified", "refine_unified"}:
-            self.combined_focus = "all"
-        self.retry_ai_available = False
-        if command == "generate_timeline":
-            self.magic_build()
-        elif command == "generate_unified" and self.unified_workspace and not self.prompt_only_workspace:
-            self._generate_minimax_prompt(self.minimax_prompt_mode)
-        elif command == "refine_unified" and self.unified_workspace:
-            self.refine_minimax_prompt()
-        elif command in {"refine_segment", "refine_global", "refine_timing"} and self.unified_workspace and not self.prompt_only_workspace and self._combined_enabled():
-            self.combined_focus = (
-                f"{command} selected id={self.current_segment().id if self.current_segment() else 'none'}; "
-                "preserve all other timeline content unless required for continuity"
-            )
-            if self.minimax_prompt_text.strip():
-                self.refine_minimax_prompt()
-            else:
-                self._generate_minimax_prompt(self.minimax_prompt_mode)
-        elif command == "refine_segment" and not self.prompt_only_workspace:
-            if self.prompt_scope.currentData() == "global":
-                self.prompt_scope.setCurrentIndex(0)
-            self.refine_selected_prompt()
-        elif command == "refine_global" and not self.prompt_only_workspace:
-            if self.prompt_scope.isVisible():
-                self.prompt_scope.setCurrentIndex(1)
-            self.refine_global_direction()
-        elif command == "refine_timing" and not self.prompt_only_workspace:
-            self.refine_selected_timing()
-
-    def retry_ai_operation(self) -> None:
-        """Use the same menu to retry; never add a second inline retry button."""
         if self.ai_busy:
             return
-        self.retry_ai_available = False
-        if self.unified_workspace and getattr(self, "minimax_operation_kind", ""):
-            self.retry_minimax_operation()
-        elif getattr(self, "last_ai_command", ""):
-            self.run_ai_action(self.last_ai_command)
-
-    def toggle_ai_activity(self) -> None:
-        dock = self.reasoning_dock
-        dock.setVisible(not dock.isVisible())
-        if dock.isVisible():
-            dock.raise_()
+        command = getattr(self, "primary_ai_command", "")
+        if command in {"generate_timeline", "generate_unified"}:
+            if command == "generate_unified":
+                self.combined_focus = "all"
+                self._generate_minimax_prompt(self.minimax_prompt_mode)
+            else:
+                self.magic_build()
+        elif command == "refine_unified":
+            self.combined_focus = "all"
+            self.refine_minimax_prompt()
+        elif command in {"refine_segment", "refine_global"}:
+            if self.unified_workspace and self._combined_enabled():
+                self.combined_focus = (
+                    f"{command} selected id={self.current_segment().id if self.current_segment() else 'none'}; "
+                    "preserve all other segments unless the requested changes need them"
+                )
+                self.refine_minimax_prompt()
+            elif command == "refine_segment":
+                self.refine_selected_prompt()
+            else:
+                self.refine_global_direction()
 
     def generate_project_prompt(self) -> None:
         if not self.ai_busy:
@@ -7628,7 +7546,6 @@ class MainWindow(QMainWindow):
         animation.start()
 
     def magic_failed(self, message: str) -> None:
-        self.retry_ai_available = True
         self.set_ai_controls_enabled(True)
         self.magic_overlay.hide_overlay()
         title = getattr(self, "ai_activity_title", "AI operation")
