@@ -364,6 +364,10 @@ class UnifiedEditorTests(unittest.TestCase):
             self.assertEqual(w.segments[0].media_path, str(edited))
             self.assertEqual(w.segments[0].role, "end")
             self.assertTrue(original.is_file())
+            # Close while the temporary media still exists; project thumbnail
+            # creation on window teardown needs to read the source frame.
+            with patch.object(w, "save_library_project"):
+                w.close()
 
     def test_explicit_refine_triggers_existing_frame_if_model_omits_artwork(self):
         from tempfile import TemporaryDirectory
@@ -389,6 +393,8 @@ class UnifiedEditorTests(unittest.TestCase):
             job.assert_called_once()
             self.assertEqual(w.segments[0].artwork_prompt,
                              "Edit this image to remove the fog")
+            with patch.object(w, "save_library_project"):
+                w.close()
 
     def test_unchanged_timeline_accepts_chatgpt_model_completion(self):
         w = self.make_window('minimax_frames')
