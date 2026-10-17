@@ -422,6 +422,24 @@ def sync_timeline_to_prompt(segments, provider, model, api_key, combined_prompt,
         inputs = ai._minimax_reference_inputs(segments, provider, reference_images, refinement=True)
     else:
         inputs = ai._minimax_frames_inputs(segments, provider, reference_images, refinement=True)
+    # The provider already receives each actual image (or sampled video)
+    # through the established multimodal reference pipeline. Bind that visual
+    # evidence to its exact persistent segment UUID so the model can match
+    # a frame to a timecode without inventing or swapping attachments.
+    for index, asset in enumerate(inputs):
+        slot = asset.get("timeline_index")
+        if slot is None and "reference_slot" not in asset and workspace_engine != "generic" and mode != "references":
+            slot = index if index < len(segments) else None
+        if isinstance(slot, int) and 0 <= slot < len(segments):
+            original = segments[slot]
+            asset["name"] = (
+                f"CURRENT SEGMENT {slot + 1}, ID={original.id}, "
+                f"ORIGINAL ROLE={original.role} — {asset.get('name', original.name)}"
+            )
+            asset["segment_id"] = original.id
+            asset["prompt_label"] = (
+                "OLD TIMELINE DIRECTION; master combined prompt overrides old timing"
+            )
     current = [
         {"id": item.id, "name": item.name, "kind": item.kind,
          "role": item.role, "duration": item.duration, "prompt": item.prompt,
