@@ -5955,7 +5955,12 @@ class MainWindow(QMainWindow):
                 STREAM_SINK.reset(stream_token)
                 WORKSPACE_INSTRUCTIONS.reset(token)
         worker = MagicWorker(workspace_operation, args, retries, retry_cooldown, activity)
-        model = str(args[1] if args and isinstance(args[0], str) else args[2])
+        # Internal/custom worker calls may legitimately have no model args.
+        model = (
+            str(args[1]) if len(args) >= 2 and isinstance(args[0], str) else
+            str(args[2]) if len(args) >= 3 else
+            "Background task"
+        )
         self.active_live_panel = self.magic_overlay.live_stream if show_main_overlay else self.live_activity
         self.active_live_panel.begin(activity, model)
         worker.signals.stream.connect(self.ai_stream_received)
