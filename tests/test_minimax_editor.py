@@ -167,6 +167,53 @@ class UnifiedEditorTests(unittest.TestCase):
         self.assertFalse(w.unified_prompt.isReadOnly())
         self.assertTrue(w.prompt_scope.isEnabled())
 
+    def test_minimax_has_one_visible_prompt_editor_and_ai_toolbar(self):
+        from PySide6.QtWidgets import QToolButton
+        w = self.make_window('minimax_frames')
+        self.assertTrue(w.segment_panel.isHidden())
+        self.assertFalse(w.unified_panel.isHidden())
+        self.assertTrue(w.timeline_controls.indexOf(w.magic_button) >= 0)
+        self.assertTrue(w.timeline_controls.indexOf(w.prompt_scope) >= 0)
+        self.assertEqual(len(w.findChildren(QToolButton, 'timelineButton')), 1)
+
+    def test_combined_json_inserts_animated_artwork_placeholder_without_deleting_media(self):
+        from unittest.mock import patch
+        w = self.make_window('minimax_frames')
+        w.render_artwork_toggle.setChecked(True)
+        w.session_keys['openai'] = 'test-image-key'
+        old = list(w.segments)
+        original = old[0]
+        w.minimax_operation_kind = 'generate_frames'
+        w.minimax_prompt_text = 'Before unified prompt'
+        w.ai_segment_snapshot = old
+        w.ai_plan_stream_active = False
+        def record(s):
+            return {'id': s.id, 'name': s.name, 'kind': s.kind, 'role': s.role,
+                    'duration': s.duration, 'prompt': s.prompt,
+                    'imagePrompt': s.image_prompt, 'artworkPrompt': ''}
+        entries = [record(s) for s in old]
+        entries.insert(1, {
+            'id': 'new:1', 'name': 'Rendered insert', 'kind': 'text',
+            'role': 'text', 'duration': 2.2, 'prompt': 'Smooth continuous motion',
+            'imagePrompt': 'New frame composition',
+            'artworkPrompt': 'High-quality cinematic 16:9 image',
+        })
+        with patch.object(w, 'start_disk_job') as disk:
+            w.combined_refinement_finished({
+                'prompt': 'Combined unified production brief',
+                'segments': entries,
+            })
+        self.assertEqual(len(w.segments), len(old) + 1)
+        self.assertEqual(w.segments[0].media_path, original.media_path)
+        self.assertEqual(w.minimax_prompt_text, 'Combined unified production brief')
+        generated = w.segments[1]
+        self.assertEqual(generated.artwork_status, 'generating')
+        self.assertTrue(generated.artwork_prompt)
+        self.assertTrue(w._ai_tile_animation is not None)
+        card = w.timeline.itemWidget(w.timeline.item(1))
+        self.assertIn('Generating artwork', card.preview.text())
+        disk.assert_called_once()
+
     def test_unchanged_timeline_accepts_chatgpt_model_completion(self):
         w = self.make_window('minimax_frames')
         w.unified_prompt.setPlainText('Original draft')
