@@ -6,7 +6,7 @@ from importlib.resources import files
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QIcon, QTextCursor
 from PySide6.QtWidgets import (
-    QCheckBox, QFrame, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton,
+    QCheckBox, QDockWidget, QFrame, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton,
     QSizePolicy, QSplitter, QTextEdit, QVBoxLayout, QWidget,
 )
 
@@ -171,3 +171,66 @@ class LiveOutputPane(QFrame):
         self.status.setText("Complete" if success else "Generation failed")
         if not self.received_reasoning:
             self.reasoning.setPlaceholderText("This model did not publish a reasoning summary.")
+
+
+
+class ReasoningActivityDock(QDockWidget):
+    """Small, floating/dockable live AI reasoning and request status monitor.
+
+    No duplicate prompt output: new wording is animated in the real editor.
+    """
+
+    def __init__(self, owner):
+        super().__init__("AI ACTIVITY", owner)
+        self.setObjectName("aiActivityDock")
+        self.setAllowedAreas(
+            Qt.DockWidgetArea.RightDockWidgetArea |
+            Qt.DockWidgetArea.BottomDockWidgetArea
+        )
+        self.setFeatures(
+            QDockWidget.DockWidgetFeature.DockWidgetClosable |
+            QDockWidget.DockWidgetFeature.DockWidgetMovable |
+            QDockWidget.DockWidgetFeature.DockWidgetFloatable
+        )
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(10, 8, 10, 8)
+        header = QHBoxLayout()
+        header.addWidget(QLabel("✦ Model activity"))
+        self.model_status = QLabel("Idle")
+        header.addWidget(self.model_status, 1)
+        layout.addLayout(header)
+        self.summary = QPlainTextEdit()
+        self.summary.setObjectName("reasoningSummary")
+        self.summary.setReadOnly(True)
+        self.summary.setPlaceholderText(
+            "Reasoning summaries appear here only when the provider offers them. "
+            "New prompt wording is shown in red directly inside the editor."
+        )
+        self.summary.setStyleSheet(
+            "QPlainTextEdit{background:#0c1622;color:#c8dcfa;"
+            "border:1px solid #30445c;border-radius:6px;padding:8px}"
+        )
+        layout.addWidget(self.summary, 1)
+        self.setWidget(panel)
+        self.resize(420, 320)
+        self.hide()
+
+    def begin(self, activity: str, model: str):
+        self.model_status.setText(f"{model} · {activity}")
+        self.summary.clear()
+
+    def receive_stream(self, kind: str, text: str):
+        if kind == "reset":
+            self.model_status.setText(text or "Retrying…")
+            self.summary.clear()
+        elif kind == "status":
+            self.model_status.setText(text)
+        elif kind == "reasoning" and text:
+            cursor = self.summary.textCursor()
+            cursor.movePosition(QTextCursor.MoveOperation.End)
+            cursor.insertText(text)
+            self.summary.setTextCursor(cursor)
+
+    def finish(self, success: bool):
+        self.model_status.setText("Complete" if success else "Generation failed")
