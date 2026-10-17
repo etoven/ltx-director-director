@@ -6599,6 +6599,88 @@ class MainWindow(QMainWindow):
         self.set_reference_panel_open(True)
         self.minimax_panel.reference_dock.raise_()
 
+    def refresh_primary_ai_action(self) -> None:
+        """The only visible Generate/Refine button adapts to the current editor."""
+        if not hasattr(self, "magic_button") or not hasattr(self, "ai_action_commands"):
+            return
+        try:
+            unified = self.unified_workspace
+            prompt_only = self.prompt_only_workspace
+            sequence = self.workspace_engine == "shot_sequence"
+        except (AttributeError, KeyError):
+            return
+        if not hasattr(self, "unified_prompt") or not hasattr(self, "segment_prompt"):
+            return
+        selected = self.current_segment() if hasattr(self, "timeline") else None
+        has_segments = bool(getattr(self, "segments", ()))
+        has_unified = bool(self.minimax_prompt_text.strip())
+        has_selected_prompt = bool(selected and selected.prompt.strip())
+        has_global = bool(self.global_prompt.toPlainText().strip())
+        scope = self.prompt_scope.currentData() if hasattr(self, "prompt_scope") else "segment"
+        if sequence:
+            primary = ""
+        elif unified:
+            primary = ("refine_unified" if has_unified else
+                       "generate_unified" if not prompt_only else "")
+        elif scope == "global" and has_global:
+            primary = "refine_global"
+        elif has_selected_prompt:
+            primary = "refine_segment"
+        else:
+            primary = "generate_timeline"
+        self.primary_ai_command = primary
+        choices = {
+            "generate_timeline": has_segments and not prompt_only and not sequence,
+            "generate_unified": unified and has_segments and not prompt_only and not sequence,
+            "refine_unified": unified and has_unified and not sequence,
+            "refine_segment": has_selected_prompt and not prompt_only and not sequence,
+            "refine_global": has_global and not prompt_only and not sequence,
+            "refine_timing": selected is not None and not prompt_only and not sequence,
+        }
+        for command, action in self.ai_action_commands.items():
+            action.setVisible(choices[command] or command in {"generate_timeline", "generate_unified"})
+            action.setEnabled(not self.ai_busy and choices[command])
+        labels = {
+            "generate_timeline": "✦ Generate",
+            "generate_unified": "✦ Generate",
+            "refine_unified": "✦ Refine",
+            "refine_segment": "✦ Refine",
+            "refine_global": "✦ Refine",
+            "": "✦ Generate / Refine",
+        }
+        self.magic_button.setText(labels[primary])
+        self.magic_button.setEnabled(bool(primary) and not self.ai_busy and not sequence)
+
+    def run_primary_ai_action(self) -> None:
+        self.run_ai_action(getattr(self, "primary_ai_command", ""))
+
+    def run_ai_action(self, command: str) -> None:
+        """Single entry point for all modes, preserving their established workers."""
+        if self.ai_busy:
+            return
+        if command == "generate_timeline":
+            self.magic_build()
+        elif command == "generate_unified" and self.unified_workspace and not self.prompt_only_workspace:
+            self._generate_minimax_prompt(self.minimax_prompt_mode)
+        elif command == "refine_unified" and self.unified_workspace:
+            self.refine_minimax_prompt()
+        elif command == "refine_segment" and not self.prompt_only_workspace:
+            if self.prompt_scope.currentData() == "global":
+                self.prompt_scope.setCurrentIndex(0)
+            self.refine_selected_prompt()
+        elif command == "refine_global" and not self.prompt_only_workspace:
+            if self.prompt_scope.isVisible():
+                self.prompt_scope.setCurrentIndex(1)
+            self.refine_global_direction()
+        elif command == "refine_timing" and not self.prompt_only_workspace:
+            self.refine_selected_timing()
+
+    def toggle_ai_activity(self) -> None:
+        dock = self.reasoning_dock
+        dock.setVisible(not dock.isVisible())
+        if dock.isVisible():
+            dock.raise_()
+
     def generate_project_prompt(self) -> None:
         if not self.ai_busy:
             self.magic_build()
