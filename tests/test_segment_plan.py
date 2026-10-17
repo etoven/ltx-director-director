@@ -355,7 +355,7 @@ class SegmentPlanTests(unittest.TestCase):
         )
         with patch.object(artwork_tools.requests, "post", side_effect=server) as post:
             data = artwork_tools._gemini_image("Edit my 16:9 frame", tool)
-        self.assertTrue(data.startswith(b"\\x89PNG"))
+        self.assertTrue(data.startswith(bytes((137, 80, 78, 71))))
         self.assertEqual(post.call_count, 1)
 
     def test_openai_400_reports_provider_error_code_message_and_safe_model(self):
