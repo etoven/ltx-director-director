@@ -146,7 +146,10 @@ panel.begin("Generating", "gpt-test")
 panel.receive_stream("reasoning", "Provider summary.")
 panel.receive_stream("output", '{"prompt":"hello"}')
 assert panel.reasoning.toPlainText() == "Provider summary."
-assert panel.output.toPlainText() == '{"prompt":"hello"}'
+app.processEvents()
+panel.finish(True)
+assert "hello" in panel.output.toPlainText()
+assert r'{"prompt":' not in panel.output.toPlainText()
 panel.receive_stream("reset", "Retrying")
 assert panel.output.toPlainText() == ""
 panel.receive_stream("output", "valid")
