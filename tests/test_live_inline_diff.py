@@ -90,7 +90,7 @@ editor.close()
         self.assertEqual(typing_batch_size(99999), 160)
         html = rich_diff_html("Older text\n", "New text\n")
         self.assertIn("#80e991", html)
-        self.assertIn("#ed969e", html)
+        self.assertIn("#9c3f4b", html)
         self.assertIn("line-through", html)
         self.assertIn("New&nbsp;text", html)
 
