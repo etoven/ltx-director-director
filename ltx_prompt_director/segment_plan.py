@@ -381,15 +381,22 @@ def normalize_timeline_sync(raw, current, authoritative_prompt):
     for entry in entries:
         sid = entry.get("id")
         original = existing.get(sid)
-        if str(entry.get("artworkPrompt") or "").strip():
-            raise ai.AIResponseFormatError("Timeline sync cannot create or modify artwork.")
+        artwork = str(entry.get("artworkPrompt") or "").strip()
+        if original and artwork:
+            raise ai.AIResponseFormatError(
+                "Timeline sync cannot regenerate an existing image checkpoint.")
         if original:
             if entry.get("kind", original.kind) != original.kind:
                 raise ai.AIResponseFormatError("Timeline sync cannot change existing media types.")
             if entry.get("role", original.role) != original.role:
                 raise ai.AIResponseFormatError("Timeline sync cannot change frame roles.")
+        elif entry.get("kind") == "image":
+            if entry.get("role") not in ("start", "end") or not artwork:
+                raise ai.AIResponseFormatError(
+                    "A new image checkpoint requires a start/end role and an artwork prompt.")
         elif entry.get("kind") != "text" or entry.get("role") != "text":
-            raise ai.AIResponseFormatError("New synchronized intervals must be text-only.")
+            raise ai.AIResponseFormatError(
+                "New synchronized intervals must be text or renderable image checkpoints.")
     # Deleting a superseded text beat is fine. Silently deleting/reordering a
     # user's actual frames or video, however, is not a text synchronization.
     visual_before = [item.id for item in current if item.kind != "text"]
@@ -427,14 +434,22 @@ def sync_timeline_to_prompt(segments, provider, model, api_key, combined_prompt,
         "timed action and wording. Use the exact timecodes and scene order from "
         "the combined prompt; preserve all explicitly requested dialogue, "
         "identity and motion details in their matching intervals. "
-        "Create as many missing TEXT segments as needed (IDs new:1, new:2, ...). "
+        "Create as many missing segments as needed (IDs new:1, new:2, ...). "
+        "Use text segments for timed motion beats. For a genuinely missing "
+        "image checkpoint explicitly required by the master prompt, propose "
+        "kind=image, role=start or end, with a detailed, nonempty artworkPrompt "
+        "and imagePrompt describing the desired image. The application "
+        "renders real pixels separately, and until then the new image is "
+        "a temporary text placeholder. Do not propose unnecessary frames. "
         "You may retime, rename, reorder, rewrite or remove obsolete TEXT beats "
         "to create a clean match. Preserve the original IDs, media kinds, roles "
         "and relative order of all image/video checkpoints: real attached media "
         "cannot be regenerated or deleted by sync. Keep its corresponding "
-        "interval action aligned to the immutable prompt. New segments are "
-        "always kind=text role=text; never invent visual/audio attachments, "
-        "artwork, new images, videos, external paths or source observations. "
+        "interval action aligned to the immutable prompt. New motion beats "
+        "use kind=text role=text; ONLY genuinely new visual checkpoints may "
+        "request kind=image role=start|end and a detailed artworkPrompt. "
+        "Never invent audio attachments, video files, external media paths "
+        "or source observations. Existing image/video assets are never edited. "
         "Include every retained existing item only once. Give every segment "
         "a meaningful action prompt and duration in seconds (0.01 to 3600). "
         "An explicit time range controls duration; split into extra segments "
@@ -443,6 +458,8 @@ def sync_timeline_to_prompt(segments, provider, model, api_key, combined_prompt,
         'Return exactly one strict JSON object {"segments":[{"id":"new:1",'
         '"name":"Action","kind":"text","role":"text","duration":2.5,'
         '"prompt":"timed action wording","imagePrompt":"","artworkPrompt":""}]}. '
+        "For requested images use kind=image, role=start|end, nonempty "
+        "artworkPrompt and imagePrompt; no media path. "
         "NO combined prompt field and NO commentary.\\n"
         "EXISTING TIMELINE AND MEDIA IDs:\\n"
         + json.dumps(current, ensure_ascii=False)
