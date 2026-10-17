@@ -36,8 +36,8 @@ from .ai_stream import STREAM_SINK
 from .stream_widgets import ReasoningActivityDock, LiveOutputPane
 from .ai_inline_diff import LiveTypingPreview
 from .segment_plan import (supports_structured_edit, generate_combined, preview_operations,
-                           build_segment_objects, stream_operations, completed_stream_records,
-                           render_requested_artwork)
+                           build_segment_objects, stream_operations, completed_stream_records)
+from .artwork_tools import available_artwork_tools, render_artwork
 from .cache_maintenance import cover_path, mark_ready, needs_refresh, warm_metadata
 from .ai import AIResponseFormatError, GEMINI_MODELS, build_minimax_h3_prompt, build_minimax_h3_reference_prompt, build_prompts, minimax_h3_cache_key, provider_error_message, WORKSPACE_INSTRUCTIONS, refine_minimax_text_prompt, refine_minimax_h3_prompt, refine_minimax_h3_reference_prompt, refine_segment_prompt, refine_global_prompt, refine_timing, retryable_connection_error
 from .media import APP_CACHE, TIMELINE_VIDEO_SUFFIXES, comfy_input_references, copy_media_for_export, data_url, extract_audio_for_export, prepare_media, safe_media_filename, thumbnail_for_image, unique_media_filename, video_source_dimensions, write_data_url
@@ -3459,36 +3459,11 @@ class MainWindow(QMainWindow):
         self.reduce_music.setObjectName("qualityToggle")
         self.reduce_music.setToolTip("Ask Magic Build for setting-specific ambient sound to discourage generated music")
         self.reduce_music.toggled.connect(self.mark_dirty)
-        self.magic_button = QToolButton()
-        self.magic_button.setText("✦ Generate")
-        self.magic_button.setObjectName("magicButton")
-        self.magic_button.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
-        self.magic_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        # One ordinary contextual action button, no menu or secondary choices.
+        self.magic_button = QPushButton("✦ Generate")
+        self.magic_button.setObjectName("timelineButton")
         self.magic_button.clicked.connect(self.run_primary_ai_action)
-        self.ai_action_menu = QMenu(self.magic_button)
-        self.magic_button.setMenu(self.ai_action_menu)
-        self.ai_action_commands = {}
-        for key, label in (
-            ("generate_timeline", "✦ Generate timeline prompts"),
-            ("generate_unified", "✦ Generate unified prompt"),
-            ("refine_unified", "✎ Refine unified prompt"),
-            ("refine_segment", "✎ Refine selected segment"),
-            ("refine_global", "✎ Refine global direction"),
-            ("refine_timing", "⏱ Refine selected timing"),
-        ):
-            action = self.ai_action_menu.addAction(label)
-            action.triggered.connect(lambda checked=False, command=key: self.run_ai_action(command))
-            self.ai_action_commands[key] = action
-        self.ai_action_menu.addSeparator()
-        self.retry_ai_action = self.ai_action_menu.addAction("↻ Retry last request")
-        self.retry_ai_action.triggered.connect(self.retry_ai_operation)
-        self.retry_ai_action.setEnabled(False)
-        self.ai_action_menu.addSeparator()
-        self.show_ai_activity_action = self.ai_action_menu.addAction("◈ Show AI Activity")
-        self.show_ai_activity_action.triggered.connect(self.toggle_ai_activity)
-        self.primary_ai_command = "generate_timeline"
-        self.last_ai_command = ""
-        self.retry_ai_available = False
+        self.primary_ai_command = "generate"
         for button in (self.sfx, self.spoken_dialog, self.hdr, self.reduce_music, self.magic_button):
             button.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         intent_row.addWidget(self.intent, 1)
@@ -3582,14 +3557,7 @@ class MainWindow(QMainWindow):
         self.timeline_controls.addWidget(self.magic_button)
         self.timeline_controls.addWidget(self.prompt_scope)
         self.timeline_controls.addWidget(self.ai_timeline_status)
-        self.render_artwork_toggle = QCheckBox("Render artwork")
-        self.render_artwork_toggle.setToolTip(
-            "Optional paid OpenAI Images API. Requires a separate OpenAI API key; ChatGPT OAuth does not support image generation."
-        )
-        self.render_artwork_toggle.setChecked(bool(
-            self.settings.value("openai_key", "") or self.session_keys.get("openai")
-        ))
-        self.timeline_controls.addWidget(self.render_artwork_toggle)
+        # Image tools are chosen from connected providers as needed; no toggle.
         # Never create another prompt editor or a second Generate/Refine button.
         self.magic_button.setObjectName("timelineButton")
         self.refine_timing_button = QPushButton("⏱ Refine Timing")
@@ -6042,7 +6010,7 @@ class MainWindow(QMainWindow):
             editor.setReadOnly(not enabled)
         for widget in (self.prompt_scope, self.project_type_combo, self.duration_spin,
                        self.start_button, self.end_button, self.requested_length,
-                       self.add_tile, self.add_text_tile, self.render_artwork_toggle,
+                       self.add_tile, self.add_text_tile,
                        self.hdr, self.sfx, self.spoken_dialog, self.reduce_music,
                        self.output_width, self.output_height, self.references_button):
             widget.setEnabled(enabled)
@@ -6069,7 +6037,6 @@ class MainWindow(QMainWindow):
         retries = self.settings.value("api_retries", 2, int)
         retry_cooldown = self.settings.value("api_retry_cooldown", 10, int)
         self.set_ai_controls_enabled(False)
-        self.retry_ai_available = False
         self.ai_activity_title = (
             "Generic Generate" if operation in {build_generic_prompt, build_generic_segments} else
             "Generic Refine" if operation in {refine_generic_prompt, refine_generic_segment} else
@@ -6527,7 +6494,6 @@ class MainWindow(QMainWindow):
             self._prompt_scope_initialized = True
         if not self.unified_workspace and self.prompt_scope.currentData() == "unified":
             self.prompt_scope.setCurrentIndex(0)
-        self.render_artwork_toggle.setVisible(self.unified_workspace and not prompt_only)
         self.unified_panel.setVisible(not ltx)
         self.timeline_shell.setVisible(not prompt_only)
         self.sequence_bar.setVisible(not prompt_only)
@@ -6781,71 +6747,43 @@ class MainWindow(QMainWindow):
         self.set_reference_panel_open(True)
         self.minimax_panel.reference_dock.raise_()
 
+    def _has_inline_refinement(self) -> bool:
+        """Slash annotations in any prompt are the user's edit instructions."""
+        sources = [
+            self.minimax_prompt_text, self.global_prompt.toPlainText(),
+            self.intent.toPlainText(),
+            *(item.prompt for item in self.segments),
+        ]
+        return any("/refine" in text.lower() for text in sources if text)
+
     def refresh_primary_ai_action(self) -> None:
-        """The only visible Generate/Refine button adapts to the current editor."""
-        if not hasattr(self, "magic_button") or not hasattr(self, "ai_action_commands"):
-            return
-        try:
-            unified = self.unified_workspace
-            prompt_only = self.prompt_only_workspace
-            sequence = self.workspace_engine == "shot_sequence"
-        except (AttributeError, KeyError):
+        """One button. Slash-marked edits and existing prose mean Refine."""
+        if not hasattr(self, "magic_button") or not hasattr(self, "prompt_scope"):
             return
         if not hasattr(self, "unified_prompt") or not hasattr(self, "segment_prompt"):
             return
-        selected = self.current_segment() if hasattr(self, "timeline") else None
-        has_segments = bool(getattr(self, "segments", ()))
-        has_unified = bool(self.minimax_prompt_text.strip())
-        has_selected_prompt = bool(selected and selected.prompt.strip())
-        has_global = bool(self.global_prompt.toPlainText().strip())
-        scope = self.prompt_scope.currentData() if hasattr(self, "prompt_scope") else "segment"
-        if sequence:
-            primary = ""
-        elif unified:
-            if prompt_only:
-                primary = "refine_unified" if has_unified else ""
-            elif scope == "segment" and selected:
-                primary = ("refine_segment" if has_selected_prompt or self._combined_enabled()
-                           else "generate_unified")
-            elif scope == "global":
-                primary = ("refine_global" if has_global or self._combined_enabled()
-                           else "generate_unified")
-            else:
-                primary = "refine_unified" if has_unified else "generate_unified"
-        elif scope == "global" and has_global:
-            primary = "refine_global"
-        elif has_selected_prompt:
-            primary = "refine_segment"
-        else:
-            primary = "generate_timeline"
-        self.primary_ai_command = primary
-        choices = {
-            "generate_timeline": has_segments and not prompt_only and not sequence,
-            "generate_unified": unified and has_segments and not prompt_only and not sequence,
-            "refine_unified": unified and has_unified and not sequence,
-            "refine_segment": bool(selected) and (has_selected_prompt or (unified and self._combined_enabled())) and not prompt_only and not sequence,
-            "refine_global": (has_global or (unified and self._combined_enabled())) and not prompt_only and not sequence,
-            "refine_timing": selected is not None and not prompt_only and not sequence,
-        }
-        for command, action in self.ai_action_commands.items():
-            action.setVisible(choices[command] or command in {"generate_timeline", "generate_unified"})
-            action.setEnabled(not self.ai_busy and choices[command])
-        labels = {
-            "generate_timeline": "✦ Generate",
-            "generate_unified": "✦ Generate",
-            "refine_unified": "✦ Refine",
-            "refine_segment": "✦ Refine",
-            "refine_global": "✦ Refine",
-            "": "✦ Generate / Refine",
-        }
-        if primary == "refine_segment" and not has_selected_prompt:
-            labels["refine_segment"] = "✦ Generate"
-        if primary == "refine_global" and not has_global:
-            labels["refine_global"] = "✦ Generate"
-        self.magic_button.setText(labels[primary])
-        self.magic_button.setEnabled(bool(primary) and not self.ai_busy and not sequence)
-        self.retry_ai_action.setEnabled(
-            not self.ai_busy and bool(getattr(self, "retry_ai_available", False))
+        if self.workspace_engine == "shot_sequence":
+            self.magic_button.setEnabled(False)
+            self.magic_button.setText("✦ Generate")
+            return
+        has_existing = (
+            bool(self.minimax_prompt_text.strip()) if self.unified_workspace
+            else (
+                bool(self.global_prompt.toPlainText().strip())
+                if self.prompt_scope.currentData() == "global"
+                else bool(self.current_segment() and self.current_segment().prompt.strip())
+            )
+        )
+        self.primary_ai_command = "refine" if has_existing or self._has_inline_refinement() else "generate"
+        self.magic_button.setText("✦ Refine" if self.primary_ai_command == "refine" else "✦ Generate")
+        self.magic_button.setEnabled(
+            not self.ai_busy and (
+                (self.prompt_only_workspace and has_existing) or bool(self.segments)
+            )
+        )
+        self.magic_button.setToolTip(
+            "Write /refine or /refine-global beside any requested edit, then click Refine. "
+            "The single result updates the unified prompt and segment JSON together."
         )
 
     def _combined_enabled(self) -> bool:
@@ -6857,57 +6795,35 @@ class MainWindow(QMainWindow):
         return supports_structured_edit(provider, model)
 
     def run_primary_ai_action(self) -> None:
-        self.run_ai_action(getattr(self, "primary_ai_command", ""))
-
-    def run_ai_action(self, command: str) -> None:
-        """Single entry point for all modes, preserving their established workers."""
-        if self.ai_busy or not command:
-            return
-        self.last_ai_command = command
-        if command in {"generate_unified", "refine_unified"}:
-            self.combined_focus = "all"
-        self.retry_ai_available = False
-        if command == "generate_timeline":
-            self.magic_build()
-        elif command == "generate_unified" and self.unified_workspace and not self.prompt_only_workspace:
-            self._generate_minimax_prompt(self.minimax_prompt_mode)
-        elif command == "refine_unified" and self.unified_workspace:
-            self.refine_minimax_prompt()
-        elif command in {"refine_segment", "refine_global", "refine_timing"} and self.unified_workspace and not self.prompt_only_workspace and self._combined_enabled():
-            self.combined_focus = (
-                f"{command} selected id={self.current_segment().id if self.current_segment() else 'none'}; "
-                "preserve all other timeline content unless required for continuity"
-            )
-            if self.minimax_prompt_text.strip():
-                self.refine_minimax_prompt()
-            else:
-                self._generate_minimax_prompt(self.minimax_prompt_mode)
-        elif command == "refine_segment" and not self.prompt_only_workspace:
-            if self.prompt_scope.currentData() == "global":
-                self.prompt_scope.setCurrentIndex(0)
-            self.refine_selected_prompt()
-        elif command == "refine_global" and not self.prompt_only_workspace:
-            if self.prompt_scope.isVisible():
-                self.prompt_scope.setCurrentIndex(1)
-            self.refine_global_direction()
-        elif command == "refine_timing" and not self.prompt_only_workspace:
-            self.refine_selected_timing()
-
-    def retry_ai_operation(self) -> None:
-        """Use the same menu to retry; never add a second inline retry button."""
+        """One unified action; segment JSON determines timeline edits."""
         if self.ai_busy:
             return
-        self.retry_ai_available = False
-        if self.unified_workspace and getattr(self, "minimax_operation_kind", ""):
-            self.retry_minimax_operation()
-        elif getattr(self, "last_ai_command", ""):
-            self.run_ai_action(self.last_ai_command)
-
-    def toggle_ai_activity(self) -> None:
-        dock = self.reasoning_dock
-        dock.setVisible(not dock.isVisible())
-        if dock.isVisible():
-            dock.raise_()
+        refining = self.primary_ai_command == "refine"
+        if self.unified_workspace:
+            if self.prompt_only_workspace:
+                self.refine_minimax_prompt()
+                return
+            selected = self.current_segment()
+            scope = self.prompt_scope.currentData()
+            if scope in {"segment", "global"} and self._combined_enabled():
+                self.combined_focus = (
+                    f"{scope} selected id={selected.id if selected else 'none'}; "
+                    "follow inline /refine tags anywhere and preserve other passages"
+                )
+            else:
+                self.combined_focus = "all"
+            if refining and self.minimax_prompt_text.strip():
+                self.refine_minimax_prompt()
+            else:
+                # A slash-marked timeline can be refined on its first run; the
+                # established generation template still receives all directives.
+                self._generate_minimax_prompt(self.minimax_prompt_mode)
+        elif not refining:
+            self.magic_build()
+        elif self.prompt_scope.currentData() == "global":
+            self.refine_global_direction()
+        else:
+            self.refine_selected_prompt()
 
     def generate_project_prompt(self) -> None:
         if not self.ai_busy:
@@ -7196,17 +7112,65 @@ class MainWindow(QMainWindow):
         self._ai_tile_animation = animation
         animation.start()
 
+    def _available_artwork_tools(self):
+        """Discover configured callable image backends, not subscription OAuth."""
+        keys = {
+            provider: str(
+                self.session_keys.get(provider) or
+                self.settings.value(f"{provider}_key", "") or ""
+            )
+            for provider in ("gemini", "openai")
+        }
+        return available_artwork_tools(
+            keys, str(self.settings.value("provider", "gemini"))
+        )
+
+    def _approve_artwork_cost(self, tool):
+        """One-time per-backend informed approval, before any paid API call."""
+        setting = f"artwork/cost_approved/{tool.provider}"
+        if self.settings.value(setting, False, bool):
+            return True
+        notice = QMessageBox(self)
+        notice.setIcon(QMessageBox.Icon.Warning)
+        notice.setWindowTitle("Enable paid artwork generation")
+        notice.setText(f"Allow {tool.label} to generate timeline artwork?")
+        notice.setInformativeText(
+            "A model may request artwork automatically in its segment JSON. "
+            "Each image is a separate API request billed to your "
+            f"{'Google Gemini' if tool.provider == 'gemini' else 'OpenAI API'} account, "
+            "not your ChatGPT subscription. Up to four images may be generated "
+            "per refinement; actual cost depends on model, image size, and usage. "
+            "You can decline and keep the artwork request for later."
+        )
+        notice.setStandardButtons(
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        notice.setDefaultButton(QMessageBox.StandardButton.No)
+        remember = QCheckBox("Remember my approval; don't ask again for this provider")
+        remember.setChecked(True)
+        notice.setCheckBox(remember)
+        approved = notice.exec() == QMessageBox.StandardButton.Yes
+        if approved and remember.isChecked():
+            self.settings.setValue(setting, True)
+            self.queue_settings_sync()
+        return approved
+
     def combined_refinement_finished(self, result):
         """Apply the validated JSON as one prompt/timeline transaction."""
         before = getattr(self, "ai_segment_snapshot", self.segments)
         records = result["segments"]
         changes = preview_operations(before, records)
         updated = build_segment_objects(before, records)
-        image_key = str(
-            self.session_keys.get("openai") or
-            self.settings.value("openai_key", "")
+        # A model requests an image by returning artworkPrompt in segment JSON.
+        # Choose the available image tool automatically; don't add a second
+        # generate-image button or require a manual checkbox.
+        tools = self._available_artwork_tools()
+        tool = tools[0] if tools else None
+        requested_artwork = any(row["id"].startswith("new:") and
+                                row.get("artworkPrompt") for row in records)
+        should_render = bool(
+            tool and requested_artwork and self._approve_artwork_cost(tool)
         )
-        should_render = bool(self.render_artwork_toggle.isChecked() and image_key)
         to_render = []
         inserted = set()
         for data, item in zip(records, updated):
@@ -7249,7 +7213,7 @@ class MainWindow(QMainWindow):
         self.ai_edit_feed.show()
         self.ai_timeline_status.hide()
         for segment_id, data in to_render:
-            self._start_segment_artwork(segment_id, data, image_key)
+            self._start_segment_artwork(segment_id, data, tool)
         waiting = sum(1 for seg in self.segments if seg.artwork_status == "awaiting")
         if waiting and should_render:
             self.ai_edit_feed.setText(
@@ -7258,13 +7222,13 @@ class MainWindow(QMainWindow):
             )
         if waiting and not should_render:
             self.ai_edit_feed.setText(
-                "✦ Artwork prompts saved. Enable Render artwork and configure "
-                "an OpenAI API key to generate the requested frames."
+                "✦ Artwork requests saved and ready. Configure a Gemini or "
+                "OpenAI API key (or approve image costs) to render them."
             )
 
-    def _start_segment_artwork(self, segment_id, record, image_key):
+    def _start_segment_artwork(self, segment_id, record, tool):
         item = next((item for item in self.segments if item.id == segment_id), None)
-        if not item or not image_key or not item.artwork_prompt:
+        if not item or tool is None or not item.artwork_prompt:
             return
         item.artwork_status = "generating"
         row = next((i for i, s in enumerate(self.segments) if s.id == segment_id), -1)
@@ -7304,7 +7268,7 @@ class MainWindow(QMainWindow):
             )
 
         self.start_disk_job(
-            render_requested_artwork, ([record], image_key),
+            render_artwork, ([record], tool),
             ready, failed,
         )
 
@@ -7314,19 +7278,23 @@ class MainWindow(QMainWindow):
         segment = self.current_segment()
         if not segment or not segment.artwork_prompt:
             return
-        key = str(self.session_keys.get("openai") or
-                  self.settings.value("openai_key", ""))
-        if not key:
+        tools = self._available_artwork_tools()
+        if not tools:
             QMessageBox.information(
-                self, "Render artwork",
-                "Add an OpenAI API key in Settings to render this frame."
+                self, "Artwork tool unavailable",
+                "Connect a Gemini API key or a conventional OpenAI API key "
+                "in Settings to render this image. ChatGPT OAuth does not "
+                "include image generation."
             )
+            return
+        tool = tools[0]
+        if not self._approve_artwork_cost(tool):
             return
         self._start_segment_artwork(
             segment.id,
             {"id": "new:1", "name": segment.name,
              "artworkPrompt": segment.artwork_prompt},
-            key,
+            tool,
         )
 
     def _generate_minimax_prompt(self, mode: str) -> None:
@@ -7583,7 +7551,6 @@ class MainWindow(QMainWindow):
         animation.start()
 
     def magic_failed(self, message: str) -> None:
-        self.retry_ai_available = True
         self.set_ai_controls_enabled(True)
         self.magic_overlay.hide_overlay()
         title = getattr(self, "ai_activity_title", "AI operation")
