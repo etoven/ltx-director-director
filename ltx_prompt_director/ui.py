@@ -7332,35 +7332,9 @@ class MainWindow(QMainWindow):
         )
 
     def minimax_h3_finished(self, prompt: str) -> None:
-        signature = str(getattr(self, "minimax_operation_signature", ""))
-        # Compare the exact provider/model used to start the request. The old
-        # default-model comparison rejected successful ChatGPT completions.
-        provider_model = getattr(self, "minimax_operation_provider_model", None)
-        current_signature = self.current_minimax_cache_key(*provider_model) if provider_model else self.current_minimax_cache_key()
-        if not signature or signature != current_signature:
-            self.pending_minimax_result = prompt
-            self.set_ai_controls_enabled(True)
-            self.magic_overlay.hide_overlay()
-            if self.minimax_panel:
-                self.minimax_panel.set_busy(False, "Completed prompt ready for review")
-                self.minimax_panel.show_message(
-                    "The completed result was not applied automatically because the input fingerprint differs. "
-                    "The generated text is preserved and can be used or copied below.", "warning")
-            return
-        editor_snapshot = (
-            self.minimax_prompt_text,
-            self.minimax_refinement_instructions,
-        )
-        if editor_snapshot != getattr(self, "minimax_operation_editor_snapshot", editor_snapshot):
-            self.pending_minimax_result = prompt
-            self.set_ai_controls_enabled(True)
-            self.magic_overlay.hide_overlay()
-            if self.minimax_panel:
-                self.minimax_panel.set_busy(False, "Completed prompt ready for review")
-                self.minimax_panel.show_message(
-                    "The completed result was not applied automatically because the editor changed. "
-                    "The generated text is preserved and can be used or copied below.", "warning")
-            return
+        # The unified editor and timeline are locked while AI is running.
+        # Project/workspace identity is checked once by ai_result_received().
+        # Legacy editor-change fingerprint checks caused completed output loss.
         operation = str(getattr(self, "minimax_operation_kind", "generate_frames"))
         if operation.startswith("refine_"):
             prompt = consume_global_refinements(prompt)
