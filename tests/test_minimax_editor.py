@@ -275,6 +275,39 @@ class UnifiedEditorTests(unittest.TestCase):
         w.minimax_panel.set_cache_state("Saved")
         self.assertFalse(w.minimax_panel.cache_state.property("active"))
 
+    def test_finished_unified_refinement_exposes_inline_paragraph_review(self):
+        w = self.make_window('minimax_frames')
+        w.resize(1150, 870)
+        w.show()
+        self.app.processEvents()
+        before = "Opening original.\n\nUnchanged center.\n\nEnding original."
+        after = "Opening revised.\n\nUnchanged center.\n\nEnding revised."
+        w.minimax_prompt_text = before
+        w.unified_prompt.setPlainText(before)
+        w.inline_typing.start(w.unified_prompt, before, "unified")
+        w.ai_request_workspace = (
+            w.workspace_revision, w.current_project_id, w.project_type
+        )
+        w.active_live_panel = None
+        def apply(text):
+            w.unified_prompt.setPlainText(text)
+            w.set_ai_controls_enabled(True)
+        w.ai_finished_callback = apply
+        w.ai_result_received(after)
+        self.assertEqual(w.paragraph_review.pending_count, 2)
+        self.assertEqual(len(w.paragraph_review.buttons), 2)
+        self.assertIs(w.paragraph_review.approve_all.parent(), w.unified_prompt)
+        w.paragraph_review.decide(0, False)
+        self.assertEqual(w.paragraph_review.pending_count, 1)
+        self.assertTrue(w.minimax_prompt_text.startswith("Opening original."))
+        w.paragraph_review.approve_all.setChecked(True)
+        self.assertIsNone(w.paragraph_review.editor)
+        self.assertTrue(w.minimax_prompt_text.endswith("Ending revised."))
+        self.assertEqual(
+            w.minimax_prompt_text,
+            "Opening original.\n\nUnchanged center.\n\nEnding revised."
+        )
+
     def test_ltx_segment_editor_remains_authoritative(self):
         w = self.make_window('ltx')
         self.assertTrue(w.prompt_scope.isHidden())
