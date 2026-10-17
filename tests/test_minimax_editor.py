@@ -484,6 +484,9 @@ class UnifiedEditorTests(unittest.TestCase):
         import json
         from ltx_prompt_director import segment_plan
         w = self.make_window("minimax_frames")
+        # This test uses dummy external files. Skip writing a real project
+        # archive on window teardown; the validation path is under test.
+        w.save_library_project = lambda *args, **kwargs: None
         w.segments[0] = Segment(
             "Original footage", "/tmp/original-scene.mp4", "/tmp/thumb.png",
             "video", "end", "Original film direction", 3.0,
