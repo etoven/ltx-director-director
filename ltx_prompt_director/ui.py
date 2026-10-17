@@ -7284,7 +7284,7 @@ class MainWindow(QMainWindow):
             path = images.get(record["id"])
             if path and Path(path).is_file():
                 segment.kind = "image"
-                segment.role = "start"
+                segment.role = segment.artwork_target_role if segment.artwork_target_role in {"start", "end"} else "start"
                 segment.media_path = segment.preview_path = path
                 segment.artwork_status = "complete"
                 self.statusBar().showMessage(f"✦ New AI frame ready: {segment.name}", 5000)
