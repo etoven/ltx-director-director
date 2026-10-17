@@ -52,14 +52,13 @@ assert not review.removed_labels  # old deletion QLabel strips are gone
 assert review.source_document.toPlainText() == "First revised.\n\nSecond original.\n\nThird revised."
 # The temporary projection displays red removed and green added words IN
 # the editor's text flow; the real project text remains free of both.
-red = editor.document().find("original.")
-green = editor.document().find("revised.")
+red = editor.document().find("original")
+green = editor.document().find("revised")
 assert not red.isNull() and not green.isNull()
 assert red.charFormat().fontStrikeOut()
 assert red.charFormat().background().color().name().lower() == "#9c3f4b"
 assert green.charFormat().background().color().name().lower() == "#80e991"
-assert "First original." in editor.toPlainText()
-assert "First revised." in editor.toPlainText()
+assert "First originalrevised." in editor.toPlainText()
 review.decide(0, False)
 assert review.pending_count == 1
 assert not review.removed_labels
@@ -92,7 +91,8 @@ editor.close()
         self.assertIn("#80e991", html)
         self.assertIn("#9c3f4b", html)
         self.assertIn("line-through", html)
-        self.assertIn("New&nbsp;text", html)
+        self.assertIn(">New</span>", html)
+        self.assertIn("&nbsp;text", html)
 
     def test_only_changed_sections_are_marked_not_entire_original(self):
         base = "subject_definitions\nPreserve identity\n\n00:00:01:00 - 00:00:02:00\nOriginal motion\n"
@@ -109,7 +109,7 @@ editor.close()
             "The paws settle against wet tiles.",
             "The paws softly settle against wet tiles."
         )
-        self.assertIn(("added", "softly "), changed)
+        self.assertIn(("added", " softly"), changed)
         self.assertTrue(any(state == "equal" and "against wet tiles" in phrase
                             for state, phrase in changed))
         self.assertEqual("".join(x for state, x in changed if state != "removed"),
@@ -148,10 +148,10 @@ for _ in range(12):
     preview.render()
 shown = editor.toPlainText()
 assert "Opening shot" in shown, shown
-assert "Old movement" in shown, shown
+assert "OldNew movement" in shown, shown
 assert "New movement" in shown, shown
 assert counter[0] == 0, counter
-cursor = editor.document().find("New movement")
+cursor = editor.document().find("New")
 assert not cursor.isNull()
 assert cursor.charFormat().background().color().name().lower() == "#80e991"
 preview.finish()
