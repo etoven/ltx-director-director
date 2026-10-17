@@ -44,7 +44,9 @@ assert review.begin(editor,
 app.processEvents()
 assert review.pending_count == 2
 assert review.approve_all.text().endswith("Approve all")
+assert review.deny_all.text().endswith("Deny all")
 assert review.approve_all.parent() is editor
+assert review.deny_all.parent() is editor
 assert len(review.buttons) == 2
 assert len(review.removed_labels) == 2
 assert all(lbl.isVisible() for lbl, _, _ in review.removed_labels)
@@ -64,6 +66,14 @@ review.approve_all.setChecked(True)
 assert review.editor is None
 assert not review.removed_labels
 assert editor.toPlainText() == "First original.\n\nSecond original.\n\nThird revised."
+# A new review can independently deny every pending paragraph.
+editor.setPlainText("First revised.\n\nSecond original.\n\nThird revised.")
+assert review.begin(editor,
+                    "First original.\n\nSecond original.\n\nThird original.",
+                    editor.toPlainText())
+review.deny_all.setChecked(True)
+assert review.editor is None
+assert editor.toPlainText() == "First original.\n\nSecond original.\n\nThird original."
 editor.close()
 '''
         env = dict(os.environ, QT_QPA_PLATFORM="offscreen")

@@ -87,6 +87,7 @@ class ParagraphDiffReview(QObject):
         self.removed_labels = []
         self._block_margins = []
         self.approve_all = None
+        self.deny_all = None
         self._applying = False
 
     @property
@@ -118,6 +119,19 @@ class ParagraphDiffReview(QObject):
         self.approve_all.setFixedSize(110, 20)
         self.approve_all.toggled.connect(self._approve_all_toggled)
         self.approve_all.show()
+        self.deny_all = QCheckBox("× Deny all", editor)
+        self.deny_all.setObjectName("diffDenyAll")
+        self.deny_all.setAccessibleName("Deny all paragraph changes")
+        self.deny_all.setToolTip("Restore the original text for all remaining changes")
+        self.deny_all.setStyleSheet(
+            "QCheckBox#diffDenyAll{background:#44272a;border:0;"
+            "border-radius:4px;color:#f3a6ac;font-size:10px;"
+            "padding:1px 5px;spacing:4px}"
+            "QCheckBox#diffDenyAll:hover{background:#663239;color:white}"
+        )
+        self.deny_all.setFixedSize(91, 20)
+        self.deny_all.toggled.connect(self._deny_all_toggled)
+        self.deny_all.show()
         editor.viewport().installEventFilter(self)
         editor.installEventFilter(self)
         editor.verticalScrollBar().valueChanged.connect(self.reposition)
@@ -137,6 +151,14 @@ class ParagraphDiffReview(QObject):
             for part in self.parts:
                 if part.decision == "pending":
                     part.decision = "approved"
+            self._apply()
+            self.finish()
+
+    def _deny_all_toggled(self, checked):
+        if checked:
+            for part in self.parts:
+                if part.decision == "pending":
+                    part.decision = "rejected"
             self._apply()
             self.finish()
 
@@ -301,8 +323,12 @@ class ParagraphDiffReview(QObject):
         if not self.editor:
             return
         editor = self.editor
+        if self.deny_all:
+            self.deny_all.move(max(2, editor.width() - self.deny_all.width() - 9), 2)
+            self.deny_all.raise_()
         if self.approve_all:
-            self.approve_all.move(max(2, editor.width() - self.approve_all.width() - 9), 2)
+            right = editor.width() - (self.deny_all.width() + 6 if self.deny_all else 0)
+            self.approve_all.move(max(2, right - self.approve_all.width() - 9), 2)
             self.approve_all.raise_()
         viewport = editor.viewport()
         for label, offset, height in self.removed_labels:
@@ -360,6 +386,10 @@ class ParagraphDiffReview(QObject):
             self.approve_all.hide()
             self.approve_all.deleteLater()
             self.approve_all = None
+        if self.deny_all:
+            self.deny_all.hide()
+            self.deny_all.deleteLater()
+            self.deny_all = None
         editor.setExtraSelections([])
         editor.setViewportMargins(0, 0, 0, 0)
         editor.viewport().update()
