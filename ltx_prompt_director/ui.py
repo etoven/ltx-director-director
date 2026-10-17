@@ -6036,14 +6036,23 @@ class MainWindow(QMainWindow):
         self.ai_busy = not enabled
         # While streaming, every text source and timeline mutation control is
         # locked. Viewing/scrolling the timeline is still allowed.
-        for editor in (self.unified_prompt, self.segment_prompt, self.intent):
+        for editor in (self.unified_prompt, self.segment_prompt,
+                       self.global_prompt, self.intent):
             editor.setReadOnly(not enabled)
         for widget in (self.prompt_scope, self.project_type_combo, self.duration_spin,
                        self.start_button, self.end_button, self.requested_length,
-                       self.add_tile, self.add_text_tile, self.render_artwork_toggle):
+                       self.add_tile, self.add_text_tile, self.render_artwork_toggle,
+                       self.hdr, self.sfx, self.spoken_dialog, self.reduce_music,
+                       self.output_width, self.output_height, self.references_button):
             widget.setEnabled(enabled)
         self.timeline.setDragEnabled(enabled)
         self.timeline.setAcceptDrops(enabled)
+        for row in range(self.timeline.count()):
+            card = self.timeline.itemWidget(self.timeline.item(row))
+            if isinstance(card, SegmentCard):
+                card.resize_handle.setEnabled(enabled)
+                for button in card.findChildren(QPushButton, "tileDelete"):
+                    button.setEnabled(enabled)
         if enabled:
             self.update_summary()
         segment = self.current_segment()
@@ -6146,10 +6155,22 @@ class MainWindow(QMainWindow):
     def discard_obsolete_ai_result(self) -> None:
         self.inline_typing.finish()
         self.ai_plan_stream_active = False
+        if hasattr(self, "_ai_plan_timer"):
+            self._ai_plan_timer.stop()
         self._clear_ai_timeline_preview()
         self.set_ai_controls_enabled(True)
         self.magic_overlay.hide_overlay()
         self.statusBar().showMessage("AI result discarded because the project or workflow changed.")
+
+    def _flush_ai_plan_preview(self) -> None:
+        if not getattr(self, "ai_plan_stream_active", False):
+            return
+        records = completed_stream_records(self.ai_plan_raw)
+        if len(records) != getattr(self, "ai_plan_record_count", 0):
+            self.ai_plan_record_count = len(records)
+            self.preview_ai_timeline_operations(
+                stream_operations(self.ai_segment_snapshot, self.ai_plan_raw)
+            )
 
     def ai_stream_received(self, kind: str, text: str) -> None:
         if not self.ai_request_is_current():
@@ -6162,15 +6183,14 @@ class MainWindow(QMainWindow):
         self.inline_typing.receive(kind, text)
         if kind == "output" and getattr(self, "ai_plan_stream_active", False):
             self.ai_plan_raw += text
-            records = completed_stream_records(self.ai_plan_raw)
-            if len(records) != getattr(self, "ai_plan_record_count", 0):
-                self.ai_plan_record_count = len(records)
-                ops = stream_operations(self.ai_segment_snapshot, self.ai_plan_raw)
-                self.preview_ai_timeline_operations(ops)
+            if '"segments"' in self.ai_plan_raw and not self._ai_plan_timer.isActive():
+                self._ai_plan_timer.start()
 
     def ai_result_received(self, result) -> None:
         self.inline_typing.finish()
         self.ai_plan_stream_active = False
+        if hasattr(self, "_ai_plan_timer"):
+            self._ai_plan_timer.stop()
         if not self.ai_request_is_current():
             self.discard_obsolete_ai_result()
             return
@@ -6181,6 +6201,8 @@ class MainWindow(QMainWindow):
     def ai_failure_received(self, error: str) -> None:
         self.inline_typing.finish()
         self.ai_plan_stream_active = False
+        if hasattr(self, "_ai_plan_timer"):
+            self._ai_plan_timer.stop()
         self._clear_ai_timeline_preview()
         if not self.ai_request_is_current():
             self.discard_obsolete_ai_result()
@@ -7101,6 +7123,11 @@ class MainWindow(QMainWindow):
         self.ai_plan_raw = ""
         self.ai_plan_record_count = 0
         self.ai_plan_stream_active = True
+        if not hasattr(self, "_ai_plan_timer"):
+            self._ai_plan_timer = QTimer(self)
+            self._ai_plan_timer.setSingleShot(True)
+            self._ai_plan_timer.setInterval(90)
+            self._ai_plan_timer.timeout.connect(self._flush_ai_plan_preview)
         self._clear_ai_timeline_preview()
         self.ai_timeline_status.setText("✦ Reading unified prompt and segment JSON…")
         self.ai_timeline_status.show()
