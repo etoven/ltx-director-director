@@ -62,5 +62,16 @@ jobs:
           git add -f "$WHEEL"
           if ! git diff --cached --quiet; then
             git commit -m "Publish experimental wheel ${VERSION}"
-            git push origin HEAD:experimental
+            # A documentation or source change may land while CI runs.
+            # Keep the built wheel commit and safely rebase before pushing.
+            for attempt in 1 2 3; do
+              git fetch origin experimental
+              git rebase origin/experimental
+              if git push origin HEAD:experimental; then
+                exit 0
+              fi
+              echo "Experimental moved again; retrying publish (${attempt}/3)"
+            done
+            echo "Wheel was built but could not be pushed to experimental" >&2
+            exit 1
           fi
