@@ -2911,7 +2911,7 @@ class AIWorkingMarquee(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("aiWorkMarquee")
-        self.setFixedHeight(28)
+        self.setFixedHeight(25)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._phase = 0
         self._title = "✦ AI working…"
@@ -2941,8 +2941,8 @@ class AIWorkingMarquee(QFrame):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         outer = self.rect().adjusted(1, 1, -1, -1)
-        painter.setPen(QPen(QColor("#42677d"), 1))
-        painter.setBrush(QColor("#152732"))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor("#132b3c"))
         painter.drawRoundedRect(outer, 5, 5)
         painter.save()
         painter.setClipRect(outer.adjusted(2, 2, -2, -2))
@@ -2953,11 +2953,12 @@ class AIWorkingMarquee(QFrame):
         width = min(self.width() - 16,
                     max(126, painter.fontMetrics().horizontalAdvance(self._title) + 28))
         left = (self.width() - width) / 2
-        center = QRectF(left, 3, width, self.height() - 6)
-        painter.setPen(QPen(QColor("#548cab"), 1))
-        painter.setBrush(QColor("#172e3c"))
+        center = QRectF(left, 2, width, self.height() - 4)
+        # Shared borderless dark-blue chip for segment and unified refinement.
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor("#102f4b"))
         painter.drawRoundedRect(center, 5, 5)
-        painter.setPen(QColor("#d0eaff"))
+        painter.setPen(QColor("#d8f2ff"))
         painter.drawText(center, Qt.AlignmentFlag.AlignCenter, self._title)
         painter.end()
 
@@ -2979,7 +2980,7 @@ class MiniMaxPromptPanel(QFrame):
         self.header = header
         self.cache_state = QLabel("Not generated")
         self.cache_state.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Preferred)
-        self.cache_state.setMinimumWidth(80)
+        self.cache_state.setMinimumWidth(70)
         self.cache_state.setObjectName("minimaxCacheState")
         label = QLabel("UNIFIED PROMPT")
         self.prompt_label = label
@@ -3073,6 +3074,12 @@ class MiniMaxPromptPanel(QFrame):
     def set_cache_state(self, text: str) -> None:
         self.cache_state.setText(text)
         self.cache_state.setToolTip(text)
+        self.cache_state.setProperty(
+            "active", any(word in text.casefold() for word in
+                          ("refining", "generating", "working", "rendering"))
+        )
+        self.cache_state.style().unpolish(self.cache_state)
+        self.cache_state.style().polish(self.cache_state)
 
     def show_message(self, text: str, level: str = "info", retry: bool = False) -> None:
         if level == "timeline":
@@ -3107,6 +3114,10 @@ class MiniMaxPromptPanel(QFrame):
         if status:
             self.set_cache_state(status)
         if busy:
+            if (self.message_panel.isVisible()
+                    and not getattr(self.owner, "pending_minimax_result", "")
+                    and self.message_panel.property("level") == "success"):
+                self.clear_message()  # Don't stack a stale success banner over a new job.
             self.ai_marquee.begin("✦ " + (status or "AI working…"))
         elif not getattr(self.owner, "_artwork_jobs", 0):
             self.ai_marquee.finish()
@@ -3450,20 +3461,22 @@ class MainWindow(QMainWindow):
         timeline_layout.addWidget(self.ai_edit_feed)
         ruler_row = QHBoxLayout()
         ruler_row.setContentsMargins(0, 0, 0, 0)
-        ruler_spacer = QWidget()
-        ruler_spacer.setFixedWidth(145)
+        self.ruler_spacer = QWidget()
+        self.ruler_spacer.setFixedWidth(38)
         self.ruler = TimelineRuler()
-        ruler_row.addWidget(ruler_spacer)
+        ruler_row.addWidget(self.ruler_spacer)
         ruler_row.addWidget(self.ruler, 1)
         timeline_layout.addLayout(ruler_row)
         track_row = QHBoxLayout()
         track_row.setContentsMargins(0, 0, 0, 0)
         track_row.setSpacing(0)
-        main_label = QLabel("MAIN ◉")
-        main_label.setObjectName("mainTrackLabel")
-        main_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        main_label.setFixedWidth(145)
-        track_row.addWidget(main_label)
+        self.main_track_label = QLabel("◉")
+        self.main_track_label.setObjectName("mainTrackLabel")
+        self.main_track_label.setAccessibleName("Main timeline track")
+        self.main_track_label.setToolTip("Main timeline track")
+        self.main_track_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.main_track_label.setFixedWidth(38)
+        track_row.addWidget(self.main_track_label)
         self.timeline = TimelineListWidget()
         self.timeline.setObjectName("timeline")
         self.timeline.setProperty("dropActive", False)
@@ -3487,22 +3500,26 @@ class MainWindow(QMainWindow):
         self.timeline.horizontalScrollBar().valueChanged.connect(self.ruler.set_offset)
         self.timeline_loading = TimelineLoadingOverlay(self.timeline.viewport())
         track_row.addWidget(self.timeline, 1)
-        self.add_tile = QPushButton("＋\nAdd media")
+        # Slim insertion rail with two distinct click targets and tooltips.
+        self.add_tile = QPushButton("＋")
         self.add_tile.setObjectName("addTile")
+        self.add_tile.setToolTip("Add image or video to timeline")
+        self.add_tile.setAccessibleName("Add media")
         self.add_tile.clicked.connect(self.add_media)
-        self.add_text_tile = QPushButton("＋\nAdd text")
+        self.add_text_tile = QPushButton("T＋")
         self.add_text_tile.setObjectName("addTextTile")
+        self.add_text_tile.setToolTip("Add a text segment")
+        self.add_text_tile.setAccessibleName("Add text")
         self.add_text_tile.clicked.connect(self.add_text_segment)
         self.add_tile_wrap = QFrame()
         self.add_tile_wrap.setObjectName("addTileBox")
         self.add_tile_wrap.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.add_tile_wrap.setFixedSize(128, max(152, self.timeline_height - 32))
+        self.add_tile_wrap.setFixedSize(44, self.timeline_height)
         self.add_tile_layout = QVBoxLayout(self.add_tile_wrap)
-        self.add_tile_layout.setContentsMargins(8, 8, 8, 8)
-        self.add_tile_layout.setSpacing(0)
-        self.add_tile.setFixedHeight(44)
-        self.add_text_tile.setFixedHeight(26)
-        self.add_tile_layout.addStretch(1)
+        self.add_tile_layout.setContentsMargins(3, 4, 3, 4)
+        self.add_tile_layout.setSpacing(5)
+        self.add_tile.setFixedSize(32, 32)
+        self.add_text_tile.setFixedSize(32, 32)
         self.add_tile_layout.addWidget(self.add_tile, 0, Qt.AlignmentFlag.AlignHCenter)
         self.add_tile_layout.addWidget(self.add_text_tile, 0, Qt.AlignmentFlag.AlignHCenter)
         self.add_tile_layout.addStretch(1)
@@ -3526,11 +3543,12 @@ class MainWindow(QMainWindow):
         outer.addWidget(self.conditioning_guide)
 
         self.sequence_bar = QLabel()
-        self.sequence_bar.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Preferred)
+        self.sequence_bar.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         self.sequence_bar.setObjectName("sequenceBar")
         self.sequence_controls = QHBoxLayout()
         self.sequence_controls.setContentsMargins(0, 0, 0, 0)
-        self.sequence_controls.addWidget(self.sequence_bar, 1)
+        self.sequence_controls.setSpacing(3)
+        self.sequence_controls.addWidget(self.sequence_bar)
         outer.addLayout(self.sequence_controls)
 
         director_panel = QFrame()
@@ -3624,6 +3642,7 @@ class MainWindow(QMainWindow):
         # conditioning preview, not underneath the text editor.
         length_label = QLabel("Len")
         self.length_label = length_label
+        length_label.hide()
         length_label.setObjectName("groupLabel")
         self.requested_length = QDoubleSpinBox()
         self.requested_length.setObjectName("timelineSpin")
@@ -3632,7 +3651,8 @@ class MainWindow(QMainWindow):
         self.requested_length.setDecimals(2)
         self.requested_length.setSuffix(" s")
         self.requested_length.setSpecialValueText("Auto")
-        self.requested_length.setToolTip("Requested total sequence length; Auto lets Magic Build choose")
+        self.requested_length.setToolTip("Total sequence length in seconds; Auto lets the AI choose")
+        self.requested_length.setAccessibleName("Total sequence length")
         self.requested_length.valueChanged.connect(self.mark_dirty)
         language_label = QLabel("LANGUAGE")
         language_label.setObjectName("groupLabel")
@@ -3758,7 +3778,8 @@ class MainWindow(QMainWindow):
         self.duration_spin.setSingleStep(.01)
         self.duration_spin.setDecimals(2)
         self.duration_spin.setSuffix(" s")
-        self.duration_spin.setToolTip("Segment duration in seconds")
+        self.duration_spin.setToolTip("Selected segment duration in seconds")
+        self.duration_spin.setAccessibleName("Selected segment duration")
         self.duration_spin.valueChanged.connect(self.editor_duration_changed)
         duration_control_layout.addWidget(self.duration_spin)
         self.start_button.clicked.connect(lambda: self.set_role("start"))
@@ -3768,16 +3789,20 @@ class MainWindow(QMainWindow):
         self.segment_meta = segment_meta
         segment_meta.setObjectName("segmentMetaBar")
         segment_meta_layout = QHBoxLayout(segment_meta)
-        segment_meta_layout.setContentsMargins(5, 3, 5, 3)
-        segment_meta_layout.setSpacing(6)
-        segment_meta_layout.addWidget(self.frame_number)
+        segment_meta_layout.setContentsMargins(3, 1, 3, 1)
+        segment_meta_layout.setSpacing(3)
+        self.frame_number.hide()
         segment_meta_layout.addWidget(self.start_button)
         segment_meta_layout.addWidget(self.end_button)
         duration_label = QLabel("DURATION")
         duration_label.setObjectName("timelineControlLabel")
         duration_label.hide()  # Units in the spinner make this label redundant.
         segment_meta_layout.addWidget(self.duration_control)
+        self.sequence_controls.addStretch(1)
         self.sequence_controls.addWidget(segment_meta)
+        self.segment_ai_marquee = AIWorkingMarquee(segment_panel)
+        self.segment_ai_marquee.setFixedWidth(234)
+        self.segment_header.addWidget(self.segment_ai_marquee)
         segment_layout.addLayout(self.segment_header)
         self.segment_prompt = PromptTextEdit()
         self.segment_prompt.setObjectName("promptEditor")
@@ -4206,7 +4231,7 @@ class MainWindow(QMainWindow):
         QMainWindow,QWidget{background:#24292c;color:#d9dcde;font:11px Arial} QMainWindow::separator{width:__DOCK_GRIP_WIDTH__px;height:__DOCK_GRIP_WIDTH__px;background:transparent;background-repeat:no-repeat;background-position:center} QMainWindow::separator:vertical{background-image:url("__DOCK_GRIP_IMAGE__")} QMainWindow::separator:horizontal{background-image:url("__DOCK_GRIP_HORIZONTAL_IMAGE__")} QMainWindow::separator:hover{background-color:rgba(88,118,134,35)} QToolBar{background:#1b2023;border:0;border-bottom:1px solid #111517;spacing:3px;padding:5px} QToolBar::separator{background:#394247;width:1px;margin:7px 5px}
         QToolButton,QPushButton,QComboBox,QSpinBox,QDoubleSpinBox,QLineEdit{background:#303436;border:1px solid #101213;border-radius:3px;padding:3px 7px;min-height:19px}
         #mainToolbar QToolButton{background:transparent;border:1px solid transparent;border-radius:4px;padding:5px 9px;color:#c5cdd1} #mainToolbar QToolButton:hover{background:#2b3438;border-color:#3a464c;color:#f3f7f9} #mainToolbar QToolButton:pressed{background:#17232a;border-color:#477d99;color:#bde6fb} #toolbarButton{background:#23343d;border:1px solid #385667;border-radius:5px;color:#c4e8fb;font-weight:bold}
-        #minimaxPromptToolbar{background:#1b2023;border:1px solid #354047;border-radius:6px} #minimaxCacheState{background:#2b3438;color:#aebbc1;border:1px solid #435159;border-radius:9px;padding:2px 8px;font-size:9px} #minimaxCacheState[cached="true"]{background:#244d37;color:#c9f4d6;border-color:#4c9b6a} #minimaxInstructions{background:#1b2023;border:1px solid #37464d;border-radius:4px;color:#d8e1e5;padding:7px} #minimaxMessagePanel{background:#20313a;border:1px solid #49758a;border-radius:6px} #minimaxMessagePanel[level="success"]{background:#20392c;border-color:#4b8962} #minimaxMessagePanel[level="warning"]{background:#3a321f;border-color:#8a7340} #minimaxMessagePanel[level="timeline"]{background:#3a321f;border-color:#b4974a} #minimaxMessagePanel[level="error"]{background:#3a2325;border-color:#94555a} #minimaxMessageBanner{background:transparent;color:#ccecf8;border:0;padding:1px} #minimaxMessagePanel[level="success"] #minimaxMessageBanner{color:#cef2d9} #minimaxMessagePanel[level="warning"] #minimaxMessageBanner{color:#f2dfb0} #minimaxMessagePanel[level="timeline"] #minimaxMessageBanner{color:#f2dfb0} #minimaxMessagePanel[level="error"] #minimaxMessageBanner{color:#f2c5c8} #minimaxRetryButton{background:#5b451b;color:#ffe7a1;border:1px solid #c79a39;border-radius:4px;font-weight:bold;padding:4px 10px} #minimaxRetryButton:hover{background:#755b25;border-color:#e2bc5a;color:#fff5cf} #minimaxBusyCard{background:#17262d;border:1px solid #65a7c7;border-radius:8px} #minimaxBusyStatus{background:transparent;color:#d9f2ff;font-weight:bold;padding:2px}
+        #minimaxPromptToolbar{background:#1b2023;border:1px solid #354047;border-radius:6px} #minimaxCacheState{background:#283740;color:#afc0ca;border:0;border-radius:8px;padding:2px 7px;font-size:9px} #minimaxCacheState[active="true"]{background:#102f4b;color:#d8f2ff} #minimaxCacheState[cached="true"]{background:#244d37;color:#c9f4d6} #minimaxInstructions{background:#1b2023;border:1px solid #37464d;border-radius:4px;color:#d8e1e5;padding:7px} #minimaxMessagePanel{background:#20313a;border:1px solid #49758a;border-radius:6px} #minimaxMessagePanel[level="success"]{background:#20392c;border-color:#4b8962} #minimaxMessagePanel[level="warning"]{background:#3a321f;border-color:#8a7340} #minimaxMessagePanel[level="timeline"]{background:#3a321f;border-color:#b4974a} #minimaxMessagePanel[level="error"]{background:#3a2325;border-color:#94555a} #minimaxMessageBanner{background:transparent;color:#ccecf8;border:0;padding:1px} #minimaxMessagePanel[level="success"] #minimaxMessageBanner{color:#cef2d9} #minimaxMessagePanel[level="warning"] #minimaxMessageBanner{color:#f2dfb0} #minimaxMessagePanel[level="timeline"] #minimaxMessageBanner{color:#f2dfb0} #minimaxMessagePanel[level="error"] #minimaxMessageBanner{color:#f2c5c8} #minimaxRetryButton{background:#5b451b;color:#ffe7a1;border:1px solid #c79a39;border-radius:4px;font-weight:bold;padding:4px 10px} #minimaxRetryButton:hover{background:#755b25;border-color:#e2bc5a;color:#fff5cf} #minimaxBusyCard{background:#17262d;border:1px solid #65a7c7;border-radius:8px} #minimaxBusyStatus{background:transparent;color:#d9f2ff;font-weight:bold;padding:2px}
         QToolButton:hover,QPushButton:hover{background:#41474a} QToolButton:pressed,QPushButton:pressed{background:#202729;border-color:#79a8c5} QLineEdit{background:#1e2122}
         QSpinBox,QDoubleSpinBox{padding-right:__SPIN_PAD__px} QSpinBox::up-button,QDoubleSpinBox::up-button{subcontrol-origin:border;subcontrol-position:top right;width:__SPIN_BUTTON__px;background:#3b4347;border:0;border-left:1px solid #171a1c;border-bottom:1px solid #202527;border-top-right-radius:3px} QSpinBox::down-button,QDoubleSpinBox::down-button{subcontrol-origin:border;subcontrol-position:bottom right;width:__SPIN_BUTTON__px;background:#343b3f;border:0;border-left:1px solid #171a1c;border-top:1px solid #202527;border-bottom-right-radius:3px}
         QSpinBox::up-button:hover,QDoubleSpinBox::up-button:hover,QSpinBox::down-button:hover,QDoubleSpinBox::down-button:hover{background:#506471} QSpinBox::up-button:pressed,QDoubleSpinBox::up-button:pressed,QSpinBox::down-button:pressed,QDoubleSpinBox::down-button:pressed{background:#274e66} QSpinBox::up-arrow,QDoubleSpinBox::up-arrow,QSpinBox::down-arrow,QDoubleSpinBox::down-arrow{width:__ARROW_SIZE__px;height:__ARROW_SIZE__px}
@@ -4241,9 +4266,9 @@ class MainWindow(QMainWindow):
         #timelineHeightHandle{background:transparent;border:0} #timelineHeightHandle:hover{background:rgba(88,118,134,35);border:0}
         #promptSplitter::handle{background:transparent;border:0} #promptSplitter::handle:hover{background:rgba(88,118,134,35);border:0}
         #segmentPreview{background:#17191a;border-top:1px solid #34383a}
-        #addTileBox{border:1px dashed #596065;background:#111415} #addTile,#addTextTile{border:0;border-radius:0;background:transparent;color:#828b90;font-size:10px;text-align:center} #addTile:hover,#addTextTile:hover{background:#1c2326;color:#b7d7e6} #sequenceBar{background:#181e21;border:1px solid #303a3f;border-left:3px solid #4e91b4;border-radius:4px;padding:3px 8px;color:#cbd7dd;font-weight:bold}
+        #addTileBox{border:0;border-left:1px solid #35424b;background:#141b20} #addTile,#addTextTile{min-height:0;border:1px solid #365366;border-radius:5px;background:#1a2b35;color:#c1e5f7;font-size:12px;font-weight:bold;text-align:center;padding:0} #addTile:hover,#addTextTile:hover{background:#254357;border-color:#71a7c4;color:#fff} #sequenceBar{background:#182935;border:0;border-radius:4px;padding:3px 7px;color:#bcd6e6;font-weight:bold}
         #directorPanel{background:#1d2326;border:1px solid #354047;border-radius:6px} #panelTitle{background:transparent;color:#b8d9e9;border:0;font-size:10px;font-weight:bold;letter-spacing:1px} #groupLabel{background:transparent;color:#71838c;border:0;font-size:8px;font-weight:bold;letter-spacing:1px;padding-right:4px}
-        #sectionLabel{color:#8ebbd1;font-size:8px;font-weight:bold;letter-spacing:1px} #muted{color:#879095;font-size:9px} #promptPanel{background:#202527;border:1px solid #374044;border-radius:6px} #segmentMetaBar{background:#1a2023;border:1px solid #303a3f;border-radius:5px} #refineButton{background:#252d31;border:1px solid #45545b;color:#c9dce5;padding-left:9px;padding-right:9px} #refineButton:hover{background:#31414a;border-color:#6590a7;color:#f2fbff} #refineButton:pressed{background:#1d2b32;border-color:#7ca9bf} #refineButton:disabled{background:#202527;border-color:#31393d;color:#606a6f}
+        #sectionLabel{color:#8ebbd1;font-size:8px;font-weight:bold;letter-spacing:1px} #muted{color:#879095;font-size:9px} #promptPanel{background:#202527;border:1px solid #374044;border-radius:6px} #segmentMetaBar{background:#1a2023;border:0;border-radius:4px} #refineButton{background:#252d31;border:1px solid #45545b;color:#c9dce5;padding-left:9px;padding-right:9px} #refineButton:hover{background:#31414a;border-color:#6590a7;color:#f2fbff} #refineButton:pressed{background:#1d2b32;border-color:#7ca9bf} #refineButton:disabled{background:#202527;border-color:#31393d;color:#606a6f}
         QTextEdit{background:#252728;border:0;color:#e1e4e5;font:11px 'Courier New';padding:4px} #promptEditor{background:#202527;border:0;color:#e1e4e5;padding:7px} #magicButton{background:#3b78a5;border:1px solid #5b9bc6;border-radius:5px;color:#f4fbff;font-weight:bold;padding-left:12px;padding-right:12px} #magicButton:hover{background:#4b8dbd;border-color:#8bc6ea} #magicButton:pressed{background:#285b7c}
         #audioToggle,#qualityToggle,#frameToggle{background:transparent;border:1px solid #455057;color:#b8c0c4} #audioToggle:hover,#qualityToggle:hover,#frameToggle:hover{background:#293236;border-color:#65747c;color:#eef3f5} #audioToggle:checked,#qualityToggle:checked,#frameToggle:checked{background:#244d37;border-color:#4c9b6a;color:#c9f4d6} #copyButton{min-height:0;padding:1px 4px;margin:0;border:0;background:transparent;color:#aeb5b8} #copyButton:hover{background:#303a3f;color:#e5f4fc;border:0} #copyButton:pressed{background:#1b2429;color:#8fd3f7;border:0} QStatusBar{background:#171c1e;color:#7f898d;border-top:1px solid #30383c}
         QDockWidget{background:#191d1f;color:#d9dcde;font-weight:bold} QDockWidget::title{background:#1b2022;border-bottom:1px solid #0e1011;padding:8px;text-align:left}
@@ -4298,19 +4323,19 @@ class MainWindow(QMainWindow):
         spin_up = str(files("ltx_prompt_director").joinpath("assets/spin-up.svg")).replace("\\", "/")
         spin_down = str(files("ltx_prompt_director").joinpath("assets/spin-down.svg")).replace("\\", "/")
         theme = theme.replace("__SPIN_UP_IMAGE__", spin_up).replace("__SPIN_DOWN_IMAGE__", spin_down)
-        theme = theme.replace("__TIMELINE_SPIN_PAD__", str(metric(20))).replace("__TIMELINE_SPIN_BUTTON__", str(metric(17))).replace("__TIMELINE_ARROW__", str(metric(8)))
+        theme = theme.replace("__TIMELINE_SPIN_PAD__", str(metric(16))).replace("__TIMELINE_SPIN_BUTTON__", str(metric(13))).replace("__TIMELINE_ARROW__", str(metric(7)))
         for size in (15, 10, 9, 8):
             theme = theme.replace(f"font-size:{size}px", f"font-size:{scaled(size)}px")
         self.setStyleSheet(theme)
         self.timeline_controls.setSpacing(metric(4))
         self.timeline_scale.setFixedWidth(metric(110))
         self.timeline_fit_button.setFixedSize(metric(26), metric(25))
-        self.output_width.setFixedWidth(metric(79))
-        self.output_height.setFixedWidth(metric(79))
+        self.output_width.setFixedWidth(metric(75))
+        self.output_height.setFixedWidth(metric(75))
         self.ui_scale_spin.setFixedWidth(metric(82))
         self.intent.setMinimumHeight(metric(40))
         self.intent.setMaximumHeight(16777215)
-        self.requested_length.setFixedWidth(metric(72))
+        self.requested_length.setFixedWidth(metric(68))
         self.speaker_language.setMinimumWidth(metric(170))
         self.speaker_accent.setMinimumWidth(metric(170))
         for field in (self.speaker_language,self.speaker_accent):
@@ -4339,9 +4364,14 @@ class MainWindow(QMainWindow):
             button.setMinimumWidth(button.fontMetrics().horizontalAdvance(button.text()) + metric(18))
         self.output_width.setMinimumWidth(metric(74))
         self.output_height.setMinimumWidth(metric(74))
-        self.duration_spin.setFixedWidth(metric(76))
-        self.add_tile_wrap.setFixedWidth(metric(128))
-        self.add_tile_layout.setContentsMargins(metric(8), 0, metric(8), 0)
+        self.duration_spin.setFixedWidth(metric(68))
+        self.ruler_spacer.setFixedWidth(metric(38))
+        self.main_track_label.setFixedWidth(metric(38))
+        self.add_tile_wrap.setFixedWidth(metric(44))
+        self.add_tile.setFixedSize(metric(32), metric(32))
+        self.add_text_tile.setFixedSize(metric(32), metric(32))
+        self.add_tile_layout.setContentsMargins(metric(3), metric(4), metric(3), metric(4))
+        self.segment_ai_marquee.setFixedWidth(metric(230))
         for button in (self.copy_segment,):
             button.setFixedHeight(button.fontMetrics().height() + metric(4))
             button.setMinimumWidth(button.fontMetrics().horizontalAdvance(button.text()) + metric(10))
@@ -5387,7 +5417,7 @@ class MainWindow(QMainWindow):
                 if self.timeline.height()!=height:
                     timeline_resized=True
                     self.timeline.setFixedHeight(height)
-                    self.add_tile_wrap.setFixedHeight(max(80,height-32))
+                    self.add_tile_wrap.setFixedHeight(height)
                     self.update_timeline_layout()
             self.editor_root.layout().activate()
             if timeline_resized:
@@ -5545,7 +5575,7 @@ class MainWindow(QMainWindow):
         self.timeline_height_handle.current_height = value
         effective=min(value,self.maximum_safe_timeline_height())
         self.timeline.setFixedHeight(effective)
-        self.add_tile_wrap.setFixedHeight(max(80, effective - 32))
+        self.add_tile_wrap.setFixedHeight(effective)
         self.update_timeline_layout()
         self.mark_dirty()
 
@@ -5794,6 +5824,7 @@ class MainWindow(QMainWindow):
             self.end_button.setChecked(segment.role == "end" if visual else False)
             self.duration_spin.setValue(segment.duration)
             self.frame_number.setText(f"{'Text' if segment.kind == 'text' else 'Frame'} {row + 1}")
+            self.segment_meta.setToolTip(self.frame_number.text() + " · duration and frame role")
         else:
             self.frame_number.setText("Frame —")
         self._loading = False
@@ -5930,7 +5961,7 @@ class MainWindow(QMainWindow):
             f"Sequence begins at 0.00 seconds and ends at {total:.2f} seconds "
             f"({len(self.segments)} segments)."
         )
-        self.add_tile.setText("＋\nAdd media")
+        self.add_tile.setText("＋")
         self.add_tile.setEnabled(True)
         self.add_text_tile.setEnabled(True)
         self.applied_label.setText(f"Applied across all {len(self.segments)} segments")
@@ -6237,6 +6268,15 @@ class MainWindow(QMainWindow):
         self.update_refine_prompt_enabled()
         if self.minimax_panel:
             self.minimax_panel.set_busy(not enabled)
+        # The LTX segment editor shares exactly the same blue progress style.
+        if hasattr(self, "segment_ai_marquee"):
+            if not enabled and not self.unified_workspace and not self.prompt_only_workspace:
+                self.segment_ai_marquee.begin(
+                    "✦ Refining segment…" if self.prompt_scope.currentData() == "segment"
+                    else "✦ Refining prompt…"
+                )
+            else:
+                self.segment_ai_marquee.finish()
         self.refresh_primary_ai_action()
 
     def start_ai_worker(self, operation, args: tuple, activity: str, finished, show_main_overlay: bool = True) -> None:
@@ -6738,7 +6778,7 @@ class MainWindow(QMainWindow):
                 control.setChecked(False)
         self.hdr.setVisible(True)
         self.requested_length.setVisible(True)
-        self.length_label.setVisible(not prompt_only)
+        self.length_label.hide()
         self.voice_options_button.setVisible(audio and not prompt_only)
         self.update_spoken_dialog_visibility()
         self.output_size_control.setVisible(True)
