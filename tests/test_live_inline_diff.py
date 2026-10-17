@@ -98,7 +98,7 @@ assert "New movement" in shown, shown
 assert counter[0] == 0, counter
 cursor = editor.document().find("New movement")
 assert not cursor.isNull()
-assert cursor.charFormat().foreground().color().name().lower() == "#ff696e"
+assert cursor.charFormat().foreground().color().name().lower() == "#a7edbf"
 preview.finish()
 assert editor.toPlainText() == "Opening shot\nOld movement\nClosing beat"
 editor.setFocus()
