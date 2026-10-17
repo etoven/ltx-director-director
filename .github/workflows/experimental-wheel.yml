@@ -45,7 +45,7 @@ jobs:
           # Older Qt/PySide combinations can abort in Python's interpreter finalizer
           # after tests have already completed. Preserve pytest's actual exit code
           # but skip destructors for this isolated offscreen GUI test subprocess.
-          python -c 'import os,sys,pytest; rc=pytest.main(["-q","tests/test_minimax_editor.py"]); sys.stdout.flush(); sys.stderr.flush(); os._exit(rc)'
+          python -X faulthandler -c 'import os,sys,pytest; rc=pytest.main(["-vv","tests/test_minimax_editor.py"]); sys.stdout.flush(); sys.stderr.flush(); os._exit(rc)'
 
       - name: Build the wheel
         run: python -m build --wheel --outdir dist
