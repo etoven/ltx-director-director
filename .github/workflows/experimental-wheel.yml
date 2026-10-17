@@ -37,7 +37,7 @@ jobs:
           python -m pip install --upgrade pip build pytest
           python -m pip install -e .
 
-      - name: Test combined GPT-6 segment JSON, animated timeline and editor locking
+      - name: Test one-button slash refinement and Gemini/OpenAI image tool fallback
         env:
           QT_QPA_PLATFORM: offscreen
         run: |
