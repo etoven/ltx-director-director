@@ -18,7 +18,7 @@ def supports_structured_edit(provider, model):
     return provider in {"openai", "chatgpt"} and bool(
         re.match(r"^gpt-(?:[6-9]|[1-9]\d)(?:[.-]|$)", str(model).lower()))
 
-def response_contract(segments, current_prompt, *, refine):
+def response_contract(segments, current_prompt, *, refine, focus="all"):
     plan = [{"id": s.id, "name": s.name, "kind": s.kind, "role": s.role,
              "duration": s.duration, "prompt": s.prompt,
              "imagePrompt": s.image_prompt, "hasMedia": bool(s.media_path)}
@@ -46,6 +46,7 @@ def response_contract(segments, current_prompt, *, refine):
         "The unified prompt and segments must describe exactly the same sequence. "
         "Do not output anything outside JSON.\nCURRENT SEGMENTS:\n"
         + json.dumps(plan, ensure_ascii=False) + "\n"
+        + "FOCUS: " + focus + "\n"
         + ("CURRENT USER EDITED UNIFIED PROMPT — preserve requested creative edits "
            "and wording as best as possible:\n" + current_prompt if current_prompt
            else "Generate unified prompt from existing source template.")
@@ -137,7 +138,7 @@ def build_segment_objects(original, records):
 def generate_combined(segments, provider, model, api_key, intent, global_prompt,
                       sfx, spoken_dialog, reduce_music, current_prompt,
                       refinement_instructions, timeout, reference_images,
-                      workspace_engine, mode, refine):
+                      workspace_engine, mode, refine, focus="all", image_api_key="", render_artwork=False):
     if not supports_structured_edit(provider, model):
         raise ValueError("Combined editing requires an eligible GPT-6+ model.")
     if not segments:
@@ -163,6 +164,9 @@ def generate_combined(segments, provider, model, api_key, intent, global_prompt,
             from .prompt_templates import render_workspace_prompt
             rules += render_workspace_prompt("minimax_frames", "refine", {
                 "current_prompt": current_prompt, "refinement_instructions": refinement_instructions})
-    rules += response_contract(segments, current_prompt, refine=refine)
+    # Preserve the original unified response contract in the provider prompt.
+    # The new segment JSON is appended AFTER it and overrides transport only.
+    rules += ai.UNIFIED_PROMPT_TRANSPORT
+    rules += response_contract(segments, current_prompt, refine=refine, focus=focus)
     raw = ai._provider_raw(inputs, provider, model, api_key, rules, timeout)
     return normalize_plan(raw, segments)
