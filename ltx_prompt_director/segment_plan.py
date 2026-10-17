@@ -169,7 +169,12 @@ def generate_combined(segments, provider, model, api_key, intent, global_prompt,
     rules += ai.UNIFIED_PROMPT_TRANSPORT
     rules += response_contract(segments, current_prompt, refine=refine, focus=focus)
     raw = ai._provider_raw(inputs, provider, model, api_key, rules, timeout)
-    return normalize_plan(raw, segments)
+    result = normalize_plan(raw, segments)
+    if render_artwork and image_api_key:
+        result["renderedArtwork"] = render_requested_artwork(
+            result["segments"], image_api_key
+        )
+    return result
 
 
 
@@ -224,3 +229,51 @@ def stream_operations(original: list[Segment], raw: str) -> list[dict]:
         if item.get("prompt", before.prompt) != before.prompt:
             changes.append({"kind": "rewrite", "id": before.id, "name": before.name})
     return changes
+
+
+
+def render_requested_artwork(records: list[dict], api_key: str) -> dict[str, str]:
+    """Optional, billed OpenAI image API: no ChatGPT OAuth/image tool shortcut.
+
+    Only synthesize up to four newly requested frames, never alter existing media.
+    Produces persistent PNGs after a complete validated segment plan.
+    """
+    import base64
+    import os
+    from pathlib import Path
+    from uuid import uuid4
+    import requests
+    from .ai_stream import send_stream
+
+    output = {}
+    entries = [row for row in records if row["id"].startswith("new:") and row["artworkPrompt"]]
+    if not entries:
+        return output
+    root = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share") / "PromptDirector" / "generated-artwork"
+    root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    for entry in entries[:4]:
+        send_stream("status", f"Rendering frame artwork: {entry['name']}")
+        result = requests.post(
+            "https://api.openai.com/v1/images/generations",
+            headers={"Authorization": "Bearer " + api_key, "Content-Type": "application/json"},
+            json={"model": "gpt-image-2.5-flare", "size": "1536x1024",
+                  "n": 1, "prompt": entry["artworkPrompt"]},
+            timeout=240,
+        )
+        if not result.ok:
+            send_stream("status", f"Artwork not rendered (HTTP {result.status_code}): {entry['name']}")
+            continue
+        try:
+            source = result.json()["data"][0]["b64_json"]
+            payload = base64.b64decode(source, validate=True)
+            if not payload.startswith(b"\x89PNG\r\n\x1a\n") or len(payload) > 35 * 1024 * 1024:
+                raise ValueError("Invalid generated PNG")
+        except (ValueError, KeyError, IndexError, TypeError):
+            send_stream("status", f"Artwork response incomplete for {entry['name']}")
+            continue
+        path = root / (str(uuid4()) + ".png")
+        path.write_bytes(payload)
+        output[entry["id"]] = str(path)
+        send_stream("artwork", json.dumps({"id": entry["id"], "name": entry["name"],
+                                           "path": str(path)}))
+    return output
