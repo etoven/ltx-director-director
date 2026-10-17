@@ -3320,6 +3320,7 @@ class MainWindow(QMainWindow):
         self.ai_timeline_status = QLabel("")
         self.ai_timeline_status.setObjectName("timelineControlLabel")
         self.ai_timeline_status.setToolTip("Live AI timeline edit preview; changes apply only after validated completion")
+        self.ai_timeline_status.setMaximumWidth(172)
         self.ai_timeline_status.hide()
         timeline_layout.addLayout(self.timeline_controls)
         self.ai_edit_feed = QLabel()
@@ -6804,9 +6805,11 @@ class MainWindow(QMainWindow):
             if prompt_only:
                 primary = "refine_unified" if has_unified else ""
             elif scope == "segment" and selected:
-                primary = "refine_segment" if has_selected_prompt else "generate_unified"
-            elif scope == "global" and has_global:
-                primary = "refine_global"
+                primary = ("refine_segment" if has_selected_prompt or self._combined_enabled()
+                           else "generate_unified")
+            elif scope == "global":
+                primary = ("refine_global" if has_global or self._combined_enabled()
+                           else "generate_unified")
             else:
                 primary = "refine_unified" if has_unified else "generate_unified"
         elif scope == "global" and has_global:
@@ -6820,8 +6823,8 @@ class MainWindow(QMainWindow):
             "generate_timeline": has_segments and not prompt_only and not sequence,
             "generate_unified": unified and has_segments and not prompt_only and not sequence,
             "refine_unified": unified and has_unified and not sequence,
-            "refine_segment": bool(selected) and not prompt_only and not sequence,
-            "refine_global": (has_global or unified) and not prompt_only and not sequence,
+            "refine_segment": bool(selected) and (has_selected_prompt or (unified and self._combined_enabled())) and not prompt_only and not sequence,
+            "refine_global": (has_global or (unified and self._combined_enabled())) and not prompt_only and not sequence,
             "refine_timing": selected is not None and not prompt_only and not sequence,
         }
         for command, action in self.ai_action_commands.items():
@@ -6835,6 +6838,10 @@ class MainWindow(QMainWindow):
             "refine_global": "✦ Refine",
             "": "✦ Generate / Refine",
         }
+        if primary == "refine_segment" and not has_selected_prompt:
+            labels["refine_segment"] = "✦ Generate"
+        if primary == "refine_global" and not has_global:
+            labels["refine_global"] = "✦ Generate"
         self.magic_button.setText(labels[primary])
         self.magic_button.setEnabled(bool(primary) and not self.ai_busy and not sequence)
         self.retry_ai_action.setEnabled(
