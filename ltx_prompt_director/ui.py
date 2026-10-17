@@ -6176,6 +6176,17 @@ class MainWindow(QMainWindow):
         self.timeline.setCurrentItem(item)
         segment = self.current_segment()
         menu = QMenu(self)
+        if segment:
+            artwork_generate = menu.addAction("✦ Generate Artwork")
+            artwork_generate.setToolTip(
+                "Create artwork from this segment's prompt using neighboring references; "
+                "existing image segments are edited using their own original image.")
+            artwork_generate.setEnabled(
+                segment.kind in {"text", "image"}
+                and segment.artwork_status != "generating")
+            artwork_generate.triggered.connect(
+                lambda checked=False, sid=segment.id: self.generate_artwork_for_segment(sid))
+            menu.addSeparator()
         if segment and segment.artwork_prompt and segment.artwork_status in {"awaiting", "failed"}:
             artwork_action = menu.addAction(
                 "✦ Render requested artwork" if segment.artwork_status == "awaiting"
@@ -8060,6 +8071,109 @@ class MainWindow(QMainWindow):
         if pending:
             self.statusBar().showMessage(
                 f"✦ Review {len(pending)} timeline edit(s): ✓ approve or × deny", 10000)
+
+    def _manual_artwork_prompt(self, index: int) -> str:
+        """Art-direct a single tile, including adjoining prose in the image prompt.
+
+        The image API already receives real nearby image/video thumbnails from
+        _artwork_reference_inputs. Text-only neighbors must instead travel as
+        text in the direction, never as invalid image-reference records.
+        """
+        segment = self.segments[index]
+        direction = (segment.prompt or "").strip()
+        image_direction = (segment.image_prompt or "").strip()
+        nearby = []
+        for step, label in ((-1, "PREVIOUS"), (1, "NEXT")):
+            neighbor_index = index + step
+            if 0 <= neighbor_index < len(self.segments):
+                neighbor = self.segments[neighbor_index]
+                neighbor_prompt = (neighbor.prompt or "").strip()
+                neighbor_visual = (neighbor.image_prompt or "").strip()
+                nearby.append(
+                    f"{label} SEGMENT {neighbor_index + 1} "
+                    f"({neighbor.kind}, {neighbor.role}): "
+                    f"{neighbor_prompt[:2000] or '[no written direction]'}"
+                    + (f"\nVisual description: {neighbor_visual[:900]}" if neighbor_visual else "")
+                )
+        if segment.kind == "image":
+            instruction = (
+                "IMAGE-TO-IMAGE ALIGNMENT: Edit only the supplied SOURCE IMAGE "
+                "to better match the TARGET SEGMENT PROMPT. Keep the same "
+                "subject identity, scene, camera viewpoint, composition, "
+                "lighting, and existing visual details except where the "
+                "current segment explicitly requests a change. Do not "
+                "replace the subject or change to a different shot. "
+                "Nearby segments are secondary continuity references."
+            )
+        else:
+            instruction = (
+                "GENERATE THE ARTWORK for this text timeline segment. "
+                "Depict the exact action or visual state requested by its "
+                "own prompt, using actual neighboring timeline images and "
+                "nearby written direction to preserve subject identity, "
+                "wardrobe, setting, lighting and chronological progression. "
+                "Do not merge previous and next frames into the new artwork."
+            )
+        return (
+            instruction
+            + "\n\nTARGET SEGMENT PROMPT:\n" + (direction or "[No segment direction]")
+            + ("\n\nTARGET VISUAL DESCRIPTION:\n" + image_direction if image_direction else "")
+            + ("\n\nADJACENT TIMELINE CONTEXT (continuity only):\n"
+               + "\n\n".join(nearby) if nearby else "")
+        )
+
+    def generate_artwork_for_segment(self, segment_id: str) -> None:
+        """One right-click action for new text artwork or existing image edits."""
+        if self.ai_busy:
+            return
+        index = next((i for i, item in enumerate(self.segments)
+                      if item.id == segment_id), -1)
+        if index < 0:
+            return
+        segment = self.segments[index]
+        if segment.kind not in {"text", "image"} or segment.artwork_status == "generating":
+            return
+        if not (segment.prompt or "").strip() and not (segment.image_prompt or "").strip():
+            self.minimax_panel.show_message(
+                "Add a prompt to this segment before generating its artwork.",
+                "warning")
+            return
+        # Resolve archived full-resolution originals before authorizing a
+        # paid image-to-image edit; a missing source must not become text-to-image.
+        if segment.kind == "image":
+            try:
+                source = Path(materialize_source(segment))
+                if not source.is_file():
+                    raise FileNotFoundError(source.name)
+            except (OSError, ValueError) as error:
+                self.minimax_panel.show_message(
+                    f"The source image for this segment is unavailable: {error}",
+                    "warning")
+                return
+        tools = self._available_artwork_tools()
+        if not tools:
+            QMessageBox.information(
+                self, "Artwork tool unavailable",
+                "Configure a Gemini or OpenAI image API key in Settings to "
+                "generate artwork. ChatGPT OAuth cannot render image files.")
+            return
+        tool = tools[0]
+        if not self._approve_artwork_cost(tool, manual=True):
+            return
+        segment.artwork_prompt = self._manual_artwork_prompt(index)
+        if segment.kind == "text":
+            segment.artwork_target_role = "start"
+        # An earlier review rejection must not cancel this new explicit action.
+        getattr(self, "_artwork_cancelled_segments", set()).discard(segment_id)
+        self.mark_dirty()
+        self._start_segment_artwork(
+            segment_id,
+            {"id": segment_id, "name": segment.name,
+             "artworkPrompt": segment.artwork_prompt,
+             "imagePrompt": segment.image_prompt,
+             "prompt": segment.prompt},
+            tool,
+        )
 
     def _artwork_reference_inputs(self, segment_id: str) -> list[dict]:
         """Provide actual project references and nearby frames to the image API.
