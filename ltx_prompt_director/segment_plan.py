@@ -173,12 +173,9 @@ def generate_combined(segments, provider, model, api_key, intent, global_prompt,
     rules += ai.UNIFIED_PROMPT_TRANSPORT
     rules += response_contract(segments, current_prompt, refine=refine, focus=focus)
     raw = ai._provider_raw(inputs, provider, model, api_key, rules, timeout)
-    result = normalize_plan(raw, segments)
-    if render_artwork and image_api_key:
-        result["renderedArtwork"] = render_requested_artwork(
-            result["segments"], image_api_key
-        )
-    return result
+    # Return the validated plan immediately. Image rendering runs AFTER the
+    # proposed segments have slid into the UI so the user sees progress.
+    return normalize_plan(raw, segments)
 
 
 
