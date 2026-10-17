@@ -16,7 +16,7 @@ You need **Python 3.10 or newer** and a desktop environment supported by Qt 6. A
 python3 -m venv ~/.venvs/ltx-director
 source ~/.venvs/ltx-director/bin/activate
 python -m pip install --upgrade pip
-python -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a56-py3-none-any.whl'
+python -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a57-py3-none-any.whl'
 prompt-director
 ```
 
@@ -26,7 +26,7 @@ prompt-director
 py -m venv "$env:USERPROFILE\ltx-director-venv"
 & "$env:USERPROFILE\ltx-director-venv\Scripts\Activate.ps1"
 python -m pip install --upgrade pip
-python -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a56-py3-none-any.whl'
+python -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a57-py3-none-any.whl'
 prompt-director
 ```
 
@@ -103,3 +103,13 @@ Each active prompt editor now displays one contextual **Generate** or **Refine**
 Generated prompt text animates *inside the active text box*, with newly arriving text tinted red and removed/replaced passages struck through in muted red. Unchanged lines remain visible as anchors. This temporary diff does not enter project state, and the original QTextDocument/undo history is preserved. On completion or error the original editor document is restored before validating/applying the finished response. When a user begins to edit, inline animation suspends immediately, restores the original editor and yields to the user, with the existing result-conflict recovery available if necessary.
 
 Reasoning summaries and provider progress are displayed in a separate **AI ACTIVITY** Qt dock. The panel can be floated or docked; open it through the primary AI button dropdown. It automatically opens when the selected model publishes a reasoning summary. JSON model output is parsed incrementally so red typing shows decoded prompt prose rather than escape sequences or schema keys. If a model provides no text until completion, the normal validated result application still works.
+
+## GPT-6+ combined segment and unified refinement
+
+Existing workspace creative/production prompts stay intact. For selected GPT-6+ OpenAI API-key or ChatGPT-plan models, the same Generate/Refine action adds an extra JSON segments array to the ordinary unified prompt response. This is automatic and not an extra button. IDs identify existing media so the plan can propose changes in prompt, duration, frame role, order, inserts, or deletions without inventing physical source files. The revised unified prompt and segment plan are validated together before being applied.
+
+MiniMax and Generic workflows now show only the actual unified text editor, not a second segment prompt box. The timeline toolbar contains the one contextual Generate/Refine button, the segment/global/unified target selector, and the optional Render artwork check box. Prompt-only refinement workspaces keep that same button in the visible editor header. Red in-editor generated-text animation auto-scrolls while editors and timeline edit controls are locked, so no concurrent-edit conflict warning is needed.
+
+Completed segment JSON records preview proposed timeline operations as they stream; the full validated plan commits atomically. New tiles slide into place and expand to their planned duration. When artwork is requested and an OpenAI API key is available with Render artwork enabled, the new text tile shows a luminous pulsing generation placeholder while the separate billed Images API renders via `gpt-image-2.5-flare`. On success the real PNG replaces the placeholder as a start frame; on failure the proposed segment and image prompt remain with a right-click Retry artwork generation entry. If there is no image API key or the check box is off, the artwork request stays pending. Automatic image generation is limited to four new images per pass; additional requests wait for manual initiation. ChatGPT OAuth alone never bills or uses Images API.
+
+The AI activity dock continues to show provider-published reasoning summaries, while project identity checks still prevent stale worker output from overwriting a different project.

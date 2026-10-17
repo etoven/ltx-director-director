@@ -32,14 +32,14 @@ class UnifiedEditorTests(unittest.TestCase):
     def test_single_ai_button_follows_active_prompt_editor(self):
         from PySide6.QtWidgets import QToolButton
         w = self.make_window('ltx')
-        self.assertEqual(len(w.findChildren(QToolButton, 'magicButton')), 1)
-        self.assertEqual(w.segment_header.indexOf(w.magic_button) >= 0, True)
+        self.assertEqual(len(w.findChildren(QToolButton, 'timelineButton')), 1)
+        self.assertTrue(w.timeline_controls.indexOf(w.magic_button) >= 0)
         self.assertTrue(w.refine_prompt_button.isHidden())
         self.assertTrue(w.refine_timing_button.isHidden())
         self.assertTrue(w.magic_button.menu() is w.ai_action_menu)
         w.set_project_type('minimax_frames')
-        self.assertEqual(w.minimax_panel.header.indexOf(w.magic_button) >= 0, True)
-        self.assertEqual(len(w.findChildren(QToolButton, 'magicButton')), 1)
+        self.assertTrue(w.timeline_controls.indexOf(w.magic_button) >= 0)
+        self.assertEqual(len(w.findChildren(QToolButton, 'timelineButton')), 1)
         w.unified_prompt.setPlainText('Existing unified draft')
         w.refresh_primary_ai_action()
         self.assertEqual(w.primary_ai_command, 'refine_unified')
@@ -50,7 +50,7 @@ class UnifiedEditorTests(unittest.TestCase):
         w.refresh_primary_ai_action()
         self.assertTrue(w.magic_button.isEnabled())
         w.set_project_type('ltx')
-        self.assertEqual(w.segment_header.indexOf(w.magic_button) >= 0, True)
+        self.assertTrue(w.timeline_controls.indexOf(w.magic_button) >= 0)
 
     def test_segment_editor_is_shared_and_unified_draft_is_independent(self):
         w = self.make_window()
@@ -120,7 +120,9 @@ class UnifiedEditorTests(unittest.TestCase):
             self.assertTrue(w.refine_timing_button.isHidden())
             self.assertTrue(w.ai_action_commands["refine_timing"].isEnabled())
             self.assertFalse(w.requested_length.isHidden())
-            self.assertTrue(w.prompt_scope.isHidden())
+            self.assertFalse(w.prompt_scope.isHidden())
+            self.assertTrue(w.segment_panel.isHidden())
+            self.assertFalse(w.unified_panel.isHidden())
             self.assertFalse(hasattr(w, "copy_image_prompt"))
             self.assertFalse(w.references_button.isHidden())
             w.show_reference_images()
@@ -151,22 +153,66 @@ class UnifiedEditorTests(unittest.TestCase):
             self.assertIs(worker.call_args.args[0], operation)
             w.minimax_panel.set_busy(False)
 
-    def test_prompt_and_instructions_remain_editable_while_busy_and_stale_result_is_rejected(self):
+    def test_unified_editor_and_timeline_controls_lock_during_ai(self):
         w = self.make_window('minimax_frames')
-        w.unified_prompt.setPlainText('Original prompt')
-        w.minimax_operation_signature = w.current_minimax_cache_key()
-        w.minimax_operation_editor_snapshot = ('Original prompt', '')
+        w.unified_prompt.setPlainText('Keep this draft')
         w.set_ai_controls_enabled(False)
+        self.assertTrue(w.unified_prompt.isReadOnly())
+        self.assertTrue(w.intent.isReadOnly())
+        self.assertFalse(w.prompt_scope.isEnabled())
+        self.assertFalse(w.duration_spin.isEnabled())
+        self.assertFalse(w.render_artwork_toggle.isEnabled())
+        self.assertFalse(w.timeline.dragEnabled())
+        w.set_ai_controls_enabled(True)
         self.assertFalse(w.unified_prompt.isReadOnly())
-        self.assertFalse(hasattr(w.minimax_panel, 'notes_toggle'))
-        self.assertFalse(w.refine_prompt_button.isEnabled())
-        w.unified_prompt.setPlainText('New pasted prompt')
-        w.unified_prompt.setPlainText('/refine-global Keep the new ending\nNew pasted prompt')
-        self.assertFalse(w.refine_prompt_button.isEnabled())
-        w.minimax_h3_finished('Old provider result')
-        self.assertEqual(w.unified_prompt.toPlainText(), '/refine-global Keep the new ending\nNew pasted prompt')
-        self.assertIn('not applied', w.minimax_panel.message_banner.text())
+        self.assertTrue(w.prompt_scope.isEnabled())
 
+    def test_minimax_has_one_visible_prompt_editor_and_ai_toolbar(self):
+        from PySide6.QtWidgets import QToolButton
+        w = self.make_window('minimax_frames')
+        self.assertTrue(w.segment_panel.isHidden())
+        self.assertFalse(w.unified_panel.isHidden())
+        self.assertTrue(w.timeline_controls.indexOf(w.magic_button) >= 0)
+        self.assertTrue(w.timeline_controls.indexOf(w.prompt_scope) >= 0)
+        self.assertEqual(len(w.findChildren(QToolButton, 'timelineButton')), 1)
+
+    def test_combined_json_inserts_animated_artwork_placeholder_without_deleting_media(self):
+        from unittest.mock import patch
+        w = self.make_window('minimax_frames')
+        w.render_artwork_toggle.setChecked(True)
+        w.session_keys['openai'] = 'test-image-key'
+        old = list(w.segments)
+        original = old[0]
+        w.minimax_operation_kind = 'generate_frames'
+        w.minimax_prompt_text = 'Before unified prompt'
+        w.ai_segment_snapshot = old
+        w.ai_plan_stream_active = False
+        def record(s):
+            return {'id': s.id, 'name': s.name, 'kind': s.kind, 'role': s.role,
+                    'duration': s.duration, 'prompt': s.prompt,
+                    'imagePrompt': s.image_prompt, 'artworkPrompt': ''}
+        entries = [record(s) for s in old]
+        entries.insert(1, {
+            'id': 'new:1', 'name': 'Rendered insert', 'kind': 'text',
+            'role': 'text', 'duration': 2.2, 'prompt': 'Smooth continuous motion',
+            'imagePrompt': 'New frame composition',
+            'artworkPrompt': 'High-quality cinematic 16:9 image',
+        })
+        with patch.object(w, 'start_disk_job') as disk:
+            w.combined_refinement_finished({
+                'prompt': 'Combined unified production brief',
+                'segments': entries,
+            })
+        self.assertEqual(len(w.segments), len(old) + 1)
+        self.assertEqual(w.segments[0].media_path, original.media_path)
+        self.assertEqual(w.minimax_prompt_text, 'Combined unified production brief')
+        generated = w.segments[1]
+        self.assertEqual(generated.artwork_status, 'generating')
+        self.assertTrue(generated.artwork_prompt)
+        self.assertTrue(w._ai_tile_animation is not None)
+        card = w.timeline.itemWidget(w.timeline.item(1))
+        self.assertIn('Generating artwork', card.preview.text())
+        disk.assert_called_once()
 
     def test_unchanged_timeline_accepts_chatgpt_model_completion(self):
         w = self.make_window('minimax_frames')
@@ -182,25 +228,14 @@ class UnifiedEditorTests(unittest.TestCase):
         self.assertIn('Successful generated result', w.unified_prompt.toPlainText())
         self.assertFalse(w.pending_minimax_result)
 
-    def test_actual_input_change_preserves_generated_result_for_explicit_use(self):
+    def test_normal_completion_no_longer_rejects_local_editor_fingerprint(self):
         w = self.make_window('minimax_frames')
-        w.unified_prompt.setPlainText('Existing draft')
-        w.minimax_operation_provider_model = ('chatgpt', 'gpt-6')
-        w.minimax_operation_signature = w.current_minimax_cache_key('chatgpt', 'gpt-6')
-        w.minimax_operation_editor_snapshot = ('Existing draft', '')
+        w.unified_prompt.setPlainText('Original')
         w.minimax_operation_kind = 'generate_frames'
-        w.segments[0].prompt = 'Changed while generating'
-        w.minimax_h3_finished('Generated result to recover')
-        self.assertEqual(w.minimax_prompt_text, 'Existing draft')
-        self.assertEqual(w.pending_minimax_result, 'Generated result to recover')
-        self.assertTrue(w.minimax_panel.recover_button.isVisible() or
-                        not w.minimax_panel.recover_button.isHidden())
-        w.copy_pending_minimax_result()
-        self.assertEqual(QApplication.clipboard().text(), 'Generated result to recover')
-        with patch.object(QMessageBox, 'question', return_value=QMessageBox.StandardButton.Yes):
-            w.apply_pending_minimax_result()
-        self.assertEqual(w.minimax_prompt_text, 'Generated result to recover')
-        self.assertFalse(w.pending_minimax_result)
+        w.minimax_operation_signature = 'old signature'
+        w.minimax_h3_finished('Validated production prompt')
+        self.assertEqual(w.minimax_prompt_text, 'Validated production prompt')
+        self.assertIn('Validated production prompt', w.unified_prompt.toPlainText())
 
     def test_refine_uses_edited_prompt_and_notes_for_selected_mode(self):
         for kind, expected in [('minimax_frames', ai.refine_minimax_h3_prompt), ('minimax_references', ai.refine_minimax_h3_reference_prompt)]:
@@ -254,15 +289,15 @@ class UnifiedEditorTests(unittest.TestCase):
         self.assertEqual(w.segment_prompt.toPlainText(), 'First action')
 
 
-    def test_switch_away_and_back_rejects_old_worker_response(self):
+    def test_old_worker_rejected_on_workspace_identity_change(self):
         w = self.make_window('minimax_frames')
         w.unified_prompt.setPlainText('Keep me')
-        w.minimax_operation_signature = w.current_minimax_cache_key()
+        w.ai_request_workspace = (w.workspace_revision, w.current_project_id, w.project_type)
+        w.ai_finished_callback = w.minimax_h3_finished
         w.set_project_type('ltx')
         w.set_project_type('minimax_frames')
-        w.minimax_h3_finished('Stale')
+        w.ai_result_received('Stale')
         self.assertEqual(w.unified_prompt.toPlainText(), 'Keep me')
-
 
     def test_actual_worker_callback_does_not_apply_after_project_switch(self):
         w = self.make_window('ltx')

@@ -35,6 +35,9 @@ from .chatgpt_widgets import ChatGPTSettingsPanel
 from .ai_stream import STREAM_SINK
 from .stream_widgets import ReasoningActivityDock, LiveOutputPane
 from .ai_inline_diff import LiveTypingPreview
+from .segment_plan import (supports_structured_edit, generate_combined, preview_operations,
+                           build_segment_objects, stream_operations, completed_stream_records,
+                           render_requested_artwork)
 from .cache_maintenance import cover_path, mark_ready, needs_refresh, warm_metadata
 from .ai import AIResponseFormatError, GEMINI_MODELS, build_minimax_h3_prompt, build_minimax_h3_reference_prompt, build_prompts, minimax_h3_cache_key, provider_error_message, WORKSPACE_INSTRUCTIONS, refine_minimax_text_prompt, refine_minimax_h3_prompt, refine_minimax_h3_reference_prompt, refine_segment_prompt, refine_global_prompt, refine_timing, retryable_connection_error
 from .media import APP_CACHE, TIMELINE_VIDEO_SUFFIXES, comfy_input_references, copy_media_for_export, data_url, extract_audio_for_export, prepare_media, safe_media_filename, thumbnail_for_image, unique_media_filename, video_source_dimensions, write_data_url
@@ -1952,6 +1955,15 @@ class SegmentCard(QFrame):
             self.preview.setMargin(8)
             self.preview.setWordWrap(True)
             self.set_text_preview(segment.prompt)
+        self.artwork_frame = 0
+        self.artwork_timer = QTimer(self)
+        self.artwork_timer.setInterval(95)
+        self.artwork_timer.timeout.connect(self._advance_artwork_shimmer)
+        if segment.artwork_status == "generating":
+            self.artwork_timer.start()
+            self._advance_artwork_shimmer()
+        elif segment.artwork_status in {"awaiting", "failed"}:
+            self._show_artwork_placeholder()
         layout.addWidget(self.preview, 1)
         title = QLabel(segment.name if segment.kind == "text" else (segment.prompt or segment.name))
         title.setToolTip(segment.name)
@@ -1976,6 +1988,34 @@ class SegmentCard(QFrame):
         self.resize_handle.finished.connect(self.resize_finished)
         self.outer_layout.addWidget(self.resize_handle)
         self.update_layout(preview_height, pixels_per_second)
+
+    def _show_artwork_placeholder(self):
+        if self.segment.kind != "text" or not self.segment.artwork_prompt:
+            return
+        state = self.segment.artwork_status
+        label = ("✦  Generating artwork" if state == "generating" else
+                 "◌  Artwork failed · right-click to retry" if state == "failed" else
+                 "✦  Artwork requested · ready to render")
+        if state == "generating":
+            dots = "." * (self.artwork_frame % 4)
+            self.preview.setText(label + dots + "\n\n" + self.segment.prompt[:130])
+        else:
+            self.preview.setText(label + "\n\n" + self.segment.prompt[:130])
+        glow = (self.artwork_frame % 12) / 12
+        light = round(32 + glow * 35)
+        self.preview.setStyleSheet(
+            "QLabel#segmentPreview{border:1px solid #517ac0;border-radius:7px;"
+            f"background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #101b31,"
+            f"stop:0.40 rgb({light},{light+13},{light+49}),stop:0.65 #294c83,"
+            "stop:1 #111f37);color:#e4f0ff;padding:7px}"
+        )
+
+    def _advance_artwork_shimmer(self):
+        if self.segment.artwork_status != "generating":
+            self.artwork_timer.stop()
+            return
+        self.artwork_frame += 1
+        self._show_artwork_placeholder()
 
     def set_timeline_edges(self, first: bool, last: bool) -> None:
         self.outer_layout.setContentsMargins(0 if first else 1, 0, 0 if last else 1, 0)
@@ -2130,6 +2170,11 @@ class SettingsDialog(QDialog):
         self.openai = QLineEdit(settings.value("openai_key", ""))
         self.gemini.setEchoMode(QLineEdit.EchoMode.Password)
         self.openai.setEchoMode(QLineEdit.EchoMode.Password)
+        self.openai_model = QComboBox()
+        self.openai_model.setEditable(True)
+        self.openai_model.addItems(["gpt-6", "gpt-6-mini", "gpt-5.4-mini"])
+        self.openai_model.setCurrentText(str(settings.value("openai_model", "gpt-5.4-mini")))
+        self.openai_model.setToolTip("OpenAI API-key model; enter any model available to your API account")
         self.remember = QCheckBox("Store API keys persistently on this computer")
         self.remember.setChecked(settings.value("remember_keys", False, bool))
         self.timeout = QSpinBox()
@@ -2192,6 +2237,7 @@ class SettingsDialog(QDialog):
         form.addRow("Gemini model", self.model)
         form.addRow("Gemini API key", self.gemini)
         form.addRow("OpenAI API key", self.openai)
+        form.addRow("OpenAI model", self.openai_model)
         form.addRow("API timeout", self.timeout)
         form.addRow("Connection retries", self.retries)
         form.addRow("Retry cooldown", self.retry_cooldown)
@@ -2221,6 +2267,7 @@ class SettingsDialog(QDialog):
             return
         self.settings.setValue("provider", self.provider.currentText())
         self.settings.setValue("gemini_model", self.model.currentText())
+        self.settings.setValue("openai_model", self.openai_model.currentText())
         self.settings.setValue("remember_keys", self.remember.isChecked())
         self.settings.setValue("api_timeout", self.timeout.value())
         self.settings.setValue("api_retries", self.retries.value())
@@ -3270,7 +3317,21 @@ class MainWindow(QMainWindow):
         autofit.setObjectName("timelineButton")
         autofit.clicked.connect(self.autofit_timeline)
         self.timeline_controls.addWidget(autofit)
+        self.ai_timeline_status = QLabel("")
+        self.ai_timeline_status.setObjectName("timelineControlLabel")
+        self.ai_timeline_status.setToolTip("Live AI timeline edit preview; changes apply only after validated completion")
+        self.ai_timeline_status.setMaximumWidth(172)
+        self.ai_timeline_status.hide()
         timeline_layout.addLayout(self.timeline_controls)
+        self.ai_edit_feed = QLabel()
+        self.ai_edit_feed.setObjectName("aiEditFeed")
+        self.ai_edit_feed.setWordWrap(True)
+        self.ai_edit_feed.setStyleSheet(
+            "QLabel#aiEditFeed{background:#162b41;color:#b6d7ff;"
+            "border:1px solid #35608d;border-radius:6px;padding:5px 10px}"
+        )
+        self.ai_edit_feed.hide()
+        timeline_layout.addWidget(self.ai_edit_feed)
         ruler_row = QHBoxLayout()
         ruler_row.setContentsMargins(0, 0, 0, 0)
         ruler_spacer = QWidget()
@@ -3515,8 +3576,22 @@ class MainWindow(QMainWindow):
         self.prompt_scope = QComboBox()
         self.prompt_scope.addItem("Selected segment", "segment")
         self.prompt_scope.addItem("Global prompt", "global")
+        self.prompt_scope.addItem("Unified prompt", "unified")
+        self.prompt_scope.setToolTip("AI editing target: selected segment, global direction or full unified prompt")
         self.prompt_scope.currentIndexChanged.connect(self.prompt_scope_changed)
-        self.segment_header.addWidget(self.prompt_scope)
+        self.timeline_controls.addWidget(self.magic_button)
+        self.timeline_controls.addWidget(self.prompt_scope)
+        self.timeline_controls.addWidget(self.ai_timeline_status)
+        self.render_artwork_toggle = QCheckBox("Render artwork")
+        self.render_artwork_toggle.setToolTip(
+            "Optional paid OpenAI Images API. Requires a separate OpenAI API key; ChatGPT OAuth does not support image generation."
+        )
+        self.render_artwork_toggle.setChecked(bool(
+            self.settings.value("openai_key", "") or self.session_keys.get("openai")
+        ))
+        self.timeline_controls.addWidget(self.render_artwork_toggle)
+        # Never create another prompt editor or a second Generate/Refine button.
+        self.magic_button.setObjectName("timelineButton")
         self.refine_timing_button = QPushButton("⏱ Refine Timing")
         self.refine_timing_button.setObjectName("refineButton")
         self.refine_timing_button.setToolTip("Analyze the existing sequence and retime only the selected segment; MiniMax then generates the unified prompt")
@@ -5702,6 +5777,8 @@ class MainWindow(QMainWindow):
         self.provider_button.setText(f"✦ {label.replace('gemini-', 'Gemini ').replace('-', ' ').title() if provider == 'gemini' else label}")
 
     def timeline_menu(self, point) -> None:
+        if self.ai_busy:
+            return
         item = self.timeline.itemAt(point)
         if not item:
             return
@@ -5709,7 +5786,15 @@ class MainWindow(QMainWindow):
         segment = self.current_segment()
         menu = QMenu(self)
         if segment and segment.kind == "text":
-            menu.addAction("Edit text prompt", self.focus_segment_prompt)
+            if segment.artwork_prompt and segment.artwork_status in {"awaiting", "failed"}:
+                artwork_action = menu.addAction(
+                    "✦ Render requested artwork" if segment.artwork_status == "awaiting"
+                    else "↻ Retry artwork generation", self.retry_selected_artwork
+                )
+                artwork_action.setToolTip("Use separately billed OpenAI Images API")
+                menu.addSeparator()
+            if not self.unified_workspace:
+                menu.addAction("Edit text prompt", self.focus_segment_prompt)
             menu.addAction("Convert to image segment…", self.convert_text_segment_to_image)
         else:
             menu.addAction("Replace media", self.replace_selected)
@@ -5726,7 +5811,7 @@ class MainWindow(QMainWindow):
 
     def focus_segment_prompt(self) -> None:
         self.prompt_scope.setCurrentIndex(0)
-        self.segment_prompt.setFocus()
+        (self.unified_prompt if self.unified_workspace else self.segment_prompt).setFocus()
 
     def copy_selected_image(self) -> None:
         segment = self.current_segment()
@@ -5942,11 +6027,35 @@ class MainWindow(QMainWindow):
             key = self.session_keys.get(provider) or self.settings.value(f"{provider}_key", "")
         if not key:
             return None
-        return provider, self.settings.value("gemini_model", GEMINI_MODELS[0]), key
+        return provider, (
+            self.settings.value("openai_model", "gpt-5.4-mini") if provider == "openai"
+            else self.settings.value("gemini_model", GEMINI_MODELS[0])
+        ), key
 
     def set_ai_controls_enabled(self, enabled: bool) -> None:
         self.magic_button.setEnabled(enabled and self.workspace_engine != "shot_sequence")
         self.ai_busy = not enabled
+        # While streaming, every text source and timeline mutation control is
+        # locked. Viewing/scrolling the timeline is still allowed.
+        for editor in (self.unified_prompt, self.segment_prompt,
+                       self.global_prompt, self.intent):
+            editor.setReadOnly(not enabled)
+        for widget in (self.prompt_scope, self.project_type_combo, self.duration_spin,
+                       self.start_button, self.end_button, self.requested_length,
+                       self.add_tile, self.add_text_tile, self.render_artwork_toggle,
+                       self.hdr, self.sfx, self.spoken_dialog, self.reduce_music,
+                       self.output_width, self.output_height, self.references_button):
+            widget.setEnabled(enabled)
+        self.timeline.setDragEnabled(enabled)
+        self.timeline.setAcceptDrops(enabled)
+        for row in range(self.timeline.count()):
+            card = self.timeline.itemWidget(self.timeline.item(row))
+            if isinstance(card, SegmentCard):
+                card.resize_handle.setEnabled(enabled)
+                for button in card.findChildren(QPushButton, "tileDelete"):
+                    button.setEnabled(enabled)
+        if enabled:
+            self.update_summary()
         segment = self.current_segment()
         self.refine_timing_button.setEnabled(enabled and not self.prompt_only_workspace and bool(segment))
         self.update_refine_prompt_enabled()
@@ -6001,6 +6110,7 @@ class MainWindow(QMainWindow):
         kind = "unified"
         selected_index = 0
         if operation in {
+            generate_combined,
             build_minimax_h3_prompt, build_minimax_h3_reference_prompt,
             refine_minimax_h3_prompt, refine_minimax_h3_reference_prompt,
             refine_minimax_text_prompt, build_generic_prompt, refine_generic_prompt,
@@ -6045,9 +6155,23 @@ class MainWindow(QMainWindow):
 
     def discard_obsolete_ai_result(self) -> None:
         self.inline_typing.finish()
+        self.ai_plan_stream_active = False
+        if hasattr(self, "_ai_plan_timer"):
+            self._ai_plan_timer.stop()
+        self._clear_ai_timeline_preview()
         self.set_ai_controls_enabled(True)
         self.magic_overlay.hide_overlay()
         self.statusBar().showMessage("AI result discarded because the project or workflow changed.")
+
+    def _flush_ai_plan_preview(self) -> None:
+        if not getattr(self, "ai_plan_stream_active", False):
+            return
+        records = completed_stream_records(self.ai_plan_raw)
+        if len(records) != getattr(self, "ai_plan_record_count", 0):
+            self.ai_plan_record_count = len(records)
+            self.preview_ai_timeline_operations(
+                stream_operations(self.ai_segment_snapshot, self.ai_plan_raw)
+            )
 
     def ai_stream_received(self, kind: str, text: str) -> None:
         if not self.ai_request_is_current():
@@ -6058,9 +6182,16 @@ class MainWindow(QMainWindow):
             if kind == "reasoning" and text and not pane.isVisible():
                 pane.show()
         self.inline_typing.receive(kind, text)
+        if kind == "output" and getattr(self, "ai_plan_stream_active", False):
+            self.ai_plan_raw += text
+            if '"segments"' in self.ai_plan_raw and not self._ai_plan_timer.isActive():
+                self._ai_plan_timer.start()
 
     def ai_result_received(self, result) -> None:
         self.inline_typing.finish()
+        self.ai_plan_stream_active = False
+        if hasattr(self, "_ai_plan_timer"):
+            self._ai_plan_timer.stop()
         if not self.ai_request_is_current():
             self.discard_obsolete_ai_result()
             return
@@ -6070,6 +6201,10 @@ class MainWindow(QMainWindow):
 
     def ai_failure_received(self, error: str) -> None:
         self.inline_typing.finish()
+        self.ai_plan_stream_active = False
+        if hasattr(self, "_ai_plan_timer"):
+            self._ai_plan_timer.stop()
+        self._clear_ai_timeline_preview()
         if not self.ai_request_is_current():
             self.discard_obsolete_ai_result()
             return
@@ -6361,7 +6496,7 @@ class MainWindow(QMainWindow):
         if self.unified_workspace:
             self.load_minimax_draft(("frames" if self.workspace_engine == "generic" else self.workspace_engine.removeprefix("minimax_")))
         self.prompt_scope.blockSignals(True)
-        self.prompt_scope.setCurrentIndex(0)
+        self.prompt_scope.setCurrentIndex(2 if self.unified_workspace else 0)
         self.prompt_scope.blockSignals(False)
         self.minimax_panel.clear_message()
         self.sync_minimax_panel()
@@ -6383,22 +6518,28 @@ class MainWindow(QMainWindow):
         self.project_type_combo.blockSignals(False)
         self.prompt_label.setText("SEGMENT PROMPT")
         self.segment_prompt.inline_cue_mode = False
-        self.prompt_scope.setVisible(self.workspace_definition.get("global_prompt", False))
-        if not self.workspace_definition.get("global_prompt", False):
+        self.prompt_scope.setVisible(not prompt_only and self.workspace_engine != "shot_sequence")
+        self.prompt_scope.model().item(2).setEnabled(self.unified_workspace)
+        if self.unified_workspace and not prompt_only and not getattr(self, "_prompt_scope_initialized", False):
+            self.prompt_scope.blockSignals(True)
+            self.prompt_scope.setCurrentIndex(2)
+            self.prompt_scope.blockSignals(False)
+            self._prompt_scope_initialized = True
+        if not self.unified_workspace and self.prompt_scope.currentData() == "unified":
             self.prompt_scope.setCurrentIndex(0)
+        self.render_artwork_toggle.setVisible(self.unified_workspace and not prompt_only)
         self.unified_panel.setVisible(not ltx)
         self.timeline_shell.setVisible(not prompt_only)
         self.sequence_bar.setVisible(not prompt_only)
         self.segment_meta.setVisible(not prompt_only)
-        self.segment_panel.setVisible(not prompt_only)
+        self.segment_panel.setVisible(ltx and not prompt_only)
         self.director_panel.setVisible(not prompt_only)
         self.magic_button.setVisible(True)
-        # Put the ONE contextual AI control immediately above the active
-        # editor. The Director's Intent bar remains free of duplicate actions.
-        self.ai_workflow_row.removeWidget(self.magic_button)
-        self.segment_header.removeWidget(self.magic_button)
+        # The timeline-toolbar button is shared; prompt-only workspaces hide
+        # the timeline, so the same control moves to the unified editor header.
+        self.timeline_controls.removeWidget(self.magic_button)
         self.minimax_panel.header.removeWidget(self.magic_button)
-        (self.minimax_panel.header if self.unified_workspace else self.segment_header).addWidget(self.magic_button)
+        (self.minimax_panel.header if prompt_only else self.timeline_controls).addWidget(self.magic_button)
         self.refine_prompt_button.hide()
         self.refine_timing_button.hide()
         self.minimax_panel.prompt_label.setText("PROMPT REFINEMENT" if prompt_only else "UNIFIED PROMPT")
@@ -6419,7 +6560,7 @@ class MainWindow(QMainWindow):
         self.output_size_control.setVisible(True)
         self.output_label.setVisible(True)
         self.refine_timing_button.hide()
-        self.magic_button.setToolTip("Primary AI action; use the adjacent arrow to select any generation/refinement mode")
+        self.magic_button.setToolTip("Generate / Refine for the target selected in the timeline toolbar")
         self.comfy_export_action.setVisible(self.workspace_engine in {"minimax_frames","minimax_references","minimax_prompt"})
         self.workflow_export_action.setVisible(ltx)
         self.timeline_import_action.setVisible(not prompt_only)
@@ -6661,8 +6802,16 @@ class MainWindow(QMainWindow):
         if sequence:
             primary = ""
         elif unified:
-            primary = ("refine_unified" if has_unified else
-                       "generate_unified" if not prompt_only else "")
+            if prompt_only:
+                primary = "refine_unified" if has_unified else ""
+            elif scope == "segment" and selected:
+                primary = ("refine_segment" if has_selected_prompt or self._combined_enabled()
+                           else "generate_unified")
+            elif scope == "global":
+                primary = ("refine_global" if has_global or self._combined_enabled()
+                           else "generate_unified")
+            else:
+                primary = "refine_unified" if has_unified else "generate_unified"
         elif scope == "global" and has_global:
             primary = "refine_global"
         elif has_selected_prompt:
@@ -6674,8 +6823,8 @@ class MainWindow(QMainWindow):
             "generate_timeline": has_segments and not prompt_only and not sequence,
             "generate_unified": unified and has_segments and not prompt_only and not sequence,
             "refine_unified": unified and has_unified and not sequence,
-            "refine_segment": has_selected_prompt and not prompt_only and not sequence,
-            "refine_global": has_global and not prompt_only and not sequence,
+            "refine_segment": bool(selected) and (has_selected_prompt or (unified and self._combined_enabled())) and not prompt_only and not sequence,
+            "refine_global": (has_global or (unified and self._combined_enabled())) and not prompt_only and not sequence,
             "refine_timing": selected is not None and not prompt_only and not sequence,
         }
         for command, action in self.ai_action_commands.items():
@@ -6689,11 +6838,23 @@ class MainWindow(QMainWindow):
             "refine_global": "✦ Refine",
             "": "✦ Generate / Refine",
         }
+        if primary == "refine_segment" and not has_selected_prompt:
+            labels["refine_segment"] = "✦ Generate"
+        if primary == "refine_global" and not has_global:
+            labels["refine_global"] = "✦ Generate"
         self.magic_button.setText(labels[primary])
         self.magic_button.setEnabled(bool(primary) and not self.ai_busy and not sequence)
         self.retry_ai_action.setEnabled(
             not self.ai_busy and bool(getattr(self, "retry_ai_available", False))
         )
+
+    def _combined_enabled(self) -> bool:
+        provider = str(self.settings.value("provider", "gemini"))
+        model = str(self.settings.value(
+            "chatgpt_model" if provider == "chatgpt" else
+            "openai_model" if provider == "openai" else "gemini_model", ""
+        ))
+        return supports_structured_edit(provider, model)
 
     def run_primary_ai_action(self) -> None:
         self.run_ai_action(getattr(self, "primary_ai_command", ""))
@@ -6703,6 +6864,8 @@ class MainWindow(QMainWindow):
         if self.ai_busy or not command:
             return
         self.last_ai_command = command
+        if command in {"generate_unified", "refine_unified"}:
+            self.combined_focus = "all"
         self.retry_ai_available = False
         if command == "generate_timeline":
             self.magic_build()
@@ -6710,6 +6873,15 @@ class MainWindow(QMainWindow):
             self._generate_minimax_prompt(self.minimax_prompt_mode)
         elif command == "refine_unified" and self.unified_workspace:
             self.refine_minimax_prompt()
+        elif command in {"refine_segment", "refine_global", "refine_timing"} and self.unified_workspace and not self.prompt_only_workspace and self._combined_enabled():
+            self.combined_focus = (
+                f"{command} selected id={self.current_segment().id if self.current_segment() else 'none'}; "
+                "preserve all other timeline content unless required for continuity"
+            )
+            if self.minimax_prompt_text.strip():
+                self.refine_minimax_prompt()
+            else:
+                self._generate_minimax_prompt(self.minimax_prompt_mode)
         elif command == "refine_segment" and not self.prompt_only_workspace:
             if self.prompt_scope.currentData() == "global":
                 self.prompt_scope.setCurrentIndex(0)
@@ -6915,6 +7087,248 @@ class MainWindow(QMainWindow):
             self.set_project_type("minimax_references")
         self._generate_minimax_prompt("references")
 
+
+    def _clear_ai_timeline_preview(self):
+        if hasattr(self, "ai_timeline_status"):
+            self.ai_timeline_status.hide()
+        if hasattr(self, "ai_edit_feed"):
+            self.ai_edit_feed.hide()
+        if hasattr(self, "timeline"):
+            for row in range(self.timeline.count()):
+                card = self.timeline.itemWidget(self.timeline.item(row))
+                if isinstance(card, SegmentCard):
+                    card.setStyleSheet("")
+
+    def preview_ai_timeline_operations(self, operations):
+        """Animate proposed changes visually, without mutating the timeline."""
+        from collections import Counter
+        quantities = Counter(op["kind"] for op in operations)
+        names = {"add": "add", "delete": "remove", "move": "move",
+                 "timing": "retime", "role": "set frame role",
+                 "rewrite": "rewrite", "artwork": "render artwork"}
+        summary = "  ·  ".join(
+            f"✦ {total} {names[kind]}" for kind, total in quantities.items()
+        )
+        self.ai_edit_feed.setText("AI TIMELINE PLAN  " + (summary or "Reading segment JSON…"))
+        self.ai_edit_feed.show()
+        by_id = {o["id"]: o["kind"] for o in operations if o.get("id")}
+        for row in range(self.timeline.count()):
+            item = self.timeline.item(row)
+            card = self.timeline.itemWidget(item)
+            if isinstance(card, SegmentCard):
+                kind = by_id.get(item.data(Qt.ItemDataRole.UserRole))
+                color = "#76d5b6" if kind in {"add", "move"} else (
+                    "#f1ac66" if kind == "timing" else "#ed858a"
+                )
+                card.setStyleSheet(
+                    f"QFrame#segmentCard{{border:2px solid {color};border-radius:7px}}"
+                    if kind else ""
+                )
+        self.ai_timeline_status.setText(
+            f"✦ {len(operations)} proposed timeline edit(s)"
+        )
+        self.ai_timeline_status.show()
+
+    def _start_combined_ai(self, provider, model, key, timeout, mode, refine):
+        """The existing Generate/Refine button now returns prompt + segment JSON."""
+        self.ai_segment_snapshot = copy.deepcopy(self.segments)
+        self.ai_plan_raw = ""
+        self.ai_plan_record_count = 0
+        self.ai_plan_stream_active = True
+        if not hasattr(self, "_ai_plan_timer"):
+            self._ai_plan_timer = QTimer(self)
+            self._ai_plan_timer.setSingleShot(True)
+            self._ai_plan_timer.setInterval(90)
+            self._ai_plan_timer.timeout.connect(self._flush_ai_plan_preview)
+        self._clear_ai_timeline_preview()
+        self.ai_timeline_status.setText("✦ Reading unified prompt and segment JSON…")
+        self.ai_timeline_status.show()
+        self.start_ai_worker(
+            generate_combined,
+            (self.ai_segment_snapshot, provider, model, key,
+             self.build_director_request(include_requested_length=False),
+             self.global_prompt.toPlainText(), self.sfx.isChecked(),
+             self.spoken_dialog.isChecked(), self.reduce_music.isChecked(),
+             self.minimax_prompt_text, self.minimax_refinement_instructions,
+             timeout, self.active_reference_images(),
+             self.workspace_engine, mode, refine,
+             getattr(self, "combined_focus", "all")),
+            "Refining unified prompt and timeline…" if refine else
+            "Generating unified prompt and timeline…",
+            self.combined_refinement_finished, show_main_overlay=False,
+        )
+        self.combined_focus = "all"
+
+    def _animate_ai_timeline(self, before, inserted):
+        """Slide new tiles to the model-assigned duration and settle moved tiles."""
+        if getattr(self, "_ai_tile_animation", None):
+            self._ai_tile_animation.stop()
+        original = {item.id: item for item in before}
+        target_widths = [self.timeline.item(i).sizeHint().width()
+                         for i in range(self.timeline.count())]
+        starting = [
+            30 if item.id in inserted else
+            max(40, round(original[item.id].duration * self.pixels_per_second))
+            if item.id in original else target_widths[i]
+            for i, item in enumerate(self.segments)
+        ]
+        heights = [self.timeline.item(i).sizeHint().height()
+                   for i in range(self.timeline.count())]
+        for index, width in enumerate(starting):
+            self.timeline.item(index).setSizeHint(QSize(width, heights[index]))
+        self.timeline.doItemsLayout()
+        animation = QVariantAnimation(self)
+        animation.setDuration(1150)
+        animation.setStartValue(0.0)
+        animation.setEndValue(1.0)
+        animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+        def update(value):
+            for index, (left, right) in enumerate(zip(starting, target_widths)):
+                item = self.timeline.item(index)
+                if item:
+                    item.setSizeHint(QSize(round(left + (right-left) * value), heights[index]))
+            self.timeline.doItemsLayout()
+            self.timeline.viewport().update()
+
+        animation.valueChanged.connect(update)
+        animation.finished.connect(self.update_timeline_layout)
+        self._ai_tile_animation = animation
+        animation.start()
+
+    def combined_refinement_finished(self, result):
+        """Apply the validated JSON as one prompt/timeline transaction."""
+        before = getattr(self, "ai_segment_snapshot", self.segments)
+        records = result["segments"]
+        changes = preview_operations(before, records)
+        updated = build_segment_objects(before, records)
+        image_key = str(
+            self.session_keys.get("openai") or
+            self.settings.value("openai_key", "")
+        )
+        should_render = bool(self.render_artwork_toggle.isChecked() and image_key)
+        to_render = []
+        inserted = set()
+        for data, item in zip(records, updated):
+            if data["id"].startswith("new:"):
+                inserted.add(item.id)
+                item.artwork_prompt = data.get("artworkPrompt", "")
+                if item.artwork_prompt:
+                    # Limit paid automatic image requests to four per pass.
+                    # Remaining artwork directions stay visible and retryable.
+                    auto_render = should_render and len(to_render) < 4
+                    item.artwork_status = "generating" if auto_render else "awaiting"
+                    if auto_render:
+                        to_render.append((item.id, dict(data)))
+        if fit_sequence([item.duration for item in updated],
+                        self.maximum_sequence_duration) != [item.duration for item in updated]:
+            self._clear_ai_timeline_preview()
+            self.set_ai_controls_enabled(True)
+            self.minimax_panel.show_message(
+                "Combined plan exceeds the workspace duration limit. "
+                "The existing timeline is unchanged.", "warning"
+            )
+            return
+        # Complete the regular unified prompt workflow while the old timeline
+        # is still present, then atomically install the validated segment snapshot.
+        self.minimax_h3_finished(result["prompt"])
+        current = self.current_segment()
+        selected_id = current.id if current else None
+        self.segments = updated
+        selected = next(
+            (i for i, item in enumerate(updated) if item.id == selected_id), 0
+        )
+        self._clear_ai_timeline_preview()
+        self.refresh_timeline(selected)
+        self._animate_ai_timeline(before, inserted)
+        self.mark_dirty()
+        self.ai_edit_feed.setText(
+            "✦ Applied " + str(len(changes)) + " segment edit(s)"
+            + (" · artwork rendering" if to_render else "")
+        )
+        self.ai_edit_feed.show()
+        self.ai_timeline_status.hide()
+        for segment_id, data in to_render:
+            self._start_segment_artwork(segment_id, data, image_key)
+        waiting = sum(1 for seg in self.segments if seg.artwork_status == "awaiting")
+        if waiting and should_render:
+            self.ai_edit_feed.setText(
+                f"✦ {len(to_render)} artwork requests running · {waiting} awaiting manual render "
+                "(automatic batch limited to four images)"
+            )
+        if waiting and not should_render:
+            self.ai_edit_feed.setText(
+                "✦ Artwork prompts saved. Enable Render artwork and configure "
+                "an OpenAI API key to generate the requested frames."
+            )
+
+    def _start_segment_artwork(self, segment_id, record, image_key):
+        item = next((item for item in self.segments if item.id == segment_id), None)
+        if not item or not image_key or not item.artwork_prompt:
+            return
+        item.artwork_status = "generating"
+        row = next((i for i, s in enumerate(self.segments) if s.id == segment_id), -1)
+        if row >= 0 and row < self.timeline.count():
+            card = self.timeline.itemWidget(self.timeline.item(row))
+            if isinstance(card, SegmentCard):
+                card.artwork_timer.start()
+                card._advance_artwork_shimmer()
+        workspace = (self.workspace_revision, self.current_project_id, self.project_type)
+
+        def ready(images):
+            if workspace != (self.workspace_revision, self.current_project_id, self.project_type):
+                return
+            segment = next((s for s in self.segments if s.id == segment_id), None)
+            if not segment:
+                return
+            path = images.get(record["id"])
+            if path and Path(path).is_file():
+                segment.kind = "image"
+                segment.role = segment.artwork_target_role if segment.artwork_target_role in {"start", "end"} else "start"
+                segment.media_path = segment.preview_path = path
+                segment.artwork_status = "complete"
+                self.statusBar().showMessage(f"✦ New AI frame ready: {segment.name}", 5000)
+            else:
+                segment.artwork_status = "failed"
+                self.statusBar().showMessage(
+                    f"Art generation failed for {segment.name}; right-click to retry", 7000
+                )
+            index = next(i for i, s in enumerate(self.segments) if s.id == segment_id)
+            self.refresh_timeline(index)
+            self.mark_dirty()
+
+        def failed(message):
+            ready({})
+            self.statusBar().showMessage(
+                f"Artwork request failed: {message}", 9000
+            )
+
+        self.start_disk_job(
+            render_requested_artwork, ([record], image_key),
+            ready, failed,
+        )
+
+    def retry_selected_artwork(self):
+        if self.ai_busy:
+            return
+        segment = self.current_segment()
+        if not segment or not segment.artwork_prompt:
+            return
+        key = str(self.session_keys.get("openai") or
+                  self.settings.value("openai_key", ""))
+        if not key:
+            QMessageBox.information(
+                self, "Render artwork",
+                "Add an OpenAI API key in Settings to render this frame."
+            )
+            return
+        self._start_segment_artwork(
+            segment.id,
+            {"id": "new:1", "name": segment.name,
+             "artworkPrompt": segment.artwork_prompt},
+            key,
+        )
+
     def _generate_minimax_prompt(self, mode: str) -> None:
         if self.prompt_only_workspace:
             self.refine_minimax_prompt()
@@ -6945,6 +7359,9 @@ class MainWindow(QMainWindow):
         )
         timeout = self.settings.value("api_timeout", 400, int)
         window.set_busy(True, f"Generating {mode_label} prompt…")
+        if supports_structured_edit(provider, model):
+            self._start_combined_ai(provider, model, key, timeout, mode, False)
+            return
         operation = build_generic_prompt if self.workspace_engine == "generic" else (build_minimax_h3_reference_prompt if reference_mode else build_minimax_h3_prompt)
         self.start_ai_worker(
             operation,
@@ -6962,35 +7379,9 @@ class MainWindow(QMainWindow):
         )
 
     def minimax_h3_finished(self, prompt: str) -> None:
-        signature = str(getattr(self, "minimax_operation_signature", ""))
-        # Compare the exact provider/model used to start the request. The old
-        # default-model comparison rejected successful ChatGPT completions.
-        provider_model = getattr(self, "minimax_operation_provider_model", None)
-        current_signature = self.current_minimax_cache_key(*provider_model) if provider_model else self.current_minimax_cache_key()
-        if not signature or signature != current_signature:
-            self.pending_minimax_result = prompt
-            self.set_ai_controls_enabled(True)
-            self.magic_overlay.hide_overlay()
-            if self.minimax_panel:
-                self.minimax_panel.set_busy(False, "Completed prompt ready for review")
-                self.minimax_panel.show_message(
-                    "The completed result was not applied automatically because the input fingerprint differs. "
-                    "The generated text is preserved and can be used or copied below.", "warning")
-            return
-        editor_snapshot = (
-            self.minimax_prompt_text,
-            self.minimax_refinement_instructions,
-        )
-        if editor_snapshot != getattr(self, "minimax_operation_editor_snapshot", editor_snapshot):
-            self.pending_minimax_result = prompt
-            self.set_ai_controls_enabled(True)
-            self.magic_overlay.hide_overlay()
-            if self.minimax_panel:
-                self.minimax_panel.set_busy(False, "Completed prompt ready for review")
-                self.minimax_panel.show_message(
-                    "The completed result was not applied automatically because the editor changed. "
-                    "The generated text is preserved and can be used or copied below.", "warning")
-            return
+        # The unified editor and timeline are locked while AI is running.
+        # Project/workspace identity is checked once by ai_result_received().
+        # Legacy editor-change fingerprint checks caused completed output loss.
         operation = str(getattr(self, "minimax_operation_kind", "generate_frames"))
         if operation.startswith("refine_"):
             prompt = consume_global_refinements(prompt)
@@ -7084,6 +7475,9 @@ class MainWindow(QMainWindow):
                 (provider, model, key, self.minimax_prompt_text, timeout),
                 "Refining the annotated MiniMax prompt…", self.minimax_h3_finished,
                 show_main_overlay=False)
+            return
+        if supports_structured_edit(provider, model):
+            self._start_combined_ai(provider, model, key, timeout, self.minimax_prompt_mode, True)
             return
         operation = refine_generic_prompt if self.workspace_engine == "generic" else (refine_minimax_h3_reference_prompt if reference_mode else refine_minimax_h3_prompt)
         self.start_ai_worker(

@@ -88,20 +88,6 @@ class LiveTypingPreview(QObject):
         self.showing = False
         self.last_candidate = ""
         self.rendered_candidate = ""
-        editor.installEventFilter(self)
-        editor.viewport().installEventFilter(self)
-
-    def eventFilter(self, source, event):
-        if self.active and not self._busy_render:
-            if event.type() in (
-                QEvent.Type.KeyPress, QEvent.Type.InputMethod,
-                QEvent.Type.MouseButtonPress, QEvent.Type.Drop,
-                QEvent.Type.ContextMenu,
-            ):
-                # Restore BEFORE Qt processes the user input. This way the user
-                # edits their actual draft rather than an ephemeral AI diff.
-                self.suspend()
-        return super().eventFilter(source, event)
 
     def receive(self, kind: str, value: str):
         if not self.active or self.suspended:
@@ -164,7 +150,11 @@ class LiveTypingPreview(QObject):
                 old.setFontStrikeOut(True)
                 for state, passage in line_diff(self.baseline, candidate):
                     cursor.insertText(passage, {"equal": keep, "added": incoming, "removed": old}[state])
-                text.verticalScrollBar().setValue(pos)
+                # Keep newly streaming wording in view while the draft editor
+                # is read-only, like a collaborative live typing session.
+                text.setTextCursor(cursor)
+                text.ensureCursorVisible()
+                text.verticalScrollBar().setValue(text.verticalScrollBar().maximum())
         finally:
             self._busy_render = False
         if self.active and not self.suspended and self.rendered_candidate != self.last_candidate:
@@ -197,8 +187,6 @@ class LiveTypingPreview(QObject):
             self.active = False
             return
         self.restore_baseline()
-        self.editor.removeEventFilter(self)
-        self.editor.viewport().removeEventFilter(self)
         self.active = False
         self.suspended = False
         self.editor = None

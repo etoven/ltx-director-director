@@ -36,7 +36,7 @@ def build_prompts(segments: list[Segment], provider: str, model: str, api_key: s
     rules = _rules(len(images), intent, sfx, spoken_dialog, hdr, reduce_music, sum(item.kind == "text" for item in segments))
     rules += f'\n\nRequired transport: exactly {len(segments)} segment records in input order. Return JSON with segments (each duration, prompt) and globalPrompt. Each duration must be positive and finite. Preserve all media and segment identities.'
     if provider == "openai":
-        return _openai(images, api_key, rules, timeout, sfx, spoken_dialog)
+        return _openai(images, api_key, rules, timeout, sfx, spoken_dialog, model)
     if provider == "chatgpt":
         raw = _openai_raw(images, api_key, rules, timeout, model=model, chatgpt=True)
         return _validate(raw, len(images), sfx, spoken_dialog)
@@ -641,7 +641,7 @@ def _gemini(images: list[dict], key: str, model: str, rules: str, timeout: int, 
 
 def _provider_raw(images: list[dict], provider: str, model: str, key: str, rules: str, timeout: int) -> str:
     if provider == "openai":
-        return _openai_raw(images, key, rules, timeout)
+        return _openai_raw(images, key, rules, timeout, model=model)
     if provider == "chatgpt":
         return _openai_raw(images, key, rules, timeout, model=model, chatgpt=True)
     return _gemini_raw(images, key, model, rules, timeout)
@@ -778,8 +778,8 @@ def _gemini_response_text(data: object) -> str:
     return raw
 
 
-def _openai(images: list[dict], key: str, rules: str, timeout: int, sfx: bool, spoken_dialog: bool) -> dict:
-    raw = _openai_raw(images, key, rules, timeout)
+def _openai(images: list[dict], key: str, rules: str, timeout: int, sfx: bool, spoken_dialog: bool, model: str = "gpt-5.4-mini") -> dict:
+    raw = _openai_raw(images, key, rules, timeout, model=model)
     return _validate(raw, len(images), sfx, spoken_dialog)
 
 
