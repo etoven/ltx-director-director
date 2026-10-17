@@ -59,14 +59,17 @@ preview.finish()
 assert editor.toPlainText() == "Opening shot\nOld movement\nClosing beat"
 editor.setFocus()
 app.processEvents()
+editor.setReadOnly(True)
 preview.start(editor, editor.toPlainText())
 preview.receive("output", '{"prompt":"Completely new words')
 preview.render()
+shown = editor.toPlainText()
 QTest.keyClicks(editor, "X")
-assert preview.suspended
-assert "Completely new words" not in editor.toPlainText()
-assert "Old movement" in editor.toPlainText()
+assert not preview.suspended
+assert editor.toPlainText() == shown
 preview.finish()
+assert editor.toPlainText() == "Opening shot\nOld movement\nClosing beat"
+editor.setReadOnly(False)
 editor.close()
 os._exit(0)
 '''
