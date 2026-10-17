@@ -54,6 +54,31 @@ def line_diff(base: str, candidate: str) -> list[tuple[str, str]]:
     return spans
 
 
+def word_diff(base: str, candidate: str) -> list[tuple[str, str]]:
+    """Inline word/punctuation diff with unchanged context left unmarked.
+
+    Word spans (rather than whole changed lines) make edits readable in long
+    prompts without painting unrelated instructions green or red.
+    """
+    import re
+
+    tokens = lambda text: re.findall(r"\\w+|[^\\w\\s]+|\\s+", text)
+    previous, proposed = tokens(base), tokens(candidate)
+    pieces: list[tuple[str, str]] = []
+    for tag, i, j, m, n in SequenceMatcher(
+        None, previous, proposed, autojunk=False
+    ).get_opcodes():
+        if tag in ("equal", "delete", "replace"):
+            portion = "".join(previous[i:j])
+            if portion:
+                pieces.append(("equal" if tag == "equal" else "removed", portion))
+        if tag in ("insert", "replace"):
+            portion = "".join(proposed[m:n])
+            if portion:
+                pieces.append(("added", portion))
+    return pieces
+
+
 def typing_batch_size(remaining: int) -> int:
     """Shared live-typing cadence for prompt editor and timeline card."""
     return max(24, min(160, remaining // 7))
@@ -63,14 +88,14 @@ def rich_diff_html(before: str, candidate: str) -> str:
     """Use the SAME red/green inline diff colors on compact timeline tiles."""
     styles = {
         "equal": "color:#dbe7f5",
-        "added": "color:#a7edbf;background-color:#183f2c",
-        "removed": "color:#ed969e;background-color:#41242b;text-decoration:line-through",
+        "added": "color:#14251a;background-color:#80e991",
+        "removed": "color:#ffe2e5;background-color:#9c3f4b;text-decoration:line-through",
     }
     content = "".join(
         '<span style="' + styles[state] + '">' +
         escape(chunk).replace("\n", "<br/>").replace(" ", "&nbsp;") +
         "</span>"
-        for state, chunk in line_diff(before, candidate)
+        for state, chunk in word_diff(before, candidate)
     )
     return '<div style="font-size:10px">' + content + "</div>"
 
@@ -165,13 +190,13 @@ class LiveTypingPreview(QObject):
                 keep = QTextCharFormat()
                 keep.setForeground(QColor("#dbe7f5"))
                 incoming = QTextCharFormat()
-                incoming.setForeground(QColor("#a7edbf"))
-                incoming.setBackground(QColor("#183f2c"))
+                incoming.setForeground(QColor("#14251a"))
+                incoming.setBackground(QColor("#80e991"))
                 old = QTextCharFormat()
-                old.setForeground(QColor("#ed969e"))
-                old.setBackground(QColor("#41242b"))
+                old.setForeground(QColor("#ffe2e5"))
+                old.setBackground(QColor("#9c3f4b"))
                 old.setFontStrikeOut(True)
-                for state, passage in line_diff(self.baseline, candidate):
+                for state, passage in word_diff(self.baseline, candidate):
                     cursor.insertText(passage, {"equal": keep, "added": incoming, "removed": old}[state])
                 # Keep newly streaming wording in view while the draft editor
                 # is read-only, like a collaborative live typing session.
