@@ -5967,9 +5967,9 @@ class MainWindow(QMainWindow):
             "Refine Prompt"
         )
         self.ai_activity_in_minimax = not show_main_overlay
-        if show_main_overlay:
-            self.magic_overlay.update_attempt(1, retries + 1, activity)
-            self.magic_overlay.show_overlay()
+        # Never cover the real prompt editor with a duplicate streaming window.
+        # All text edits animate inline; reasoning is in a dockable side panel.
+        self.magic_overlay.hide_overlay()
         instructions = (None if self.unified_workspace and operation in {build_prompts, refine_segment_prompt, refine_global_prompt, refine_timing}
                         else copy.deepcopy(self.workspace_definition.get("generation_prompts", {})))
         def workspace_operation(*values):
@@ -5987,8 +5987,34 @@ class MainWindow(QMainWindow):
             str(args[2]) if len(args) >= 3 else
             "Background task"
         )
-        self.active_live_panel = self.magic_overlay.live_stream if show_main_overlay else self.live_activity
+        self.active_live_panel = self.reasoning_dock
         self.active_live_panel.begin(activity, model)
+        self.inline_typing.finish()
+        target = None
+        kind = "unified"
+        selected_index = 0
+        if operation in {
+            build_minimax_h3_prompt, build_minimax_h3_reference_prompt,
+            refine_minimax_h3_prompt, refine_minimax_h3_reference_prompt,
+            refine_minimax_text_prompt, build_generic_prompt, refine_generic_prompt,
+        } and self.unified_workspace:
+            target = self.unified_prompt
+        elif operation in {refine_segment_prompt, refine_generic_segment}:
+            target = self.segment_prompt
+            kind = "segment"
+        elif operation is refine_global_prompt:
+            target = self.segment_prompt
+            kind = "global"
+        elif operation in {build_prompts, build_generic_segments} and self.segments:
+            target = self.segment_prompt
+            kind = "global" if self.prompt_scope.currentData() == "global" else "segment"
+            selected_index = max(0, self.timeline.currentRow()) if kind == "segment" else 0
+        if target is not None and target.isVisible():
+            # Save the authoritative text before any temporary red diff is shown.
+            baseline = (self.minimax_prompt_text if target is self.unified_prompt else
+                        self.global_prompt.toPlainText() if kind == "global" else
+                        self.segment_prompt.toPlainText())
+            self.inline_typing.start(target, baseline, kind, selected_index)
         worker.signals.stream.connect(self.ai_stream_received)
         worker.signals.progress.connect(self.magic_progress)
         self.ai_request_workspace = (self.workspace_revision, self.current_project_id, self.project_type)
@@ -6011,6 +6037,7 @@ class MainWindow(QMainWindow):
         return getattr(self, "ai_request_workspace", None) == (self.workspace_revision, self.current_project_id, self.project_type)
 
     def discard_obsolete_ai_result(self) -> None:
+        self.inline_typing.finish()
         self.set_ai_controls_enabled(True)
         self.magic_overlay.hide_overlay()
         self.statusBar().showMessage("AI result discarded because the project or workflow changed.")
@@ -6021,8 +6048,12 @@ class MainWindow(QMainWindow):
         pane = getattr(self, "active_live_panel", None)
         if pane is not None:
             pane.receive_stream(kind, text)
+            if kind == "reasoning" and text and not pane.isVisible():
+                pane.show()
+        self.inline_typing.receive(kind, text)
 
     def ai_result_received(self, result) -> None:
+        self.inline_typing.finish()
         if not self.ai_request_is_current():
             self.discard_obsolete_ai_result()
             return
@@ -6031,6 +6062,7 @@ class MainWindow(QMainWindow):
         self.ai_finished_callback(result)
 
     def ai_failure_received(self, error: str) -> None:
+        self.inline_typing.finish()
         if not self.ai_request_is_current():
             self.discard_obsolete_ai_result()
             return
@@ -6353,7 +6385,7 @@ class MainWindow(QMainWindow):
         self.segment_meta.setVisible(not prompt_only)
         self.segment_panel.setVisible(not prompt_only)
         self.director_panel.setVisible(not prompt_only)
-        self.magic_button.setVisible(not prompt_only)
+        self.magic_button.setVisible(True)
         # Move the SAME AI action between the intent toolbar and the unified
         # prompt header as modes change, never instantiate a second button.
         if prompt_only:
