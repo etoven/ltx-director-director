@@ -25,7 +25,7 @@ from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
     QColorDialog, QDateTimeEdit, QDockWidget, QGraphicsOpacityEffect, QFileDialog, QFormLayout, QFrame, QHBoxLayout, QLabel, QLayout, QLineEdit,
-    QListWidget, QListWidgetItem, QSplitter, QTabBar, QTabWidget, QMainWindow, QMenu, QMessageBox, QPushButton, QScrollArea,
+    QListWidget, QListWidgetItem, QSplitter, QStackedWidget, QTabBar, QTabWidget, QMainWindow, QMenu, QMessageBox, QPushButton, QScrollArea,
     QSizePolicy, QSlider, QSpinBox, QProgressBar, QStatusBar, QStyle, QStyledItemDelegate, QStyleOptionSlider, QStyleOptionViewItem, QTextEdit, QToolBar, QToolButton, QToolTip, QVBoxLayout, QWidget,
 )
 
@@ -3428,8 +3428,10 @@ class MainWindow(QMainWindow):
         intent_row.setContentsMargins(0, 0, 0, 0)
         intent_row.setSpacing(8)
         intent_label = QLabel("DIRECTOR'S INTENT")
+        self.director_intent_label = intent_label
         intent_label.setObjectName("panelTitle")
         intent_row.addWidget(intent_label)
+        self.director_intent_row = intent_row
         self.intent = PromptTextEdit()
         self.intent.setAcceptRichText(False)
         intent_example = (
@@ -3439,6 +3441,21 @@ class MainWindow(QMainWindow):
         self.intent.setPlaceholderText(intent_example)
         self.intent.setToolTip(intent_example)
         self.intent.textChanged.connect(self.mark_dirty)
+        # One visible editor at the Director's Intent location. Changing the
+        # selector switches underlying documents without changing their data.
+        self.director_intent_stack = QStackedWidget()
+        self.director_intent_stack.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
+        self.director_intent_stack.addWidget(self.intent)
+        self.intent_segment_prompt = PromptTextEdit()
+        self.intent_segment_prompt.setObjectName("directorSegmentEditor")
+        self.intent_segment_prompt.setAcceptRichText(False)
+        self.intent_segment_prompt.setPlaceholderText(
+            "Select a timeline segment to display and edit its prompt here…"
+        )
+        self.intent_segment_prompt.textChanged.connect(self.save_director_segment_prompt)
+        self.director_intent_stack.addWidget(self.intent_segment_prompt)
         self.sfx = QPushButton("SFX")
         self.sfx.setCheckable(True)
         self.sfx.setObjectName("audioToggle")
@@ -3466,7 +3483,7 @@ class MainWindow(QMainWindow):
         self.primary_ai_command = "generate"
         for button in (self.sfx, self.spoken_dialog, self.hdr, self.reduce_music, self.magic_button):
             button.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
-        intent_row.addWidget(self.intent, 1)
+        intent_row.addWidget(self.director_intent_stack, 1)
         self.ai_workflow_row = workflow_row
         workflow_row.addWidget(self.magic_button)
         self.director_controls.addLayout(intent_row, 1)
@@ -3549,13 +3566,18 @@ class MainWindow(QMainWindow):
         segment_label.setObjectName("sectionLabel")
         self.segment_header.addWidget(segment_label)
         self.prompt_scope = QComboBox()
-        self.prompt_scope.addItem("Selected segment", "segment")
-        self.prompt_scope.addItem("Global prompt", "global")
-        self.prompt_scope.addItem("Unified prompt", "unified")
-        self.prompt_scope.setToolTip("AI editing target: selected segment, global direction or full unified prompt")
+        self.prompt_scope.addItem("Director's Intent", "global")
+        self.prompt_scope.addItem("Selected Segment", "segment")
+        self.prompt_scope.setToolTip(
+            "Choose the text shown in the Director's Intent editor. "
+            "This does not change AI refinement scope."
+        )
+        self.prompt_scope.setMinimumWidth(142)
         self.prompt_scope.currentIndexChanged.connect(self.prompt_scope_changed)
+        self.director_intent_row.insertWidget(
+            1, self.prompt_scope, 0, Qt.AlignmentFlag.AlignTop
+        )
         self.timeline_controls.addWidget(self.magic_button)
-        self.timeline_controls.addWidget(self.prompt_scope)
         self.timeline_controls.addWidget(self.ai_timeline_status)
         # Image tools are chosen from connected providers as needed; no toggle.
         # Never create another prompt editor or a second Generate/Refine button.
@@ -5778,8 +5800,9 @@ class MainWindow(QMainWindow):
         menu.exec(self.timeline.mapToGlobal(point))
 
     def focus_segment_prompt(self) -> None:
-        self.prompt_scope.setCurrentIndex(0)
-        (self.unified_prompt if self.unified_workspace else self.segment_prompt).setFocus()
+        self.prompt_scope.setCurrentIndex(1)
+        (self.intent_segment_prompt if self.unified_workspace
+         else self.segment_prompt).setFocus()
 
     def copy_selected_image(self) -> None:
         segment = self.current_segment()
@@ -6006,7 +6029,7 @@ class MainWindow(QMainWindow):
         # While streaming, every text source and timeline mutation control is
         # locked. Viewing/scrolling the timeline is still allowed.
         for editor in (self.unified_prompt, self.segment_prompt,
-                       self.global_prompt, self.intent):
+                       self.global_prompt, self.intent, self.intent_segment_prompt):
             editor.setReadOnly(not enabled)
         for widget in (self.prompt_scope, self.project_type_combo, self.duration_spin,
                        self.start_button, self.end_button, self.requested_length,
@@ -6387,7 +6410,7 @@ class MainWindow(QMainWindow):
             self.store_minimax_draft()
         if self.unified_workspace:
             self.load_minimax_draft(("frames" if self.workspace_engine == "generic" else self.workspace_engine.removeprefix("minimax_")))
-        self.prompt_scope.setCurrentIndex(0)
+        self.prompt_scope.setCurrentIndex(0 if self.unified_workspace else 1)
         self.sync_reference_panel_visibility()
 
     def load_minimax_draft(self, mode: str) -> None:
@@ -6463,7 +6486,7 @@ class MainWindow(QMainWindow):
         if self.unified_workspace:
             self.load_minimax_draft(("frames" if self.workspace_engine == "generic" else self.workspace_engine.removeprefix("minimax_")))
         self.prompt_scope.blockSignals(True)
-        self.prompt_scope.setCurrentIndex(2 if self.unified_workspace else 0)
+        self.prompt_scope.setCurrentIndex(0 if self.unified_workspace else 1)
         self.prompt_scope.blockSignals(False)
         self.minimax_panel.clear_message()
         self.sync_minimax_panel()
@@ -6485,15 +6508,12 @@ class MainWindow(QMainWindow):
         self.project_type_combo.blockSignals(False)
         self.prompt_label.setText("SEGMENT PROMPT")
         self.segment_prompt.inline_cue_mode = False
-        self.prompt_scope.setVisible(not prompt_only and self.workspace_engine != "shot_sequence")
-        self.prompt_scope.model().item(2).setEnabled(self.unified_workspace)
-        if self.unified_workspace and not prompt_only and not getattr(self, "_prompt_scope_initialized", False):
+        self.prompt_scope.setVisible(self.unified_workspace and not prompt_only)
+        if not self.unified_workspace and self.prompt_scope.currentData() != "segment":
             self.prompt_scope.blockSignals(True)
-            self.prompt_scope.setCurrentIndex(2)
+            self.prompt_scope.setCurrentIndex(1)
             self.prompt_scope.blockSignals(False)
-            self._prompt_scope_initialized = True
-        if not self.unified_workspace and self.prompt_scope.currentData() == "unified":
-            self.prompt_scope.setCurrentIndex(0)
+        self.refresh_director_scope_editor()
         self.unified_panel.setVisible(not ltx)
         self.timeline_shell.setVisible(not prompt_only)
         self.sequence_bar.setVisible(not prompt_only)
@@ -6683,7 +6703,51 @@ class MainWindow(QMainWindow):
         self.queue_settings_sync()
 
     def prompt_scope_changed(self, _index: int) -> None:
-        self.refresh_shared_editor()
+        # This selects the displayed Director's Intent editor, NOT an AI action.
+        self.refresh_director_scope_editor()
+        self.refresh_primary_ai_action()
+
+    def save_director_segment_prompt(self) -> None:
+        if self._loading or self.ai_busy or not self.unified_workspace:
+            return
+        segment = self.current_segment()
+        if segment is None:
+            return
+        text = self.intent_segment_prompt.toPlainText()
+        if text == segment.prompt:
+            return
+        segment.prompt = text
+        self.segment_prompt.blockSignals(True)
+        self.segment_prompt.setPlainText(text)
+        self.segment_prompt.blockSignals(False)
+        item = self.timeline.currentItem()
+        card = self.timeline.itemWidget(item) if item is not None else None
+        if segment.kind == "text" and isinstance(card, SegmentCard):
+            card.set_text_preview(text)
+        self.mark_dirty()
+        self.refresh_primary_ai_action()
+        self.update_counts()
+
+    def refresh_director_scope_editor(self) -> None:
+        if not hasattr(self, "director_intent_stack"):
+            return
+        show_segment = (
+            self.unified_workspace and not self.prompt_only_workspace
+            and self.prompt_scope.currentData() == "segment"
+        )
+        self.director_intent_stack.setCurrentIndex(1 if show_segment else 0)
+        self.director_intent_label.setText(
+            "SEGMENT PROMPT" if show_segment else "DIRECTOR'S INTENT"
+        )
+        if show_segment:
+            current = self.current_segment()
+            content = current.prompt if current else ""
+            if content != self.intent_segment_prompt.toPlainText():
+                self.intent_segment_prompt.blockSignals(True)
+                self.intent_segment_prompt.setPlainText(content)
+                render_prompt_notes(self.intent_segment_prompt)
+                self.intent_segment_prompt.blockSignals(False)
+            self.intent_segment_prompt.setReadOnly(self.ai_busy or current is None)
 
     def update_refine_prompt_enabled(self) -> None:
         text = self.unified_prompt.toPlainText() if self.prompt_only_workspace else self.segment_prompt.toPlainText()
@@ -6714,6 +6778,7 @@ class MainWindow(QMainWindow):
             render_prompt_notes(self.unified_prompt)
             self.unified_prompt.blockSignals(False)
         self.minimax_panel.update_actions()
+        self.refresh_director_scope_editor()
         self.update_refine_prompt_enabled()
         self.update_counts()
 
@@ -6803,15 +6868,9 @@ class MainWindow(QMainWindow):
             if self.prompt_only_workspace:
                 self.refine_minimax_prompt()
                 return
-            selected = self.current_segment()
-            scope = self.prompt_scope.currentData()
-            if scope in {"segment", "global"} and self._combined_enabled():
-                self.combined_focus = (
-                    f"{scope} selected id={selected.id if selected else 'none'}; "
-                    "follow inline /refine tags anywhere and preserve other passages"
-                )
-            else:
-                self.combined_focus = "all"
+            # The selector only changes the visible editing document; the
+            # one model response always processes ALL inline /refine notes.
+            self.combined_focus = "all"
             if refining and self.minimax_prompt_text.strip():
                 self.refine_minimax_prompt()
             else:
