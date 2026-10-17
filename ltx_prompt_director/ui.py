@@ -3419,9 +3419,15 @@ class MainWindow(QMainWindow):
             action.triggered.connect(lambda checked=False, command=key: self.run_ai_action(command))
             self.ai_action_commands[key] = action
         self.ai_action_menu.addSeparator()
+        self.retry_ai_action = self.ai_action_menu.addAction("↻ Retry last request")
+        self.retry_ai_action.triggered.connect(self.retry_ai_operation)
+        self.retry_ai_action.setEnabled(False)
+        self.ai_action_menu.addSeparator()
         self.show_ai_activity_action = self.ai_action_menu.addAction("◈ Show AI Activity")
         self.show_ai_activity_action.triggered.connect(self.toggle_ai_activity)
         self.primary_ai_command = "generate_timeline"
+        self.last_ai_command = ""
+        self.retry_ai_available = False
         for button in (self.sfx, self.spoken_dialog, self.hdr, self.reduce_music, self.magic_button):
             button.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         intent_row.addWidget(self.intent, 1)
@@ -5954,6 +5960,7 @@ class MainWindow(QMainWindow):
         retries = self.settings.value("api_retries", 2, int)
         retry_cooldown = self.settings.value("api_retry_cooldown", 10, int)
         self.set_ai_controls_enabled(False)
+        self.retry_ai_available = False
         self.ai_activity_title = (
             "Generic Generate" if operation in {build_generic_prompt, build_generic_segments} else
             "Generic Refine" if operation in {refine_generic_prompt, refine_generic_segment} else
@@ -6684,14 +6691,19 @@ class MainWindow(QMainWindow):
         }
         self.magic_button.setText(labels[primary])
         self.magic_button.setEnabled(bool(primary) and not self.ai_busy and not sequence)
+        self.retry_ai_action.setEnabled(
+            not self.ai_busy and bool(getattr(self, "retry_ai_available", False))
+        )
 
     def run_primary_ai_action(self) -> None:
         self.run_ai_action(getattr(self, "primary_ai_command", ""))
 
     def run_ai_action(self, command: str) -> None:
         """Single entry point for all modes, preserving their established workers."""
-        if self.ai_busy:
+        if self.ai_busy or not command:
             return
+        self.last_ai_command = command
+        self.retry_ai_available = False
         if command == "generate_timeline":
             self.magic_build()
         elif command == "generate_unified" and self.unified_workspace and not self.prompt_only_workspace:
@@ -6708,6 +6720,16 @@ class MainWindow(QMainWindow):
             self.refine_global_direction()
         elif command == "refine_timing" and not self.prompt_only_workspace:
             self.refine_selected_timing()
+
+    def retry_ai_operation(self) -> None:
+        """Use the same menu to retry; never add a second inline retry button."""
+        if self.ai_busy:
+            return
+        self.retry_ai_available = False
+        if self.unified_workspace and getattr(self, "minimax_operation_kind", ""):
+            self.retry_minimax_operation()
+        elif getattr(self, "last_ai_command", ""):
+            self.run_ai_action(self.last_ai_command)
 
     def toggle_ai_activity(self) -> None:
         dock = self.reasoning_dock
@@ -7167,6 +7189,7 @@ class MainWindow(QMainWindow):
         animation.start()
 
     def magic_failed(self, message: str) -> None:
+        self.retry_ai_available = True
         self.set_ai_controls_enabled(True)
         self.magic_overlay.hide_overlay()
         title = getattr(self, "ai_activity_title", "AI operation")
