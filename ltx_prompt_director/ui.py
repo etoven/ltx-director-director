@@ -7043,6 +7043,234 @@ class MainWindow(QMainWindow):
             self.set_project_type("minimax_references")
         self._generate_minimax_prompt("references")
 
+
+    def _clear_ai_timeline_preview(self):
+        if hasattr(self, "ai_timeline_status"):
+            self.ai_timeline_status.hide()
+        if hasattr(self, "ai_edit_feed"):
+            self.ai_edit_feed.hide()
+        if hasattr(self, "timeline"):
+            for row in range(self.timeline.count()):
+                card = self.timeline.itemWidget(self.timeline.item(row))
+                if isinstance(card, SegmentCard):
+                    card.setStyleSheet("")
+
+    def preview_ai_timeline_operations(self, operations):
+        """Animate proposed changes visually, without mutating the timeline."""
+        from collections import Counter
+        quantities = Counter(op["kind"] for op in operations)
+        names = {"add": "add", "delete": "remove", "move": "move",
+                 "timing": "retime", "role": "set frame role",
+                 "rewrite": "rewrite", "artwork": "render artwork"}
+        summary = "  ·  ".join(
+            f"✦ {total} {names[kind]}" for kind, total in quantities.items()
+        )
+        self.ai_edit_feed.setText("AI TIMELINE PLAN  " + (summary or "Reading segment JSON…"))
+        self.ai_edit_feed.show()
+        by_id = {o["id"]: o["kind"] for o in operations if o.get("id")}
+        for row in range(self.timeline.count()):
+            item = self.timeline.item(row)
+            card = self.timeline.itemWidget(item)
+            if isinstance(card, SegmentCard):
+                kind = by_id.get(item.data(Qt.ItemDataRole.UserRole))
+                color = "#76d5b6" if kind in {"add", "move"} else (
+                    "#f1ac66" if kind == "timing" else "#ed858a"
+                )
+                card.setStyleSheet(
+                    f"QFrame#segmentCard{{border:2px solid {color};border-radius:7px}}"
+                    if kind else ""
+                )
+        self.ai_timeline_status.setText(
+            f"✦ {len(operations)} proposed timeline edit(s)"
+        )
+        self.ai_timeline_status.show()
+
+    def _start_combined_ai(self, provider, model, key, timeout, mode, refine):
+        """The existing Generate/Refine button now returns prompt + segment JSON."""
+        self.ai_segment_snapshot = copy.deepcopy(self.segments)
+        self.ai_plan_raw = ""
+        self.ai_plan_record_count = 0
+        self.ai_plan_stream_active = True
+        self._clear_ai_timeline_preview()
+        self.ai_timeline_status.setText("✦ Reading unified prompt and segment JSON…")
+        self.ai_timeline_status.show()
+        self.start_ai_worker(
+            generate_combined,
+            (self.ai_segment_snapshot, provider, model, key,
+             self.build_director_request(include_requested_length=False),
+             self.global_prompt.toPlainText(), self.sfx.isChecked(),
+             self.spoken_dialog.isChecked(), self.reduce_music.isChecked(),
+             self.minimax_prompt_text, self.minimax_refinement_instructions,
+             timeout, self.active_reference_images(),
+             self.workspace_engine, mode, refine,
+             getattr(self, "combined_focus", "all")),
+            "Refining unified prompt and timeline…" if refine else
+            "Generating unified prompt and timeline…",
+            self.combined_refinement_finished, show_main_overlay=False,
+        )
+        self.combined_focus = "all"
+
+    def _animate_ai_timeline(self, before, inserted):
+        """Slide new tiles to the model-assigned duration and settle moved tiles."""
+        if getattr(self, "_ai_tile_animation", None):
+            self._ai_tile_animation.stop()
+        original = {item.id: item for item in before}
+        target_widths = [self.timeline.item(i).sizeHint().width()
+                         for i in range(self.timeline.count())]
+        starting = [
+            30 if item.id in inserted else
+            max(40, round(original[item.id].duration * self.pixels_per_second))
+            if item.id in original else target_widths[i]
+            for i, item in enumerate(self.segments)
+        ]
+        height = max(80, self.timeline.height() - 32)
+        for index, width in enumerate(starting):
+            self.timeline.item(index).setSizeHint(QSize(width, height))
+        self.timeline.doItemsLayout()
+        animation = QVariantAnimation(self)
+        animation.setDuration(1150)
+        animation.setStartValue(0.0)
+        animation.setEndValue(1.0)
+        animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+        def update(value):
+            for index, (left, right) in enumerate(zip(starting, target_widths)):
+                item = self.timeline.item(index)
+                if item:
+                    item.setSizeHint(QSize(round(left + (right-left) * value), height))
+            self.timeline.doItemsLayout()
+            self.timeline.viewport().update()
+
+        animation.valueChanged.connect(update)
+        animation.finished.connect(self.update_timeline_layout)
+        self._ai_tile_animation = animation
+        animation.start()
+
+    def combined_refinement_finished(self, result):
+        """Apply the validated JSON as one prompt/timeline transaction."""
+        before = getattr(self, "ai_segment_snapshot", self.segments)
+        records = result["segments"]
+        changes = preview_operations(before, records)
+        updated = build_segment_objects(before, records)
+        image_key = str(
+            self.session_keys.get("openai") or
+            self.settings.value("openai_key", "")
+        )
+        should_render = bool(self.render_artwork_toggle.isChecked() and image_key)
+        to_render = []
+        inserted = set()
+        for data, item in zip(records, updated):
+            if data["id"].startswith("new:"):
+                inserted.add(item.id)
+                item.artwork_prompt = data.get("artworkPrompt", "")
+                if item.artwork_prompt:
+                    item.artwork_status = "generating" if should_render else "awaiting"
+                    if should_render:
+                        to_render.append((item.id, dict(data)))
+        if fit_sequence([item.duration for item in updated],
+                        self.maximum_sequence_duration) != [item.duration for item in updated]:
+            self._clear_ai_timeline_preview()
+            self.set_ai_controls_enabled(True)
+            self.minimax_panel.show_message(
+                "Combined plan exceeds the workspace duration limit. "
+                "The existing timeline is unchanged.", "warning"
+            )
+            return
+        # Complete the regular unified prompt workflow while the old timeline
+        # is still present, then atomically install the validated segment snapshot.
+        self.minimax_h3_finished(result["prompt"])
+        current = self.current_segment()
+        selected_id = current.id if current else None
+        self.segments = updated
+        selected = next(
+            (i for i, item in enumerate(updated) if item.id == selected_id), 0
+        )
+        self._clear_ai_timeline_preview()
+        self.refresh_timeline(selected)
+        self._animate_ai_timeline(before, inserted)
+        self.mark_dirty()
+        self.ai_edit_feed.setText(
+            "✦ Applied " + str(len(changes)) + " segment edit(s)"
+            + (" · artwork rendering" if to_render else "")
+        )
+        self.ai_edit_feed.show()
+        self.ai_timeline_status.hide()
+        for segment_id, data in to_render:
+            self._start_segment_artwork(segment_id, data, image_key)
+        if any(row["id"].startswith("new:") and row.get("artworkPrompt")
+               for row in records) and not should_render:
+            self.ai_edit_feed.setText(
+                "✦ Artwork prompts saved. Enable Render artwork and configure "
+                "an OpenAI API key to generate the requested frames."
+            )
+
+    def _start_segment_artwork(self, segment_id, record, image_key):
+        item = next((item for item in self.segments if item.id == segment_id), None)
+        if not item or not image_key or not item.artwork_prompt:
+            return
+        item.artwork_status = "generating"
+        row = next((i for i, s in enumerate(self.segments) if s.id == segment_id), -1)
+        if row >= 0 and row < self.timeline.count():
+            card = self.timeline.itemWidget(self.timeline.item(row))
+            if isinstance(card, SegmentCard):
+                card.artwork_timer.start()
+                card._advance_artwork_shimmer()
+        workspace = (self.workspace_revision, self.current_project_id, self.project_type)
+
+        def ready(images):
+            if workspace != (self.workspace_revision, self.current_project_id, self.project_type):
+                return
+            segment = next((s for s in self.segments if s.id == segment_id), None)
+            if not segment:
+                return
+            path = images.get(record["id"])
+            if path and Path(path).is_file():
+                segment.kind = "image"
+                segment.role = "start"
+                segment.media_path = segment.preview_path = path
+                segment.artwork_status = "complete"
+                self.statusBar().showMessage(f"✦ New AI frame ready: {segment.name}", 5000)
+            else:
+                segment.artwork_status = "failed"
+                self.statusBar().showMessage(
+                    f"Art generation failed for {segment.name}; right-click to retry", 7000
+                )
+            index = next(i for i, s in enumerate(self.segments) if s.id == segment_id)
+            self.refresh_timeline(index)
+            self.mark_dirty()
+
+        def failed(message):
+            ready({})
+            self.statusBar().showMessage(
+                f"Artwork request failed: {message}", 9000
+            )
+
+        self.start_disk_job(
+            render_requested_artwork, ([record], image_key),
+            ready, failed,
+        )
+
+    def retry_selected_artwork(self):
+        if self.ai_busy:
+            return
+        segment = self.current_segment()
+        if not segment or not segment.artwork_prompt:
+            return
+        key = str(self.session_keys.get("openai") or
+                  self.settings.value("openai_key", ""))
+        if not key:
+            QMessageBox.information(
+                self, "Render artwork",
+                "Add an OpenAI API key in Settings to render this frame."
+            )
+            return
+        self._start_segment_artwork(
+            segment.id,
+            {"id": "new:1", "name": segment.name,
+             "artworkPrompt": segment.artwork_prompt},
+            key,
+        )
+
     def _generate_minimax_prompt(self, mode: str) -> None:
         if self.prompt_only_workspace:
             self.refine_minimax_prompt()
@@ -7073,6 +7301,9 @@ class MainWindow(QMainWindow):
         )
         timeout = self.settings.value("api_timeout", 400, int)
         window.set_busy(True, f"Generating {mode_label} prompt…")
+        if supports_structured_edit(provider, model):
+            self._start_combined_ai(provider, model, key, timeout, mode, False)
+            return
         operation = build_generic_prompt if self.workspace_engine == "generic" else (build_minimax_h3_reference_prompt if reference_mode else build_minimax_h3_prompt)
         self.start_ai_worker(
             operation,
@@ -7212,6 +7443,9 @@ class MainWindow(QMainWindow):
                 (provider, model, key, self.minimax_prompt_text, timeout),
                 "Refining the annotated MiniMax prompt…", self.minimax_h3_finished,
                 show_main_overlay=False)
+            return
+        if supports_structured_edit(provider, model):
+            self._start_combined_ai(provider, model, key, timeout, self.minimax_prompt_mode, True)
             return
         operation = refine_generic_prompt if self.workspace_engine == "generic" else (refine_minimax_h3_reference_prompt if reference_mode else refine_minimax_h3_prompt)
         self.start_ai_worker(
