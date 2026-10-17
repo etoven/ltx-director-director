@@ -7511,7 +7511,9 @@ class MainWindow(QMainWindow):
         request = dict(record)
         request["id"] = segment_id
         if item.kind == "image":
-            request["sourceImage"] = item.media_path
+            # Saved .LTXD projects may keep full-resolution originals inside
+            # their archive. Resolve the original lazily before image-to-image.
+            request["sourceImage"] = materialize_source(item)
 
         def ready(images):
             self._artwork_jobs = max(0, getattr(self, "_artwork_jobs", 1) - 1)
