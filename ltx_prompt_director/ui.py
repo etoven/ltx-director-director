@@ -6386,14 +6386,12 @@ class MainWindow(QMainWindow):
         self.segment_panel.setVisible(not prompt_only)
         self.director_panel.setVisible(not prompt_only)
         self.magic_button.setVisible(True)
-        # Move the SAME AI action between the intent toolbar and the unified
-        # prompt header as modes change, never instantiate a second button.
-        if prompt_only:
-            self.ai_workflow_row.removeWidget(self.magic_button)
-            self.minimax_panel.header.addWidget(self.magic_button)
-        else:
-            self.minimax_panel.header.removeWidget(self.magic_button)
-            self.ai_workflow_row.addWidget(self.magic_button)
+        # Put the ONE contextual AI control immediately above the active
+        # editor. The Director's Intent bar remains free of duplicate actions.
+        self.ai_workflow_row.removeWidget(self.magic_button)
+        self.segment_header.removeWidget(self.magic_button)
+        self.minimax_panel.header.removeWidget(self.magic_button)
+        (self.minimax_panel.header if self.unified_workspace else self.segment_header).addWidget(self.magic_button)
         self.refine_prompt_button.hide()
         self.refine_timing_button.hide()
         self.minimax_panel.prompt_label.setText("PROMPT REFINEMENT" if prompt_only else "UNIFIED PROMPT")
