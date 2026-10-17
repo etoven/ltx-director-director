@@ -7752,15 +7752,6 @@ class MainWindow(QMainWindow):
                 return min(target_widths[index], max(30, round(closest.duration * self.pixels_per_second * 0.35)))
             return 30
         starting = [start_width(i, item) for i, item in enumerate(self.segments)]
-        arriving = []
-        for i, item in enumerate(self.segments):
-            if item.id in inserted:
-                card = self.timeline.itemWidget(self.timeline.item(i))
-                if card is not None:
-                    effect = QGraphicsOpacityEffect(card)
-                    effect.setOpacity(0.03)
-                    card.setGraphicsEffect(effect)
-                    arriving.append((card, effect))
         heights = [self.timeline.item(i).sizeHint().height()
                    for i in range(self.timeline.count())]
         for index, width in enumerate(starting):
@@ -7777,18 +7768,11 @@ class MainWindow(QMainWindow):
                 item = self.timeline.item(index)
                 if item:
                     item.setSizeHint(QSize(round(left + (right-left) * value), heights[index]))
-            for _card, effect in arriving:
-                effect.setOpacity(max(0.03, float(value)))
             self.timeline.doItemsLayout()
             self.timeline.viewport().update()
 
-        def finished():
-            for card, effect in arriving:
-                card.setGraphicsEffect(None)
-            self.update_timeline_layout()
-
         animation.valueChanged.connect(update)
-        animation.finished.connect(finished)
+        animation.finished.connect(self.update_timeline_layout)
         self._ai_tile_animation = animation
         animation.start()
 
