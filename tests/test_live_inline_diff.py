@@ -21,7 +21,7 @@ class LiveInlineDiffTests(unittest.TestCase):
 
     def test_removed_diff_renders_escaped_original_struck_out_in_red(self):
         html = removed_paragraph_html("Old <Picture 1> & action\n")
-        self.assertIn("#ed969e", html)
+        self.assertIn("#9c3f4b", html)
         self.assertIn("#41242b", html)
         self.assertIn("text-decoration:line-through", html)
         self.assertIn("&lt;Picture 1&gt;", html)
@@ -48,20 +48,23 @@ assert review.deny_all.text().endswith("Deny all")
 assert review.approve_all.parent() is editor
 assert review.deny_all.parent() is editor
 assert len(review.buttons) == 2
-assert len(review.removed_labels) == 2
-assert all(lbl.isVisible() for lbl, _, _ in review.removed_labels)
-assert all("#ed969e" in lbl.text() and "line-through" in lbl.text()
-           for lbl, _, _ in review.removed_labels)
-assert all(editor.toPlainText().find("original.") != -1
-           for _ in review.removed_labels)
-assert "−" not in editor.toPlainText()
-# Green additions remain actual editable source, not HTML markup.
+assert not review.removed_labels  # old deletion QLabel strips are gone
+assert review.source_document.toPlainText() == "First revised.\\n\\nSecond original.\\n\\nThird revised."
+# The temporary projection displays red removed and green added words IN
+# the editor's text flow; the real project text remains free of both.
+red = editor.document().find("First original.")
+green = editor.document().find("First revised.")
+assert not red.isNull() and not green.isNull()
+assert red.charFormat().fontStrikeOut()
+assert red.charFormat().background().color().name().lower() == "#9c3f4b"
+assert green.charFormat().background().color().name().lower() == "#80e991"
+assert "First original." in editor.toPlainText()
 assert "First revised." in editor.toPlainText()
 review.decide(0, False)
 assert review.pending_count == 1
-assert len(review.removed_labels) == 1
-assert editor.toPlainText().startswith("First original.")
-assert editor.toPlainText().endswith("Third revised.")
+assert not review.removed_labels
+assert review.source_document.toPlainText().startswith("First original.")
+assert review.source_document.toPlainText().endswith("Third revised.")
 review.approve_all.setChecked(True)
 assert review.editor is None
 assert not review.removed_labels
@@ -86,7 +89,7 @@ editor.close()
         self.assertEqual(typing_batch_size(200), 28)
         self.assertEqual(typing_batch_size(99999), 160)
         html = rich_diff_html("Older text\n", "New text\n")
-        self.assertIn("#a7edbf", html)
+        self.assertIn("#80e991", html)
         self.assertIn("#ed969e", html)
         self.assertIn("line-through", html)
         self.assertIn("New&nbsp;text", html)
@@ -137,7 +140,7 @@ assert "New movement" in shown, shown
 assert counter[0] == 0, counter
 cursor = editor.document().find("New movement")
 assert not cursor.isNull()
-assert cursor.charFormat().foreground().color().name().lower() == "#a7edbf"
+assert cursor.charFormat().background().color().name().lower() == "#80e991"
 preview.finish()
 assert editor.toPlainText() == "Opening shot\nOld movement\nClosing beat"
 editor.setFocus()
