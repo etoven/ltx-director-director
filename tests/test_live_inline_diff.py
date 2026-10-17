@@ -45,7 +45,8 @@ editor.textChanged.connect(lambda: counter.__setitem__(0, counter[0] + 1))
 preview = LiveTypingPreview()
 preview.start(editor, editor.toPlainText())
 preview.receive("output", '{"prompt":"Opening shot\\nNew movement')
-preview.render()
+for _ in range(12):
+    preview.render()
 shown = editor.toPlainText()
 assert "Opening shot" in shown, shown
 assert "Old movement" in shown, shown
