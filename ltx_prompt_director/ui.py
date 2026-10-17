@@ -3463,7 +3463,7 @@ class MainWindow(QMainWindow):
         self.magic_button = QPushButton("✦ Generate")
         self.magic_button.setObjectName("timelineButton")
         self.magic_button.clicked.connect(self.run_primary_ai_action)
-        self.primary_ai_command = "generate_timeline"
+        self.primary_ai_command = "generate"
         for button in (self.sfx, self.spoken_dialog, self.hdr, self.reduce_music, self.magic_button):
             button.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         intent_row.addWidget(self.intent, 1)
@@ -6747,43 +6747,43 @@ class MainWindow(QMainWindow):
         self.set_reference_panel_open(True)
         self.minimax_panel.reference_dock.raise_()
 
+    def _has_inline_refinement(self) -> bool:
+        """Slash annotations in any prompt are the user's edit instructions."""
+        sources = [
+            self.minimax_prompt_text, self.global_prompt.toPlainText(),
+            self.intent.toPlainText(),
+            *(item.prompt for item in self.segments),
+        ]
+        return any("/refine" in text.lower() for text in sources if text)
+
     def refresh_primary_ai_action(self) -> None:
-        """Only one context-driven action, without menu or task selection."""
+        """One button. Slash-marked edits and existing prose mean Refine."""
         if not hasattr(self, "magic_button") or not hasattr(self, "prompt_scope"):
             return
         if not hasattr(self, "unified_prompt") or not hasattr(self, "segment_prompt"):
             return
         if self.workspace_engine == "shot_sequence":
-            self.primary_ai_command = ""
-            self.magic_button.setText("✦ Generate")
             self.magic_button.setEnabled(False)
+            self.magic_button.setText("✦ Generate")
             return
-        scope = self.prompt_scope.currentData()
-        selected = self.current_segment() if hasattr(self, "timeline") else None
-        if self.prompt_only_workspace:
-            has_text = bool(self.minimax_prompt_text.strip())
-            self.primary_ai_command = "refine_unified" if has_text else ""
-            allow = has_text
-        elif self.unified_workspace:
-            has_text = bool(self.minimax_prompt_text.strip())
-            if scope == "segment" and selected and self._combined_enabled():
-                self.primary_ai_command = "refine_segment" if has_text else "generate_unified"
-            elif scope == "global" and self._combined_enabled():
-                self.primary_ai_command = "refine_global" if has_text else "generate_unified"
-            else:
-                self.primary_ai_command = "refine_unified" if has_text else "generate_unified"
-            allow = bool(self.segments)
-        else:
-            has_text = (bool(self.global_prompt.toPlainText().strip())
-                        if scope == "global" else bool(selected and selected.prompt.strip()))
-            self.primary_ai_command = ("refine_global" if scope == "global" else
-                                       "refine_segment") if has_text else "generate_timeline"
-            allow = bool(self.segments)
-        self.magic_button.setText("✦ Refine" if has_text else "✦ Generate")
-        self.magic_button.setEnabled(bool(allow) and not self.ai_busy)
+        has_existing = (
+            bool(self.minimax_prompt_text.strip()) if self.unified_workspace
+            else (
+                bool(self.global_prompt.toPlainText().strip())
+                if self.prompt_scope.currentData() == "global"
+                else bool(self.current_segment() and self.current_segment().prompt.strip())
+            )
+        )
+        self.primary_ai_command = "refine" if has_existing or self._has_inline_refinement() else "generate"
+        self.magic_button.setText("✦ Refine" if self.primary_ai_command == "refine" else "✦ Generate")
+        self.magic_button.setEnabled(
+            not self.ai_busy and (
+                (self.prompt_only_workspace and has_existing) or bool(self.segments)
+            )
+        )
         self.magic_button.setToolTip(
-            "Uses the Segment / Global / Unified target selected in the toolbar. "
-            "The model's segment JSON automatically determines timeline changes."
+            "Write /refine or /refine-global beside any requested edit, then click Refine. "
+            "The single result updates the unified prompt and segment JSON together."
         )
 
     def _combined_enabled(self) -> bool:
@@ -6795,29 +6795,35 @@ class MainWindow(QMainWindow):
         return supports_structured_edit(provider, model)
 
     def run_primary_ai_action(self) -> None:
+        """One unified action; segment JSON determines timeline edits."""
         if self.ai_busy:
             return
-        command = getattr(self, "primary_ai_command", "")
-        if command in {"generate_timeline", "generate_unified"}:
-            if command == "generate_unified":
-                self.combined_focus = "all"
-                self._generate_minimax_prompt(self.minimax_prompt_mode)
-            else:
-                self.magic_build()
-        elif command == "refine_unified":
-            self.combined_focus = "all"
-            self.refine_minimax_prompt()
-        elif command in {"refine_segment", "refine_global"}:
-            if self.unified_workspace and self._combined_enabled():
-                self.combined_focus = (
-                    f"{command} selected id={self.current_segment().id if self.current_segment() else 'none'}; "
-                    "preserve all other segments unless the requested changes need them"
-                )
+        refining = self.primary_ai_command == "refine"
+        if self.unified_workspace:
+            if self.prompt_only_workspace:
                 self.refine_minimax_prompt()
-            elif command == "refine_segment":
-                self.refine_selected_prompt()
+                return
+            selected = self.current_segment()
+            scope = self.prompt_scope.currentData()
+            if scope in {"segment", "global"} and self._combined_enabled():
+                self.combined_focus = (
+                    f"{scope} selected id={selected.id if selected else 'none'}; "
+                    "follow inline /refine tags anywhere and preserve other passages"
+                )
             else:
-                self.refine_global_direction()
+                self.combined_focus = "all"
+            if refining and self.minimax_prompt_text.strip():
+                self.refine_minimax_prompt()
+            else:
+                # A slash-marked timeline can be refined on its first run; the
+                # established generation template still receives all directives.
+                self._generate_minimax_prompt(self.minimax_prompt_mode)
+        elif not refining:
+            self.magic_build()
+        elif self.prompt_scope.currentData() == "global":
+            self.refine_global_direction()
+        else:
+            self.refine_selected_prompt()
 
     def generate_project_prompt(self) -> None:
         if not self.ai_busy:
