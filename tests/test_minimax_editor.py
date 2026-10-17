@@ -29,6 +29,26 @@ class UnifiedEditorTests(unittest.TestCase):
         self.addCleanup(window.close)
         return window
 
+    def test_single_ai_button_follows_active_prompt_editor(self):
+        from PySide6.QtWidgets import QToolButton
+        w = self.make_window('ltx')
+        self.assertEqual(len(w.findChildren(QToolButton, 'magicButton')), 1)
+        self.assertEqual(w.segment_header.indexOf(w.magic_button) >= 0, True)
+        self.assertTrue(w.refine_prompt_button.isHidden())
+        self.assertTrue(w.refine_timing_button.isHidden())
+        self.assertTrue(w.magic_button.menu() is w.ai_action_menu)
+        w.set_project_type('minimax_frames')
+        self.assertEqual(w.minimax_panel.header.indexOf(w.magic_button) >= 0, True)
+        self.assertEqual(len(w.findChildren(QToolButton, 'magicButton')), 1)
+        w.unified_prompt.setPlainText('Existing unified draft')
+        w.refresh_primary_ai_action()
+        self.assertEqual(w.primary_ai_command, 'refine_unified')
+        w.set_project_type('minimax_prompt_refinement')
+        self.assertEqual(w.minimax_panel.header.indexOf(w.magic_button) >= 0, True)
+        self.assertTrue(w.magic_button.isEnabled())
+        w.set_project_type('ltx')
+        self.assertEqual(w.segment_header.indexOf(w.magic_button) >= 0, True)
+
     def test_segment_editor_is_shared_and_unified_draft_is_independent(self):
         w = self.make_window()
         editor = w.segment_prompt
