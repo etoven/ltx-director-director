@@ -558,7 +558,8 @@ class UnifiedEditorTests(unittest.TestCase):
         rich = (card.preview.text() if card.segment.kind == "text"
                 else card.rewrite_overlay.text())
         self.assertIn("#80e991", rich)
-        self.assertIn("#9c3f4b", rich)
+        # A pure addition does not falsely mark preserved words as deleted.
+        self.assertNotIn("#9c3f4b", rich)
         w.resolve_segment_review(before[0].id, False)
         self.assertEqual(next(s.prompt for s in w.segments if s.id == before[0].id),
                          before[0].prompt)
