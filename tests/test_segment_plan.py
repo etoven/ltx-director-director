@@ -73,7 +73,6 @@ class SegmentPlanTests(unittest.TestCase):
             [record(items[0]), record(items[0])],
             [dict(record(items[0]), kind="video"), record(items[1])],
             [dict(record(items[0]), duration=float("inf")), record(items[1])],
-            [dict(record(items[0]), role="text"), record(items[1])],
         ]
         for records in payloads:
             with self.subTest(records=records), self.assertRaises(ValueError):
@@ -86,8 +85,8 @@ class SegmentPlanTests(unittest.TestCase):
         items.append(Segment("Text", "", "", "text", "text",
                              "Old direction", 2.0, id="seg-text"))
         records = [record(item) for item in items]
-        records[0]["role"] = "Scene"  # conditioning label is NOT a frame role
-        records[1]["role"] = "source"
+        records[0]["role"] = "text"  # exact 1.13.0a73 failure: model labels image as text
+        records[1]["role"] = "source"  # conditioning label is NOT a frame role
         records[2]["role"] = "end"  # model borrowed visual role for text
         records[2]["prompt"] = "New direction for the text segment"
         outcome = segment_plan.normalize_plan(json.dumps({
@@ -114,12 +113,40 @@ class SegmentPlanTests(unittest.TestCase):
         self.assertEqual(result["segments"][1]["role"], "text")
         self.assertEqual(result["segments"][1]["artworkRole"], "end")
         self.assertEqual(result["segments"][1]["kind"], "text")
-        with self.assertRaisesRegex(segment_plan.ai.AIResponseFormatError,
-                                    "visual media requires start/end"):
-            segment_plan.normalize_plan(json.dumps({
-                "prompt": "Original", "segments": [
-                    dict(record(items[0]), role="text"), record(items[1])]
-            }), items)
+        existing = segment_plan.normalize_plan(json.dumps({
+            "prompt": "Original", "segments": [
+                dict(record(items[0]), role="text"), record(items[1])]
+        }), items)
+        self.assertEqual(existing["segments"][0]["kind"], "image")
+        self.assertEqual(existing["segments"][0]["role"], "start")
+        self.assertEqual(segment_plan.build_segment_objects(
+            items, existing["segments"])[0].media_path, items[0].media_path)
+
+    def test_existing_video_with_text_role_can_rewrite_without_losing_media(self):
+        items = seeded()
+        items[0] = Segment(
+            "Original movie", "/tmp/shot.mp4", "/tmp/shot-preview.png",
+            "video", "end", "Original continuity", 4.0,
+            id="7ef289b4-aa34-4389-82f8-fb1357862450"
+        )
+        rows = [record(s) for s in items]
+        rows[0]["role"] = "text"
+        rows[0]["prompt"] = "New seamless continuity and timing"
+        result = segment_plan.normalize_plan(json.dumps({
+            "prompt": "Updated production prompt", "segments": rows
+        }), items)
+        self.assertEqual(result["segments"][0]["role"], "end")
+        built = segment_plan.build_segment_objects(items, result["segments"])
+        self.assertEqual(built[0].kind, "video")
+        self.assertEqual(built[0].id, items[0].id)
+        self.assertEqual(built[0].media_path, "/tmp/shot.mp4")
+        self.assertEqual(built[0].preview_path, "/tmp/shot-preview.png")
+        self.assertEqual(built[0].prompt, "New seamless continuity and timing")
+        self.assertFalse(any(op["kind"] == "role"
+                             for op in segment_plan.preview_operations(
+                                 items, result["segments"])))
+        self.assertIn("NEVER send role=text for an existing image/video",
+                      segment_plan.response_contract(items, "Draft", refine=True))
 
     def test_existing_image_artwork_edit_is_not_dropped(self):
         items = seeded()

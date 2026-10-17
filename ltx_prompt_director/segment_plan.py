@@ -62,8 +62,11 @@ def response_contract(segments, current_prompt, *, refine, focus="all"):
         "Never provide external media paths or URLs, and do not change existing "
         "media kinds. Text items cannot use start/end role. "
         "A text segment ALWAYS has role=text; never label text as start/end. "
-        "An existing image or video segment retains its current kind and role "
-        "unless a start/end role change was explicitly requested. In particular, "
+        "An existing image or video segment retains its current kind and "
+        "start/end role unless a start/end role change was explicitly requested. "
+        "NEVER send role=text for an existing image/video, including while "
+        "rewriting only its prompt; copy its original role from CURRENT SEGMENTS. "
+        "In particular, "
         "Source/Scene are conditioning labels, NOT frame roles. "
         "The unified prompt and segments must describe exactly the same sequence. "
         "ALWAYS include the complete nonempty segments array, including when "
@@ -126,15 +129,12 @@ def normalize_plan(raw, current):
             # Do not reject an entire otherwise-valid combined refinement.
             role = "text"
         elif role not in ("start", "end"):
-            if role == "text":
-                # Unlike a text segment, media cannot become text through
-                # an AI response: preserve the existing media contract.
-                raise ai.AIResponseFormatError(
-                    f"Invalid frame role for {sid}: visual media requires start/end, not text."
-                )
-            # Some models confuse "Source" and "Scene" conditioning names
-            # with the start/end media role. Those are not role changes.
-            # Preserve the original role rather than silently inventing one.
+            # AI occasionally copies "text" from an adjacent text tile, or
+            # "Source"/"Scene" from conditioning metadata, into an EXISTING
+            # image/video's role. This is malformed metadata, NOT authority
+            # to convert the user's original visual media to a text tile.
+            # Preserve the original start/end and keep the rest of the valid
+            # combined plan instead of failing the entire refinement.
             role = before.role if before and before.role in ("start", "end") else "start"
         try:
             duration = float(data.get("duration", before.duration if before else 5.0))

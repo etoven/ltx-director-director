@@ -480,6 +480,36 @@ class UnifiedEditorTests(unittest.TestCase):
         self.assertTrue(media_card.rewrite_overlay.isHidden())
         media_card.close()
 
+    def test_combined_video_refinement_keeps_original_role_and_source(self):
+        import json
+        from ltx_prompt_director import segment_plan
+        w = self.make_window("minimax_frames")
+        w.segments[0] = Segment(
+            "Original footage", "/tmp/original-scene.mp4", "/tmp/thumb.png",
+            "video", "end", "Original film direction", 3.0,
+            id="7ef289b4-aa34-4389-82f8-fb1357862450")
+        w.refresh_timeline(0)
+        snapshot = list(w.segments)
+        rows = [
+            {"id": s.id, "name": s.name, "kind": s.kind, "role": s.role,
+             "duration": s.duration, "prompt": s.prompt,
+             "imagePrompt": s.image_prompt, "artworkPrompt": ""}
+            for s in snapshot
+        ]
+        rows[0]["role"] = "text"  # model-output mistake, NOT a conversion
+        rows[0]["prompt"] = "A smoother progression without camera cuts"
+        parsed = segment_plan.normalize_plan(json.dumps({
+            "prompt": "Updated unified direction", "segments": rows
+        }), snapshot)
+        w.ai_segment_snapshot = snapshot
+        w.combined_refinement_finished(parsed)
+        self.assertEqual(w.segments[0].id, snapshot[0].id)
+        self.assertEqual(w.segments[0].kind, "video")
+        self.assertEqual(w.segments[0].role, "end")
+        self.assertEqual(w.segments[0].media_path, snapshot[0].media_path)
+        self.assertEqual(w.segments[0].prompt, rows[0]["prompt"])
+        self.assertEqual(w.minimax_prompt_text, "Updated unified direction")
+
     def test_combined_json_inserts_animated_artwork_placeholder_without_deleting_media(self):
         from unittest.mock import patch
         w = self.make_window('minimax_frames')
