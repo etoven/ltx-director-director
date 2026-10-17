@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ltx-prompt-director"
-version = "1.13.0a55"
+version = "1.13.0a56"
 description = "Prompt Director: native AI video prompt editor and completed-shot sequence workspace"
 readme = "README.md"
 requires-python = ">=3.10"
