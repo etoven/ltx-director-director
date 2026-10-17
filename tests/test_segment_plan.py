@@ -111,8 +111,8 @@ class SegmentPlanTests(unittest.TestCase):
         text = rules_seen[0]
         self.assertIn("CURRENT SEGMENTS:", text)
         self.assertIn("Existing unified prompt", text)
-        self.assertIn("ADDITIVE GPT-6+", text)
-        self.assertLess(text.index(segment_plan.ai.UNIFIED_PROMPT_TRANSPORT.strip()), text.index("ADDITIVE GPT-6+"))
+        self.assertIn("ADDITIVE STRUCTURED", text)
+        self.assertLess(text.index(segment_plan.ai.UNIFIED_PROMPT_TRANSPORT.strip()), text.index("ADDITIVE STRUCTURED"))
 
     def test_gemini_flash_lite_is_preferred_when_chatgpt_oauth_is_selected(self):
         tools = artwork_tools.available_artwork_tools(
