@@ -36,7 +36,8 @@ from .ai_stream import STREAM_SINK
 from .stream_widgets import ReasoningActivityDock, LiveOutputPane
 from .ai_inline_diff import LiveTypingPreview
 from .segment_plan import (supports_structured_edit, generate_combined, preview_operations,
-                           build_segment_objects, stream_operations)
+                           build_segment_objects, stream_operations, completed_stream_records,
+                           render_requested_artwork)
 from .cache_maintenance import cover_path, mark_ready, needs_refresh, warm_metadata
 from .ai import AIResponseFormatError, GEMINI_MODELS, build_minimax_h3_prompt, build_minimax_h3_reference_prompt, build_prompts, minimax_h3_cache_key, provider_error_message, WORKSPACE_INSTRUCTIONS, refine_minimax_text_prompt, refine_minimax_h3_prompt, refine_minimax_h3_reference_prompt, refine_segment_prompt, refine_global_prompt, refine_timing, retryable_connection_error
 from .media import APP_CACHE, TIMELINE_VIDEO_SUFFIXES, comfy_input_references, copy_media_for_export, data_url, extract_audio_for_export, prepare_media, safe_media_filename, thumbnail_for_image, unique_media_filename, video_source_dimensions, write_data_url
@@ -3321,6 +3322,15 @@ class MainWindow(QMainWindow):
         self.ai_timeline_status.setToolTip("Live AI timeline edit preview; changes apply only after validated completion")
         self.ai_timeline_status.hide()
         timeline_layout.addLayout(self.timeline_controls)
+        self.ai_edit_feed = QLabel()
+        self.ai_edit_feed.setObjectName("aiEditFeed")
+        self.ai_edit_feed.setWordWrap(True)
+        self.ai_edit_feed.setStyleSheet(
+            "QLabel#aiEditFeed{background:#162b41;color:#b6d7ff;"
+            "border:1px solid #35608d;border-radius:6px;padding:5px 10px}"
+        )
+        self.ai_edit_feed.hide()
+        timeline_layout.addWidget(self.ai_edit_feed)
         ruler_row = QHBoxLayout()
         ruler_row.setContentsMargins(0, 0, 0, 0)
         ruler_spacer = QWidget()
@@ -3575,7 +3585,9 @@ class MainWindow(QMainWindow):
         self.render_artwork_toggle.setToolTip(
             "Optional paid OpenAI Images API. Requires a separate OpenAI API key; ChatGPT OAuth does not support image generation."
         )
-        self.render_artwork_toggle.setChecked(False)
+        self.render_artwork_toggle.setChecked(bool(
+            self.settings.value("openai_key", "") or self.session_keys.get("openai")
+        ))
         self.timeline_controls.addWidget(self.render_artwork_toggle)
         # Never create another prompt editor or a second Generate/Refine button.
         self.magic_button.setObjectName("timelineButton")
@@ -6123,6 +6135,8 @@ class MainWindow(QMainWindow):
 
     def discard_obsolete_ai_result(self) -> None:
         self.inline_typing.finish()
+        self.ai_plan_stream_active = False
+        self._clear_ai_timeline_preview()
         self.set_ai_controls_enabled(True)
         self.magic_overlay.hide_overlay()
         self.statusBar().showMessage("AI result discarded because the project or workflow changed.")
@@ -6136,9 +6150,17 @@ class MainWindow(QMainWindow):
             if kind == "reasoning" and text and not pane.isVisible():
                 pane.show()
         self.inline_typing.receive(kind, text)
+        if kind == "output" and getattr(self, "ai_plan_stream_active", False):
+            self.ai_plan_raw += text
+            records = completed_stream_records(self.ai_plan_raw)
+            if len(records) != getattr(self, "ai_plan_record_count", 0):
+                self.ai_plan_record_count = len(records)
+                ops = stream_operations(self.ai_segment_snapshot, self.ai_plan_raw)
+                self.preview_ai_timeline_operations(ops)
 
     def ai_result_received(self, result) -> None:
         self.inline_typing.finish()
+        self.ai_plan_stream_active = False
         if not self.ai_request_is_current():
             self.discard_obsolete_ai_result()
             return
@@ -6148,6 +6170,8 @@ class MainWindow(QMainWindow):
 
     def ai_failure_received(self, error: str) -> None:
         self.inline_typing.finish()
+        self.ai_plan_stream_active = False
+        self._clear_ai_timeline_preview()
         if not self.ai_request_is_current():
             self.discard_obsolete_ai_result()
             return
