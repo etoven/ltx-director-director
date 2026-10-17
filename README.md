@@ -8,7 +8,7 @@ Build a visual plan for AI video, turn it into a detailed production prompt, and
 
 ![The Aurora workspace: a visual timeline, creative direction and one continuous MiniMax production brief](docs/images/ltx-director-director-overview.png)
 
-*Current release: Aurora 1.13.0a74 on `experimental`. Screenshots show the native app with an authored demonstration project.*
+*Current release: Aurora 1.13.0a75 on `experimental`. Screenshots show the native app with an authored demonstration project.*
 
 ## See the story before you generate
 

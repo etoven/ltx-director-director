@@ -3363,6 +3363,17 @@ class MainWindow(QMainWindow):
         catalog_action = self.catalog_dock.toggleViewAction()
         catalog_action.setIcon(toolbar_icon("catalog"))
         toolbar.addAction(catalog_action)
+        # The image/reference tool belongs alongside Media Catalog, not
+        # beside the workspace selector. Icon-only, with a full tooltip.
+        self.references_button = QToolButton(toolbar)
+        self.references_button.setObjectName("toolbarRefs")
+        self.references_button.setIcon(toolbar_icon("references"))
+        self.references_button.setIconSize(QSize(22, 22))
+        self.references_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        self.references_button.setAccessibleName("Reference media")
+        self.references_button.setToolTip("Open reference artwork and conditioning media")
+        self.references_button.clicked.connect(self.show_reference_images)
+        toolbar.addWidget(self.references_button)
         toolbar.addSeparator()
         action_groups = [
             (("New Project", "new", self.new_project),
@@ -3407,12 +3418,6 @@ class MainWindow(QMainWindow):
             self.project_type_combo.addItem(definition["name"], key)
         self.project_type_combo.currentIndexChanged.connect(self.project_type_changed)
         toolbar.addWidget(self.project_type_combo)
-        self.references_button = QPushButton("Refs", toolbar)
-        self.references_button.setObjectName("toolbarRefs")
-        self.references_button.setToolTip("Open reference media for this workspace")
-        self.references_button.setAccessibleName("Reference media")
-        self.references_button.clicked.connect(self.show_reference_images)
-        toolbar.addWidget(self.references_button)
         # Workflow information remains available as a tooltip and in the
         # status bar; repeating it beside the selector wastes horizontal room.
         self.workflow_label = QLabel(self)
@@ -3426,7 +3431,7 @@ class MainWindow(QMainWindow):
         self.downloads_button.setIconSize(QSize(22, 22))
         self.downloads_button.setToolTip("Recent exports")
         self.downloads_button.clicked.connect(self.toggle_downloads)
-        toolbar.addWidget(self.downloads_button)
+        downloads_toolbar_action = toolbar.addWidget(self.downloads_button)
         self.download_tray = DownloadTray(self.settings, self)
         self.download_tray.folder_button.clicked.connect(self.open_download_folder)
         self.provider_button = QPushButton()
@@ -3468,12 +3473,8 @@ class MainWindow(QMainWindow):
         timeline_layout = QVBoxLayout(timeline_shell)
         timeline_layout.setContentsMargins(0, 0, 0, 0)
         timeline_layout.setSpacing(0)
-        # A single, non-wrapping timeline toolbar. Numeric dimensions,
-        # zoom and the icon-only fit control need tooltips, not redundant
-        # TIMELINE / OUTPUT / SCALE labels or a second header row.
-        self.timeline_controls = QHBoxLayout()
-        self.timeline_controls.setContentsMargins(6, 2, 6, 2)
-        self.timeline_controls.setSpacing(4)
+        # No dedicated timeline toolbar: all navigation and output-size
+        # controls live in the project toolbar, leaving the ruler at the top.
         self.output_size_control = QFrame()
         self.output_size_control.setToolTip("Output resolution (width × height, pixels)")
         self.output_size_control.setAccessibleName("Output resolution")
@@ -3511,25 +3512,21 @@ class MainWindow(QMainWindow):
         self.timeline_scale.setMaximumWidth(135)
         self.timeline_scale.setToolTip("Timeline zoom — move left to fit more of the sequence")
         self.timeline_scale.valueChanged.connect(self.set_timeline_scale)
-        self.timeline_controls.addWidget(self.timeline_scale)
         self.timeline_fit_button = QToolButton()
         self.timeline_fit_button.setObjectName("timelineFitButton")
         self.timeline_fit_button.setText("↔")
         self.timeline_fit_button.setAccessibleName("Fit timeline")
         self.timeline_fit_button.setToolTip("Auto-fit the complete timeline")
         self.timeline_fit_button.clicked.connect(self.autofit_timeline)
-        self.timeline_controls.addWidget(self.timeline_fit_button)
-        self.timeline_controls.addSpacing(8)
-        self.timeline_controls.addWidget(self.output_size_control)
-        # The primary Generate/Refine action belongs at the far right, not
-        # interleaved with navigation and output settings.
-        self.timeline_controls.addStretch(1)
+        self.timeline_zoom_action = toolbar.insertWidget(downloads_toolbar_action, self.timeline_scale)
+        self.timeline_fit_action = toolbar.insertWidget(downloads_toolbar_action, self.timeline_fit_button)
+        self.timeline_output_action = toolbar.insertWidget(downloads_toolbar_action, self.output_size_control)
+        toolbar.insertSeparator(downloads_toolbar_action)
         self.ai_timeline_status = QLabel("")
         self.ai_timeline_status.setObjectName("timelineControlLabel")
         self.ai_timeline_status.setToolTip("Live AI timeline edit preview; changes apply only after validated completion")
         self.ai_timeline_status.setMaximumWidth(205)
         self.ai_timeline_status.hide()
-        timeline_layout.addLayout(self.timeline_controls)
         self.ai_edit_feed = QLabel()
         self.ai_edit_feed.setObjectName("aiEditFeed")
         self.ai_edit_feed.setWordWrap(True)
@@ -3713,9 +3710,7 @@ class MainWindow(QMainWindow):
         for button in (self.sfx, self.spoken_dialog, self.hdr, self.reduce_music):
             button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.magic_button.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
-        # The only Generate/Refine control stays in the timeline toolbar.
-        # No redundant prompt or project-type row is created.
-        self.ai_workflow_row = self.timeline_controls
+        # The sole Generate/Refine action lives in the active prompt header.
         self.director_controls.addLayout(intent_row)
         self.director_controls.addWidget(self.director_intent_stack, 1)
         # Length and the quality/audio options sit directly below the
@@ -3818,12 +3813,11 @@ class MainWindow(QMainWindow):
         # Selector sits in the header's right edge; the editor occupies the
         # entire row beneath it even in a narrow or scaled window.
         self.director_intent_row.addWidget(self.prompt_scope)
-        self.timeline_controls.addWidget(self.magic_button)
-        # AI progress is in the existing status bar, never in a wrapping
-        # timeline toolbar. The same QLabel is still updated by the planner.
+        # Placement is selected by workspace after all editors are built.
+        # Live planning status remains in the bottom status bar.
         # Image tools are chosen from connected providers as needed; no toggle.
         # Never create another prompt editor or a second Generate/Refine button.
-        self.magic_button.setObjectName("timelineButton")
+        self.magic_button.setObjectName("promptAction")
         self.refine_timing_button = QPushButton("⏱ Refine Timing")
         self.refine_timing_button.setObjectName("refineButton")
         self.refine_timing_button.setToolTip("Analyze the existing sequence and retime only the selected segment; MiniMax then generates the unified prompt")
@@ -4321,7 +4315,12 @@ class MainWindow(QMainWindow):
         #timelineTitle{background:#19262d;color:#b9def2;border:1px solid #304955;border-radius:4px;padding:4px 8px;font-weight:bold;letter-spacing:1px} #timelineControlLabel{background:transparent;color:#7f9099;border:0;font-size:9px;font-weight:bold;letter-spacing:1px}
         #outputSizeControl{background:#1a2023;border:1px solid #354047;border-radius:5px} #timelineSpin{background:transparent;border:0;border-radius:0;padding-left:9px;padding-right:__TIMELINE_SPIN_PAD__px;color:#e6edf1;font-weight:bold;selection-background-color:#3b6f9c} #timelineSpin:hover{background:#20292d} #timelineSpin:focus{background:#202b30;color:#fff}
         #timelineSpin::up-button{width:__TIMELINE_SPIN_BUTTON__px;background:transparent;border:0;border-radius:2px;subcontrol-origin:border;subcontrol-position:top right} #timelineSpin::down-button{width:__TIMELINE_SPIN_BUTTON__px;background:transparent;border:0;border-radius:2px;subcontrol-origin:border;subcontrol-position:bottom right} #timelineSpin::up-button:hover,#timelineSpin::down-button:hover{background:#344b57} #timelineSpin::up-button:pressed,#timelineSpin::down-button:pressed{background:#1f668b} #timelineSpin::up-arrow{image:url("__SPIN_UP_IMAGE__");width:__TIMELINE_ARROW__px;height:__TIMELINE_ARROW__px} #timelineSpin::down-arrow{image:url("__SPIN_DOWN_IMAGE__");width:__TIMELINE_ARROW__px;height:__TIMELINE_ARROW__px}
-        #resolutionSeparator{background:transparent;color:#60717a;border:0;padding:0 3px;font-weight:bold} #timelineButton{background:transparent;color:#acd8ef;border:1px solid #3f6679;border-radius:5px;padding:4px 10px;font-weight:bold} #timelineButton:hover{background:#243b46;color:#e0f5ff;border-color:#65a7c7} #timelineButton:pressed{background:#172b35;color:#85c9eb;border-color:#347898}
+        #resolutionSeparator{background:transparent;color:#60717a;border:0;padding:0 3px;font-weight:bold}
+        #promptAction{background:#303436;color:#dbe7ee;border:1px solid #101213;border-radius:3px;padding:2px 6px;min-height:0;font-weight:bold}
+        #promptAction:hover{background:#385062;border-color:#668da7;color:#f4fbff}
+        #promptAction:pressed{background:#1e3442;color:#b9e9ff}
+        #promptAction:disabled{background:#293033;border-color:#22282b;color:#6b7a81}
+        #timelineButton{background:transparent;color:#acd8ef;border:1px solid #3f6679;border-radius:5px;padding:4px 10px;font-weight:bold} #timelineButton:hover{background:#243b46;color:#e0f5ff;border-color:#65a7c7} #timelineButton:pressed{background:#172b35;color:#85c9eb;border-color:#347898}
         QListWidget{background:#0d0f10;border:0;padding:0} QListWidget::item{border:1px solid #696b6c;background:#252728;margin:0} QListWidget::item:selected{border:2px solid #f1f1f1;background:#293034}
         #conditioningGuide{background:#141b1f;border:1px solid #354047;border-radius:4px}
         #conditioningGuide QWidget{background:transparent}
@@ -4407,8 +4406,7 @@ class MainWindow(QMainWindow):
         for size in (15, 10, 9, 8):
             theme = theme.replace(f"font-size:{size}px", f"font-size:{scaled(size)}px")
         self.setStyleSheet(theme)
-        self.timeline_controls.setSpacing(metric(4))
-        self.timeline_scale.setFixedWidth(metric(110))
+        self.timeline_scale.setFixedWidth(metric(98))
         self.timeline_fit_button.setFixedSize(metric(26), metric(25))
         self.output_width.setFixedWidth(metric(75))
         self.output_height.setFixedWidth(metric(75))
@@ -4427,8 +4425,8 @@ class MainWindow(QMainWindow):
         self.segment_header.setSpacing(metric(6))
         self.project_type_combo.setFixedWidth(min(252, max(160, metric(198))))
         self.project_type_combo.setFixedHeight(max(metric(24), self.project_type_combo.fontMetrics().height() + metric(7)))
-        self.references_button.setFixedHeight(max(metric(23), self.references_button.fontMetrics().height() + metric(6)))
-        self.references_button.setFixedWidth(self.references_button.fontMetrics().horizontalAdvance(self.references_button.text()) + metric(18))
+        self.references_button.setFixedSize(metric(32), metric(30))
+        self.references_button.setIconSize(QSize(metric(22), metric(22)))
         for option in (self.hdr, self.sfx, self.spoken_dialog, self.reduce_music):
             option.setMinimumWidth(0)
             option.setFixedWidth(option.fontMetrics().horizontalAdvance(option.text()) + metric(12))
@@ -4439,9 +4437,14 @@ class MainWindow(QMainWindow):
         self.ruler.setFixedHeight(metric(28))
         self.timeline_height_handle.set_scale(scale)
         self.project_list.setSpacing(metric(4))
-        for button in (self.provider_button, self.magic_button, self.refine_timing_button,
+        for button in (self.provider_button, self.refine_timing_button,
                        self.refine_prompt_button, self.start_button, self.end_button):
             button.setMinimumWidth(button.fontMetrics().horizontalAdvance(button.text()) + metric(18))
+        self.magic_button.setFixedHeight(metric(23))
+        self.magic_button.setMinimumWidth(0)
+        self.magic_button.setFixedWidth(
+            max(metric(85), self.magic_button.fontMetrics().horizontalAdvance("✦ Generate") + metric(13))
+        )
         self.output_width.setMinimumWidth(metric(74))
         self.output_height.setMinimumWidth(metric(74))
         self.duration_spin.setFixedWidth(metric(68))
@@ -6850,11 +6853,22 @@ class MainWindow(QMainWindow):
         self.segment_panel.setVisible(ltx and not prompt_only)
         self.director_panel.setVisible(not prompt_only)
         self.magic_button.setVisible(True)
-        # The timeline-toolbar button is shared; prompt-only workspaces hide
-        # the timeline, so the same control moves to the unified editor header.
-        self.timeline_controls.removeWidget(self.magic_button)
-        self.minimax_panel.header.removeWidget(self.magic_button)
-        (self.minimax_panel.header if prompt_only else self.timeline_controls).addWidget(self.magic_button)
+        # Reparent the one action into whichever prompt editor is active;
+        # no duplicate buttons or row for project/timeline controls.
+        for layout in (self.director_intent_row, self.segment_header,
+                       self.minimax_panel.header):
+            layout.removeWidget(self.magic_button)
+        if prompt_only:
+            destination = self.minimax_panel.header
+            index = destination.indexOf(self.minimax_panel.copy_button)
+        elif ltx:
+            destination = self.segment_header
+            index = destination.indexOf(self.segment_ai_marquee)
+        else:
+            destination = self.director_intent_row
+            index = destination.indexOf(self.prompt_scope)
+        destination.insertWidget(index, self.magic_button)
+        self.magic_button.show()
         self.refine_prompt_button.hide()
         self.refine_timing_button.hide()
         if hasattr(self, "paragraph_review"):
@@ -6878,7 +6892,7 @@ class MainWindow(QMainWindow):
         self.update_spoken_dialog_visibility()
         self.output_size_control.setVisible(True)
         self.refine_timing_button.hide()
-        self.magic_button.setToolTip("Generate / Refine for the target selected in the timeline toolbar")
+        self.magic_button.setToolTip("Generate / Refine from the active prompt editor")
         self.comfy_export_action.setVisible(self.workspace_engine in {"minimax_frames","minimax_references","minimax_prompt"})
         self.workflow_export_action.setVisible(ltx)
         self.timeline_import_action.setVisible(not prompt_only)
