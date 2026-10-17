@@ -7785,7 +7785,6 @@ class MainWindow(QMainWindow):
         def finished():
             for card, effect in arriving:
                 card.setGraphicsEffect(None)
-                effect.deleteLater()
             self.update_timeline_layout()
 
         animation.valueChanged.connect(update)
