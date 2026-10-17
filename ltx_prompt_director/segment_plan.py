@@ -61,6 +61,10 @@ def response_contract(segments, current_prompt, *, refine, focus="all"):
         "on existing images unless actual image generation/editing is requested. "
         "Never provide external media paths or URLs, and do not change existing "
         "media kinds. Text items cannot use start/end role. "
+        "A text segment ALWAYS has role=text; never label text as start/end. "
+        "An existing image or video segment retains its current kind and role "
+        "unless a start/end role change was explicitly requested. In particular, "
+        "Source/Scene are conditioning labels, NOT frame roles. "
         "The unified prompt and segments must describe exactly the same sequence. "
         "ALWAYS include the complete nonempty segments array, including when "
         "the request is only to generate an image; an artwork request is not "
@@ -109,12 +113,29 @@ def normalize_plan(raw, current):
             raise ai.AIResponseFormatError("AI cannot replace or invent media kinds.")
         role = data.get("role", before.role if before else "text")
         if before is None and data.get("artworkPrompt") and data.get("kind") == "image":
+            # A separately-rendered image is a text placeholder until pixels
+            # exist. Keep the requested start/end role for the final image.
             role = "text"
             if artwork_role not in ("start", "end"):
-                raise ai.AIResponseFormatError("Generated visual role must be start or end.")
-        if role != ("text" if kind == "text" else role) or (
-            kind != "text" and role not in ("start", "end")):
-            raise ai.AIResponseFormatError("Invalid frame role.")
+                raise ai.AIResponseFormatError(
+                    "Generated visual role must be start or end."
+                )
+        elif kind == "text":
+            # A text segment remains text even if the model accidentally
+            # mirrors a neighboring frame's start/end or conditioning label.
+            # Do not reject an entire otherwise-valid combined refinement.
+            role = "text"
+        elif role not in ("start", "end"):
+            if role == "text":
+                # Unlike a text segment, media cannot become text through
+                # an AI response: preserve the existing media contract.
+                raise ai.AIResponseFormatError(
+                    f"Invalid frame role for {sid}: visual media requires start/end, not text."
+                )
+            # Some models confuse "Source" and "Scene" conditioning names
+            # with the start/end media role. Those are not role changes.
+            # Preserve the original role rather than silently inventing one.
+            role = before.role if before and before.role in ("start", "end") else "start"
         try:
             duration = float(data.get("duration", before.duration if before else 5.0))
         except (TypeError, ValueError) as error:
@@ -160,7 +181,9 @@ def preview_operations(original, records):
         if before.role != entry["role"]:
             ops.append({"kind": "role", "id": before.id, "name": before.name, "role": entry["role"]})
         if before.prompt != entry["prompt"] or before.image_prompt != entry["imagePrompt"]:
-            ops.append({"kind": "rewrite", "id": before.id, "name": before.name})
+            ops.append({"kind": "rewrite", "id": before.id, "name": before.name,
+                        "prompt": entry["prompt"],
+                        "imagePrompt": entry["imagePrompt"]})
         if entry["artworkPrompt"] and before.kind == "image":
             ops.append({"kind": "artwork", "id": before.id, "name": before.name})
     return ops
@@ -330,8 +353,11 @@ def stream_operations(original: list[Segment], raw: str) -> list[dict]:
             changes.append({"kind": "timing", "id": before.id, "name": before.name, "duration": duration})
         if item.get("role", before.role) != before.role:
             changes.append({"kind": "role", "id": before.id, "name": before.name, "role": item["role"]})
-        if item.get("prompt", before.prompt) != before.prompt:
-            changes.append({"kind": "rewrite", "id": before.id, "name": before.name})
+        if (item.get("prompt", before.prompt) != before.prompt
+                or item.get("imagePrompt", before.image_prompt) != before.image_prompt):
+            changes.append({"kind": "rewrite", "id": before.id, "name": before.name,
+                            "prompt": item.get("prompt", before.prompt),
+                            "imagePrompt": item.get("imagePrompt", before.image_prompt)})
         if before.kind == "image" and str(item.get("artworkPrompt") or "").strip():
             changes.append({"kind": "artwork", "id": before.id, "name": before.name})
     return changes

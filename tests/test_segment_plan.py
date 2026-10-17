@@ -81,6 +81,46 @@ class SegmentPlanTests(unittest.TestCase):
                     "prompt": "Complete", "segments": records,
                 }), items)
 
+    def test_frame_roles_canonicalized_for_text_and_preserved_for_visuals(self):
+        items = seeded()
+        items.append(Segment("Text", "", "", "text", "text",
+                             "Old direction", 2.0, id="seg-text"))
+        records = [record(item) for item in items]
+        records[0]["role"] = "Scene"  # conditioning label is NOT a frame role
+        records[1]["role"] = "source"
+        records[2]["role"] = "end"  # model borrowed visual role for text
+        records[2]["prompt"] = "New direction for the text segment"
+        outcome = segment_plan.normalize_plan(json.dumps({
+            "prompt": "Continuous original brief", "segments": records
+        }), items)
+        self.assertEqual([r["role"] for r in outcome["segments"]],
+                         ["start", "end", "text"])
+        rebuilt = segment_plan.build_segment_objects(items, outcome["segments"])
+        self.assertEqual([s.kind for s in rebuilt], ["image", "image", "text"])
+        self.assertEqual(rebuilt[2].prompt, "New direction for the text segment")
+        changes = segment_plan.preview_operations(items, outcome["segments"])
+        self.assertEqual(next(c["prompt"] for c in changes if c["kind"] == "rewrite"),
+                         "New direction for the text segment")
+
+    def test_new_image_placeholder_keeps_image_role_and_text_media_safety(self):
+        items = seeded()
+        proposal = {"id":"new:1", "kind":"image", "role":"end",
+                    "name":"Requested last frame", "duration":2.0,
+                    "prompt":"Bridge", "imagePrompt":"Photo", "artworkPrompt":"Render"}
+        result = segment_plan.normalize_plan(json.dumps({
+            "prompt": "A coherent timeline", "segments": [
+                record(items[0]), proposal, record(items[1])]
+        }), items)
+        self.assertEqual(result["segments"][1]["role"], "text")
+        self.assertEqual(result["segments"][1]["artworkRole"], "end")
+        self.assertEqual(result["segments"][1]["kind"], "text")
+        with self.assertRaisesRegex(segment_plan.ai.AIResponseFormatError,
+                                    "visual media requires start/end"):
+            segment_plan.normalize_plan(json.dumps({
+                "prompt": "Original", "segments": [
+                    dict(record(items[0]), role="text"), record(items[1])]
+            }), items)
+
     def test_existing_image_artwork_edit_is_not_dropped(self):
         items = seeded()
         edit = dict(record(items[0]),
