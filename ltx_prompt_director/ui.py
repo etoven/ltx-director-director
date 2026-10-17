@@ -5965,6 +5965,18 @@ class MainWindow(QMainWindow):
     def set_ai_controls_enabled(self, enabled: bool) -> None:
         self.magic_button.setEnabled(enabled and self.workspace_engine != "shot_sequence")
         self.ai_busy = not enabled
+        # While streaming, every text source and timeline mutation control is
+        # locked. Viewing/scrolling the timeline is still allowed.
+        for editor in (self.unified_prompt, self.segment_prompt, self.intent):
+            editor.setReadOnly(not enabled)
+        for widget in (self.prompt_scope, self.project_type_combo, self.duration_spin,
+                       self.start_button, self.end_button, self.requested_length,
+                       self.add_tile, self.add_text_tile, self.render_artwork_toggle):
+            widget.setEnabled(enabled)
+        self.timeline.setDragEnabled(enabled)
+        self.timeline.setAcceptDrops(enabled)
+        if enabled:
+            self.update_summary()
         segment = self.current_segment()
         self.refine_timing_button.setEnabled(enabled and not self.prompt_only_workspace and bool(segment))
         self.update_refine_prompt_enabled()
@@ -6413,8 +6425,11 @@ class MainWindow(QMainWindow):
         self.segment_panel.setVisible(ltx and not prompt_only)
         self.director_panel.setVisible(not prompt_only)
         self.magic_button.setVisible(True)
-        # Exactly one AI split-button lives in the shared Timeline control row.
-        # No per-editor duplicates: it is accessible in every supported mode.
+        # The timeline-toolbar button is shared; prompt-only workspaces hide
+        # the timeline, so the same control moves to the unified editor header.
+        self.timeline_controls.removeWidget(self.magic_button)
+        self.minimax_panel.header.removeWidget(self.magic_button)
+        (self.minimax_panel.header if prompt_only else self.timeline_controls).addWidget(self.magic_button)
         self.refine_prompt_button.hide()
         self.refine_timing_button.hide()
         self.minimax_panel.prompt_label.setText("PROMPT REFINEMENT" if prompt_only else "UNIFIED PROMPT")
@@ -6677,8 +6692,14 @@ class MainWindow(QMainWindow):
         if sequence:
             primary = ""
         elif unified:
-            primary = ("refine_unified" if has_unified else
-                       "generate_unified" if not prompt_only else "")
+            if prompt_only:
+                primary = "refine_unified" if has_unified else ""
+            elif scope == "segment" and selected:
+                primary = "refine_segment" if has_selected_prompt else "generate_unified"
+            elif scope == "global" and has_global:
+                primary = "refine_global"
+            else:
+                primary = "refine_unified" if has_unified else "generate_unified"
         elif scope == "global" and has_global:
             primary = "refine_global"
         elif has_selected_prompt:
@@ -6690,8 +6711,8 @@ class MainWindow(QMainWindow):
             "generate_timeline": has_segments and not prompt_only and not sequence,
             "generate_unified": unified and has_segments and not prompt_only and not sequence,
             "refine_unified": unified and has_unified and not sequence,
-            "refine_segment": has_selected_prompt and not prompt_only and not sequence,
-            "refine_global": has_global and not prompt_only and not sequence,
+            "refine_segment": bool(selected) and not prompt_only and not sequence,
+            "refine_global": (has_global or unified) and not prompt_only and not sequence,
             "refine_timing": selected is not None and not prompt_only and not sequence,
         }
         for command, action in self.ai_action_commands.items():
