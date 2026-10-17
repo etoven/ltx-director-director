@@ -37,7 +37,10 @@ def response_contract(segments, current_prompt, *, refine, focus="all"):
         "only when justified. You may reorder, retime, or modify roles, prompts "
         "and image prompts as warranted by explicit requests. Do not gratuitously "
         "change existing wording, duration, media or order. "
-        'New IDs must be new:1, new:2, etc, with kind=text and role=text; '
+        'New IDs must be new:1, new:2, etc; use kind=text role=text for '
+        'text inserts, or kind=image with role=start|end and a nonempty '
+        'artworkPrompt to request a new visual frame (a temporary text tile '
+        'becomes an image only after real artwork renders). '
         "new visual media cannot be fabricated. If new artwork is requested, "
         "include a detailed imagePrompt and artworkPrompt; the app can render "
         "only through a separately authenticated image provider. "
@@ -75,9 +78,20 @@ def normalize_plan(raw, current):
         if before is None and not re.fullmatch(r"new:\d+", sid):
             raise ai.AIResponseFormatError("Unknown segment ID.")
         kind = before.kind if before else "text"
-        if data.get("kind", kind) != kind:
+        requested_kind = data.get("kind", kind)
+        artwork_role = "start"
+        if before is None and requested_kind == "image" and data.get("artworkPrompt"):
+            # A proposed image is temporarily a text placeholder until the
+            # separately authenticated image API returns actual media bytes.
+            artwork_role = data.get("role", "start")
+            requested_kind = "text"
+        if requested_kind != kind:
             raise ai.AIResponseFormatError("AI cannot replace or invent media kinds.")
         role = data.get("role", before.role if before else "text")
+        if before is None and data.get("artworkPrompt") and data.get("kind") == "image":
+            role = "text"
+            if artwork_role not in ("start", "end"):
+                raise ai.AIResponseFormatError("Generated visual role must be start or end.")
         if role != ("text" if kind == "text" else role) or (
             kind != "text" and role not in ("start", "end")):
             raise ai.AIResponseFormatError("Invalid frame role.")
@@ -97,7 +111,8 @@ def normalize_plan(raw, current):
             raise ai.AIResponseFormatError("Segment requires a name and direction.")
         normalized.append({"id": sid, "name": name.strip(), "kind": kind,
                            "role": role, "duration": duration, "prompt": prose,
-                           "imagePrompt": img, "artworkPrompt": art.strip() if not before else ""})
+                           "imagePrompt": img, "artworkPrompt": art.strip() if not before else "",
+                           "artworkRole": artwork_role})
     return {"prompt": prompt.strip(), "segments": normalized}
 
 def preview_operations(original, records):
@@ -132,6 +147,8 @@ def build_segment_objects(original, records):
             row["name"], "", "", "text", "text", "", row["duration"], id=str(uuid4()))
         item.name, item.duration = row["name"], row["duration"]
         item.role, item.prompt, item.image_prompt = row["role"], row["prompt"], row["imagePrompt"]
+        if before is None:
+            item.artwork_target_role = row.get("artworkRole", "start")
         built.append(item)
     return built
 
