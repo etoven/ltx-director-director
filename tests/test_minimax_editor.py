@@ -56,6 +56,62 @@ class UnifiedEditorTests(unittest.TestCase):
         w.set_project_type('ltx')
         self.assertTrue(w.segment_header.indexOf(w.magic_button) >= 0)
 
+    def test_sync_button_follows_unified_timeline_capability(self):
+        w = self.make_window("ltx")
+        self.assertTrue(w.sync_timeline_button.isHidden())
+        w.set_project_type("minimax_frames")
+        w.unified_prompt.setPlainText("00:00–00:08 master")
+        self.assertFalse(w.sync_timeline_button.isHidden())
+        self.assertTrue(w.sync_timeline_button.isEnabled())
+        w.set_project_type("minimax_references")
+        w.unified_prompt.setPlainText("00:00–00:08 reference master")
+        self.assertFalse(w.sync_timeline_button.isHidden())
+        self.assertTrue(w.sync_timeline_button.isEnabled())
+        w.set_project_type("minimax_prompt_refinement")
+        self.assertTrue(w.sync_timeline_button.isHidden())
+
+    def test_sync_worker_receives_original_segments_and_combined_prompt(self):
+        from ltx_prompt_director.segment_plan import sync_timeline_to_prompt
+        w = self.make_window("minimax_frames")
+        w.unified_prompt.setPlainText("00:00-00:01 opening; 00:01-00:09 closing")
+        snapshot = w.minimax_prompt_text
+        with (patch.object(w, "ai_credentials", return_value=("gemini", "gemini-3.5-flash", "key")),
+              patch.object(w, "start_ai_worker") as start):
+            w.sync_timeline_from_prompt()
+        args = start.call_args.args
+        self.assertIs(args[0], sync_timeline_to_prompt)
+        self.assertEqual(args[1][4], snapshot)
+        self.assertEqual([x.id for x in args[1][0]], [x.id for x in w.segments])
+        self.assertEqual(args[3], w.sync_timeline_finished)
+        self.assertEqual(w.unified_prompt.toPlainText(), snapshot)
+
+    def test_sync_result_retimes_existing_segments_and_preserves_combined_prompt(self):
+        from ltx_prompt_director.segment_plan import normalize_timeline_sync
+        import json
+        w = self.make_window("minimax_frames")
+        master = "00:00-00:01 Opening action. 00:01-00:09 Closing action."
+        w.unified_prompt.setPlainText(master)
+        before = [x.to_dict() for x in w.segments]
+        records = [{**{field: value for field, value in row.items()
+                       if field in ("id", "name", "kind", "role", "prompt", "image_prompt")},
+                    "imagePrompt": row["image_prompt"],
+                    "duration": duration, "prompt": direction}
+                   for row, duration, direction in zip(
+                       before, (1.0, 8.0), ("Opening action", "Closing action"))]
+        records[0].pop("image_prompt", None)
+        records[1].pop("image_prompt", None)
+        response = normalize_timeline_sync(json.dumps({"segments": records}), w.segments, master)
+        w.sync_timeline_source = master
+        w.ai_segment_snapshot = [Segment.from_dict(item) for item in before]
+        with patch.object(w, "_animate_ai_timeline") as animate:
+            w.sync_timeline_finished(response)
+        animate.assert_called_once()
+        self.assertEqual([seg.duration for seg in w.segments], [1.0, 8.0])
+        self.assertEqual([seg.id for seg in w.segments], [x["id"] for x in before])
+        self.assertEqual(w.unified_prompt.toPlainText(), master)
+        self.assertEqual(w.minimax_prompt_text, master)
+        self.assertEqual(w.paragraph_review.pending_count, 0)
+
     def test_image_generation_model_setting_persists_and_selects_backend(self):
         import tempfile
         from PySide6.QtCore import QSettings
