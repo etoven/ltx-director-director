@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from ltx_prompt_director.models import Segment
-from ltx_prompt_director import segment_plan
+from ltx_prompt_director import segment_plan, artwork_tools
 
 
 def seeded():
@@ -114,23 +114,62 @@ class SegmentPlanTests(unittest.TestCase):
         self.assertIn("ADDITIVE GPT-6+", text)
         self.assertLess(text.index(segment_plan.ai.UNIFIED_PROMPT_TRANSPORT.strip()), text.index("ADDITIVE GPT-6+"))
 
-    def test_artwork_api_returns_real_png_bytes_without_using_chatgpt(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            class Reply:
-                ok = True
-                status_code = 200
-                def json(self):
-                    import base64
-                    return {"data": [{"b64_json": base64.b64encode(b"\x89PNG\r\n\x1a\nmore").decode()}]}
-            row = {"id": "new:1", "name": "New image", "artworkPrompt": "A scenic image"}
-            with patch.dict("os.environ", {"XDG_DATA_HOME": tmp}), \
-                 patch("requests.post", return_value=Reply()) as post:
-                files = segment_plan.render_requested_artwork([row], "separate-image-api-key")
-            self.assertIn("new:1", files)
-            self.assertTrue(Path(files["new:1"]).is_file())
-            self.assertIn("gpt-image-2.5-flare", str(post.call_args.kwargs["json"]))
-            self.assertEqual(post.call_args.kwargs["headers"]["Authorization"],
-                             "Bearer separate-image-api-key")
+    def test_gemini_flash_lite_is_preferred_when_chatgpt_oauth_is_selected(self):
+        tools = artwork_tools.available_artwork_tools(
+            {"gemini": "gemini-api", "openai": "openai-api", "chatgpt": "oauth"},
+            preferred="chatgpt",
+        )
+        self.assertEqual([item.provider for item in tools], ["gemini", "openai"])
+        self.assertEqual(tools[0].model, "gemini-3.1-flash-lite-image")
+        self.assertEqual(artwork_tools.available_artwork_tools(
+            {"chatgpt": "oauth"}, preferred="chatgpt"
+        ), [])
+
+    def test_gemini_flash_lite_calls_documented_image_endpoint(self):
+        from PIL import Image
+        from io import BytesIO
+        import base64
+        png = BytesIO()
+        Image.new("RGB", (2, 2)).save(png, format="PNG")
+        encoded = base64.b64encode(png.getvalue()).decode()
+        class Reply:
+            def raise_for_status(self):
+                pass
+            def json(self):
+                return {"candidates": [{"content": {"parts": [
+                    {"inlineData": {"mimeType": "image/png", "data": encoded}}
+                ]}}]}
+        tool = artwork_tools.ArtworkTool(
+            "gemini", "gemini-3.1-flash-lite-image", "gemini-api"
+        )
+        with patch.object(artwork_tools.requests, "post", return_value=Reply()) as post:
+            data = artwork_tools._gemini_image("Photographic forest", tool)
+        self.assertEqual(data[:8], b"\x89PNG\r\n\x1a\n")
+        self.assertIn("gemini-3.1-flash-lite-image:generateContent", post.call_args.args[0])
+        self.assertEqual(post.call_args.kwargs["json"]["generationConfig"]["imageConfig"],
+                         {"aspectRatio": "16:9", "imageSize": "1K"})
+        self.assertEqual(post.call_args.kwargs["headers"]["x-goog-api-key"], "gemini-api")
+
+    def test_artwork_tools_return_png_and_use_provider_api_not_chatgpt(self):
+        from PIL import Image
+        from io import BytesIO
+        png = BytesIO()
+        Image.new("RGB", (2, 2)).save(png, format="PNG")
+        row = {"id": "new:1", "name": "New image", "artworkPrompt": "Scenic image"}
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch.dict("os.environ", {"XDG_DATA_HOME": tmp}), \
+             patch.object(artwork_tools, "_gemini_image", return_value=png.getvalue()) as generate:
+            images = artwork_tools.render_artwork(
+                [row], artwork_tools.ArtworkTool("gemini", "gemini-3.1-flash-lite-image", "key")
+            )
+            self.assertIn("new:1", images)
+            self.assertTrue(Path(images["new:1"]).is_file())
+            generate.assert_called_once()
+
+    def test_gemini_flash_reasoning_model_can_plan_segments(self):
+        self.assertTrue(segment_plan.supports_structured_edit("gemini", "gemini-3.5-flash"))
+        self.assertTrue(segment_plan.supports_structured_edit("gemini", "gemini-3.1-flash-lite"))
+        self.assertFalse(segment_plan.supports_structured_edit("gemini", "gemini-3.1-flash-lite-image"))
 
 
 if __name__ == "__main__":
