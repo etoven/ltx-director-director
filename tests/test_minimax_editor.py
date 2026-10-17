@@ -161,7 +161,7 @@ class UnifiedEditorTests(unittest.TestCase):
         self.assertTrue(w.intent.isReadOnly())
         self.assertFalse(w.prompt_scope.isEnabled())
         self.assertFalse(w.duration_spin.isEnabled())
-        self.assertFalse(w.render_artwork_toggle.isEnabled())
+        self.assertFalse(hasattr(w, "render_artwork_toggle"))
         self.assertFalse(w.timeline.dragEnabled())
         w.set_ai_controls_enabled(True)
         self.assertFalse(w.unified_prompt.isReadOnly())
@@ -179,8 +179,8 @@ class UnifiedEditorTests(unittest.TestCase):
     def test_combined_json_inserts_animated_artwork_placeholder_without_deleting_media(self):
         from unittest.mock import patch
         w = self.make_window('minimax_frames')
-        w.render_artwork_toggle.setChecked(True)
-        w.session_keys['openai'] = 'test-image-key'
+        w.session_keys['gemini'] = 'test-image-key'
+        w.settings.setValue('artwork/cost_approved/gemini', True)
         old = list(w.segments)
         original = old[0]
         w.minimax_operation_kind = 'generate_frames'
