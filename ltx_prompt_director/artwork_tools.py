@@ -80,7 +80,7 @@ def _openai_image(prompt: str, tool: ArtworkTool) -> bytes:
 def _gemini_image(prompt: str, tool: ArtworkTool) -> bytes:
     """Nano Banana 2 Lite using Google's documented generateContent REST API."""
     response = requests.post(
-        f"https://generativelanguage.googleapis.com/v1beta/models/"
+        f"https://generativelanguage.googleapis.com/v1/models/"
         f"{tool.model}:generateContent",
         headers={"x-goog-api-key": tool.api_key,
                  "Content-Type": "application/json"},
@@ -88,7 +88,7 @@ def _gemini_image(prompt: str, tool: ArtworkTool) -> bytes:
             "contents": [{"role": "user", "parts": [{"text": prompt}]}],
             "generationConfig": {
                 "responseModalities": ["IMAGE"],
-                "imageConfig": {"aspectRatio": "16:9", "imageSize": "1K"},
+                "responseFormat": {"image": {"aspectRatio": "16:9", "imageSize": "1K"}},
             },
         },
         timeout=240,
