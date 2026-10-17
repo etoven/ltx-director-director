@@ -45,6 +45,9 @@ class UnifiedEditorTests(unittest.TestCase):
         self.assertEqual(w.primary_ai_command, 'refine_unified')
         w.set_project_type('minimax_prompt_refinement')
         self.assertEqual(w.minimax_panel.header.indexOf(w.magic_button) >= 0, True)
+        self.assertFalse(w.magic_button.isEnabled())  # no text to refine
+        w.unified_prompt.setPlainText('Text to refine')
+        w.refresh_primary_ai_action()
         self.assertTrue(w.magic_button.isEnabled())
         w.set_project_type('ltx')
         self.assertEqual(w.segment_header.indexOf(w.magic_button) >= 0, True)
@@ -114,7 +117,8 @@ class UnifiedEditorTests(unittest.TestCase):
             w.project_type_combo.setCurrentIndex(w.project_type_combo.findData('minimax_references'))
             self.assertEqual(w.project_type, 'minimax_references')
             self.assertFalse(w.hdr.isHidden())
-            self.assertFalse(w.refine_timing_button.isHidden())
+            self.assertTrue(w.refine_timing_button.isHidden())
+            self.assertTrue(w.ai_action_commands["refine_timing"].isEnabled())
             self.assertFalse(w.requested_length.isHidden())
             self.assertTrue(w.prompt_scope.isHidden())
             self.assertFalse(hasattr(w, "copy_image_prompt"))
@@ -129,7 +133,8 @@ class UnifiedEditorTests(unittest.TestCase):
             self.assertTrue(w.minimax_panel.reference_dock.isHidden())
             self.assertTrue(w.references_button.isHidden())
             self.assertFalse(w.hdr.isHidden())
-            self.assertFalse(w.refine_timing_button.isHidden())
+            self.assertTrue(w.refine_timing_button.isHidden())
+            self.assertTrue(w.ai_action_commands["refine_timing"].isEnabled())
             self.assertFalse(w.prompt_scope.isHidden())
             self.assertTrue(w.unified_panel.isHidden())
             worker.assert_not_called()
@@ -314,9 +319,10 @@ class UnifiedEditorTests(unittest.TestCase):
         warning.assert_not_called()
         critical.assert_not_called()
         self.assertEqual(w.minimax_panel.message_banner.text(), 'Provider temporarily overloaded')
-        self.assertFalse(w.minimax_panel.retry_button.isHidden())
+        self.assertTrue(w.minimax_panel.retry_button.isHidden())
+        self.assertTrue(w.retry_ai_action.isEnabled())
         with patch.object(w, 'generate_minimax_prompt_references') as retry:
-            w.minimax_panel.retry_button.click()
+            w.retry_ai_operation()
         retry.assert_called_once_with()
 
     def test_minimax_uses_visible_requested_total_length(self):
