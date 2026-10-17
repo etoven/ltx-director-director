@@ -48,7 +48,7 @@ class UnifiedEditorTests(unittest.TestCase):
         w.unified_prompt.clear()
         w.minimax_prompt_text = ''
         w.refresh_primary_ai_action()
-        self.assertFalse(w.magic_button.isEnabled())  # empty prompt
+        self.assertTrue(w.magic_button.isEnabled())  # unified workspace can generate
         w.unified_prompt.setPlainText('Text to refine')
         w.refresh_primary_ai_action()
         self.assertTrue(w.magic_button.isEnabled())
