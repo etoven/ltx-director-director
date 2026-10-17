@@ -438,7 +438,14 @@ class UnifiedEditorTests(unittest.TestCase):
         self.assertEqual(target.prompt, original)
         self.assertGreater(len(card.rewrite_shown), 0)
         self.assertLess(len(card.rewrite_shown), len(altered))
-        self.assertIn("#a7edbf", card.rewrite_overlay.text())
+        while card.rewrite_shown != altered:
+            card._advance_rewrite_preview()
+        # Text tiles render the rich diff in their native prompt preview,
+        # while image/video tiles display a compact overlay over the media.
+        rich = (card.preview.text() if target.kind == "text"
+                else card.rewrite_overlay.text())
+        self.assertIn("#a7edbf", rich)
+        self.assertEqual(card.rewrite_timer.interval(), 80)
         # Read-only diff disappears on provider rejection or workspace reset.
         w._clear_ai_timeline_preview()
         self.assertFalse(card.rewrite_active)
