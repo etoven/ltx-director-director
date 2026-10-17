@@ -138,7 +138,7 @@ class UnifiedEditorTests(unittest.TestCase):
     def test_manual_text_artwork_uses_neighbor_images_and_prompt_context(self):
         from tempfile import TemporaryDirectory
         from PIL import Image
-        from ltx_prompt_director.artwork_tools import ArtworkTool, render_artwork
+        from ltx_prompt_director.artwork_tools import ArtworkTool
         scratch = TemporaryDirectory()
         self.addCleanup(scratch.cleanup)
         directory = scratch.name
@@ -159,24 +159,21 @@ class UnifiedEditorTests(unittest.TestCase):
         tool = ArtworkTool("gemini", "gemini-3.1-flash-lite-image", "test-key")
         with (patch.object(w, "_available_artwork_tools", return_value=[tool]),
               patch.object(w, "_approve_artwork_cost", return_value=True),
-              patch.object(w, "start_disk_job") as job):
+              patch.object(w, "_start_segment_artwork") as worker):
             w.generate_artwork_for_segment(w.segments[1].id)
-        job.assert_called_once()
-        operation, (records, dispatched_tool) = job.call_args.args[:2]
-        self.assertIs(operation, render_artwork)
+        worker.assert_called_once()
+        segment_id, record, dispatched_tool = worker.call_args.args
+        self.assertEqual(segment_id, w.segments[1].id)
         self.assertEqual(dispatched_tool, tool)
-        record = records[0]
-        self.assertNotIn("sourceImage", record)
-        self.assertEqual(len(record["referenceImages"]), 2)
-        self.assertEqual({Path(ref["path"]) for ref in record["referenceImages"]},
-                         {first, last})
+        self.assertEqual(
+            {Path(ref["path"]) for ref in w._artwork_reference_inputs(segment_id)
+             if ref.get("path")}, {first, last})
         self.assertIn("She stretches her arm gradually", record["artworkPrompt"])
         self.assertIn("Standing in a wet shower", record["artworkPrompt"])
         self.assertIn("Arm becomes a lioness foreleg", record["artworkPrompt"])
         self.assertEqual(w.segments[1].kind, "text")
-        self.assertEqual(w.segments[1].artwork_status, "generating")
-        w._artwork_jobs = 0
-        # Simulated workers are not running; skip on-close project-save jobs.
+        self.assertEqual(w.segments[1].artwork_prompt, record["artworkPrompt"])
+        # No background render was started; avoid scheduling a fixture save.
         w.project_dirty = False
         w.project_sessions.clear()
 
@@ -203,20 +200,21 @@ class UnifiedEditorTests(unittest.TestCase):
         tool = ArtworkTool("gemini", "gemini-3.1-flash-lite-image", "key")
         with (patch.object(w, "_available_artwork_tools", return_value=[tool]),
               patch.object(w, "_approve_artwork_cost", return_value=True),
-              patch.object(w, "start_disk_job") as job):
+              patch.object(w, "_start_segment_artwork") as worker):
             w.generate_artwork_for_segment(original_id)
-        job.assert_called_once()
-        record = job.call_args.args[1][0][0]
-        self.assertEqual(record["id"], original_id)
-        self.assertEqual(Path(record["sourceImage"]), before)
-        self.assertEqual([Path(ref["path"]) for ref in record["referenceImages"]],
-                         [following])
+        worker.assert_called_once()
+        segment_id, record, dispatched_tool = worker.call_args.args
+        self.assertEqual(segment_id, original_id)
+        self.assertEqual(dispatched_tool, tool)
+        self.assertEqual(Path(w.segments[0].media_path), before)
+        self.assertEqual([Path(ref["path"]) for ref in w._artwork_reference_inputs(original_id)
+                          if ref.get("path")], [following])
         self.assertIn("Extend claws and lengthen the forearm", record["artworkPrompt"])
         self.assertIn("IMAGE-TO-IMAGE ALIGNMENT", record["artworkPrompt"])
         self.assertEqual(w.segments[0].media_path, str(before))
         self.assertEqual(w.segments[0].role, "start")
         w._artwork_jobs = 0
-        # Simulated workers are not running; skip on-close project-save jobs.
+        # No background render was started; avoid scheduling a fixture save.
         w.project_dirty = False
         w.project_sessions.clear()
 
