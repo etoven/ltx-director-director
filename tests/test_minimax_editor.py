@@ -140,7 +140,9 @@ class UnifiedEditorTests(unittest.TestCase):
                                 ('minimax_references', ai.build_prompts)]:
             w.set_project_type(kind)
             with patch.object(w, 'ai_credentials', return_value=(w.settings.value('provider', 'gemini'), w.settings.value('gemini_model', ai.GEMINI_MODELS[0]), 'unused')), patch.object(w, 'start_ai_worker') as worker:
-                w.magic_button.click()
+                # Generate remains available in the one-button dropdown;
+                # the primary click is contextual (Refine for a filled editor).
+                w.run_ai_action("generate_timeline")
             self.assertIs(worker.call_args.args[0], operation)
             w.minimax_panel.set_busy(False)
 
