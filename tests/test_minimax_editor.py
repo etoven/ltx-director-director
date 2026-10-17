@@ -112,6 +112,117 @@ class UnifiedEditorTests(unittest.TestCase):
         self.assertEqual(w.minimax_prompt_text, master)
         self.assertEqual(w.paragraph_review.pending_count, 0)
 
+    def test_segment_context_menu_has_manual_generate_artwork(self):
+        from PySide6.QtWidgets import QMenu
+        w = self.make_window("minimax_frames")
+        w.resize(1150, 820)
+        w.show()
+        self.app.processEvents()
+        actions = []
+        def capture(menu, *_):
+            actions.extend((item.text(), item.isEnabled()) for item in menu.actions())
+        with patch.object(QMenu, "exec", capture):
+            point = w.timeline.visualItemRect(w.timeline.item(0)).center()
+            w.timeline_menu(point)
+        self.assertIn(("✦ Generate Artwork", True), actions)
+
+        w.segments[0].kind = "video"
+        w.segments[0].role = "start"
+        w.refresh_timeline(0)
+        actions.clear()
+        with patch.object(QMenu, "exec", capture):
+            point = w.timeline.visualItemRect(w.timeline.item(0)).center()
+            w.timeline_menu(point)
+        self.assertIn(("✦ Generate Artwork", False), actions)
+
+    def test_manual_text_artwork_uses_neighbor_images_and_prompt_context(self):
+        from tempfile import TemporaryDirectory
+        from PIL import Image
+        from ltx_prompt_director.artwork_tools import ArtworkTool, render_artwork
+        with TemporaryDirectory() as directory:
+            w = self.make_window("minimax_frames")
+            first = Path(directory) / "before.png"
+            last = Path(directory) / "after.png"
+            Image.new("RGB", (16, 9)).save(first)
+            Image.new("RGB", (16, 9)).save(last)
+            w.segments = [
+                Segment("Before", str(first), str(first), "image", "start",
+                        "Standing in a wet shower", 1),
+                Segment("Bridge", "", "", "text", "text",
+                        "She stretches her arm gradually", 2),
+                Segment("After", str(last), str(last), "image", "end",
+                        "Arm becomes a lioness foreleg", 2),
+            ]
+            w.refresh_timeline(1)
+            tool = ArtworkTool("gemini", "gemini-3.1-flash-lite-image", "test-key")
+            with (patch.object(w, "_available_artwork_tools", return_value=[tool]),
+                  patch.object(w, "_approve_artwork_cost", return_value=True),
+                  patch.object(w, "start_disk_job") as job):
+                w.generate_artwork_for_segment(w.segments[1].id)
+            job.assert_called_once()
+            operation, (records, dispatched_tool) = job.call_args.args[:2]
+            self.assertIs(operation, render_artwork)
+            self.assertEqual(dispatched_tool, tool)
+            record = records[0]
+            self.assertNotIn("sourceImage", record)
+            self.assertEqual(len(record["referenceImages"]), 2)
+            self.assertEqual({Path(ref["path"]) for ref in record["referenceImages"]},
+                             {first, last})
+            self.assertIn("She stretches her arm gradually", record["artworkPrompt"])
+            self.assertIn("Standing in a wet shower", record["artworkPrompt"])
+            self.assertIn("Arm becomes a lioness foreleg", record["artworkPrompt"])
+            self.assertEqual(w.segments[1].kind, "text")
+            self.assertEqual(w.segments[1].artwork_status, "generating")
+            w._artwork_jobs = 0
+
+    def test_manual_image_artwork_uses_original_as_edit_source(self):
+        from tempfile import TemporaryDirectory
+        from PIL import Image
+        from ltx_prompt_director.artwork_tools import ArtworkTool
+        with TemporaryDirectory() as directory:
+            w = self.make_window("minimax_frames")
+            before = Path(directory) / "source.png"
+            following = Path(directory) / "next.png"
+            Image.new("RGB", (16, 9)).save(before)
+            Image.new("RGB", (16, 9)).save(following)
+            w.segments = [
+                Segment("Subject", str(before), str(before), "image", "start",
+                        "Extend claws and lengthen the forearm", 2),
+                Segment("Next", str(following), str(following), "image", "end",
+                        "Later transformation stage", 3),
+            ]
+            w.refresh_timeline(0)
+            original_id = w.segments[0].id
+            tool = ArtworkTool("gemini", "gemini-3.1-flash-lite-image", "key")
+            with (patch.object(w, "_available_artwork_tools", return_value=[tool]),
+                  patch.object(w, "_approve_artwork_cost", return_value=True),
+                  patch.object(w, "start_disk_job") as job):
+                w.generate_artwork_for_segment(original_id)
+            job.assert_called_once()
+            record = job.call_args.args[1][0][0]
+            self.assertEqual(record["id"], original_id)
+            self.assertEqual(Path(record["sourceImage"]), before)
+            self.assertEqual([Path(ref["path"]) for ref in record["referenceImages"]],
+                             [following])
+            self.assertIn("Extend claws and lengthen the forearm", record["artworkPrompt"])
+            self.assertIn("IMAGE-TO-IMAGE ALIGNMENT", record["artworkPrompt"])
+            self.assertEqual(w.segments[0].media_path, str(before))
+            self.assertEqual(w.segments[0].role, "start")
+            w._artwork_jobs = 0
+
+    def test_manual_artwork_denied_approval_does_not_start(self):
+        from ltx_prompt_director.artwork_tools import ArtworkTool
+        w = self.make_window("minimax_frames")
+        current = w.segments[0]
+        tool = ArtworkTool("gemini", "gemini-3.1-flash-lite-image", "key")
+        with (patch.object(w, "_available_artwork_tools", return_value=[tool]),
+              patch.object(w, "_approve_artwork_cost", return_value=False),
+              patch.object(w, "start_disk_job") as job):
+            w.generate_artwork_for_segment(current.id)
+        job.assert_not_called()
+        self.assertEqual(current.artwork_prompt, "")
+        self.assertEqual(current.artwork_status, "")
+
     def test_image_generation_model_setting_persists_and_selects_backend(self):
         import tempfile
         from PySide6.QtCore import QSettings
