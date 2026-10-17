@@ -526,6 +526,81 @@ class UnifiedEditorTests(unittest.TestCase):
         self.assertEqual(w.segments[0].prompt, rows[0]["prompt"])
         self.assertEqual(w.minimax_prompt_text, "Updated unified direction")
 
+    def test_segment_review_inline_diff_and_individual_deny(self):
+        import copy
+        w = self.make_window("minimax_frames")
+        w.resize(1300, 820)
+        w.show()
+        self.app.processEvents()
+        before = copy.deepcopy(w.segments)
+        rows = [
+            {"id": s.id, "name": s.name, "kind": s.kind, "role": s.role,
+             "duration": s.duration, "prompt": s.prompt,
+             "imagePrompt": s.image_prompt, "artworkPrompt": ""}
+            for s in before
+        ]
+        rows[0]["prompt"] = before[0].prompt + "\nLioness shoulders gradually expand."
+        rows[1]["prompt"] = before[1].prompt + "\nClaws extend naturally."
+        w.ai_segment_snapshot = copy.deepcopy(before)
+        w.combined_refinement_finished({
+            "prompt": "Unified production direction", "segments": rows
+        })
+        changed = {before[0].id, before[1].id}
+        self.assertTrue(changed.issubset(w.timeline_review_pending))
+        card = w.timeline.itemWidget(w.timeline.item(0))
+        self.assertTrue(card.review_pending)
+        self.assertFalse(card.review_accept.isHidden())
+        self.assertFalse(card.review_reject.isHidden())
+        self.assertTrue(card.rewrite_active)
+        self.assertEqual(card.rewrite_timer.interval(), 80)
+        while card.rewrite_shown != card.rewrite_target:
+            card._advance_rewrite_preview()
+        rich = (card.preview.text() if card.segment.kind == "text"
+                else card.rewrite_overlay.text())
+        self.assertIn("#a7edbf", rich)
+        self.assertIn("#ed969e", rich)
+        w.resolve_segment_review(before[0].id, False)
+        self.assertEqual(next(s.prompt for s in w.segments if s.id == before[0].id),
+                         before[0].prompt)
+        self.assertIn(before[1].id, w.timeline_review_pending)
+        self.assertFalse(w.timeline_approve_all.isHidden())
+        self.assertFalse(w.timeline_deny_all.isHidden())
+        w.timeline_deny_all.setChecked(True)
+        self.assertFalse(w.timeline_review_pending)
+        self.assertEqual([(s.id, s.prompt) for s in w.segments],
+                         [(s.id, s.prompt) for s in before])
+        self.assertTrue(w.timeline_approve_all.isHidden())
+
+    def test_timeline_approve_all_and_full_width_segment_progress(self):
+        import copy
+        w = self.make_window("minimax_frames")
+        before = copy.deepcopy(w.segments)
+        rows = [
+            {"id": s.id, "name": s.name, "kind": s.kind, "role": s.role,
+             "duration": s.duration, "prompt": s.prompt,
+             "imagePrompt": s.image_prompt, "artworkPrompt": ""}
+            for s in before
+        ]
+        rows[0]["prompt"] += " Additional film movement."
+        w.ai_segment_snapshot = before
+        w.combined_refinement_finished({
+            "prompt": "Updated unified prompt", "segments": rows
+        })
+        self.assertIn(before[0].id, w.timeline_review_pending)
+        w.timeline_approve_all.setChecked(True)
+        self.assertFalse(w.timeline_review_pending)
+        self.assertEqual(w.segments[0].prompt, rows[0]["prompt"])
+        w.set_project_type("ltx")
+        w.resize(1280, 820)
+        w.show()
+        self.app.processEvents()
+        self.assertIs(w.segment_ai_marquee.parent(), w.segment_panel)
+        self.assertGreater(w.segment_ai_marquee.width(), 300)
+        w.set_ai_controls_enabled(False)
+        self.assertFalse(w.segment_ai_marquee.isHidden())
+        w.set_ai_controls_enabled(True)
+        self.assertTrue(w.segment_ai_marquee.isHidden())
+
     def test_combined_json_inserts_animated_artwork_placeholder_without_deleting_media(self):
         from unittest.mock import patch
         w = self.make_window('minimax_frames')
