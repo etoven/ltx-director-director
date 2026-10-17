@@ -1893,6 +1893,7 @@ class SegmentCard(QFrame):
     duration_changed = Signal(float)
     delete_requested = Signal()
     resize_finished = Signal()
+    review_decision = Signal(str, bool)
 
     def __init__(self, segment: Segment, start_time: float, preview_height: int, pixels_per_second: int):
         super().__init__()
@@ -1925,6 +1926,29 @@ class SegmentCard(QFrame):
         badges.addWidget(kind)
         badges.addStretch()
         badges.addWidget(self.role_badge)
+        self.review_accept = QToolButton()
+        self.review_reject = QToolButton()
+        for button, glyph, description, color in (
+            (self.review_accept, "✓", "Approve this segment change", "#217744"),
+            (self.review_reject, "×", "Deny this segment change", "#973943"),
+        ):
+            button.setText(glyph)
+            button.setAccessibleName(description)
+            button.setToolTip(description)
+            button.setFixedSize(19, 19)
+            button.setCursor(Qt.CursorShape.ArrowCursor)
+            button.setStyleSheet(
+                "QToolButton{background:" + color +
+                ";color:#fff;border:0;border-radius:4px;"
+                "font-size:13px;font-weight:bold;padding:0;min-height:0}"
+                "QToolButton:hover{background:#46809e}"
+            )
+            button.hide()
+            badges.addWidget(button)
+        self.review_accept.clicked.connect(
+            lambda: self.review_decision.emit(self.segment.id, True))
+        self.review_reject.clicked.connect(
+            lambda: self.review_decision.emit(self.segment.id, False))
         badges.addWidget(close)
         layout.addLayout(badges)
         self.preview = QLabel()
@@ -1980,6 +2004,10 @@ class SegmentCard(QFrame):
         self.rewrite_timer = QTimer(self)
         self.rewrite_timer.setInterval(80)
         self.rewrite_timer.timeout.connect(self._advance_rewrite_preview)
+        self.rewrite_marquee = AIWorkingMarquee(self.preview)
+        self.rewrite_marquee.setFixedHeight(18)
+        self.rewrite_marquee.hide()
+        self.review_pending = False
         self.rewrite_base = ""
         self.rewrite_target = ""
         self.rewrite_shown = ""
@@ -2067,6 +2095,8 @@ class SegmentCard(QFrame):
         self.rewrite_target = after
         self.rewrite_shown = ""
         self.rewrite_active = True
+        self.rewrite_marquee.begin("✦ Reviewing timeline rewrite…")
+        self._position_rewrite_marquee()
         self._advance_rewrite_preview()
 
     def _advance_rewrite_preview(self) -> None:
@@ -2076,6 +2106,7 @@ class SegmentCard(QFrame):
         remaining = len(available) - len(self.rewrite_shown)
         if remaining <= 0:
             self.rewrite_timer.stop()
+            self.rewrite_marquee.finish()
             return
         self.rewrite_shown = available[:len(self.rewrite_shown) +
                                        typing_batch_size(remaining)]
@@ -2091,6 +2122,41 @@ class SegmentCard(QFrame):
             self.rewrite_overlay.raise_()
         if self.rewrite_shown != available:
             self.rewrite_timer.start()
+        else:
+            self.rewrite_timer.stop()
+            self.rewrite_marquee.finish()
+
+    def _position_rewrite_marquee(self) -> None:
+        self.rewrite_marquee.setFixedWidth(max(45, self.preview.width() - 12))
+        self.rewrite_marquee.move(6, 2)
+        if self.rewrite_marquee.isVisible():
+            self.rewrite_marquee.raise_()
+
+    def set_review_pending(self, before: Segment | None) -> None:
+        self.review_pending = True
+        self.review_accept.show()
+        self.review_reject.show()
+        if before is None:
+            old_text = ""
+            new_text = self.segment.prompt or self.segment.image_prompt
+        else:
+            old_text = before.prompt
+            new_text = self.segment.prompt
+            if old_text == new_text and before.image_prompt != self.segment.image_prompt:
+                old_text, new_text = before.image_prompt, self.segment.image_prompt
+        if old_text != new_text and new_text:
+            self.begin_rewrite_preview(old_text, new_text)
+        else:
+            self.setStyleSheet(
+                "QFrame#segmentCard{border:1px solid #5b9b75;border-radius:6px}"
+            )
+
+    def clear_review_pending(self) -> None:
+        self.review_pending = False
+        self.review_accept.hide()
+        self.review_reject.hide()
+        self.stop_rewrite_preview()
+        self.setStyleSheet("")
 
     def _position_rewrite_overlay(self) -> None:
         if not self.rewrite_active or self.segment.kind == "text":
@@ -2106,6 +2172,7 @@ class SegmentCard(QFrame):
         if not self.rewrite_active:
             return
         self.rewrite_timer.stop()
+        self.rewrite_marquee.finish()
         self.rewrite_active = False
         self.rewrite_target = self.rewrite_base = self.rewrite_shown = ""
         self.rewrite_overlay.hide()
@@ -2159,6 +2226,7 @@ class SegmentCard(QFrame):
         super().resizeEvent(event)
         self.position_resolution_badge()
         self._position_rewrite_overlay()
+        self._position_rewrite_marquee()
 
     def _preview_duration(self, value: float) -> None:
         self.duration_label.setText(f"{value:.2f}s")
@@ -3875,9 +3943,10 @@ class MainWindow(QMainWindow):
         self.sequence_controls.addStretch(1)
         self.sequence_controls.addWidget(segment_meta)
         self.segment_ai_marquee = AIWorkingMarquee(segment_panel)
-        self.segment_ai_marquee.setFixedWidth(234)
-        self.segment_header.addWidget(self.segment_ai_marquee)
         segment_layout.addLayout(self.segment_header)
+        # Match the Unified Prompt: full-width animated bar directly ABOVE
+        # the text editor, only visible while an AI refinement is running.
+        segment_layout.addWidget(self.segment_ai_marquee)
         self.segment_prompt = PromptTextEdit()
         self.segment_prompt.setObjectName("promptEditor")
         self.segment_prompt.setAcceptRichText(False)
@@ -4454,7 +4523,7 @@ class MainWindow(QMainWindow):
         self.add_tile.setFixedSize(metric(32), metric(32))
         self.add_text_tile.setFixedSize(metric(32), metric(32))
         self.add_tile_layout.setContentsMargins(metric(3), metric(4), metric(3), metric(4))
-        self.segment_ai_marquee.setFixedWidth(metric(230))
+        self.segment_ai_marquee.setMinimumWidth(0)
         for button in (self.copy_segment,):
             button.setFixedHeight(button.fontMetrics().height() + metric(4))
             button.setMinimumWidth(button.fontMetrics().horizontalAdvance(button.text()) + metric(10))
@@ -5808,6 +5877,7 @@ class MainWindow(QMainWindow):
                 card.duration_changed.connect(lambda value, sid=segment.id: self.change_duration(sid, value))
                 card.delete_requested.connect(lambda sid=segment.id: self.delete_by_id(sid))
                 card.resize_finished.connect(lambda sid=segment.id: self.finish_resize(sid))
+                card.review_decision.connect(self.resolve_segment_review)
                 card.set_timeline_edges(index == 0, index == len(self.segments) - 1)
                 self.timeline.setItemWidget(item, card)
                 start_time += segment.duration
@@ -5815,6 +5885,8 @@ class MainWindow(QMainWindow):
             if self.segments:
                 self.timeline.setCurrentRow(max(0, min(selected, len(self.segments) - 1)))
             self.update_summary()
+            if hasattr(self, "timeline_review_pending"):
+                self._show_segment_review_controls()
         finally:
             self._loading = False
             if indicator:
@@ -6863,7 +6935,7 @@ class MainWindow(QMainWindow):
             index = destination.indexOf(self.minimax_panel.copy_button)
         elif ltx:
             destination = self.segment_header
-            index = destination.indexOf(self.segment_ai_marquee)
+            index = destination.count()
         else:
             destination = self.director_intent_row
             index = destination.indexOf(self.prompt_scope)
