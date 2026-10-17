@@ -6779,7 +6779,8 @@ class MainWindow(QMainWindow):
         (self.minimax_panel.header if prompt_only else self.timeline_controls).addWidget(self.magic_button)
         self.refine_prompt_button.hide()
         self.refine_timing_button.hide()
-        self.paragraph_review.finish()
+        if hasattr(self, "paragraph_review"):
+            self.paragraph_review.finish()
         self.minimax_panel.prompt_label.setText("PROMPT REFINEMENT" if prompt_only else "UNIFIED PROMPT")
         self.unified_prompt.setPlaceholderText("Write or paste a MiniMax prompt. Use / to add refinement annotations…" if prompt_only else
             "Generate the unified prompt from your segments, or write and refine your own…")
