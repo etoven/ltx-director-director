@@ -15,8 +15,15 @@ from .models import Segment
 MAX_SEGMENTS = 96
 
 def supports_structured_edit(provider, model):
+    name = str(model).lower()
+    # Gemini Flash reasoning models support structured text/JSON output, but
+    # Nano Banana image models don't support the segment-planning JSON schema.
+    if provider == "gemini":
+        return bool(re.match(r"^gemini-(?:[3-9]|[1-9]\d)(?:[.-]|$)", name)) and not (
+            "-image" in name or "-tts" in name or "-transcribe" in name
+        )
     return provider in {"openai", "chatgpt"} and bool(
-        re.match(r"^gpt-(?:[6-9]|[1-9]\d)(?:[.-]|$)", str(model).lower()))
+        re.match(r"^gpt-(?:[6-9]|[1-9]\d)(?:[.-]|$)", name))
 
 def response_contract(segments, current_prompt, *, refine, focus="all"):
     plan = [{"id": s.id, "name": s.name, "kind": s.kind, "role": s.role,
@@ -24,7 +31,7 @@ def response_contract(segments, current_prompt, *, refine, focus="all"):
              "imagePrompt": s.image_prompt, "hasMedia": bool(s.media_path)}
             for s in segments]
     return (
-        "\n\nADDITIVE GPT-6+ SEGMENT JSON CONTRACT. All existing production "
+        "\n\nADDITIVE STRUCTURED SEGMENT JSON CONTRACT. All existing production "
         "instructions above remain authoritative. This extends ONLY the response "
         'transport. Return ONE strict JSON object {"prompt":"complete unified '
         'production prompt", "segments":[{"id":"existing UUID or new:1", '
@@ -155,9 +162,9 @@ def build_segment_objects(original, records):
 def generate_combined(segments, provider, model, api_key, intent, global_prompt,
                       sfx, spoken_dialog, reduce_music, current_prompt,
                       refinement_instructions, timeout, reference_images,
-                      workspace_engine, mode, refine, focus="all", image_api_key="", render_artwork=False):
+                      workspace_engine, mode, refine, focus="all"):
     if not supports_structured_edit(provider, model):
-        raise ValueError("Combined editing requires an eligible GPT-6+ model.")
+        raise ValueError("Combined editing requires a structured-capable GPT-6+ or Gemini Flash model.")
     if not segments:
         raise ValueError("Combined editing requires at least one timeline item.")
     if workspace_engine == "generic":
@@ -247,51 +254,3 @@ def stream_operations(original: list[Segment], raw: str) -> list[dict]:
         if item.get("prompt", before.prompt) != before.prompt:
             changes.append({"kind": "rewrite", "id": before.id, "name": before.name})
     return changes
-
-
-
-def render_requested_artwork(records: list[dict], api_key: str) -> dict[str, str]:
-    """Optional, billed OpenAI image API: no ChatGPT OAuth/image tool shortcut.
-
-    Only synthesize up to four newly requested frames, never alter existing media.
-    Produces persistent PNGs after a complete validated segment plan.
-    """
-    import base64
-    import os
-    from pathlib import Path
-    from uuid import uuid4
-    import requests
-    from .ai_stream import send_stream
-
-    output = {}
-    entries = [row for row in records if row["id"].startswith("new:") and row["artworkPrompt"]]
-    if not entries:
-        return output
-    root = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share") / "PromptDirector" / "generated-artwork"
-    root.mkdir(parents=True, exist_ok=True, mode=0o700)
-    for entry in entries[:4]:
-        send_stream("status", f"Rendering frame artwork: {entry['name']}")
-        result = requests.post(
-            "https://api.openai.com/v1/images/generations",
-            headers={"Authorization": "Bearer " + api_key, "Content-Type": "application/json"},
-            json={"model": "gpt-image-2.5-flare", "size": "1536x1024",
-                  "n": 1, "prompt": entry["artworkPrompt"]},
-            timeout=240,
-        )
-        if not result.ok:
-            send_stream("status", f"Artwork not rendered (HTTP {result.status_code}): {entry['name']}")
-            continue
-        try:
-            source = result.json()["data"][0]["b64_json"]
-            payload = base64.b64decode(source, validate=True)
-            if not payload.startswith(b"\x89PNG\r\n\x1a\n") or len(payload) > 35 * 1024 * 1024:
-                raise ValueError("Invalid generated PNG")
-        except (ValueError, KeyError, IndexError, TypeError):
-            send_stream("status", f"Artwork response incomplete for {entry['name']}")
-            continue
-        path = root / (str(uuid4()) + ".png")
-        path.write_bytes(payload)
-        output[entry["id"]] = str(path)
-        send_stream("artwork", json.dumps({"id": entry["id"], "name": entry["name"],
-                                           "path": str(path)}))
-    return output
