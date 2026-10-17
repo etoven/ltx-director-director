@@ -6867,7 +6867,12 @@ class MainWindow(QMainWindow):
         else:
             destination = self.director_intent_row
             index = destination.indexOf(self.prompt_scope)
-        destination.insertWidget(index, self.magic_button)
+        if destination is self.segment_header:
+            # The responsive ControlRow supports addWidget, not insertWidget.
+            # This remains at the right of the segment prompt header.
+            destination.addWidget(self.magic_button)
+        else:
+            destination.insertWidget(index, self.magic_button)
         self.magic_button.show()
         self.refine_prompt_button.hide()
         self.refine_timing_button.hide()
