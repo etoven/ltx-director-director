@@ -253,7 +253,10 @@ def _gemini_image(
             "contents": [{"role": "user", "parts": parts}],
             "generationConfig": {
                 "responseModalities": ["IMAGE"],
-                "responseFormat": {"image": {"aspectRatio": "16:9", "imageSize": "1K"}},
+                # generateContent accepts native ImageConfig with string
+                # aspectRatio, NOT responseFormat.image's enum-valued fields.
+                # Flash Lite only produces 1K, so omit redundant imageSize.
+                "imageConfig": {"aspectRatio": "16:9"},
             },
         },
         timeout=240,

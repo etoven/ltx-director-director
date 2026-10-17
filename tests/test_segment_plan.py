@@ -291,8 +291,10 @@ class SegmentPlanTests(unittest.TestCase):
             data = artwork_tools._gemini_image("Photographic forest", tool)
         self.assertEqual(data[:8], b"\x89PNG\r\n\x1a\n")
         self.assertIn("gemini-3.1-flash-lite-image:generateContent", post.call_args.args[0])
-        self.assertEqual(post.call_args.kwargs["json"]["generationConfig"]["responseFormat"]["image"],
-                         {"aspectRatio": "16:9", "imageSize": "1K"})
+        config = post.call_args.kwargs["json"]["generationConfig"]
+        self.assertEqual(config["imageConfig"], {"aspectRatio": "16:9"})
+        self.assertNotIn("responseFormat", config)
+        self.assertNotIn("imageSize", config["imageConfig"])
         self.assertEqual(post.call_args.kwargs["headers"]["x-goog-api-key"], "gemini-api")
 
     def test_gemini_images_use_documented_v1beta_route(self):
@@ -314,7 +316,47 @@ class SegmentPlanTests(unittest.TestCase):
                       post.call_args.args[0])
         config = post.call_args.kwargs["json"]["generationConfig"]
         self.assertEqual(config["responseModalities"], ["IMAGE"])
-        self.assertEqual(config["responseFormat"]["image"]["aspectRatio"], "16:9")
+        self.assertEqual(config["imageConfig"]["aspectRatio"], "16:9")
+        self.assertNotIn("responseFormat", config)
+
+    def test_gemini_rejects_old_enum_fields_but_accepts_correct_image_config(self):
+        # The exact response seen with v1beta responseFormat.image fields.
+        # Do not regress to the schema that rejects string 16:9 and 1K.
+        import requests
+        import base64
+        from io import BytesIO
+        from PIL import Image
+        b = BytesIO()
+        Image.new("RGB", (16, 9)).save(b, "PNG")
+        encoded = base64.b64encode(b.getvalue()).decode("ascii")
+        class Reply:
+            status_code = 200
+            def raise_for_status(self): pass
+            def json(self):
+                return {"candidates": [{"content": {"parts": [{
+                    "inlineData": {"mimeType": "image/png", "data": encoded}
+                }]}}]}
+        def server(url, **kwargs):
+            config = kwargs["json"]["generationConfig"]
+            old = config.get("responseFormat", {}).get("image", {})
+            if old:
+                message = (
+                    "Invalid value at 'generation_config.response_format.image.aspect_ratio' "
+                    '(type.googleapis.com/google.ai.generativelanguage.v1beta.ImageResponseFormat.AspectRatio), "16:9"\\n'
+                    "Invalid value at 'generation_config.response_format.image.image_size' "
+                    '(type.googleapis.com/google.ai.generativelanguage.v1beta.ImageResponseFormat.ImageSize), "1K"'
+                )
+                raise requests.HTTPError("HTTP 400: " + message)
+            self.assertEqual(config["imageConfig"], {"aspectRatio": "16:9"})
+            self.assertNotIn("imageSize", config["imageConfig"])
+            return Reply()
+        tool = artwork_tools.ArtworkTool(
+            "gemini", "gemini-3.1-flash-lite-image", "fake-api-key"
+        )
+        with patch.object(artwork_tools.requests, "post", side_effect=server) as post:
+            data = artwork_tools._gemini_image("Edit my 16:9 frame", tool)
+        self.assertTrue(data.startswith(b"\\x89PNG"))
+        self.assertEqual(post.call_count, 1)
 
     def test_openai_400_reports_provider_error_code_message_and_safe_model(self):
         import requests
