@@ -21,7 +21,7 @@ class LiveInlineDiffTests(unittest.TestCase):
 
     def test_removed_diff_renders_escaped_original_struck_out_in_red(self):
         html = removed_paragraph_html("Old <Picture 1> & action\n")
-        self.assertIn("#9c3f4b", html)
+        self.assertIn("#ed969e", html)
         self.assertIn("#41242b", html)
         self.assertIn("text-decoration:line-through", html)
         self.assertIn("&lt;Picture 1&gt;", html)
@@ -49,11 +49,11 @@ assert review.approve_all.parent() is editor
 assert review.deny_all.parent() is editor
 assert len(review.buttons) == 2
 assert not review.removed_labels  # old deletion QLabel strips are gone
-assert review.source_document.toPlainText() == "First revised.\\n\\nSecond original.\\n\\nThird revised."
+assert review.source_document.toPlainText() == "First revised.\n\nSecond original.\n\nThird revised."
 # The temporary projection displays red removed and green added words IN
 # the editor's text flow; the real project text remains free of both.
-red = editor.document().find("First original.")
-green = editor.document().find("First revised.")
+red = editor.document().find("original.")
+green = editor.document().find("revised.")
 assert not red.isNull() and not green.isNull()
 assert red.charFormat().fontStrikeOut()
 assert red.charFormat().background().color().name().lower() == "#9c3f4b"
@@ -101,6 +101,19 @@ editor.close()
         self.assertIn(("equal", "subject_definitions\nPreserve identity\n\n00:00:01:00 - 00:00:02:00\n"), result)
         self.assertIn(("removed", "Original motion\n"), result)
         self.assertIn(("added", "Revised motion\n"), result)
+
+
+    def test_word_diff_leaves_unchanged_words_uncolored(self):
+        from ltx_prompt_director.ai_inline_diff import word_diff
+        changed = word_diff(
+            "The paws settle against wet tiles.",
+            "The paws softly settle against wet tiles."
+        )
+        self.assertIn(("added", "softly "), changed)
+        self.assertTrue(any(state == "equal" and "against wet tiles" in phrase
+                            for state, phrase in changed))
+        self.assertEqual("".join(x for state, x in changed if state != "removed"),
+                         "The paws softly settle against wet tiles.")
 
     def test_partial_prompt_stream_decodes_text_without_json_wrappers(self):
         source = '{"prompt":"subject_definitions\\n<Subject 1> is now'
