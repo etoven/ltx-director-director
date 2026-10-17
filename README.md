@@ -8,7 +8,7 @@ Build a visual plan for AI video, turn it into a detailed production prompt, and
 
 ![The Aurora workspace: a visual timeline, creative direction and one continuous MiniMax production brief](docs/images/ltx-director-director-overview.png)
 
-*Current release: Aurora 1.13.0a79 on `experimental`. Screenshots show the native app with an authored demonstration project.*
+*Current release: Aurora 1.13.0a80 on `experimental`. Screenshots show the native app with an authored demonstration project.*
 
 ## See the story before you generate
 
@@ -28,7 +28,11 @@ Replace a frame without rebuilding the beat. Copy an original image to the clipb
 | Develop the movement of each timeline segment | **LTX Video** | Individual segment prompts and a shared global prompt, ready for Director JSON export |
 | Bring your own prompting style | **Generic workspace** | A unified or segmented editor with your own generation and refinement instructions |
 
-**Sync Timeline** reads the existing image checkpoints and segment JSON alongside your completed combined prompt. It retimes the original frames, updates each segment's action, and creates missing beats when needed—without rewriting the combined prompt. New visual checkpoints can use the existing artwork-generation flow. The familiar timeline resizing and review animations show exactly what changed.\n\nMiniMax action cues and timeline segments stay connected. Select a beat to focus its action. Change its timing and the cue boundaries follow. Paste a timed production brief to reshape the timeline around the new plan.
+**Sync Timeline** reads the existing image checkpoints and segment JSON alongside your completed combined prompt. It retimes the original frames, updates each segment's action, and creates missing beats when needed—without rewriting the combined prompt. New visual checkpoints can use the existing artwork-generation flow. The familiar timeline resizing and review animations show exactly what changed.
+
+**Generate Artwork** is available on each text or image segment's right-click menu. For a text beat, create its image from the current segment prompt plus nearby written and visual references. For an existing image, refine its original artwork toward the segment prompt while preserving its subject, composition, and visual continuity. Image generation uses your configured image API provider and keeps the current media in place until a successful result.
+
+MiniMax action cues and timeline segments stay connected. Select a beat to focus its action. Change its timing and the cue boundaries follow. Paste a timed production brief to reshape the timeline around the new plan.
 
 In LTX, **Magic Build** develops the whole sequence; **Refine Prompt** and **Refine Timing** let you concentrate on the selected beat. You can switch between workflows while keeping their stored drafts with the project.
 
