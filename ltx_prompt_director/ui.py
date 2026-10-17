@@ -3195,6 +3195,32 @@ class MainWindow(QMainWindow):
                 toolbar.widgetForAction(self.comfy_export_action).setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
             if group_index < len(action_groups) - 1:
                 toolbar.addSeparator()
+        # The workspace selector is a global choice and belongs with the
+        # global commands. No separate full-width "PROJECT TYPE" strip.
+        toolbar.addSeparator()
+        self.project_type_combo = QComboBox(toolbar)
+        self.project_type_combo.setObjectName("workspacePicker")
+        self.project_type_combo.setAccessibleName("Project type")
+        self.project_type_combo.setToolTip("Choose project type / workspace")
+        self.project_type_combo.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        )
+        self.project_type_combo.setMinimumContentsLength(19)
+        for key, definition in self.workspace_definitions.items():
+            self.project_type_combo.addItem(definition["name"], key)
+        self.project_type_combo.currentIndexChanged.connect(self.project_type_changed)
+        toolbar.addWidget(self.project_type_combo)
+        self.references_button = QPushButton("Refs", toolbar)
+        self.references_button.setObjectName("toolbarRefs")
+        self.references_button.setToolTip("Open reference media for this workspace")
+        self.references_button.setAccessibleName("Reference media")
+        self.references_button.clicked.connect(self.show_reference_images)
+        toolbar.addWidget(self.references_button)
+        # Workflow information remains available as a tooltip and in the
+        # status bar; repeating it beside the selector wastes horizontal room.
+        self.workflow_label = QLabel(self)
+        self.workflow_label.setObjectName("muted")
+        self.workflow_label.hide()
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         toolbar.addWidget(spacer)
@@ -3239,22 +3265,6 @@ class MainWindow(QMainWindow):
         outer = QVBoxLayout(root)
         outer.setContentsMargins(10, 5, 10, 8)
         outer.setSpacing(8)
-        workflow_row = ControlRow()
-        workflow_row.addWidget(QLabel("PROJECT TYPE"))
-        self.project_type_combo = QComboBox()
-        for key, definition in self.workspace_definitions.items():
-            self.project_type_combo.addItem(definition["name"], key)
-        self.project_type_combo.currentIndexChanged.connect(self.project_type_changed)
-        workflow_row.addWidget(self.project_type_combo)
-        self.workflow_label = QLabel()
-        self.workflow_label.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Preferred)
-        self.workflow_label.setObjectName("muted")
-        workflow_row.addWidget(self.workflow_label)
-        workflow_row.addStretch()
-        self.references_button = QPushButton("Reference media")
-        self.references_button.clicked.connect(self.show_reference_images)
-        workflow_row.addWidget(self.references_button)
-        outer.addLayout(workflow_row)
         timeline_shell = QFrame()
         self.timeline_shell = timeline_shell
         timeline_shell.setObjectName("timelineShell")
@@ -3432,7 +3442,7 @@ class MainWindow(QMainWindow):
         intent_label = QLabel("DIRECTOR'S INTENT")
         self.director_intent_label = intent_label
         intent_label.setObjectName("panelTitle")
-        intent_row.addWidget(intent_label)
+        intent_label.hide()  # The selector identifies the document already.
         intent_row.addStretch(1)
         self.director_intent_row = intent_row
         self.intent = PromptTextEdit()
@@ -3473,7 +3483,7 @@ class MainWindow(QMainWindow):
         self.sfx.setCheckable(True)
         self.sfx.setObjectName("audioToggle")
         self.sfx.toggled.connect(self.mark_dirty)
-        self.spoken_dialog = QPushButton("Spoken Dialog")
+        self.spoken_dialog = QPushButton("Dialog")
         self.spoken_dialog.setCheckable(True)
         self.spoken_dialog.setObjectName("audioToggle")
         self.spoken_dialog.setToolTip("Allow Magic Build to include spoken-dialog direction when supported by the scene")
@@ -3484,11 +3494,14 @@ class MainWindow(QMainWindow):
         self.hdr.setToolTip("Prepend (4K, HDR, Realistic) to the global prompt")
         self.hdr.clicked.connect(self.apply_global_prefixes)
         self.hdr.toggled.connect(self.mark_dirty)
-        self.reduce_music = QPushButton("Reduce Music")
+        self.reduce_music = QPushButton("Less music")
         self.reduce_music.setCheckable(True)
         self.reduce_music.setObjectName("qualityToggle")
-        self.reduce_music.setToolTip("Ask Magic Build for setting-specific ambient sound to discourage generated music")
+        self.reduce_music.setToolTip("Ask the model for ambient sound instead of prominent background music")
         self.reduce_music.toggled.connect(self.mark_dirty)
+        for toggle in (self.sfx, self.spoken_dialog, self.hdr, self.reduce_music):
+            toggle.setObjectName("directorOption")
+            toggle.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         # One ordinary contextual action button, no menu or secondary choices.
         self.magic_button = QPushButton("✦ Generate")
         self.magic_button.setObjectName("timelineButton")
@@ -3496,18 +3509,19 @@ class MainWindow(QMainWindow):
         self.primary_ai_command = "generate"
         for button in (self.sfx, self.spoken_dialog, self.hdr, self.reduce_music, self.magic_button):
             button.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
-        self.ai_workflow_row = workflow_row
-        workflow_row.addWidget(self.magic_button)
+        # The only Generate/Refine control stays in the timeline toolbar.
+        # No redundant prompt or project-type row is created.
+        self.ai_workflow_row = self.timeline_controls
         self.director_controls.addLayout(intent_row)
         self.director_controls.addWidget(self.director_intent_stack, 1)
         planning_row = ControlRow()
         planning_row.setContentsMargins(0, 0, 0, 0)
         planning_row.setSpacing(6)
-        planning_label = QLabel("DIALOG VOICE")
+        planning_label = QLabel("VOICE")
         self.planning_label = planning_label
         planning_label.setObjectName("groupLabel")
         planning_row.addWidget(planning_label)
-        length_label = QLabel("TOTAL LENGTH")
+        length_label = QLabel("LENGTH")
         self.length_label = length_label
         length_label.setObjectName("groupLabel")
         self.requested_length = QDoubleSpinBox()
@@ -3555,14 +3569,13 @@ class MainWindow(QMainWindow):
         options_row = ControlRow()
         options_row.setContentsMargins(0, 0, 0, 0)
         options_row.setSpacing(6)
-        options_label = QLabel("PROMPT OPTIONS")
-        options_label.setObjectName("groupLabel")
-        options_row.addWidget(options_label)
+        # Time → image quality → sound → speech → music. No duplicate
+        # "PROMPT OPTIONS" label or oversized form-style action buttons.
         options_row.addWidget(length_label)
         options_row.addWidget(self.requested_length)
+        options_row.addWidget(self.hdr)
         options_row.addWidget(self.sfx)
         options_row.addWidget(self.spoken_dialog)
-        options_row.addWidget(self.hdr)
         options_row.addWidget(self.reduce_music)
         options_row.addStretch()
         self.options_row = options_row
@@ -4132,6 +4145,20 @@ class MainWindow(QMainWindow):
         QScrollBar:horizontal{background:#171b1d;height:12px;margin:0;border:0;border-radius:6px} QScrollBar::handle:horizontal{background:#46545c;min-width:28px;margin:2px;border-radius:4px} QScrollBar::handle:horizontal:hover{background:#63869b} QScrollBar::handle:horizontal:pressed{background:#74a8c6}
         QScrollBar::add-line,QScrollBar::sub-line{width:0;height:0;background:transparent;border:0} QScrollBar::up-arrow,QScrollBar::down-arrow,QScrollBar::left-arrow,QScrollBar::right-arrow{width:0;height:0;background:transparent} QScrollBar::add-page,QScrollBar::sub-page{background:transparent} QAbstractScrollArea::corner{background:#171b1d;border:0}
         """
+        # Compact controls: retain visible checked/hover states without
+        # consuming another line of writing space for padded buttons.
+        theme += """
+        #directorOption{background:transparent;border:1px solid #46535b;border-radius:4px;
+                        color:#b9c5cb;padding:1px 6px;min-height:16px}
+        #directorOption:hover{background:#2b3940;border-color:#7195a8;color:#f0f8fb}
+        #directorOption:checked{background:#244c38;border-color:#4a9970;color:#d2f3dd}
+        #directorOption:disabled{color:#68757b;border-color:#39454a}
+        #workspacePicker{background:#222e35;border:1px solid #395462;border-radius:4px;
+                         padding-top:1px;padding-bottom:1px;min-height:18px}
+        #toolbarRefs{background:transparent;border:1px solid #425b67;border-radius:4px;
+                     color:#c2deeb;padding:1px 5px;min-height:17px}
+        #toolbarRefs:hover{background:#2b404b;border-color:#659cb8}
+        """
         theme = theme.replace("font:11px Arial", f"font:{scaled(11)}px Arial")
         theme = theme.replace("font:11px 'Courier New'", f"font:{scaled(11)}px 'Courier New'")
         theme = theme.replace("spacing:6px;padding:5px", f"spacing:{metric(6)}px;padding:{metric(5)}px")
@@ -4166,13 +4193,25 @@ class MainWindow(QMainWindow):
         self.speaker_accent.setMinimumWidth(metric(170))
         for field in (self.speaker_language,self.speaker_accent):
             field.setMinimumWidth(90);field.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Fixed)
-        self.director_controls.setSpacing(metric(5))
-        self.director_intent_row.setSpacing(metric(9))
+        self.director_controls.setContentsMargins(metric(7), metric(5), metric(7), metric(5))
+        self.director_controls.setSpacing(metric(3))
+        self.director_intent_row.setSpacing(metric(4))
+        self.options_row.setSpacing(metric(4))
+        self.planning_row.setSpacing(metric(4))
         self.segment_header.setSpacing(metric(8))
+        self.project_type_combo.setFixedWidth(min(252, max(160, metric(198))))
+        self.project_type_combo.setFixedHeight(max(metric(24), self.project_type_combo.fontMetrics().height() + metric(7)))
+        self.references_button.setFixedHeight(max(metric(23), self.references_button.fontMetrics().height() + metric(6)))
+        self.references_button.setFixedWidth(self.references_button.fontMetrics().horizontalAdvance(self.references_button.text()) + metric(18))
+        for option in (self.hdr, self.sfx, self.spoken_dialog, self.reduce_music):
+            option.setMinimumWidth(0)
+            option.setFixedWidth(option.fontMetrics().horizontalAdvance(option.text()) + metric(15))
+            option.setFixedHeight(max(metric(22), option.fontMetrics().height() + metric(5)))
         self.ruler.setFixedHeight(metric(28))
         self.timeline_height_handle.set_scale(scale)
         self.project_list.setSpacing(metric(4))
-        for button in (self.provider_button, self.sfx, self.spoken_dialog, self.hdr, self.reduce_music, self.magic_button, self.refine_timing_button, self.refine_prompt_button, self.start_button, self.end_button):
+        for button in (self.provider_button, self.magic_button, self.refine_timing_button,
+                       self.refine_prompt_button, self.start_button, self.end_button):
             button.setMinimumWidth(button.fontMetrics().horizontalAdvance(button.text()) + metric(18))
         self.output_width.setMinimumWidth(metric(92))
         self.output_height.setMinimumWidth(metric(92))
@@ -6533,6 +6572,9 @@ class MainWindow(QMainWindow):
         self.project_type_combo.blockSignals(True)
         self.project_type_combo.setCurrentIndex(self.project_type_combo.findData(self.project_type))
         self.project_type_combo.blockSignals(False)
+        self.project_type_combo.setToolTip(
+            f"Project type: {self.project_type_combo.currentText()} — choose another workspace"
+        )
         self.prompt_label.setText("SEGMENT PROMPT")
         self.segment_prompt.inline_cue_mode = False
         self.prompt_scope.setVisible(self.unified_workspace and not prompt_only)

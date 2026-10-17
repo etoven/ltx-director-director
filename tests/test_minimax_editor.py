@@ -82,7 +82,28 @@ class UnifiedEditorTests(unittest.TestCase):
         self.assertEqual(w.unified_prompt.toPlainText(), "My unified production prompt")
         self.assertEqual(w.combined_focus if hasattr(w, "combined_focus") else "all", "all")
 
+    def test_workspace_picker_is_on_global_toolbar_without_a_wasted_row(self):
+        w = self.make_window('minimax_frames')
+        from PySide6.QtWidgets import QToolBar, QLabel
+        bar = w.findChild(QToolBar, "mainToolbar")
+        self.assertIsNotNone(bar)
+        self.assertIs(w.project_type_combo.parent(), bar)
+        self.assertIs(w.references_button.parent(), bar)
+        self.assertEqual(w.references_button.text(), "Refs")
+        self.assertTrue(w.workflow_label.isHidden())
+        self.assertEqual(w.project_type_combo.accessibleName(), "Project type")
+        self.assertFalse(any(
+            x.text() == "PROJECT TYPE" for x in w.centralWidget().findChildren(QLabel)
+        ))
+        before = w.project_type
+        w.project_type_combo.setCurrentIndex(w.project_type_combo.findData('ltx'))
+        self.assertEqual(w.project_type, 'ltx')
+        self.assertNotEqual(before, w.project_type)
+        w.set_project_type('minimax_frames')
+        self.assertFalse(w.references_button.isHidden())
+
     def test_full_width_segment_prompt_layout_and_compact_options(self):
+        from PySide6.QtWidgets import QPushButton, QLabel
         w = self.make_window('minimax_frames')
         w.resize(1080, 850)
         w.show()
@@ -93,11 +114,21 @@ class UnifiedEditorTests(unittest.TestCase):
         stack = w.director_intent_stack
         label = w.director_intent_label
         selector = w.prompt_scope
-        self.assertGreaterEqual(stack.geometry().top(), label.geometry().bottom())
+        self.assertGreaterEqual(stack.geometry().top(), 0)
         self.assertGreaterEqual(stack.width(), panel.width() - 24)
-        self.assertGreater(selector.geometry().left(), label.geometry().right())
-        self.assertIn(w.requested_length, [w.options_row.itemAt(i).widget()
-                    for i in range(w.options_row.count())])
+        self.assertTrue(label.isHidden())  # Picker already identifies the editor.
+        self.assertFalse(selector.isHidden())
+        options = [w.options_row.itemAt(i).widget()
+                   for i in range(w.options_row.count())]
+        self.assertEqual(
+            [x.text() for x in options if isinstance(x, QPushButton)],
+            ["HDR", "SFX", "Dialog", "Less music"]
+        )
+        self.assertIn(w.requested_length, options)
+        self.assertNotIn("PROMPT OPTIONS", [x.text() for x in options
+                         if isinstance(x, QLabel)])
+        self.assertTrue(all(x.height() <= 30 for x in (w.hdr, w.sfx,
+                                                       w.spoken_dialog, w.reduce_music)))
         self.assertEqual(w.planning_row.heightForWidth(700), 0)
         w.prompt_scope.setCurrentIndex(1)
         self.assertIs(stack.currentWidget(), w.intent_segment_prompt)
