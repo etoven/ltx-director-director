@@ -7492,6 +7492,62 @@ class MainWindow(QMainWindow):
         if not waiting and not to_render:
             self.ai_edit_feed.hide()
 
+    def _artwork_reference_inputs(self, segment_id: str) -> list[dict]:
+        """Provide actual project references and nearby frames to the image API.
+
+        Project reference roles/names stay attached to their pixels. Never feed
+        audio, model-authored paths or arbitrary video files as image inputs.
+        """
+        references = []
+        seen_paths = set()
+        for slot, reference in enumerate(reference_slots(self.active_reference_images()), 1):
+            if not reference or reference.get("kind", "image") != "image":
+                continue
+            data = str(reference.get("image") or "")
+            if data.startswith("data:image/"):
+                references.append({
+                    "label": f"Reference {slot}: {reference['name']} — "
+                             f"{reference.get('role', 'identity')} role; "
+                             f"{reference.get('notes') or 'preserve matching visual details'}",
+                    "image": data,
+                })
+
+        # Two nearest timeline visual checkpoints establish composition and
+        # stage-to-stage continuity. The target itself is sent separately
+        # as sourceImage and must not be duplicated as a reference.
+        target = next((i for i, s in enumerate(self.segments)
+                       if s.id == segment_id), 0)
+        candidates = sorted(
+            ((abs(i - target), i, s) for i, s in enumerate(self.segments)
+             if i != target and s.kind in {"image", "video"}),
+            key=lambda value: (value[0], value[1]),
+        )
+        for _, index, segment in candidates:
+            if len(seen_paths) >= 2:
+                break
+            try:
+                path = (
+                    str(materialize_source(segment)) if segment.kind == "image"
+                    else str(segment.preview_path or "")
+                )
+            except (OSError, ValueError, FileNotFoundError):
+                continue
+            if (not path or not Path(path).is_file()
+                    or (segment.kind == "video" and Path(path).suffix.lower()
+                        not in {".png", ".jpg", ".jpeg", ".webp"})):
+                continue
+            resolved = str(Path(path).resolve())
+            if resolved in seen_paths:
+                continue
+            seen_paths.add(resolved)
+            references.append({
+                "label": f"Timeline {index + 1}: {segment.name} — "
+                         f"{segment.role} continuity "
+                         f"({'video thumbnail' if segment.kind == 'video' else 'frame'})",
+                "path": resolved,
+            })
+        return references[:7]
+
     def _start_segment_artwork(self, segment_id, record, tool):
         item = next((item for item in self.segments if item.id == segment_id), None)
         if not item or tool is None or not item.artwork_prompt:
@@ -7510,6 +7566,7 @@ class MainWindow(QMainWindow):
         # edits this stays the unmodified original until an image succeeds.
         request = dict(record)
         request["id"] = segment_id
+        request["referenceImages"] = self._artwork_reference_inputs(segment_id)
         if item.kind == "image":
             # Saved .LTXD projects may keep full-resolution originals inside
             # their archive. Resolve the original lazily before image-to-image.

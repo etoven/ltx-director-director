@@ -311,6 +311,77 @@ class SegmentPlanTests(unittest.TestCase):
             self.assertTrue(Path(images["new:1"]).is_file())
             generate.assert_called_once()
 
+    def test_reference_artwork_reaches_gemini_image_provider_with_roles(self):
+        from io import BytesIO
+        from PIL import Image
+        import base64
+        buffer = BytesIO()
+        Image.new("RGB", (12, 8)).save(buffer, format="PNG")
+        payload = buffer.getvalue()
+        encoded = base64.b64encode(payload).decode("ascii")
+        class Reply:
+            def raise_for_status(self): pass
+            def json(self):
+                return {"candidates": [{"content": {"parts": [
+                    {"inlineData": {"data": encoded}}
+                ]}}]}
+        refs = [{"label": "Reference 1: Hair — identity role",
+                 "image": "data:image/png;base64," + encoded}]
+        tool = artwork_tools.ArtworkTool("gemini", "gemini-3.1-flash-lite-image", "key")
+        with patch.object(artwork_tools.requests, "post", return_value=Reply()) as post:
+            result = artwork_tools._gemini_image("Make a new shot", tool, references=refs)
+        parts = post.call_args.kwargs["json"]["contents"][0]["parts"]
+        self.assertTrue(result.startswith(b"\\x89PNG"))
+        self.assertIn("identity role", parts[0]["text"])
+        self.assertEqual(len(parts), 2)
+        self.assertEqual(base64.b64decode(parts[1]["inlineData"]["data"]), payload)
+
+    def test_reference_artwork_reaches_openai_multifile_edit_endpoint(self):
+        from io import BytesIO
+        from PIL import Image
+        import base64
+        buffer = BytesIO()
+        Image.new("RGB", (12, 8)).save(buffer, format="PNG")
+        payload = buffer.getvalue()
+        encoded = base64.b64encode(payload).decode("ascii")
+        refs = [{"label": "Ref 1: costume — wardrobe", "image":
+                 "data:image/png;base64," + encoded}]
+        class Reply:
+            def raise_for_status(self): pass
+            def json(self): return {"data": [{"b64_json": encoded}]}
+        tool = artwork_tools.ArtworkTool("openai", "gpt-image-2", "key")
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "source.png"
+            source.write_bytes(payload)
+            with patch.object(artwork_tools.requests, "post", return_value=Reply()) as post:
+                artwork_tools._openai_image("Edit shirt", tool, str(source), refs)
+        self.assertTrue(post.call_args.args[0].endswith("/images/edits"))
+        self.assertIn("wardrobe", post.call_args.kwargs["data"]["prompt"])
+        file_parts = post.call_args.kwargs["files"]
+        self.assertEqual([name for name, _ in file_parts], ["image[]", "image[]"])
+        self.assertEqual(file_parts[0][1][2], "image/png")
+        self.assertEqual(file_parts[1][1][1], payload)
+
+    def test_reference_images_turn_new_openai_generation_into_reference_edit(self):
+        from io import BytesIO
+        from PIL import Image
+        import base64
+        source = BytesIO()
+        Image.new("RGB", (9, 6)).save(source, format="PNG")
+        encoded = base64.b64encode(source.getvalue()).decode("ascii")
+        class Reply:
+            def raise_for_status(self): pass
+            def json(self): return {"data": [{"b64_json": encoded}]}
+        tool = artwork_tools.ArtworkTool("openai", "gpt-image-2", "key")
+        with patch.object(artwork_tools.requests, "post", return_value=Reply()) as post:
+            artwork_tools._openai_image(
+                "Create next frame", tool, references=[
+                    {"label": "Previous timeline frame", "image":
+                     "data:image/png;base64," + encoded}])
+        self.assertTrue(post.call_args.args[0].endswith("/images/edits"))
+        self.assertIn("continuity", post.call_args.kwargs["data"]["prompt"])
+        self.assertIn("image", post.call_args.kwargs["files"])
+
     def test_existing_image_edit_calls_gemini_with_source_bytes(self):
         from io import BytesIO
         from PIL import Image

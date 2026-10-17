@@ -112,16 +112,72 @@ def _source_png(path: str) -> bytes:
     return result.getvalue()
 
 
-def _openai_image(prompt: str, tool: ArtworkTool, source_path: str = "") -> bytes:
+def _reference_bytes(reference: dict) -> bytes:
+    """Decode a trusted project visual reference, never an AI-supplied URL."""
+    if reference.get("path"):
+        return _source_png(str(reference["path"]))
+    encoded = str(reference.get("image") or "")
+    if not encoded.startswith(("data:image/png;base64,", "data:image/jpeg;base64,",
+                               "data:image/webp;base64,")):
+        raise ValueError("Reference artwork is not a supported inline image.")
+    raw = base64.b64decode(encoded.split(",", 1)[1], validate=True)
+    if len(raw) > 30 * 1024 * 1024:
+        raise ValueError("Reference artwork exceeds the 30 MB input limit.")
+    with Image.open(BytesIO(raw)) as source:
+        source.load()
+        if source.width * source.height > 50_000_000:
+            raise ValueError("Reference image dimensions are too large.")
+        source.thumbnail((2048, 2048), Image.Resampling.LANCZOS)
+        output = BytesIO()
+        source.convert("RGB").save(output, format="PNG")
+        return output.getvalue()
+
+
+def _image_inputs(source_path: str, references: list[dict] | None) -> list[tuple[str, bytes]]:
+    """Keep the edit target FIRST, then named continuity/reference artwork."""
+    result = []
     if source_path:
-        # GPT Image edits require multipart images/edits, not a plain text
-        # image-generation call. The actual existing frame is the input image.
+        result.append(("SOURCE IMAGE — edit this frame", _source_png(source_path)))
+    for record in (references or [])[:7]:
+        label = str(record.get("label") or "Reference image")[:150]
+        result.append((label, _reference_bytes(record)))
+    return result
+
+
+def _referenced_prompt(prompt: str, images: list[tuple[str, bytes]], source_path: str) -> str:
+    if not images:
+        return prompt
+    details = "\n".join(f"Image {index}: {label}" for index, (label, _) in enumerate(images, 1))
+    direction = (
+        "Image 1 is the primary editing target; modify ONLY that frame and use the "
+        "remaining images for their labeled reference/continuity roles."
+        if source_path else
+        "Create a new frame using the images as labeled identity, composition, "
+        "style or timeline-continuity guides, not as extra subjects to insert."
+    )
+    return f"{prompt}\n\nVISUAL INPUTS IN ORDER:\n{details}\n{direction}"
+
+
+def _openai_image(
+    prompt: str, tool: ArtworkTool, source_path: str = "",
+    references: list[dict] | None = None,
+) -> bytes:
+    images = _image_inputs(source_path, references)
+    if images:
+        # Image edits support one or multiple images. They are also used to
+        # generate NEW images from existing artwork references.
+        files = (
+            {"image": ("source.png", images[0][1], "image/png")}
+            if len(images) == 1 else
+            [("image[]", (f"reference-{i}.png", data, "image/png"))
+             for i, (_, data) in enumerate(images, 1)]
+        )
         response = requests.post(
             "https://api.openai.com/v1/images/edits",
             headers={"Authorization": "Bearer " + tool.api_key},
             data={"model": tool.model, "size": "1536x1024", "n": "1",
-                  "prompt": prompt},
-            files={"image": ("source.png", _source_png(source_path), "image/png")},
+                  "prompt": _referenced_prompt(prompt, images, source_path)},
+            files=files,
             timeout=240,
         )
     else:
@@ -136,13 +192,16 @@ def _openai_image(prompt: str, tool: ArtworkTool, source_path: str = "") -> byte
     return _decode(response.json()["data"][0]["b64_json"])
 
 
-def _gemini_image(prompt: str, tool: ArtworkTool, source_path: str = "") -> bytes:
-    """Gemini image generation and source-guided image-to-image editing."""
-    parts = [{"text": prompt}]
-    if source_path:
+def _gemini_image(
+    prompt: str, tool: ArtworkTool, source_path: str = "",
+    references: list[dict] | None = None,
+) -> bytes:
+    """Gemini image generation with named timeline and project artwork inputs."""
+    images = _image_inputs(source_path, references)
+    parts = [{"text": _referenced_prompt(prompt, images, source_path)}]
+    for _, data in images:
         parts.append({"inlineData": {"mimeType": "image/png",
-                                     "data": base64.b64encode(
-                                         _source_png(source_path)).decode("ascii")}})
+                                     "data": base64.b64encode(data).decode("ascii")}})
     response = requests.post(
         f"https://generativelanguage.googleapis.com/v1/models/"
         f"{tool.model}:generateContent",
@@ -180,12 +239,13 @@ def render_artwork(records: list[dict], tool: ArtworkTool) -> dict[str, str]:
             continue
         prompt = entry["artworkPrompt"]
         source_path = str(entry.get("sourceImage") or "")
+        references = list(entry.get("referenceImages") or [])
         if source_path:
             prompt = ("Edit the provided SOURCE IMAGE. Preserve the original "
                       "scene, composition, characters, camera viewpoint and "
                       "lighting except for the following requested changes: " + prompt)
-        data = (_gemini_image(prompt, tool, source_path) if tool.provider == "gemini"
-                else _openai_image(prompt, tool, source_path))
+        data = (_gemini_image(prompt, tool, source_path, references) if tool.provider == "gemini"
+                else _openai_image(prompt, tool, source_path, references))
         path = root / (uuid4().hex + ".png")
         path.write_bytes(data)
         output[entry["id"]] = str(path)
