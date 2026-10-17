@@ -331,7 +331,7 @@ class SegmentPlanTests(unittest.TestCase):
         with patch.object(artwork_tools.requests, "post", return_value=Reply()) as post:
             result = artwork_tools._gemini_image("Make a new shot", tool, references=refs)
         parts = post.call_args.kwargs["json"]["contents"][0]["parts"]
-        self.assertTrue(result.startswith(b"\\x89PNG"))
+        self.assertTrue(result.startswith(bytes((137, 80, 78, 71))))
         self.assertIn("identity role", parts[0]["text"])
         self.assertEqual(len(parts), 2)
         self.assertEqual(base64.b64decode(parts[1]["inlineData"]["data"]), payload)
@@ -403,7 +403,8 @@ class SegmentPlanTests(unittest.TestCase):
                 result = artwork_tools._gemini_image("Edit fur", tool, str(source))
             self.assertTrue(result.startswith(b"\x89PNG"))
             parts = post.call_args.kwargs["json"]["contents"][0]["parts"]
-            self.assertEqual(parts[0]["text"], "Edit fur")
+            self.assertTrue(parts[0]["text"].startswith("Edit fur"))
+            self.assertIn("SOURCE IMAGE", parts[0]["text"])
             self.assertEqual(base64.b64decode(parts[1]["inlineData"]["data"]),
                              output.getvalue())
 
