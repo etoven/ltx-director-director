@@ -189,6 +189,46 @@ class SegmentPlanTests(unittest.TestCase):
             {"chatgpt": "oauth"}, preferred="chatgpt"
         ), [])
 
+    def test_selected_image_model_is_independent_of_text_provider(self):
+        keys = {"gemini": "g-api", "openai": "o-api", "chatgpt": "oauth"}
+        cases = [
+            ("gemini:gemini-3.1-flash-lite-image", "gemini", "gemini-3.1-flash-lite-image"),
+            ("gemini:gemini-3.1-flash-image", "gemini", "gemini-3.1-flash-image"),
+            ("gemini:gemini-3-pro-image", "gemini", "gemini-3-pro-image"),
+            ("openai:gpt-image-2.5-flare", "openai", "gpt-image-2.5-flare"),
+            ("openai:gpt-image-2.5-sunburst", "openai", "gpt-image-2.5-sunburst"),
+            ("openai:gpt-image-2", "openai", "gpt-image-2"),
+            ("openai:gpt-image-1", "openai", "gpt-image-1"),
+            ("openai:gpt-image-1-mini", "openai", "gpt-image-1-mini"),
+        ]
+        for selection, provider, model in cases:
+            with self.subTest(model=model):
+                selected = artwork_tools.available_artwork_tools(
+                    keys, preferred="chatgpt", selected=selection
+                )
+                self.assertEqual(len(selected), 1)
+                self.assertEqual(selected[0].provider, provider)
+                self.assertEqual(selected[0].model, model)
+                self.assertEqual(selected[0].api_key, keys[provider])
+
+    def test_explicit_image_preference_never_falls_back_to_other_billed_provider(self):
+        keys = {"gemini": "g-api", "chatgpt": "oauth"}
+        self.assertEqual(
+            artwork_tools.available_artwork_tools(
+                keys, preferred="gemini", selected="openai:gpt-image-2"
+            ), []
+        )
+        self.assertEqual(artwork_tools.available_artwork_tools(
+            {"chatgpt": "oauth"}, selected="gemini:gemini-3.1-flash-image"
+        ), [])
+        self.assertEqual(artwork_tools.available_artwork_tools(
+            keys, selected="openai:unsupported-image-model"
+        ), [])
+        automatic = artwork_tools.available_artwork_tools(
+            {"gemini": "g-api", "openai": "o-api"}, preferred="openai"
+        )
+        self.assertEqual([tool.provider for tool in automatic], ["openai", "gemini"])
+
     def test_gemini_flash_lite_calls_documented_image_endpoint(self):
         from PIL import Image
         from io import BytesIO

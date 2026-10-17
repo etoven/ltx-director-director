@@ -9,7 +9,7 @@ from PySide6.QtWidgets import QApplication, QDialog, QMessageBox
 
 from ltx_prompt_director import ai
 from ltx_prompt_director.models import Segment
-from ltx_prompt_director.ui import MainWindow
+from ltx_prompt_director.ui import MainWindow, SettingsDialog
 from ltx_prompt_director.inline_cues import NOTE_TAG
 from ltx_prompt_director.prompt_tags import render_prompt_notes
 
@@ -54,6 +54,32 @@ class UnifiedEditorTests(unittest.TestCase):
         self.assertTrue(w.magic_button.isEnabled())
         w.set_project_type('ltx')
         self.assertTrue(w.timeline_controls.indexOf(w.magic_button) >= 0)
+
+    def test_image_generation_model_setting_persists_and_selects_backend(self):
+        import tempfile
+        from PySide6.QtCore import QSettings
+        from ltx_prompt_director.artwork_tools import IMAGE_MODEL_CHOICES
+        w = self.make_window('minimax_frames')
+        with tempfile.TemporaryDirectory() as directory:
+            settings = QSettings(directory + "/test-settings.ini", QSettings.Format.IniFormat)
+            settings.setValue("provider", "chatgpt")
+            w.settings = settings
+            w.session_keys = {"gemini": "gemini-key", "openai": "openai-key"}
+            dialog = SettingsDialog(settings, w)
+            self.assertEqual(dialog.image_gen_model.currentData(), "auto")
+            self.assertEqual(dialog.image_gen_model.count(), len(IMAGE_MODEL_CHOICES))
+            selected = "openai:gpt-image-2.5-sunburst"
+            dialog.image_gen_model.setCurrentIndex(dialog.image_gen_model.findData(selected))
+            dialog.accept()
+            self.assertEqual(settings.value("artwork/default_model"), selected)
+            chosen = w._available_artwork_tools()
+            self.assertEqual([(tool.provider, tool.model) for tool in chosen],
+                             [("openai", "gpt-image-2.5-sunburst")])
+            reopened = SettingsDialog(settings, w)
+            self.assertEqual(reopened.image_gen_model.currentData(), selected)
+            reopened.reject()
+            w.session_keys = {"gemini": "gemini-key", "openai": ""}
+            self.assertEqual(w._available_artwork_tools(), [])
 
     def test_minimax_director_intent_selector_shows_selected_segment(self):
         w = self.make_window('minimax_frames')

@@ -17,6 +17,27 @@ import requests
 from PIL import Image, UnidentifiedImageError
 
 
+# Persist these exact IDs in Settings independently of the chosen text model.
+# "auto" retains the historical preferred-provider behavior for upgrades.
+# Explicit selections never silently switch to a different billed model.
+IMAGE_MODEL_CHOICES = (
+    ("Automatic (use configured image API)", "auto"),
+    ("Gemini · Flash Lite Image (fast)", "gemini:gemini-3.1-flash-lite-image"),
+    ("Gemini · Flash Image", "gemini:gemini-3.1-flash-image"),
+    ("Gemini · Pro Image", "gemini:gemini-3-pro-image"),
+    ("OpenAI · GPT Image 2.5 Flare", "openai:gpt-image-2.5-flare"),
+    ("OpenAI · GPT Image 2.5 Sunburst", "openai:gpt-image-2.5-sunburst"),
+    ("OpenAI · GPT Image 2", "openai:gpt-image-2"),
+    ("OpenAI · GPT Image 1", "openai:gpt-image-1"),
+    ("OpenAI · GPT Image 1 mini", "openai:gpt-image-1-mini"),
+)
+DEFAULT_IMAGE_MODELS = {
+    "gemini": "gemini-3.1-flash-lite-image",
+    "openai": "gpt-image-2.5-flare",
+}
+IMAGE_MODEL_IDS = {value for _label, value in IMAGE_MODEL_CHOICES}
+
+
 @dataclass(frozen=True)
 class ArtworkTool:
     provider: str
@@ -29,21 +50,30 @@ class ArtworkTool:
                 else "OpenAI API / GPT Image")
 
 
-def available_artwork_tools(keys: dict[str, str], preferred: str = "") -> list[ArtworkTool]:
-    """Return tools the locally configured credentials can actually call.
+def available_artwork_tools(
+    keys: dict[str, str], preferred: str = "", selected: str = "auto"
+) -> list[ArtworkTool]:
+    """Resolve configured image-capable API tools, never ChatGPT plan OAuth.
 
-    Credentials indicate potential access; the server remains authoritative
-    for entitlement, billing, quota, and the model's live availability.
+    Automatic mode keeps existing provider priority. An explicit model is
+    authoritative: absent credentials leave the artwork pending rather than
+    silently sending a chargeable request through another provider.
     """
-    providers = {
-        "gemini": ArtworkTool("gemini", "gemini-3.1-flash-lite-image", str(keys.get("gemini") or "")),
-        "openai": ArtworkTool("openai", "gpt-image-2.5-flare", str(keys.get("openai") or "")),
-    }
-    # ChatGPT OAuth is intentionally NOT a source of image-generation credentials.
-    priority = ("gemini", "openai") if preferred not in providers else (
-        preferred, "openai" if preferred == "gemini" else "gemini"
-    )
-    return [providers[provider] for provider in priority if providers[provider].api_key.strip()]
+    if selected != "auto":
+        if selected not in IMAGE_MODEL_IDS:
+            return []
+        provider, model = selected.split(":", 1)
+        key = str(keys.get(provider) or "").strip()
+        return [ArtworkTool(provider, model, key)] if key else []
+
+    # ChatGPT OAuth is intentionally NOT an image-generation credential.
+    priority = (preferred, "openai" if preferred == "gemini" else "gemini") if (
+        preferred in DEFAULT_IMAGE_MODELS
+    ) else ("gemini", "openai")
+    return [
+        ArtworkTool(provider, DEFAULT_IMAGE_MODELS[provider], str(keys.get(provider)).strip())
+        for provider in priority if str(keys.get(provider) or "").strip()
+    ]
 
 
 def _png_payload(payload: bytes) -> bytes:

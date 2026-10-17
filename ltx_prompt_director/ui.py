@@ -37,7 +37,7 @@ from .stream_widgets import ReasoningActivityDock, LiveOutputPane
 from .ai_inline_diff import LiveTypingPreview
 from .segment_plan import (supports_structured_edit, generate_combined, preview_operations,
                            build_segment_objects, stream_operations, completed_stream_records)
-from .artwork_tools import available_artwork_tools, render_artwork
+from .artwork_tools import IMAGE_MODEL_CHOICES, available_artwork_tools, render_artwork
 from .cache_maintenance import cover_path, mark_ready, needs_refresh, warm_metadata
 from .ai import AIResponseFormatError, GEMINI_MODELS, build_minimax_h3_prompt, build_minimax_h3_reference_prompt, build_prompts, minimax_h3_cache_key, provider_error_message, WORKSPACE_INSTRUCTIONS, refine_minimax_text_prompt, refine_minimax_h3_prompt, refine_minimax_h3_reference_prompt, refine_segment_prompt, refine_global_prompt, refine_timing, retryable_connection_error
 from .media import APP_CACHE, TIMELINE_VIDEO_SUFFIXES, comfy_input_references, copy_media_for_export, data_url, extract_audio_for_export, prepare_media, safe_media_filename, thumbnail_for_image, unique_media_filename, video_source_dimensions, write_data_url
@@ -2175,6 +2175,18 @@ class SettingsDialog(QDialog):
         self.openai_model.addItems(["gpt-6", "gpt-6-mini", "gpt-5.4-mini"])
         self.openai_model.setCurrentText(str(settings.value("openai_model", "gpt-5.4-mini")))
         self.openai_model.setToolTip("OpenAI API-key model; enter any model available to your API account")
+        self.image_gen_model = QComboBox()
+        for label, model_id in IMAGE_MODEL_CHOICES:
+            self.image_gen_model.addItem(label, model_id)
+        saved_image_model = str(settings.value("artwork/default_model", "auto") or "auto")
+        selected_index = self.image_gen_model.findData(saved_image_model)
+        self.image_gen_model.setCurrentIndex(max(0, selected_index))
+        self.image_gen_model.setToolTip(
+            "Default model for timeline artwork requested by segment JSON. "
+            "Automatic retains the previous provider preference. Specific "
+            "models require that provider's API key; ChatGPT plan OAuth "
+            "cannot generate image files. Image API usage is billed separately."
+        )
         self.remember = QCheckBox("Store API keys persistently on this computer")
         self.remember.setChecked(settings.value("remember_keys", False, bool))
         self.timeout = QSpinBox()
@@ -2238,6 +2250,7 @@ class SettingsDialog(QDialog):
         form.addRow("Gemini API key", self.gemini)
         form.addRow("OpenAI API key", self.openai)
         form.addRow("OpenAI model", self.openai_model)
+        form.addRow("Default image generation model", self.image_gen_model)
         form.addRow("API timeout", self.timeout)
         form.addRow("Connection retries", self.retries)
         form.addRow("Retry cooldown", self.retry_cooldown)
@@ -2268,6 +2281,7 @@ class SettingsDialog(QDialog):
         self.settings.setValue("provider", self.provider.currentText())
         self.settings.setValue("gemini_model", self.model.currentText())
         self.settings.setValue("openai_model", self.openai_model.currentText())
+        self.settings.setValue("artwork/default_model", self.image_gen_model.currentData())
         self.settings.setValue("remember_keys", self.remember.isChecked())
         self.settings.setValue("api_timeout", self.timeout.value())
         self.settings.setValue("api_retries", self.retries.value())
@@ -7258,7 +7272,9 @@ class MainWindow(QMainWindow):
             for provider in ("gemini", "openai")
         }
         return available_artwork_tools(
-            keys, str(self.settings.value("provider", "gemini"))
+            keys,
+            preferred=str(self.settings.value("provider", "gemini")),
+            selected=str(self.settings.value("artwork/default_model", "auto") or "auto"),
         )
 
     def _approve_artwork_cost(self, tool, *, manual=False):
@@ -7275,7 +7291,7 @@ class MainWindow(QMainWindow):
         notice = QMessageBox(self)
         notice.setIcon(QMessageBox.Icon.Warning)
         notice.setWindowTitle("One-time paid artwork approval")
-        notice.setText(f"Allow {tool.label} to generate timeline artwork?")
+        notice.setText(f"Allow {tool.label} ({tool.model}) to generate timeline artwork?")
         notice.setInformativeText(
             "Artwork requested by your model's segment JSON is rendered using "
             "a separately billed Gemini or OpenAI API key, NOT your ChatGPT plan. "
@@ -7419,12 +7435,22 @@ class MainWindow(QMainWindow):
             return
         tools = self._available_artwork_tools()
         if not tools:
-            QMessageBox.information(
-                self, "Artwork tool unavailable",
-                "Connect a Gemini API key or a conventional OpenAI API key "
-                "in Settings to render this image. ChatGPT OAuth does not "
-                "include image generation."
-            )
+            selected = str(self.settings.value("artwork/default_model", "auto") or "auto")
+            if selected != "auto":
+                provider, _, model = selected.partition(":")
+                message = (
+                    f"The selected image model ({model}) requires a configured "
+                    f"{provider.title()} API key. Configure it in Settings, or "
+                    "choose Automatic as the default image generation model. "
+                    "ChatGPT OAuth cannot generate image files."
+                )
+            else:
+                message = (
+                    "Connect a Gemini API key or a conventional OpenAI API key "
+                    "in Settings to render this image. ChatGPT OAuth does not "
+                    "include image generation."
+                )
+            QMessageBox.information(self, "Artwork tool unavailable", message)
             return
         tool = tools[0]
         if not self._approve_artwork_cost(tool, manual=True):
