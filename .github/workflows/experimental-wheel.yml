@@ -9,6 +9,10 @@ on:
       - "tests/**"
       - ".github/workflows/experimental-wheel.yml"
 
+concurrency:
+  group: experimental-wheel-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
 
