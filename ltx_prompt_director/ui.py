@@ -6578,6 +6578,10 @@ class MainWindow(QMainWindow):
         self.refresh_primary_ai_action()
 
     def refresh_shared_editor(self) -> None:
+        # Workspace navigation and prompt-scope changes must never replace an
+        # editor's live diff projection and later restore the wrong document.
+        if hasattr(self, "inline_typing") and self.inline_typing.active:
+            self.inline_typing.suspend()
         if self.prompt_scope.currentData() == "global":
             value = self.global_prompt.toPlainText()
         else:
