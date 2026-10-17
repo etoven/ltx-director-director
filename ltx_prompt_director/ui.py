@@ -3703,7 +3703,7 @@ class MainWindow(QMainWindow):
         options_row.setSpacing(4)
         # Time → image quality → sound → speech → music. No duplicate
         # "PROMPT OPTIONS" label or oversized form-style action buttons.
-        options_row.addWidget(length_label)
+        # No redundant Len label; the total-length spin is self-describing.
         options_row.addWidget(self.requested_length)
         options_row.addWidget(self.hdr)
         options_row.addWidget(self.sfx)
