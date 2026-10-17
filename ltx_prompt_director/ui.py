@@ -3694,6 +3694,25 @@ class MainWindow(QMainWindow):
         self.sequence_controls.setContentsMargins(0, 0, 0, 0)
         self.sequence_controls.setSpacing(3)
         self.sequence_controls.addWidget(self.sequence_bar)
+        # Bulk review is inside the existing metadata strip, not a new row.
+        self.timeline_approve_all = QCheckBox("✓ All")
+        self.timeline_deny_all = QCheckBox("× Deny all")
+        for checkbox, color, tooltip in (
+            (self.timeline_approve_all, "#1e4933", "Approve all pending timeline edits"),
+            (self.timeline_deny_all, "#542d33", "Deny all pending timeline edits"),
+        ):
+            checkbox.setFixedHeight(21)
+            checkbox.setToolTip(tooltip)
+            checkbox.setStyleSheet(
+                "QCheckBox{border:0;border-radius:4px;background:" + color +
+                ";color:#f0f5f5;font-size:10px;padding:2px 5px;spacing:3px}"
+            )
+            checkbox.hide()
+            self.sequence_controls.addWidget(checkbox)
+        self.timeline_approve_all.toggled.connect(
+            lambda yes: self.resolve_all_segment_reviews(True) if yes else None)
+        self.timeline_deny_all.toggled.connect(
+            lambda yes: self.resolve_all_segment_reviews(False) if yes else None)
         outer.addLayout(self.sequence_controls)
 
         director_panel = QFrame()
@@ -7683,6 +7702,9 @@ class MainWindow(QMainWindow):
     def combined_refinement_finished(self, result):
         """Apply the validated JSON as one prompt/timeline transaction."""
         before = getattr(self, "ai_segment_snapshot", self.segments)
+        # The latest valid refinement supersedes any earlier pending review,
+        # while preserving the user-visible draft as its new starting point.
+        self.timeline_review_pending = set()
         records = result["segments"]
         changes = preview_operations(before, records)
         updated = build_segment_objects(before, records)
@@ -7742,6 +7764,7 @@ class MainWindow(QMainWindow):
         self._clear_ai_timeline_preview()
         self.refresh_timeline(selected)
         self._animate_ai_timeline(before, inserted)
+        self._start_segment_review(before, updated, changes)
         self.mark_dirty()
         self.ai_timeline_status.hide()
         if to_render:
@@ -7771,6 +7794,114 @@ class MainWindow(QMainWindow):
             self.ai_edit_feed.show()
         if not waiting and not to_render:
             self.ai_edit_feed.hide()
+
+    def _show_segment_review_controls(self):
+        """Reattach review buttons when timeline cards are rebuilt or retimed."""
+        pending = getattr(self, "timeline_review_pending", set())
+        originals = getattr(self, "timeline_review_originals", {})
+        for row in range(self.timeline.count()):
+            card = self.timeline.itemWidget(self.timeline.item(row))
+            if not isinstance(card, SegmentCard):
+                continue
+            if card.segment.id in pending:
+                card.set_review_pending(originals.get(card.segment.id))
+            elif card.review_pending:
+                card.clear_review_pending()
+        visible = bool(pending)
+        self.timeline_approve_all.setVisible(visible)
+        self.timeline_deny_all.setVisible(visible)
+        if visible:
+            self.timeline_approve_all.setToolTip(
+                f"Approve all {len(pending)} pending timeline changes")
+            self.timeline_deny_all.setToolTip(
+                f"Deny all {len(pending)} pending timeline changes")
+
+    def resolve_segment_review(self, segment_id: str, approved: bool) -> None:
+        """One-click timeline review: retain proposal or restore source data."""
+        pending = getattr(self, "timeline_review_pending", set())
+        if segment_id not in pending:
+            return
+        pending.discard(segment_id)
+        if not approved:
+            self._artwork_cancelled_segments = getattr(
+                self, "_artwork_cancelled_segments", set())
+            self._artwork_cancelled_segments.add(segment_id)
+            old = self.timeline_review_originals.get(segment_id)
+            location = next((i for i, s in enumerate(self.segments)
+                             if s.id == segment_id), -1)
+            if location >= 0:
+                if old is None:
+                    self.segments.pop(location)  # deny a newly inserted segment
+                else:
+                    self.segments[location] = copy.deepcopy(old)
+                    original_position = self.timeline_review_positions.get(
+                        segment_id, location)
+                    restored = self.segments.pop(location)
+                    self.segments.insert(
+                        min(max(0, original_position), len(self.segments)), restored)
+            self.mark_dirty()
+            self.refresh_timeline(max(0, min(location, len(self.segments)-1)))
+        else:
+            self._show_segment_review_controls()
+        if not pending:
+            self.timeline_review_originals = {}
+            self.timeline_review_positions = {}
+            self.statusBar().showMessage("✓ Timeline review complete", 5000)
+        else:
+            self.statusBar().showMessage(
+                f"{len(pending)} timeline change(s) awaiting review", 5000)
+
+    def resolve_all_segment_reviews(self, approved: bool) -> None:
+        if not getattr(self, "timeline_review_pending", set()):
+            return
+        if not approved:
+            self._artwork_cancelled_segments = getattr(
+                self, "_artwork_cancelled_segments", set())
+            self._artwork_cancelled_segments.update(self.timeline_review_pending)
+            self.segments = [copy.deepcopy(seg) for seg in
+                             self.timeline_review_original_sequence]
+        self.timeline_review_pending.clear()
+        self.timeline_review_originals = {}
+        self.timeline_review_positions = {}
+        self.timeline_review_original_sequence = []
+        self.timeline_approve_all.blockSignals(True)
+        self.timeline_deny_all.blockSignals(True)
+        self.timeline_approve_all.setChecked(False)
+        self.timeline_deny_all.setChecked(False)
+        self.timeline_approve_all.blockSignals(False)
+        self.timeline_deny_all.blockSignals(False)
+        if not approved:
+            self.refresh_timeline()
+            self.mark_dirty()
+        else:
+            self._show_segment_review_controls()
+        self.statusBar().showMessage(
+            "✓ Approved all timeline changes" if approved else
+            "× Restored timeline before the AI changes", 6000)
+
+    def _start_segment_review(self, before: list[Segment], updated: list[Segment],
+                              changes: list[dict]) -> None:
+        originals = {seg.id: copy.deepcopy(seg) for seg in before}
+        original_positions = {seg.id: i for i, seg in enumerate(before)}
+        after_positions = {seg.id: i for i, seg in enumerate(updated)}
+        changed_ids = {op["id"] for op in changes if op.get("id")}
+        # Move, resize, rewrite, role change, artwork, and new cards are
+        # individually reviewable. Deleted segments can still be restored by
+        # Deny all (they no longer have a visible card).
+        pending = {seg.id for seg in updated if seg.id in changed_ids
+                   or seg.id not in originals
+                   or after_positions[seg.id] != original_positions.get(seg.id)}
+        if any(op["kind"] == "delete" for op in changes):
+            pending.add("__deleted_segments__")
+        self.timeline_review_original_sequence = [
+            copy.deepcopy(seg) for seg in before]
+        self.timeline_review_originals = originals
+        self.timeline_review_positions = original_positions
+        self.timeline_review_pending = pending
+        self._show_segment_review_controls()
+        if pending:
+            self.statusBar().showMessage(
+                f"✦ Review {len(pending)} timeline edit(s): ✓ approve or × deny", 10000)
 
     def _artwork_reference_inputs(self, segment_id: str) -> list[dict]:
         """Provide actual project references and nearby frames to the image API.
@@ -7859,6 +7990,8 @@ class MainWindow(QMainWindow):
                 self.ai_edit_feed.hide()
             if workspace != (self.workspace_revision, self.current_project_id, self.project_type):
                 return
+            if segment_id in getattr(self, "_artwork_cancelled_segments", set()):
+                return  # A rejected image must never overwrite restored media.
             segment = next((s for s in self.segments if s.id == segment_id), None)
             if not segment:
                 return
