@@ -6995,7 +6995,9 @@ class MainWindow(QMainWindow):
         self.voice_options_button.setEnabled(
             self.spoken_dialog.isChecked() and not self.ai_busy
         )
-        self.voice_options_button.setVisible(self.spoken_dialog.isVisible())
+        # isVisible() is false until the whole main window is shown.
+        # Use the explicit hidden flag so this gear remains on the toolbar.
+        self.voice_options_button.setVisible(not self.spoken_dialog.isHidden())
 
     def set_reference_panel_open(self, opened: bool) -> None:
         self.settings.setValue("reference_panel_open", bool(opened))

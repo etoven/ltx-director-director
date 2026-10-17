@@ -159,6 +159,7 @@ class UnifiedEditorTests(unittest.TestCase):
         self.assertIs(w.options_row, w.sequence_controls)
         self.assertFalse(hasattr(w, "planning_row"))
         self.assertFalse(w.voice_options_button.isEnabled())
+        self.assertFalse(w.voice_options_button.isHidden())
         self.assertLessEqual(w.prompt_scope.width(), 100)
         w.prompt_scope.setCurrentIndex(1)
         self.assertIs(stack.currentWidget(), w.intent_segment_prompt)
