@@ -100,7 +100,8 @@ class SegmentPlanTests(unittest.TestCase):
             rules_seen.append(rules)
             return output
 
-        with patch.object(segment_plan.ai, "_provider_raw", side_effect=output_mock):
+        with patch.object(segment_plan.ai, "_provider_raw", side_effect=output_mock), \
+             patch.object(segment_plan.ai, "_minimax_frames_inputs", return_value=[]):
             result = segment_plan.generate_combined(
                 items, "openai", "gpt-6", "key", "intent", "global",
                 True, True, True, "Existing unified prompt", "Preserve action",
