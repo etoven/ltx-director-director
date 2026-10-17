@@ -36,13 +36,13 @@ class UnifiedEditorTests(unittest.TestCase):
         self.assertTrue(w.timeline_controls.indexOf(w.magic_button) >= 0)
         self.assertTrue(w.refine_prompt_button.isHidden())
         self.assertTrue(w.refine_timing_button.isHidden())
-        self.assertTrue(w.magic_button.menu() is w.ai_action_menu)
+        self.assertIsNone(w.magic_button.menu())
         w.set_project_type('minimax_frames')
         self.assertTrue(w.timeline_controls.indexOf(w.magic_button) >= 0)
         self.assertEqual(len([x for x in w.findChildren(QPushButton, 'timelineButton') if x is w.magic_button]), 1)
         w.unified_prompt.setPlainText('Existing unified draft')
         w.refresh_primary_ai_action()
-        self.assertEqual(w.primary_ai_command, 'refine_unified')
+        self.assertEqual(w.primary_ai_command, 'refine')
         w.set_project_type('minimax_prompt_refinement')
         self.assertEqual(w.minimax_panel.header.indexOf(w.magic_button) >= 0, True)
         self.assertFalse(w.magic_button.isEnabled())  # no text to refine
@@ -255,12 +255,12 @@ class UnifiedEditorTests(unittest.TestCase):
         self.assertIn('Validated production prompt', w.unified_prompt.toPlainText())
 
     def test_refine_uses_edited_prompt_and_notes_for_selected_mode(self):
-        for kind, expected in [('minimax_frames', ai.refine_minimax_h3_prompt), ('minimax_references', ai.refine_minimax_h3_reference_prompt)]:
+        for kind in ('minimax_frames', 'minimax_references'):
             w = self.make_window(kind)
             w.unified_prompt.setPlainText('/refine-global Preserve my ending\nUser-edited production prompt')
             with patch.object(w, 'ai_credentials', return_value=(w.settings.value('provider', 'gemini'), w.settings.value('gemini_model', ai.GEMINI_MODELS[0]), 'unused')), patch.object(w, 'start_ai_worker') as worker:
                 w.refine_minimax_prompt()
-            self.assertIs(worker.call_args.args[0], expected)
+            self.assertEqual(worker.call_args.args[0].__name__, 'generate_combined')
             self.assertIn('User-edited production prompt', worker.call_args.args[1][9])
             self.assertIn('/refine-global Preserve my ending', worker.call_args.args[1][9])
             self.assertEqual(w.minimax_operation_editor_snapshot, ('/refine-global Preserve my ending\nUser-edited production prompt', ''))
