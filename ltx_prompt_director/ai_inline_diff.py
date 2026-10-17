@@ -124,9 +124,16 @@ class LiveTypingPreview(QObject):
     def render(self):
         if not self.active or self.suspended or self.editor is None:
             return
-        candidate = self.last_candidate
-        if not candidate or candidate == self.rendered_candidate:
+        available = self.last_candidate
+        if not available or available == self.rendered_candidate:
             return
+        # Animate newly arrived text in measured character batches instead of
+        # instantly pasting a large provider SSE chunk. Catch up adaptively.
+        if not available.startswith(self.rendered_candidate):
+            self.rendered_candidate = ""
+        remaining = len(available) - len(self.rendered_candidate)
+        step = max(24, min(160, remaining // 7))
+        candidate = available[:len(self.rendered_candidate) + step]
         self.rendered_candidate = candidate
         text = self.editor
         pos = text.verticalScrollBar().value()
@@ -160,6 +167,8 @@ class LiveTypingPreview(QObject):
                 text.verticalScrollBar().setValue(pos)
         finally:
             self._busy_render = False
+        if self.active and not self.suspended and self.rendered_candidate != self.last_candidate:
+            self.timer.start()
 
     def restore_baseline(self):
         self.timer.stop()
