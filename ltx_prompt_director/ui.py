@@ -36,8 +36,7 @@ from .ai_stream import STREAM_SINK
 from .stream_widgets import ReasoningActivityDock, LiveOutputPane
 from .ai_inline_diff import LiveTypingPreview
 from .segment_plan import (supports_structured_edit, generate_combined, preview_operations,
-                           build_segment_objects, stream_operations, completed_stream_records,
-                           render_requested_artwork)
+                           build_segment_objects, stream_operations, completed_stream_records)
 from .artwork_tools import available_artwork_tools, render_artwork
 from .cache_maintenance import cover_path, mark_ready, needs_refresh, warm_metadata
 from .ai import AIResponseFormatError, GEMINI_MODELS, build_minimax_h3_prompt, build_minimax_h3_reference_prompt, build_prompts, minimax_h3_cache_key, provider_error_message, WORKSPACE_INSTRUCTIONS, refine_minimax_text_prompt, refine_minimax_h3_prompt, refine_minimax_h3_reference_prompt, refine_segment_prompt, refine_global_prompt, refine_timing, retryable_connection_error
