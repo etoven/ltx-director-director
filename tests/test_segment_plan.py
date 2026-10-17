@@ -24,6 +24,89 @@ def record(item):
 
 
 class SegmentPlanTests(unittest.TestCase):
+    def test_sync_retimes_existing_images_without_replacing_pixels(self):
+        originals = seeded()
+        original_prompt = "00:00–00:01 opening; 00:01–00:08 transform"
+        rows = [
+            {**record(originals[0]), "duration": 1.0, "prompt": "Opening image held one second"},
+            {**record(originals[1]), "duration": 7.0, "prompt": "Final image reached at eight seconds"},
+        ]
+        result = segment_plan.normalize_timeline_sync(
+            json.dumps({"prompt": "Unwanted model revision", "segments": rows}),
+            originals, original_prompt)
+        self.assertNotIn("prompt", result)
+        fresh = segment_plan.build_segment_objects(originals, result["segments"])
+        self.assertEqual([x.duration for x in fresh], [1.0, 7.0])
+        self.assertEqual([x.id for x in fresh], ["seg-a", "seg-b"])
+        self.assertEqual([x.media_path for x in fresh], ["/tmp/a.png", "/tmp/b.png"])
+        self.assertEqual([x.role for x in fresh], ["start", "end"])
+        self.assertEqual([x.prompt for x in fresh],
+                         ["Opening image held one second", "Final image reached at eight seconds"])
+        self.assertEqual([op["kind"] for op in segment_plan.preview_operations(originals, result["segments"])],
+                         ["timing", "rewrite", "timing", "rewrite"])
+
+    def test_sync_rebuilds_new_intervals_and_optional_image_placeholders(self):
+        originals = seeded()
+        first, last = [record(x) for x in originals]
+        first["duration"] = 1.5
+        last["duration"] = 1.5
+        inserted_text = {"id": "new:1", "name": "Motion bridge", "kind": "text",
+                         "role": "text", "duration": 2.0, "prompt": "Gradual change",
+                         "imagePrompt": "", "artworkPrompt": ""}
+        inserted_picture = {"id": "new:2", "name": "Missing checkpoint", "kind": "image",
+                            "role": "end", "duration": 3.0, "prompt": "Ending pose",
+                            "imagePrompt": "Close frame in identical light",
+                            "artworkPrompt": "Render a visually matching missing ending frame"}
+        result = segment_plan.normalize_timeline_sync(
+            json.dumps({"segments": [first, inserted_text, inserted_picture, last]}),
+            originals, "fixed master")
+        items = segment_plan.build_segment_objects(originals, result["segments"])
+        self.assertEqual([x.kind for x in items], ["image", "text", "text", "image"])
+        self.assertEqual(items[2].artwork_target_role, "end")
+        self.assertEqual(items[2].artwork_status, "")
+        self.assertEqual([x.media_path for x in items if x.kind == "image"],
+                         ["/tmp/a.png", "/tmp/b.png"])
+
+    def test_sync_rejects_image_deletion_and_existing_artwork_modification(self):
+        originals = seeded()
+        with self.assertRaisesRegex(Exception, "retain media checkpoints"):
+            segment_plan.normalize_timeline_sync(
+                json.dumps({"segments": [record(originals[0])]}),
+                originals, "unchanged")
+        rows = [record(x) for x in originals]
+        rows[0]["artworkPrompt"] = "Regenerate existing frame"
+        with self.assertRaisesRegex(Exception, "cannot regenerate"):
+            segment_plan.normalize_timeline_sync(
+                json.dumps({"segments": rows}), originals, "unchanged")
+
+    def test_sync_sends_existing_json_and_images_with_uuid_to_provider(self):
+        originals = seeded()
+        visuals = [{"name": "First frame", "kind": "image", "role": "start",
+                    "image": "data:image/png;base64,AAAA"},
+                   {"name": "Ending frame", "kind": "image", "role": "end",
+                    "image": "data:image/png;base64,BBBB"}]
+        rows = [record(x) for x in originals]
+        rows[0]["duration"] = 1.0
+        rows[1]["duration"] = 7.0
+        captured = {}
+        def reply(inputs, provider, model, api_key, rules, timeout):
+            captured["inputs"] = inputs
+            captured["rules"] = rules
+            return json.dumps({"segments": rows})
+        with patch.object(segment_plan.ai, "_minimax_frames_inputs", return_value=visuals), \\
+             patch.object(segment_plan.ai, "_provider_raw", side_effect=reply):
+            result = segment_plan.sync_timeline_to_prompt(
+                originals, "gemini", "gemini-3.5-flash", "test-key",
+                "00:00-00:01: original image; 00:01-00:08: ending image",
+                30, [], "minimax_frames", "frames")
+        self.assertEqual(result["segments"][0]["duration"], 1.0)
+        self.assertIn("seg-a", captured["inputs"][0]["name"])
+        self.assertIn("seg-b", captured["inputs"][1]["name"])
+        self.assertIn("data:image/png;base64,AAAA", captured["inputs"][0]["image"])
+        self.assertIn('"id": "seg-a"', captured["rules"])
+        self.assertIn("AUTHORITATIVE COMBINED PROMPT", captured["rules"])
+        self.assertIn("retime", captured["rules"].lower())
+
     def test_gpt_six_gate(self):
         self.assertTrue(segment_plan.supports_structured_edit("chatgpt", "gpt-6"))
         self.assertTrue(segment_plan.supports_structured_edit("openai", "gpt-6.1-mini"))
