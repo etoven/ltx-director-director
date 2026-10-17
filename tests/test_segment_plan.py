@@ -93,8 +93,8 @@ class SegmentPlanTests(unittest.TestCase):
             captured["inputs"] = inputs
             captured["rules"] = rules
             return json.dumps({"segments": rows})
-        with patch.object(segment_plan.ai, "_minimax_frames_inputs", return_value=visuals), \\
-             patch.object(segment_plan.ai, "_provider_raw", side_effect=reply):
+        with (patch.object(segment_plan.ai, "_minimax_frames_inputs", return_value=visuals),
+              patch.object(segment_plan.ai, "_provider_raw", side_effect=reply)):
             result = segment_plan.sync_timeline_to_prompt(
                 originals, "gemini", "gemini-3.5-flash", "test-key",
                 "00:00-00:01: original image; 00:01-00:08: ending image",
