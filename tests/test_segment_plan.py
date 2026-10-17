@@ -81,6 +81,47 @@ class SegmentPlanTests(unittest.TestCase):
                     "prompt": "Complete", "segments": records,
                 }), items)
 
+    def test_existing_image_artwork_edit_is_not_dropped(self):
+        items = seeded()
+        edit = dict(record(items[0]),
+                    artworkPrompt="Remove the unwanted object from this frame",
+                    imagePrompt="Same original composition, with object removed")
+        response = segment_plan.normalize_plan(json.dumps({
+            "prompt": "Same original production wording",
+            "segments": [edit, record(items[1])]
+        }), items)
+        self.assertEqual(response["segments"][0]["artworkPrompt"],
+                         "Remove the unwanted object from this frame")
+        self.assertIn("artwork", [op["kind"] for op in
+                                  segment_plan.preview_operations(items, response["segments"])])
+        built = segment_plan.build_segment_objects(items, response["segments"])
+        self.assertEqual(built[0].media_path, "/tmp/a.png")
+        self.assertEqual(built[0].kind, "image")
+        self.assertEqual(built[0].role, "start")
+        self.assertIn("To EDIT OR REGENERATE AN EXISTING IMAGE FRAME",
+                      segment_plan.response_contract(items, "Draft", refine=True))
+
+    def test_image_edit_rejects_nonimage_existing_segment(self):
+        items = seeded()
+        items[0].kind = "video"
+        data = dict(record(items[0]), artworkPrompt="Edit this existing movie")
+        with self.assertRaisesRegex(segment_plan.ai.AIResponseFormatError,
+                                    "Only existing image frames"):
+            segment_plan.normalize_plan(json.dumps({
+                "prompt": "Original", "segments": [data, record(items[1])]
+            }), items)
+
+    def test_explicit_refine_edit_not_regular_image_prose(self):
+        self.assertEqual(
+            segment_plan.explicit_existing_image_edit(
+                "Continue story\\n/refine Edit this image: remove the background object"),
+            "Edit this image: remove the background object"
+        )
+        self.assertEqual(segment_plan.explicit_existing_image_edit(
+            "Generate imagery from this picture slowly."), "")
+        self.assertEqual(segment_plan.explicit_existing_image_edit(
+            "/refine Move character toward the image in the background"), "")
+
     def test_progress_only_uses_completed_json_records(self):
         raw = '{"prompt":"New draft","segments":[' + json.dumps(record(seeded()[0]))
         self.assertEqual(len(segment_plan.completed_stream_records(raw)), 1)
@@ -269,6 +310,51 @@ class SegmentPlanTests(unittest.TestCase):
             self.assertIn("new:1", images)
             self.assertTrue(Path(images["new:1"]).is_file())
             generate.assert_called_once()
+
+    def test_existing_image_edit_calls_gemini_with_source_bytes(self):
+        from io import BytesIO
+        from PIL import Image
+        import base64
+        output = BytesIO()
+        Image.new("RGB", (12, 8)).save(output, format="PNG")
+        encoded = base64.b64encode(output.getvalue()).decode()
+        class Reply:
+            def raise_for_status(self): pass
+            def json(self):
+                return {"candidates":[{"content":{"parts":[{
+                    "inlineData":{"mimeType":"image/png","data":encoded}
+                }]}}]}
+        tool = artwork_tools.ArtworkTool("gemini", "gemini-3.1-flash-lite-image", "key")
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "original.png"
+            source.write_bytes(output.getvalue())
+            with patch.object(artwork_tools.requests, "post", return_value=Reply()) as post:
+                result = artwork_tools._gemini_image("Edit fur", tool, str(source))
+            self.assertTrue(result.startswith(b"\\x89PNG"))
+            parts = post.call_args.kwargs["json"]["contents"][0]["parts"]
+            self.assertEqual(parts[0]["text"], "Edit fur")
+            self.assertEqual(base64.b64decode(parts[1]["inlineData"]["data"]),
+                             output.getvalue())
+
+    def test_existing_image_edit_uses_openai_edit_endpoint_not_generate(self):
+        from io import BytesIO
+        from PIL import Image
+        import base64
+        output = BytesIO()
+        Image.new("RGB", (12, 8)).save(output, format="PNG")
+        class Reply:
+            def raise_for_status(self): pass
+            def json(self): return {"data":[{"b64_json":base64.b64encode(output.getvalue()).decode()}]}
+        tool = artwork_tools.ArtworkTool("openai", "gpt-image-2", "key")
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "frame.png"
+            source.write_bytes(output.getvalue())
+            with patch.object(artwork_tools.requests, "post", return_value=Reply()) as post:
+                result = artwork_tools._openai_image("Edit frame", tool, str(source))
+            self.assertTrue(result.startswith(b"\\x89PNG"))
+            self.assertTrue(post.call_args.args[0].endswith("/images/edits"))
+            self.assertIn("image", post.call_args.kwargs["files"])
+            self.assertEqual(post.call_args.kwargs["data"]["model"], "gpt-image-2")
 
     def test_gemini_flash_reasoning_model_can_plan_segments(self):
         self.assertTrue(segment_plan.supports_structured_edit("gemini", "gemini-3.5-flash"))

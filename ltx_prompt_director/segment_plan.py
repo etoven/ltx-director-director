@@ -51,6 +51,14 @@ def response_contract(segments, current_prompt, *, refine, focus="all"):
         "new visual media cannot be fabricated. If new artwork is requested, "
         "include a detailed imagePrompt and artworkPrompt; the app can render "
         "only through a separately authenticated image provider. "
+        "To EDIT OR REGENERATE AN EXISTING IMAGE FRAME, keep its exact existing "
+        "ID, kind=image and start/end role, but set artworkPrompt to a detailed "
+        "image-editing instruction and imagePrompt to the intended resulting "
+        "frame. Do this whenever the director explicitly asks to edit, replace, "
+        "fix, render, or regenerate an image already on the timeline. The app "
+        "will supply that frame's ORIGINAL pixels to the image-editing API. "
+        "Do not create a new ID for an in-place edit. Leave artworkPrompt empty "
+        "on existing images unless actual image generation/editing is requested. "
         "Never provide external media paths or URLs, and do not change existing "
         "media kinds. Text items cannot use start/end role. "
         "The unified prompt and segments must describe exactly the same sequence. "
@@ -121,9 +129,14 @@ def normalize_plan(raw, current):
             raise ai.AIResponseFormatError("Invalid text field.")
         if not name.strip() or not (prose.strip() or art.strip()):
             raise ai.AIResponseFormatError("Segment requires a name and direction.")
+        if before and art.strip() and (before.kind != "image" or not before.media_path):
+            raise ai.AIResponseFormatError(
+                "Only existing image frames with real media can request an in-place artwork edit."
+            )
         normalized.append({"id": sid, "name": name.strip(), "kind": kind,
                            "role": role, "duration": duration, "prompt": prose,
-                           "imagePrompt": img, "artworkPrompt": art.strip() if not before else "",
+                           "imagePrompt": img,
+                           "artworkPrompt": art.strip() if (not before or before.kind == "image") else "",
                            "artworkRole": artwork_role})
     return {"prompt": prompt.strip(), "segments": normalized}
 
@@ -148,6 +161,8 @@ def preview_operations(original, records):
             ops.append({"kind": "role", "id": before.id, "name": before.name, "role": entry["role"]})
         if before.prompt != entry["prompt"] or before.image_prompt != entry["imagePrompt"]:
             ops.append({"kind": "rewrite", "id": before.id, "name": before.name})
+        if entry["artworkPrompt"] and before.kind == "image":
+            ops.append({"kind": "artwork", "id": before.id, "name": before.name})
     return ops
 
 def build_segment_objects(original, records):
@@ -163,6 +178,22 @@ def build_segment_objects(original, records):
             item.artwork_target_role = row.get("artworkRole", "start")
         built.append(item)
     return built
+
+
+def explicit_existing_image_edit(text: str) -> str:
+    """Recover an unambiguous /refine image request when a model omits artworkPrompt.
+
+    Never turn ordinary story prose mentioning images into billable image work.
+    This reads ONLY explicit inline edit instructions from the user.
+    """
+    for match in re.finditer(r"(?im)^\\s*/refine(?:-global)?\\s*:?[ \\t]+([^\\n]+)", text or ""):
+        instruction = match.group(1).strip()
+        if (re.search(r"\\b(image|frame|picture|photo|still|artwork)\\b", instruction, re.I)
+                and re.search(r"\\b(edit|generate|regenerate|render|create|change|modify|"
+                              r"replace|remove|add|fix|alter|make|update)\\b", instruction, re.I)):
+            return instruction
+    return ""
+
 
 def generate_combined(segments, provider, model, api_key, intent, global_prompt,
                       sfx, spoken_dialog, reduce_music, current_prompt,
@@ -301,4 +332,6 @@ def stream_operations(original: list[Segment], raw: str) -> list[dict]:
             changes.append({"kind": "role", "id": before.id, "name": before.name, "role": item["role"]})
         if item.get("prompt", before.prompt) != before.prompt:
             changes.append({"kind": "rewrite", "id": before.id, "name": before.name})
+        if before.kind == "image" and str(item.get("artworkPrompt") or "").strip():
+            changes.append({"kind": "artwork", "id": before.id, "name": before.name})
     return changes

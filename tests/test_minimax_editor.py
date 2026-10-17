@@ -1,5 +1,6 @@
 import os
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
@@ -316,6 +317,78 @@ class UnifiedEditorTests(unittest.TestCase):
         card = w.timeline.itemWidget(w.timeline.item(1))
         self.assertIn('Generating artwork', card.preview.text())
         disk.assert_called_once()
+
+    def test_existing_image_edit_renders_with_original_reference_and_retries(self):
+        from io import BytesIO
+        from PIL import Image
+        from tempfile import TemporaryDirectory
+        w = self.make_window('minimax_frames')
+        with TemporaryDirectory() as tmp:
+            original = Path(tmp) / "original.png"
+            Image.new("RGB", (16, 9)).save(original)
+            existing = w.segments[0]
+            existing.kind = "image"
+            existing.role = "end"
+            existing.media_path = existing.preview_path = str(original)
+            w.refresh_timeline(0)
+            w.session_keys['gemini'] = 'image-key'
+            w.settings.setValue('artwork/cost_decision/gemini', 'allow')
+            before = list(w.segments)
+            w.ai_segment_snapshot = before
+            w.minimax_operation_kind = "refine_frames"
+            def data(s):
+                return {"id":s.id, "name":s.name, "kind":s.kind, "role":s.role,
+                        "duration":s.duration, "prompt":s.prompt,
+                        "imagePrompt":s.image_prompt, "artworkPrompt":""}
+            plan = [data(s) for s in before]
+            plan[0]["artworkPrompt"] = "Change only the fur color"
+            with patch.object(w, "start_disk_job") as job:
+                w.combined_refinement_finished({
+                    "prompt":"Original production prompt", "segments":plan
+                })
+            self.assertEqual(w.segments[0].kind, "image")
+            self.assertEqual(w.segments[0].media_path, str(original))
+            self.assertEqual(w.segments[0].role, "end")
+            self.assertEqual(w.segments[0].artwork_status, "generating")
+            request = job.call_args.args[1][0][0]
+            self.assertEqual(request["sourceImage"], str(original))
+            self.assertEqual(request["id"], existing.id)
+            tile = w.timeline.itemWidget(w.timeline.item(0))
+            self.assertIn("Generating artwork", tile.artwork_overlay.text())
+            self.assertTrue(tile.artwork_overlay.isVisibleTo(tile.preview))
+            # Complete without overwriting the user's source image file.
+            edited = Path(tmp) / "edited.png"
+            Image.new("RGB", (9, 16)).save(edited)
+            ready = job.call_args.args[2]
+            ready({existing.id: str(edited)})
+            self.assertEqual(w.segments[0].media_path, str(edited))
+            self.assertEqual(w.segments[0].role, "end")
+            self.assertTrue(original.is_file())
+
+    def test_explicit_refine_triggers_existing_frame_if_model_omits_artwork(self):
+        from tempfile import TemporaryDirectory
+        from PIL import Image
+        w = self.make_window('minimax_frames')
+        with TemporaryDirectory() as tmp:
+            source = Path(tmp)/"frame.png"
+            Image.new("RGB", (16, 9)).save(source)
+            w.segments[0].kind = "image"
+            w.segments[0].media_path = w.segments[0].preview_path = str(source)
+            w.segments[0].prompt = "Keep composition\\n/refine Edit this image to remove the fog"
+            w.refresh_timeline(0)
+            w.ai_segment_snapshot = list(w.segments)
+            w.minimax_operation_kind = "refine_frames"
+            w.session_keys["gemini"] = "key"
+            w.settings.setValue("artwork/cost_decision/gemini", "allow")
+            rows = [{"id":s.id,"name":s.name,"kind":s.kind,"role":s.role,
+                     "duration":s.duration,"prompt":s.prompt,
+                     "imagePrompt":s.image_prompt,"artworkPrompt":""}
+                    for s in w.segments]
+            with patch.object(w, "start_disk_job") as job:
+                w.combined_refinement_finished({"prompt":"A draft","segments":rows})
+            job.assert_called_once()
+            self.assertEqual(w.segments[0].artwork_prompt,
+                             "Edit this image to remove the fog")
 
     def test_unchanged_timeline_accepts_chatgpt_model_completion(self):
         w = self.make_window('minimax_frames')

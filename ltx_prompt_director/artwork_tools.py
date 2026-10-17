@@ -95,27 +95,61 @@ def _decode(value: str) -> bytes:
     return _png_payload(base64.b64decode(value, validate=True))
 
 
-def _openai_image(prompt: str, tool: ArtworkTool) -> bytes:
-    response = requests.post(
-        "https://api.openai.com/v1/images/generations",
-        headers={"Authorization": "Bearer " + tool.api_key,
-                 "Content-Type": "application/json"},
-        json={"model": tool.model, "size": "1536x1024", "n": 1, "prompt": prompt},
-        timeout=240,
-    )
+def _source_png(path: str) -> bytes:
+    """Read a genuine local image, bounded for model inline/multipart inputs."""
+    source = Path(path)
+    if not source.is_file():
+        raise FileNotFoundError(f"Artwork source image is missing: {source.name}")
+    if source.stat().st_size > 100 * 1024 * 1024:
+        raise ValueError("Source image is too large to process (100 MB limit).")
+    result = BytesIO()
+    with Image.open(source) as image:
+        image.load()
+        if image.width * image.height > 50_000_000:
+            raise ValueError("Source image dimensions are too large to edit.")
+        image.thumbnail((2048, 2048), Image.Resampling.LANCZOS)
+        image.convert("RGB").save(result, format="PNG")
+    return result.getvalue()
+
+
+def _openai_image(prompt: str, tool: ArtworkTool, source_path: str = "") -> bytes:
+    if source_path:
+        # GPT Image edits require multipart images/edits, not a plain text
+        # image-generation call. The actual existing frame is the input image.
+        response = requests.post(
+            "https://api.openai.com/v1/images/edits",
+            headers={"Authorization": "Bearer " + tool.api_key},
+            data={"model": tool.model, "size": "1536x1024", "n": "1",
+                  "prompt": prompt},
+            files={"image": ("source.png", _source_png(source_path), "image/png")},
+            timeout=240,
+        )
+    else:
+        response = requests.post(
+            "https://api.openai.com/v1/images/generations",
+            headers={"Authorization": "Bearer " + tool.api_key,
+                     "Content-Type": "application/json"},
+            json={"model": tool.model, "size": "1536x1024", "n": 1, "prompt": prompt},
+            timeout=240,
+        )
     response.raise_for_status()
     return _decode(response.json()["data"][0]["b64_json"])
 
 
-def _gemini_image(prompt: str, tool: ArtworkTool) -> bytes:
-    """Nano Banana 2 Lite using Google's documented generateContent REST API."""
+def _gemini_image(prompt: str, tool: ArtworkTool, source_path: str = "") -> bytes:
+    """Gemini image generation and source-guided image-to-image editing."""
+    parts = [{"text": prompt}]
+    if source_path:
+        parts.append({"inlineData": {"mimeType": "image/png",
+                                     "data": base64.b64encode(
+                                         _source_png(source_path)).decode("ascii")}})
     response = requests.post(
         f"https://generativelanguage.googleapis.com/v1/models/"
         f"{tool.model}:generateContent",
         headers={"x-goog-api-key": tool.api_key,
                  "Content-Type": "application/json"},
         json={
-            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+            "contents": [{"role": "user", "parts": parts}],
             "generationConfig": {
                 "responseModalities": ["IMAGE"],
                 "responseFormat": {"image": {"aspectRatio": "16:9", "imageSize": "1K"}},
@@ -127,7 +161,7 @@ def _gemini_image(prompt: str, tool: ArtworkTool) -> bytes:
     for candidate in response.json().get("candidates", []):
         for part in (candidate.get("content") or {}).get("parts", []):
             image = part.get("inlineData") or part.get("inline_data") or {}
-            if image.get("data"):
+            if image.get("data") and not part.get("thought"):
                 return _decode(image["data"])
     raise ValueError("Gemini Flash Lite returned no image data.")
 
@@ -145,8 +179,13 @@ def render_artwork(records: list[dict], tool: ArtworkTool) -> dict[str, str]:
         if not entry.get("artworkPrompt"):
             continue
         prompt = entry["artworkPrompt"]
-        data = (_gemini_image(prompt, tool) if tool.provider == "gemini"
-                else _openai_image(prompt, tool))
+        source_path = str(entry.get("sourceImage") or "")
+        if source_path:
+            prompt = ("Edit the provided SOURCE IMAGE. Preserve the original "
+                      "scene, composition, characters, camera viewpoint and "
+                      "lighting except for the following requested changes: " + prompt)
+        data = (_gemini_image(prompt, tool, source_path) if tool.provider == "gemini"
+                else _openai_image(prompt, tool, source_path))
         path = root / (uuid4().hex + ".png")
         path.write_bytes(data)
         output[entry["id"]] = str(path)

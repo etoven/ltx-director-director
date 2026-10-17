@@ -36,7 +36,8 @@ from .ai_stream import STREAM_SINK
 from .stream_widgets import ReasoningActivityDock, LiveOutputPane
 from .ai_inline_diff import LiveTypingPreview
 from .segment_plan import (supports_structured_edit, generate_combined, preview_operations,
-                           build_segment_objects, stream_operations, completed_stream_records)
+                           build_segment_objects, stream_operations, completed_stream_records,
+                           explicit_existing_image_edit)
 from .artwork_tools import IMAGE_MODEL_CHOICES, available_artwork_tools, render_artwork
 from .cache_maintenance import cover_path, mark_ready, needs_refresh, warm_metadata
 from .ai import AIResponseFormatError, GEMINI_MODELS, build_minimax_h3_prompt, build_minimax_h3_reference_prompt, build_prompts, minimax_h3_cache_key, provider_error_message, WORKSPACE_INSTRUCTIONS, refine_minimax_text_prompt, refine_minimax_h3_prompt, refine_minimax_h3_reference_prompt, refine_segment_prompt, refine_global_prompt, refine_timing, retryable_connection_error
@@ -1959,6 +1960,10 @@ class SegmentCard(QFrame):
         self.artwork_timer = QTimer(self)
         self.artwork_timer.setInterval(95)
         self.artwork_timer.timeout.connect(self._advance_artwork_shimmer)
+        self.artwork_overlay = QLabel(self.preview)
+        self.artwork_overlay.setObjectName("artworkOverlay")
+        self.artwork_overlay.move(7, 26)
+        self.artwork_overlay.hide()
         if segment.artwork_status == "generating":
             self.artwork_timer.start()
             self._advance_artwork_shimmer()
@@ -1990,12 +1995,25 @@ class SegmentCard(QFrame):
         self.update_layout(preview_height, pixels_per_second)
 
     def _show_artwork_placeholder(self):
-        if self.segment.kind != "text" or not self.segment.artwork_prompt:
+        if not self.segment.artwork_prompt:
             return
         state = self.segment.artwork_status
         label = ("✦  Generating artwork" if state == "generating" else
                  "◌  Artwork failed · right-click to retry" if state == "failed" else
                  "✦  Artwork requested · ready to render")
+        if self.segment.kind == "image":
+            # Keep the existing reference visible while an edit is underway.
+            self.artwork_overlay.setText(label + ("." * (self.artwork_frame % 4)
+                                                  if state == "generating" else ""))
+            self.artwork_overlay.setStyleSheet(
+                "QLabel#artworkOverlay{background:rgba(12,30,46,224);"
+                "border:1px solid #5382aa;border-radius:5px;color:#dff1ff;"
+                "font-size:10px;padding:4px 6px}"
+            )
+            self.artwork_overlay.adjustSize()
+            self.artwork_overlay.show()
+            self.artwork_overlay.raise_()
+            return
         if state == "generating":
             dots = "." * (self.artwork_frame % 4)
             self.preview.setText(label + dots + "\n\n" + self.segment.prompt[:130])
@@ -5820,7 +5838,7 @@ class MainWindow(QMainWindow):
         if self.minimax_panel:
             self.minimax_panel.refresh_references()
         total = self.total_duration()
-        self.sequence_bar.setText(f"Sequence     Start: 0.00s  |  End: {total:.2f}s  |  Length: {total:.2f}s")
+        self.sequence_bar.setText(f"SEQUENCE  ·  {total:.2f}s  ·  {len(self.segments)} segments")
         self.add_tile.setText("＋\nAdd media")
         self.add_tile.setEnabled(True)
         self.add_text_tile.setEnabled(True)
@@ -5851,14 +5869,14 @@ class MainWindow(QMainWindow):
         self.timeline.setCurrentItem(item)
         segment = self.current_segment()
         menu = QMenu(self)
+        if segment and segment.artwork_prompt and segment.artwork_status in {"awaiting", "failed"}:
+            artwork_action = menu.addAction(
+                "✦ Render requested artwork" if segment.artwork_status == "awaiting"
+                else "↻ Retry artwork generation", self.retry_selected_artwork
+            )
+            artwork_action.setToolTip("Use your configured image-generation model and API key")
+            menu.addSeparator()
         if segment and segment.kind == "text":
-            if segment.artwork_prompt and segment.artwork_status in {"awaiting", "failed"}:
-                artwork_action = menu.addAction(
-                    "✦ Render requested artwork" if segment.artwork_status == "awaiting"
-                    else "↻ Retry artwork generation", self.retry_selected_artwork
-                )
-                artwork_action.setToolTip("Use separately billed OpenAI Images API")
-                menu.addSeparator()
             if not self.unified_workspace:
                 menu.addAction("Edit text prompt", self.focus_segment_prompt)
             menu.addAction("Convert to image segment…", self.convert_text_segment_to_image)
@@ -7325,24 +7343,36 @@ class MainWindow(QMainWindow):
         # generate-image button or require a manual checkbox.
         tools = self._available_artwork_tools()
         tool = tools[0] if tools else None
-        requested_artwork = any(row["id"].startswith("new:") and
-                                row.get("artworkPrompt") for row in records)
-        should_render = bool(
-            tool and requested_artwork and self._approve_artwork_cost(tool)
-        )
-        to_render = []
+        # A schema-compliant edit request can target an existing frame, not
+        # just a new: placeholder. Never silently discard its artworkPrompt.
+        # If the model omits the field, honor an explicit /refine instruction
+        # physically written on that same existing image segment.
+        before_by_id = {segment.id: segment for segment in before}
+        requested = []
         inserted = set()
         for data, item in zip(records, updated):
-            if data["id"].startswith("new:"):
+            previous = before_by_id.get(data["id"])
+            is_new = previous is None
+            if is_new:
                 inserted.add(item.id)
-                item.artwork_prompt = data.get("artworkPrompt", "")
-                if item.artwork_prompt:
-                    # Limit paid automatic image requests to four per pass.
-                    # Remaining artwork directions stay visible and retryable.
-                    auto_render = should_render and len(to_render) < 4
-                    item.artwork_status = "generating" if auto_render else "awaiting"
-                    if auto_render:
-                        to_render.append((item.id, dict(data)))
+            direction = str(data.get("artworkPrompt") or "").strip()
+            if not direction and previous and previous.kind == "image":
+                direction = explicit_existing_image_edit(previous.prompt)
+                if direction:
+                    data["artworkPrompt"] = direction
+            if direction and (is_new or (previous.kind == "image" and previous.media_path)):
+                item.artwork_prompt = direction
+                requested.append((item, data))
+        should_render = bool(
+            tool and requested and self._approve_artwork_cost(tool)
+        )
+        to_render = []
+        for item, data in requested:
+            # Limit automatic separately billed images to four per pass.
+            auto_render = should_render and len(to_render) < 4
+            item.artwork_status = "generating" if auto_render else "awaiting"
+            if auto_render:
+                to_render.append((item.id, dict(data)))
         if fit_sequence([item.duration for item in updated],
                         self.maximum_sequence_duration) != [item.duration for item in updated]:
             self._clear_ai_timeline_preview()
@@ -7365,12 +7395,18 @@ class MainWindow(QMainWindow):
         self.refresh_timeline(selected)
         self._animate_ai_timeline(before, inserted)
         self.mark_dirty()
-        self.ai_edit_feed.setText(
-            "✦ Applied " + str(len(changes)) + " segment edit(s)"
-            + (" · artwork rendering" if to_render else "")
-        )
-        self.ai_edit_feed.show()
         self.ai_timeline_status.hide()
+        if to_render:
+            self.ai_edit_feed.setText(
+                f"✦ Rendering {len(to_render)} requested image(s)…"
+            )
+            self.ai_edit_feed.show()
+        else:
+            # A successful change is not a permanent panel above the timeline.
+            self.ai_edit_feed.hide()
+        self.statusBar().showMessage(
+            f"✦ Applied {len(changes)} timeline edit(s)", 5500
+        )
         for segment_id, data in to_render:
             self._start_segment_artwork(segment_id, data, tool)
         waiting = sum(1 for seg in self.segments if seg.artwork_status == "awaiting")
@@ -7381,9 +7417,12 @@ class MainWindow(QMainWindow):
             )
         if waiting and not should_render:
             self.ai_edit_feed.setText(
-                "✦ Artwork requests saved and ready. Configure a Gemini or "
-                "OpenAI API key (or approve image costs) to render them."
+                f"✦ {waiting} requested image(s) waiting · select an image model "
+                "and API key in Settings, then right-click the frame to render."
             )
+            self.ai_edit_feed.show()
+        if not waiting and not to_render:
+            self.ai_edit_feed.hide()
 
     def _start_segment_artwork(self, segment_id, record, tool):
         item = next((item for item in self.segments if item.id == segment_id), None)
@@ -7397,6 +7436,12 @@ class MainWindow(QMainWindow):
                 card.artwork_timer.start()
                 card._advance_artwork_shimmer()
         workspace = (self.workspace_revision, self.current_project_id, self.project_type)
+        # Source comes from a real timeline segment, NEVER the AI JSON. For
+        # edits this stays the unmodified original until an image succeeds.
+        request = dict(record)
+        request["id"] = segment_id
+        if item.kind == "image":
+            request["sourceImage"] = item.media_path
 
         def ready(images):
             if workspace != (self.workspace_revision, self.current_project_id, self.project_type):
@@ -7404,13 +7449,21 @@ class MainWindow(QMainWindow):
             segment = next((s for s in self.segments if s.id == segment_id), None)
             if not segment:
                 return
-            path = images.get(record["id"])
+            path = images.get(segment_id)
             if path and Path(path).is_file():
+                original_kind = segment.kind
                 segment.kind = "image"
-                segment.role = segment.artwork_target_role if segment.artwork_target_role in {"start", "end"} else "start"
+                if original_kind == "text":
+                    segment.role = (segment.artwork_target_role
+                                    if segment.artwork_target_role in {"start", "end"}
+                                    else "start")
+                # Only the project reference changes; source file is untouched.
                 segment.media_path = segment.preview_path = path
                 segment.artwork_status = "complete"
-                self.statusBar().showMessage(f"✦ New AI frame ready: {segment.name}", 5000)
+                self.statusBar().showMessage(
+                    f"✦ {'Edited frame' if original_kind == 'image' else 'New frame'} ready: {segment.name}",
+                    5500,
+                )
             else:
                 segment.artwork_status = "failed"
                 self.statusBar().showMessage(
@@ -7427,7 +7480,7 @@ class MainWindow(QMainWindow):
             )
 
         self.start_disk_job(
-            render_artwork, ([record], tool),
+            render_artwork, ([request], tool),
             ready, failed,
         )
 
@@ -7461,7 +7514,7 @@ class MainWindow(QMainWindow):
             return
         self._start_segment_artwork(
             segment.id,
-            {"id": "new:1", "name": segment.name,
+            {"id": segment.id, "name": segment.name,
              "artworkPrompt": segment.artwork_prompt},
             tool,
         )
