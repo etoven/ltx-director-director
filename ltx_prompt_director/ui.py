@@ -7500,7 +7500,7 @@ class MainWindow(QMainWindow):
         """
         references = []
         seen_paths = set()
-        for slot, reference in enumerate(reference_slots(self.active_reference_images()), 1):
+        for slot, reference in enumerate(reference_slots(self.minimax_reference_images), 1):
             if not reference or reference.get("kind", "image") != "image":
                 continue
             data = str(reference.get("image") or "")

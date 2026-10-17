@@ -323,45 +323,47 @@ class UnifiedEditorTests(unittest.TestCase):
         from tempfile import TemporaryDirectory
         import base64
         from io import BytesIO
+        scratch = TemporaryDirectory()
+        self.addCleanup(scratch.cleanup)
         w = self.make_window('minimax_frames')
-        with TemporaryDirectory() as tmp:
-            source = Path(tmp) / "frame.png"
-            neighbor = Path(tmp) / "next.png"
-            Image.new("RGB", (16, 9)).save(source)
-            Image.new("RGB", (16, 9)).save(neighbor)
-            w.segments[0].kind = "image"
-            w.segments[0].media_path = w.segments[0].preview_path = str(source)
-            w.segments[1].kind = "image"
-            w.segments[1].media_path = w.segments[1].preview_path = str(neighbor)
-            data = BytesIO()
-            Image.new("RGB", (10, 10)).save(data, "PNG")
-            w.minimax_reference_images[0] = {
-                "kind": "image", "name": "Character costume",
-                "role": "wardrobe", "notes": "Keep the brown coat",
-                "image": "data:image/png;base64," +
-                base64.b64encode(data.getvalue()).decode("ascii")}
-            w.refresh_timeline(0)
-            refs = w._artwork_reference_inputs(w.segments[0].id)
-            self.assertTrue(any("wardrobe" in r["label"] for r in refs))
-            self.assertTrue(any(r.get("path") == str(neighbor) for r in refs))
-            self.assertFalse(any(r.get("path") == str(source) for r in refs))
-            w.session_keys["gemini"] = "fake"
-            w.settings.setValue("artwork/cost_decision/gemini", "allow")
-            snapshot = list(w.segments)
-            w.ai_segment_snapshot = snapshot
-            rows = [{"id": s.id, "name": s.name, "kind": s.kind,
-                     "role": s.role, "duration": s.duration,
-                     "prompt": s.prompt, "imagePrompt": s.image_prompt,
-                     "artworkPrompt": ("Keep the coat" if i == 0 else "")}
-                    for i, s in enumerate(snapshot)]
-            with patch.object(w, "start_disk_job") as worker:
-                w.combined_refinement_finished({"prompt": "Edit existing", "segments": rows})
-            request = worker.call_args.args[1][0][0]
-            self.assertEqual(request["sourceImage"], str(source))
-            self.assertEqual(len(request["referenceImages"]), 2)
-            self.assertIn("wardrobe", request["referenceImages"][0]["label"])
-            with patch.object(w, "save_library_project"):
-                w.close()
+        tmp = scratch.name
+        source = Path(tmp) / "frame.png"
+        neighbor = Path(tmp) / "next.png"
+        Image.new("RGB", (16, 9)).save(source)
+        Image.new("RGB", (16, 9)).save(neighbor)
+        w.segments[0].kind = "image"
+        w.segments[0].media_path = w.segments[0].preview_path = str(source)
+        w.segments[1].kind = "image"
+        w.segments[1].media_path = w.segments[1].preview_path = str(neighbor)
+        data = BytesIO()
+        Image.new("RGB", (10, 10)).save(data, "PNG")
+        w.minimax_reference_images[0] = {
+            "kind": "image", "name": "Character costume",
+            "role": "wardrobe", "notes": "Keep the brown coat",
+            "image": "data:image/png;base64," +
+            base64.b64encode(data.getvalue()).decode("ascii")}
+        w.refresh_timeline(0)
+        refs = w._artwork_reference_inputs(w.segments[0].id)
+        self.assertTrue(any("wardrobe" in r["label"] for r in refs))
+        self.assertTrue(any(r.get("path") == str(neighbor) for r in refs))
+        self.assertFalse(any(r.get("path") == str(source) for r in refs))
+        w.session_keys["gemini"] = "fake"
+        w.settings.setValue("artwork/cost_decision/gemini", "allow")
+        snapshot = list(w.segments)
+        w.ai_segment_snapshot = snapshot
+        rows = [{"id": s.id, "name": s.name, "kind": s.kind,
+                 "role": s.role, "duration": s.duration,
+                 "prompt": s.prompt, "imagePrompt": s.image_prompt,
+                 "artworkPrompt": ("Keep the coat" if i == 0 else "")}
+                for i, s in enumerate(snapshot)]
+        with patch.object(w, "start_disk_job") as worker:
+            w.combined_refinement_finished({"prompt": "Edit existing", "segments": rows})
+        request = worker.call_args.args[1][0][0]
+        self.assertEqual(request["sourceImage"], str(source))
+        self.assertEqual(len(request["referenceImages"]), 2)
+        self.assertIn("wardrobe", request["referenceImages"][0]["label"])
+        with patch.object(w, "save_library_project"):
+            w.close()
 
     def test_existing_image_edit_renders_with_original_reference_and_retries(self):
         from io import BytesIO
