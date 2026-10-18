@@ -1,6 +1,15 @@
 """Workspace sequence-duration budgets shared by timeline edits and AI results."""
 from __future__ import annotations
 import math
+from contextvars import ContextVar
+
+
+SHOT_COUNT_LIMIT = ContextVar("shot_count_limit", default=None)
+
+
+def shot_limit(definition: dict) -> int | None:
+    value = definition.get("max_shots", 9 if definition.get("engine", "").startswith("minimax") else 0)
+    return value or None
 
 
 def sequence_limit(definition: dict) -> float | None:

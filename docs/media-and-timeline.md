@@ -22,10 +22,26 @@ Videos use a preview frame from the clip’s final second for the timeline and A
 
 Drag a card to reorder the sequence. Drag its resize edge to change the length, or select it and enter a precise value in **Duration**. The sequence summary shows the total; each card shows its starting time. Image and video cards also show source resolution.
 
-Right-click at the desired cut within a card and choose **Split segment here**.
-Both parts keep the original media and prompt, and the total sequence duration
-stays the same. Video parts use consecutive source intervals. Each part needs
-at least one frame; approve or deny any pending timeline edits before splitting.
+Right-click a card and open **Split segment**. **At clicked position** divides
+the card where you clicked. **2-way split** and **3-way split** create equal,
+frame-aligned parts with these choices:
+
+| Choice | Result |
+| --- | --- |
+| Keep prompt | Each part keeps the original prompt |
+| Divide prompt with AI | The model distributes the prompt's action beats chronologically across the parts |
+| Hard cuts + close-ups with AI | The model divides the action into shots, establishing it first and cutting to close-ups in later parts |
+
+Every split preserves total duration and original media. Video parts use
+consecutive source intervals. AI splits use the configured prompt provider and
+offer one review for the entire split: approve any part to keep all parts, or
+deny any part to restore the original segment. Other segments and the combined
+prompt stay as authored. Each part needs at least one frame. Pending timeline
+reviews and the workspace's **Maximum shots** setting control availability.
+
+![The segment split menu with two-way and three-way options](images/segment-split-menu.png)
+
+![Prompt-preserving, AI division and hard-cut options](images/segment-split-options.png)
 
 Use **Zoom** beside the timeline ruler to inspect a passage. The
 **Fit timeline** icon at the right edge brings the whole sequence into view; moving
@@ -61,6 +77,10 @@ segment timing.
 Use **Replace media**, or hold **Ctrl** while dropping media onto a card, to retain its duration, prompt, role and identity while changing the source. This is useful when a revised pose or a cleaner frame is ready.
 
 An image card’s context menu includes **Copy image** and **Paste image to replace**, using the original-resolution source. For a text card, **Convert to image segment** lets you add an image while keeping the written beat. **Export image** and **Export video** place the original media in the project’s download folder.
+
+Choose **Convert to text segment** on an image or video card to keep its prompt,
+visual direction and duration as a text beat. Its original file remains intact;
+the text segment carries no media or source trims.
 
 When opening older projects, Director checks the stored media type and
 normalizes media names and cache extensions. Duplicated attachments and media

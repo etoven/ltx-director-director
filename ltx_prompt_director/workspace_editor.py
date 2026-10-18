@@ -62,6 +62,11 @@ class WorkspaceEditor(QWidget):
         length_layout.addWidget(self.max_length)
         length_layout.addWidget(self.no_length_limit)
         form.addRow("Maximum sequence length", length_control)
+        self.max_shots = QSpinBox()
+        self.max_shots.setRange(0, 1000000)
+        self.max_shots.setSpecialValueText("Unlimited")
+        self.max_shots.setToolTip("Maximum timeline segments. Set 0 for unlimited. Existing projects keep all their segments.")
+        form.addRow("Maximum shots", self.max_shots)
         self.variables = QLabel()
         self.variables.setWordWrap(True)
         form.addRow("Template fields", self.variables)
@@ -139,7 +144,8 @@ class WorkspaceEditor(QWidget):
         self.populate(self.values[self.current_id])
 
     def populate(self, value):
-        from .timing_limits import sequence_limit
+        from .timing_limits import sequence_limit, shot_limit
+        self.max_shots.setValue(shot_limit(value) or 0)
         maximum = sequence_limit(value)
         self.no_length_limit.setChecked(maximum is None)
         self.max_length.setEnabled(maximum is not None)
@@ -163,9 +169,10 @@ class WorkspaceEditor(QWidget):
 
     def value(self):
         existing = self.values.get(self.current_id, {})
-        return validate_definition(dict(**{key: value for key, value in existing.items() if key not in {"schema_version", "id", "name", "engine", "prompt_mode", "global_prompt", "audio_generation", "references", "generation_prompts", "max_sequence_duration"}}, schema_version=1, id=self.identifier.text().strip(), name=self.name.text().strip(),
+        return validate_definition(dict(**{key: value for key, value in existing.items() if key not in {"schema_version", "id", "name", "engine", "prompt_mode", "global_prompt", "audio_generation", "references", "generation_prompts", "max_sequence_duration", "max_shots"}}, schema_version=1, id=self.identifier.text().strip(), name=self.name.text().strip(),
             engine=self.engine.currentData(), prompt_mode=self.mode.currentData(), global_prompt=self.global_prompt.isChecked(),
             max_sequence_duration=None if self.no_length_limit.isChecked() else self.max_length.value(),
+            max_shots=self.max_shots.value(),
             audio_generation=self.audio.isChecked(), references=dict(enabled=self.references.isChecked(),
             kinds=[kind.strip() for kind in self.kinds.text().split(",") if kind.strip()], untimed_slots=self.slots.value()),
             generation_prompts=dict(generate=self.generate.toPlainText(), refine=self.refine.toPlainText())))

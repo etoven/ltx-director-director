@@ -11,8 +11,7 @@ import re
 from uuid import uuid4
 from . import ai
 from .models import Segment
-
-MAX_SEGMENTS = 96
+from .timing_limits import SHOT_COUNT_LIMIT
 
 def supports_structured_edit(provider, model):
     name = str(model).lower()
@@ -31,6 +30,10 @@ def response_contract(segments, current_prompt, *, refine, focus="all"):
              "duration": s.duration, "prompt": s.prompt,
              "imagePrompt": s.image_prompt, "hasMedia": bool(s.media_path)}
             for s in segments]
+    maximum = SHOT_COUNT_LIMIT.get()
+    budget = (f"Workspace maximum shots: {maximum}. Keep the timeline within that count. "
+              "Preserve existing over-limit projects; never add more segments to them. " if maximum else
+              "This workspace has no shot-count limit. ")
     return (
         "\n\nADDITIVE STRUCTURED SEGMENT JSON CONTRACT. All existing production "
         "instructions above remain authoritative. This extends ONLY the response "
@@ -77,7 +80,7 @@ def response_contract(segments, current_prompt, *, refine, focus="all"):
         "existing segment alongside any new image proposal. "
         "Do not output anything outside JSON.\nCURRENT SEGMENTS:\n"
         + json.dumps(plan, ensure_ascii=False) + "\n"
-        + "FOCUS: " + focus + "\n"
+        + budget + "FOCUS: " + focus + "\n"
         + ("CURRENT USER EDITED UNIFIED PROMPT — preserve requested creative edits "
            "and wording as best as possible:\n" + current_prompt if current_prompt
            else "Generate unified prompt from existing source template.")
@@ -91,8 +94,11 @@ def normalize_plan(raw, current):
     if not isinstance(prompt, str) or not prompt.strip():
         raise ai.AIResponseFormatError("No unified prompt in combined response.")
     records = response.get("segments")
-    if not isinstance(records, list) or not (1 <= len(records) <= MAX_SEGMENTS):
+    if not isinstance(records, list) or not records:
         raise ai.AIResponseFormatError("Invalid combined segment list.")
+    maximum = SHOT_COUNT_LIMIT.get()
+    if maximum is not None and len(records) > max(maximum, len(current)):
+        raise ai.AIResponseFormatError(f"Timeline exceeds the workspace's {maximum}-shot limit.")
     by_id = {s.id: s for s in current}
     used, normalized = set(), []
     for pos, data in enumerate(records):
@@ -317,7 +323,7 @@ def completed_stream_records(raw: str) -> list[dict]:
     decoder = json.JSONDecoder()
     cursor = matched.end()
     records = []
-    while len(records) < MAX_SEGMENTS:
+    while cursor < len(raw):
         while cursor < len(raw) and raw[cursor] in " \t\r\n,":
             cursor += 1
         if cursor >= len(raw) or raw[cursor] == "]":

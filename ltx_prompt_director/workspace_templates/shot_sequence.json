@@ -3,6 +3,7 @@
   "id": "shot_sequence",
   "name": "Shot Sequence",
   "engine": "shot_sequence",
+  "max_shots": 0,
   "prompt_mode": "sequence",
   "global_prompt": false,
   "audio_generation": false,

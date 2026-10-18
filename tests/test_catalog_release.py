@@ -117,7 +117,7 @@ def test_untouched_factory_workspace_upgrade_and_custom_preservation(tmp_path):
     assert set(values) == {'shot_sequence', 'minimax_prompt_refinement', 'ltx', 'minimax_official_skill_base', 'minimax_official_skill_reference', 'minimax_base_guide', 'minimax_full_reference_guide', 'my_custom'}
     assert 'imagePrompt' not in values['ltx']['generation_prompts']['generate']
     assert values['minimax_full_reference_guide']['engine'] == 'minimax_references'
-    assert values['my_custom'] == {**custom, 'max_sequence_duration': 20}
+    assert values['my_custom'] == {**custom, 'max_sequence_duration': 20, 'max_shots': 0}
 
 
 def test_native_filesystem_drop_on_every_catalog_surface(tmp_path):

@@ -44,6 +44,7 @@ Open **Settings → Workspaces**. Stock and custom definitions let you choose th
 | Name and ID | Recognizable selector name and reusable workspace identity |
 | Generation engine | LTX, MiniMax Frames, MiniMax References or Generic |
 | Prompt layout | One unified production prompt or individual segment prompts |
+| Maximum shots | Maximum timeline segments; set 0 (Unlimited) for no count limit |
 | Global prompt | Shared direction where supported by the segmented setup |
 | Audio generation | Availability of audio-direction controls |
 | Reference media and kinds | Which source types and reference attributes the workspace accepts |
@@ -52,6 +53,14 @@ Open **Settings → Workspaces**. Stock and custom definitions let you choose th
 | Refinement instructions | Your rules for developing the edited draft |
 
 Choose **New**, set the name, engine and layout, then write the generation and refinement instructions. **Generic** supports a unified or segmented layout for your own prompting approach. Its templates configure prompt authoring; they do not install or run a video model.
+
+MiniMax workspaces default to **9 shots**. Save a different limit or choose
+**Unlimited** for your own workspace. The count includes image, video and text
+segments, and applies to additions, splits and AI timeline edits. Existing
+projects above the limit keep all their segments; reduce the count or raise the
+setting to add more. The sequence-duration setting remains independent.
+
+![MiniMax workspace settings with a nine-shot maximum](images/workspace-shot-limit.png)
 
 ## Reuse the direction you like
 

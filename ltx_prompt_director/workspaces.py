@@ -9,7 +9,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QStandardPaths
 
-from .timing_limits import sequence_limit
+from .timing_limits import sequence_limit, shot_limit
 
 SCHEMA_VERSION = 1
 KINDS = {"image", "video", "start", "end", "identity", "style", "scene", "object", "composition", "wardrobe", "voice", "sound", "motion"}
@@ -76,6 +76,10 @@ def validate_definition(value: dict) -> dict:
                                 or not math.isfinite(maximum) or maximum < 0.01):
         raise ValueError("Maximum sequence length must be at least 0.01 seconds, or null for no limit.")
     value["max_sequence_duration"] = maximum
+    shots = value.get("max_shots", shot_limit(value) or 0)
+    if type(shots) is not int or shots < 0:
+        raise ValueError("Maximum shots must be a nonnegative integer; use 0 for unlimited.")
+    value["max_shots"] = shots
     return value
 
 
@@ -144,12 +148,14 @@ class WorkspaceStore:
                 if path.exists():
                     try:
                         value = json.loads(path.read_text())
-                        legacy = {key:item for key,item in value.items() if key != "max_sequence_duration"}
+                        legacy = {key:item for key,item in value.items() if key not in {"max_sequence_duration", "max_shots"}}
                         if hashlib.sha256(json.dumps(legacy,sort_keys=True).encode()).hexdigest() == digest:
                             source = files("ltx_prompt_director").joinpath(f"workspace_templates/{workspace_id}.json")
                             upgraded = json.loads(source.read_text())
                             if "max_sequence_duration" in value:
                                 upgraded["max_sequence_duration"] = value["max_sequence_duration"]
+                            if "max_shots" in value:
+                                upgraded["max_shots"] = value["max_shots"]
                             self.save(upgraded)
                     except (OSError,ValueError):
                         pass

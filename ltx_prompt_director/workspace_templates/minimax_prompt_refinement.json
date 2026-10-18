@@ -3,6 +3,7 @@
   "id": "minimax_prompt_refinement",
   "name": "MiniMax · Refine",
   "engine": "minimax_prompt",
+  "max_shots": 9,
   "prompt_mode": "prompt_only",
   "global_prompt": false,
   "audio_generation": false,

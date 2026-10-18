@@ -3,6 +3,7 @@
   "id": "ltx",
   "name": "LTX Video",
   "engine": "ltx",
+  "max_shots": 0,
   "prompt_mode": "segmented",
   "global_prompt": true,
   "audio_generation": true,

@@ -71,6 +71,19 @@ def split_segment(segment: Segment, offset: float, fps: int = 24) -> tuple[Segme
     return left, right
 
 
+def split_segment_parts(segment: Segment, count: int, fps: int = 24) -> list[Segment]:
+    """Make equal frame-aligned parts without changing the original interval."""
+    if type(count) is not int or count not in (2, 3) or fps <= 0:
+        raise ValueError("Choose a two-way or three-way split.")
+    parts, remaining, elapsed = [], segment, 0.0
+    for index in range(1, count):
+        boundary = round(segment.duration * index / count * fps) / fps
+        left, remaining = split_segment(remaining, boundary - elapsed, fps)
+        parts.append(left)
+        elapsed += left.duration
+    return parts + [remaining]
+
+
 def text_segment_from_ltx(value: dict, index: int, fps: float) -> Segment:
     """Create an editable text-only segment from an LTX timeline record."""
     if value.get("type") != "text":

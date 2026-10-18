@@ -53,11 +53,12 @@ from .catalog import MediaCatalog
 from .comfy_export import export_minimax_workflow
 from .media_labels import add_thumbnail_labels
 from .workspaces import is_obsolete_stock_definition, WorkspaceStore
-from .timing_limits import sequence_limit, fit_sequence
+from .timing_limits import sequence_limit, fit_sequence, shot_limit, SHOT_COUNT_LIMIT
 from .workspace_editor import WorkspaceEditor
 from .shot_sequence import DEFAULTS as SHOT_DEFAULTS, settings as shot_settings, ensure_collection_sequences, shot_layout
 from .shot_sequence_widgets import ShotSequencePanel
-from .models import Segment, order_segments_by_ids, split_segment, text_segment_from_ltx
+from .models import Segment, order_segments_by_ids, split_segment, split_segment_parts, text_segment_from_ltx
+from .segment_split import divide_segment_prompt
 from .project_data import ARCHIVE_COLOR, load_other_tags, load_project_tags, new_note, normalize_notes, normalize_project_labels
 from .spellcheck import install_spellcheck
 from .prompt_tags import prompt_content, consume_global_refinements, install_prompt_tags, render_prompt_notes, insert_note
@@ -5967,6 +5968,14 @@ class MainWindow(QMainWindow):
             return sys.float_info.max
         return max(MIN_DURATION, maximum - sum(item.duration for item in self.segments if item.id != segment.id))
 
+    def timeline_count_allowed(self, count: int, *, report: bool = True) -> bool:
+        maximum = shot_limit(self.workspace_definition)
+        allowed = maximum is None or count <= max(maximum, len(self.segments))
+        if not allowed and report:
+            self.statusBar().showMessage(
+                f"This workspace allows {maximum} shots. Adjust Maximum shots in Settings → Workspaces to add more.", 8000)
+        return allowed
+
     def total_duration(self) -> float:
         return sum(item.duration for item in self.segments)
 
@@ -5985,7 +5994,7 @@ class MainWindow(QMainWindow):
         self.add_media_paths(paths)
 
     def add_text_segment(self) -> None:
-        if self.prompt_only_workspace:
+        if self.prompt_only_workspace or not self.timeline_count_allowed(len(self.segments) + 1):
             return
         number = sum(segment.kind == "text" for segment in self.segments) + 1
         segment = Segment(f"Text {number}", "", "", "text", "text", "", 5.0)
@@ -6016,6 +6025,8 @@ class MainWindow(QMainWindow):
         paths = allowed_paths
         if not paths:
             return
+        if not self.timeline_count_allowed(len(self.segments) + len(paths)):
+            return
         self.settings.setValue("last_media_dir", str(Path(paths[0]).parent))
         target = len(self.segments) if insert_index is None else max(0, min(insert_index, len(self.segments)))
         before_id = self.segments[target].id if target < len(self.segments) else None
@@ -6026,6 +6037,8 @@ class MainWindow(QMainWindow):
             if workspace != (self.workspace_revision, self.current_project_id):
                 return
             prepared, errors = result
+            if not self.timeline_count_allowed(len(self.segments) + len(prepared)):
+                return
             index = next((i for i, segment in enumerate(self.segments) if segment.id == before_id), len(self.segments))
             for path, kind, preview, frames, trim in prepared:
                 duration = 1.0 if kind == "video" else 5.0
@@ -6357,7 +6370,8 @@ class MainWindow(QMainWindow):
         if segment:
             rect = self.timeline.visualItemRect(item)
             offset = segment.duration * (point.x() - rect.left()) / max(1, rect.width())
-            split_action = menu.addAction("Split segment here")
+            split_menu = menu.addMenu("Split segment")
+            split_action = split_menu.addAction("At clicked position")
             split_action.setToolTip("Divide this segment at the clicked position; keep its media and prompt on both sides.")
             try:
                 split_segment(segment, offset, FPS)
@@ -6370,9 +6384,31 @@ class MainWindow(QMainWindow):
             if segment.artwork_status == "generating":
                 can_split = False
                 split_action.setToolTip("Wait for this segment's artwork to finish before splitting.")
+            can_split = can_split and self.timeline_count_allowed(len(self.segments) + 1, report=False)
             split_action.setEnabled(can_split)
             split_action.triggered.connect(
                 lambda checked=False, sid=segment.id, at=offset: self.split_timeline_segment(sid, at))
+            for count in (2, 3):
+                choices = split_menu.addMenu(f"{count}-way split")
+                try:
+                    split_segment_parts(segment, count, FPS)
+                    available = (not getattr(self, "timeline_review_pending", set())
+                                 and segment.artwork_status != "generating"
+                                 and self.timeline_count_allowed(len(self.segments) + count - 1, report=False))
+                except ValueError:
+                    available = False
+                choices.setEnabled(available)
+                for title, style, tip in (
+                    ("Keep prompt", "keep", "Equal parts with the same prompt and consecutive source intervals."),
+                    ("Divide prompt with AI", "divide", "Distribute the written action beats across equal parts; review before keeping the result."),
+                    ("Hard cuts + close-ups with AI", "cuts", "Split action beats into separate shots, with hard cuts to close-ups; review the result."),
+                ):
+                    action = choices.addAction(title)
+                    action.setToolTip(tip)
+                    action.setEnabled(available and (style == "keep" or bool(segment.prompt.strip())))
+                    action.triggered.connect(
+                        lambda checked=False, sid=segment.id, n=count, mode=style:
+                        self.split_timeline_segment_parts(sid, n, mode))
             menu.addSeparator()
         if segment:
             artwork_generate = menu.addAction("✦ Generate Artwork")
@@ -6397,6 +6433,12 @@ class MainWindow(QMainWindow):
                 menu.addAction("Edit text prompt", self.focus_segment_prompt)
             menu.addAction("Convert to image segment…", self.convert_text_segment_to_image)
         else:
+            if segment:
+                convert = menu.addAction("Convert to text segment")
+                convert.setToolTip("Keep this segment's prompt and timing as an editable text beat.")
+                convert.setEnabled(not getattr(self, "timeline_review_pending", set())
+                                   and segment.artwork_status != "generating")
+                convert.triggered.connect(self.convert_selected_segment_to_text)
             menu.addAction("Replace media", self.replace_selected)
             if segment and segment.kind == "image":
                 menu.addAction("Copy image", self.copy_selected_image)
@@ -6410,7 +6452,8 @@ class MainWindow(QMainWindow):
         menu.exec(self.timeline.viewport().mapToGlobal(point))
 
     def split_timeline_segment(self, segment_id: str, offset: float) -> None:
-        if self.ai_busy or getattr(self, "timeline_review_pending", set()):
+        if (self.ai_busy or getattr(self, "timeline_review_pending", set())
+                or not self.timeline_count_allowed(len(self.segments) + 1)):
             return
         row = next((i for i, segment in enumerate(self.segments) if segment.id == segment_id), -1)
         if row < 0 or self.segments[row].artwork_status == "generating":
@@ -6423,6 +6466,68 @@ class MainWindow(QMainWindow):
         self.mark_dirty()
         self.refresh_timeline(row + 1)
         self.statusBar().showMessage("Segment split; media, prompts and total sequence duration preserved")
+
+    def split_timeline_segment_parts(self, segment_id: str, count: int, style: str = "keep") -> None:
+        if (self.ai_busy or getattr(self, "timeline_review_pending", set())
+                or style not in {"keep", "divide", "cuts"}
+                or not self.timeline_count_allowed(len(self.segments) + count - 1)):
+            return
+        self.finish_prompt_reviews()
+        self.inline_typing.finish()
+        row = next((i for i, item in enumerate(self.segments) if item.id == segment_id), -1)
+        if row < 0 or self.segments[row].artwork_status == "generating":
+            return
+        try:
+            parts = split_segment_parts(self.segments[row], count, FPS)
+        except ValueError:
+            return
+        if style == "keep":
+            self.segments[row:row + 1] = parts
+            self.mark_dirty()
+            self.refresh_timeline(row + 1)
+            self.statusBar().showMessage(f"Segment split into {count} equal parts; total duration preserved")
+            return
+        if not self.segments[row].prompt.strip():
+            return
+        credentials = self.ai_credentials()
+        if not credentials:
+            return
+        self.timeline.setCurrentRow(row)
+        before = copy.deepcopy(self.segments)
+        provider, model, key = credentials
+        self.start_ai_worker(
+            divide_segment_prompt,
+            (before, row, count, style, provider, model, key,
+             self.settings.value("api_timeout", 400, int)),
+            f"Splitting segment into {count} {'shots with close-ups' if style == 'cuts' else 'action beats'}…",
+            lambda result: self.finish_segment_split(before, row, count, result),
+            review_text=False,
+        )
+
+    def finish_segment_split(self, before: list[Segment], row: int, count: int, prompts: list[str]) -> None:
+        self.set_ai_controls_enabled(True)
+        if [item.to_dict() for item in self.segments] != [item.to_dict() for item in before]:
+            self.statusBar().showMessage("Split discarded because the timeline changed. Try again from the current segment.")
+            return
+        if not self.timeline_count_allowed(len(self.segments) + count - 1):
+            return
+        parts = split_segment_parts(before[row], count, FPS)
+        if (not isinstance(prompts, list) or len(prompts) != count
+                or any(not isinstance(prompt, str) or not prompt.strip() for prompt in prompts)):
+            self.statusBar().showMessage("Split returned invalid prompts; timeline preserved.")
+            return
+        for part, prompt in zip(parts, prompts):
+            part.prompt = prompt
+        self.segments[row:row + 1] = parts
+        self.mark_dirty()
+        self.refresh_timeline(row)
+        self._start_segment_review(before, self.segments, [{"kind": "split", "id": parts[0].id}])
+        # All parts form one edit: accepting or denying one card resolves the
+        # entire split so partial rejection cannot leave gaps or duplicate time.
+        self.timeline_split_review_ids = {part.id for part in parts}
+        self.timeline_review_pending = set(self.timeline_split_review_ids)
+        self._show_segment_review_controls()
+        self.statusBar().showMessage("Review split: approve any part to keep all parts, or deny to restore the original segment.")
 
     def focus_segment_prompt(self) -> None:
         self.prompt_scope.setCurrentIndex(1)
@@ -6498,6 +6603,25 @@ class MainWindow(QMainWindow):
         self.mark_dirty()
         self.refresh_timeline(row)
         self.statusBar().showMessage(f"Text segment converted to image: {segment.name}; prompt preserved")
+
+    def convert_selected_segment_to_text(self) -> None:
+        segment = self.current_segment()
+        if (self.ai_busy or not segment or segment.kind not in {"image", "video"}
+                or segment.artwork_status == "generating"
+                or getattr(self, "timeline_review_pending", set())):
+            return
+        self.finish_prompt_reviews()
+        self.inline_typing.finish()
+        segment.media_path = segment.preview_path = ""
+        segment.kind = segment.role = "text"
+        segment.media_duration_frames = segment.trim_start = None
+        segment.shot_trimmed = False
+        segment.artwork_prompt = segment.artwork_status = ""
+        segment.artwork_target_role = "start"
+        clear_archived_source(segment)
+        self.mark_dirty()
+        self.refresh_timeline(self.timeline.currentRow())
+        self.statusBar().showMessage("Converted to text segment; prompt and timing preserved")
 
     def export_selected_segment(self) -> None:
         segment = self.current_segment()
@@ -6778,7 +6902,7 @@ class MainWindow(QMainWindow):
             refine_minimax_text_prompt, build_generic_prompt, refine_generic_prompt,
         } and self.unified_workspace:
             return self.unified_prompt, "unified", 0
-        if operation in {refine_segment_prompt, generate_segment_prompt, refine_generic_segment, refine_timing}:
+        if operation in {refine_segment_prompt, generate_segment_prompt, refine_generic_segment, refine_timing, divide_segment_prompt}:
             if self.unified_workspace:
                 self.prompt_scope.setCurrentIndex(self.prompt_scope.findData("segment"))
             return (self.intent_segment_prompt if self.unified_workspace else self.segment_prompt), "segment", 0
@@ -6789,7 +6913,8 @@ class MainWindow(QMainWindow):
             return target, kind, max(0, self.timeline.currentRow()) if kind == "segment" else 0
         return None, "unified", 0
 
-    def start_ai_worker(self, operation, args: tuple, activity: str, finished, show_main_overlay: bool = True) -> None:
+    def start_ai_worker(self, operation, args: tuple, activity: str, finished, show_main_overlay: bool = True,
+                        *, review_text: bool = True) -> None:
         if self.ai_busy:
             return
         self.finish_prompt_reviews()
@@ -6797,6 +6922,7 @@ class MainWindow(QMainWindow):
         target, kind, selected_index = self.ai_editor_target(operation)
         self.ai_request_editor = target
         self.ai_request_activity = activity
+        self.ai_review_text = review_text
         self.ai_review_baseline = (self.minimax_prompt_text if target is self.unified_prompt
                                    else target.toPlainText() if target is not None else "")
         self.ai_review_segment_id = self.current_segment().id if kind == "segment" and self.current_segment() else None
@@ -6815,6 +6941,7 @@ class MainWindow(QMainWindow):
             "MiniMax Timeline Sync" if operation is sync_timeline_to_prompt else
             "MiniMax Combined Sync" if operation is sync_combined_from_timeline else
             "Selected Segment Generate" if operation is generate_segment_prompt else
+            "Segment Split" if operation is divide_segment_prompt else
             "Global Direction Generate" if operation is generate_global_direction else
             "Sequence-Wide Magic Build Refine" if operation is refine_sequence_prompts else
             "Refine Timing" if operation is refine_timing else
@@ -6826,24 +6953,28 @@ class MainWindow(QMainWindow):
         self.magic_overlay.hide_overlay()
         instructions = (None if self.unified_workspace and operation in {build_prompts, refine_segment_prompt, refine_global_prompt, refine_timing}
                         else copy.deepcopy(self.workspace_definition.get("generation_prompts", {})))
+        maximum_shots = shot_limit(self.workspace_definition)
         def workspace_operation(*values):
             token = WORKSPACE_INSTRUCTIONS.set(instructions)
+            shot_token = SHOT_COUNT_LIMIT.set(maximum_shots)
             stream_token = STREAM_SINK.set(worker.signals.stream.emit)
             try:
                 return operation(*values)
             finally:
                 STREAM_SINK.reset(stream_token)
+                SHOT_COUNT_LIMIT.reset(shot_token)
                 WORKSPACE_INSTRUCTIONS.reset(token)
         worker = MagicWorker(workspace_operation, args, retries, retry_cooldown, activity)
         # Internal/custom worker calls may legitimately have no model args.
         model = (
+            str(args[5]) if operation is divide_segment_prompt else
             str(args[1]) if len(args) >= 2 and isinstance(args[0], str) else
             str(args[2]) if len(args) >= 3 else
             "Background task"
         )
         self.active_live_panel = self.reasoning_dock
         self.active_live_panel.begin(activity, model)
-        if target is not None and target.isVisible():
+        if review_text and target is not None and target.isVisible():
             # Save the authoritative text before any temporary red diff is shown.
             self.inline_typing.start(target, self.ai_review_baseline, kind, selected_index)
         worker.signals.stream.connect(self.ai_stream_received)
@@ -6930,7 +7061,7 @@ class MainWindow(QMainWindow):
         if getattr(self, "active_live_panel", None) is not None:
             self.active_live_panel.finish(True)
         self.ai_finished_callback(result)
-        if (review_editor is not None
+        if (getattr(self, "ai_review_text", True) and review_editor is not None
                 and review_editor.isVisible() and not self.ai_busy
                 and self.ai_request_is_current()):
             self.paragraph_review.begin(
@@ -7811,6 +7942,9 @@ class MainWindow(QMainWindow):
         records = result["segments"]
         changes = preview_operations(before, records)
         updated = build_segment_objects(before, records)
+        if not self.timeline_count_allowed(len(updated)):
+            self.set_ai_controls_enabled(True)
+            return
         durations = [item.duration for item in updated]
         if fit_sequence(durations, self.maximum_sequence_duration) != durations:
             self.set_ai_controls_enabled(True)
@@ -8336,6 +8470,9 @@ class MainWindow(QMainWindow):
         records = result["segments"]
         changes = preview_operations(before, records)
         updated = build_segment_objects(before, records)
+        if not self.timeline_count_allowed(len(updated)):
+            self.set_ai_controls_enabled(True)
+            return
         # A model requests an image by returning artworkPrompt in segment JSON.
         # Choose the available image tool automatically; don't add a second
         # generate-image button or require a manual checkbox.
@@ -8433,6 +8570,13 @@ class MainWindow(QMainWindow):
                 continue
             if card.segment.id in pending:
                 card.set_review_pending(originals.get(card.segment.id))
+                grouped = card.segment.id in getattr(self, "timeline_split_review_ids", set())
+                for button, description in (
+                    (card.review_accept, "Approve entire split" if grouped else "Approve this segment change"),
+                    (card.review_reject, "Restore original segment" if grouped else "Deny this segment change"),
+                ):
+                    button.setToolTip(description)
+                    button.setAccessibleName(description)
             elif card.review_pending:
                 card.clear_review_pending()
         visible = bool(pending)
@@ -8450,6 +8594,9 @@ class MainWindow(QMainWindow):
             return
         pending = getattr(self, "timeline_review_pending", set())
         if segment_id not in pending:
+            return
+        if segment_id in getattr(self, "timeline_split_review_ids", set()):
+            self.resolve_all_segment_reviews(approved)
             return
         pending.discard(segment_id)
         if not approved:
@@ -8504,9 +8651,17 @@ class MainWindow(QMainWindow):
             self._artwork_cancelled_segments = getattr(
                 self, "_artwork_cancelled_segments", set())
             self._artwork_cancelled_segments.update(self.timeline_review_pending)
-            self.segments = [copy.deepcopy(seg) for seg in
-                             self.timeline_review_original_sequence]
+            split_ids = getattr(self, "timeline_split_review_ids", set())
+            if split_ids:
+                position = next((i for i, item in enumerate(self.segments) if item.id in split_ids), 0)
+                original = next(item for item in self.timeline_review_original_sequence if item.id in split_ids)
+                self.segments = [item for item in self.segments if item.id not in split_ids]
+                self.segments.insert(min(position, len(self.segments)), copy.deepcopy(original))
+            else:
+                self.segments = [copy.deepcopy(seg) for seg in
+                                 self.timeline_review_original_sequence]
         self.timeline_review_pending.clear()
+        self.timeline_split_review_ids = set()
         self.timeline_review_originals = {}
         self.timeline_review_positions = {}
         self.timeline_review_original_sequence = []
@@ -8544,6 +8699,7 @@ class MainWindow(QMainWindow):
 
     def _start_segment_review(self, before: list[Segment], updated: list[Segment],
                               changes: list[dict]) -> None:
+        self.timeline_split_review_ids = set()
         originals = {seg.id: copy.deepcopy(seg) for seg in before}
         original_positions = {seg.id: i for i, seg in enumerate(before)}
         after_positions = {seg.id: i for i, seg in enumerate(updated)}

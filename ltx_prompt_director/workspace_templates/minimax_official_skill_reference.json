@@ -3,6 +3,7 @@
   "id": "minimax_official_skill_reference",
   "name": "MiniMax · Full",
   "engine": "minimax_references",
+  "max_shots": 9,
   "prompt_mode": "unified",
   "global_prompt": true,
   "audio_generation": true,
