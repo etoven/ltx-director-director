@@ -43,6 +43,51 @@ def build_prompts(segments: list[Segment], provider: str, model: str, api_key: s
     return _gemini(images, api_key, model, rules, timeout, sfx, spoken_dialog)
 
 
+def refine_sequence_prompts(segments: list[Segment], provider: str, model: str,
+                            api_key: str, intent: str, global_prompt: str,
+                            sfx: bool, spoken_dialog: bool, hdr: bool,
+                            reduce_music: bool, timeout: int = 400) -> dict:
+    """Magic Build refinement across ALL segments without touching media identities.
+
+    The upper Global editor is the director's instruction set. Apply its
+    /refine and /refine-global notes across the whole ordered timeline, and
+    return exactly the segment count and globalPrompt that Magic Build uses.
+    """
+    if not segments:
+        raise ValueError("Add at least one sequence segment before global refinement.")
+    existing = [{
+        "id": item.id, "name": item.name, "kind": item.kind, "role": item.role,
+        "duration": item.duration, "prompt": item.prompt,
+        "imagePrompt": item.image_prompt,
+    } for item in segments]
+    images = [_segment_input(item) for item in segments]
+    rules = _rules(len(images), intent, sfx, spoken_dialog, hdr, reduce_music,
+                   sum(item.kind == "text" for item in segments))
+    rules += (
+        "\n\nSEQUENCE-WIDE MAGIC BUILD REFINEMENT: The Director's Intent "
+        "(GLOBAL scope) contains change instructions for the ENTIRE sequence. "
+        "Read and apply all /refine and /refine-global annotations as edits, "
+        "not narrative text. Consider EVERY supplied segment and its current "
+        "prompt, imagePrompt, duration, media role, and previous/next continuity. "
+        "Change as little as possible beyond the director's explicitly "
+        "requested changes. Retain original media, identities, ordering, and "
+        "count; do not invent any files. The returned segments array must have "
+        "exactly the same number of entries in the same order. "
+        "Refine prompts and timings across segments as appropriate to meet "
+        "the GLOBAL creative direction, including spoken-dialog continuity. "
+        "Return exactly JSON with globalPrompt and segments containing "
+        "prompt, optional imagePrompt and positive duration. "
+        "\nCURRENT GLOBAL PRODUCTION NOTES:\n" + (global_prompt.strip() or "None") +
+        "\nAUTHORITATIVE CURRENT TIMELINE (ALL SEGMENTS):\n"
+        + json.dumps(existing, ensure_ascii=False)
+    )
+    result = _validate(
+        _provider_raw(images, provider, model, api_key, rules, timeout),
+        len(images), sfx, spoken_dialog)
+    return result
+
+
+
 UNIFIED_PROMPT_TRANSPORT = '\n\nRESPONSE TRANSPORT: Return strict JSON with a single nonempty "prompt" string containing the complete editable production prompt in the workspace format. Do not return timed_actions, segment records or a timing reconciliation plan. The timeline is authoritative; describe its existing timing without changing segment count, duration, order or identity. Prompt editing never rebuilds the timeline. This response contract supersedes older structured timed-plan instructions.'
 
 
