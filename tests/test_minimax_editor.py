@@ -45,8 +45,8 @@ class UnifiedEditorTests(unittest.TestCase):
         self.assertNotEqual(w.magic_button, w.combined_generate_button)
         self.assertFalse(w.combined_generate_button.isHidden())
         self.assertFalse(w.combined_refine_button.isHidden())
-        self.assertEqual(w.magic_button.text(), "✦ Generate")
-        self.assertEqual(w.prompt_refine_button.text(), "✦ Refine")
+        self.assertEqual(w.magic_button.text(), "Generate")
+        self.assertEqual(w.prompt_refine_button.text(), "Refine")
         w.set_project_type("minimax_prompt_refinement")
         self.assertTrue(w.magic_button.isHidden())
         self.assertTrue(w.prompt_refine_button.isHidden())
@@ -583,6 +583,83 @@ class UnifiedEditorTests(unittest.TestCase):
         self.assertEqual([call.args for call in global_call.call_args_list],
                          [(False,), (True,)])
 
+    def test_global_buttons_run_sequence_wide_magic_build_and_refinement(self):
+        from ltx_prompt_director.ai import build_prompts, refine_sequence_prompts
+        w = self.make_window("minimax_frames")
+        w.prompt_scope.setCurrentIndex(0)
+        w.intent.setPlainText("/refine-global Maintain the full transformation arc")
+        original_ids = [s.id for s in w.segments]
+        with (patch.object(w, "ai_credentials",
+                           return_value=("gemini", "gemini-3.5-flash", "key")),
+              patch.object(w, "start_ai_worker") as start):
+            w.magic_button.click()
+            operation, args, activity, done = start.call_args.args
+            self.assertIs(operation, build_prompts)
+            self.assertEqual([s.id for s in args[0]], original_ids)
+            self.assertEqual(done, w.magic_finished)
+            self.assertTrue(w.global_build_cascade_requested)
+            self.assertIn("ALL sequence", activity)
+            w.prompt_refine_button.click()
+            operation, args, activity, done = start.call_args.args
+            self.assertIs(operation, refine_sequence_prompts)
+            self.assertEqual([s.id for s in args[0]], original_ids)
+            self.assertIn("/refine-global", args[4])
+            self.assertEqual(done, w.magic_finished)
+
+    def test_global_magic_finished_cascades_to_combined_only_after_sequence(self):
+        w = self.make_window("minimax_frames")
+        w.prompt_scope.setCurrentIndex(0)
+        w.unified_prompt.setPlainText("Previous combined")
+        w.global_build_cascade_requested = True
+        ids = [s.id for s in w.segments]
+        with patch.object(w, "sync_combined_from_segments") as cascade:
+            w.magic_finished({
+                "segments": [
+                    {"prompt": "New opening", "duration": 2},
+                    {"prompt": "New closing", "duration": 3},
+                ],
+                "globalPrompt": "Sequence direction",
+            })
+        cascade.assert_called_once_with()
+        self.assertEqual([s.prompt for s in w.segments],
+                         ["New opening", "New closing"])
+        self.assertEqual([s.id for s in w.segments], ids)
+        self.assertEqual(w.minimax_prompt_text, "Previous combined")
+        self.assertFalse(w.global_build_cascade_requested)
+
+    def test_segment_refinement_only_changes_selected_segment_without_cascade(self):
+        w = self.make_window("minimax_frames")
+        original_second = w.segments[1].prompt
+        original_combined = "Full production prompt"
+        w.unified_prompt.setPlainText(original_combined)
+        current = w.segments[0]
+        original_id, original_kind, original_role = current.id, current.kind, current.role
+        w.refinement_segment_id = current.id
+        with patch.object(w, "sync_combined_from_segments") as sync:
+            w.refine_prompt_finished({
+                "prompt": "Refined opening only", "duration": 2.5,
+                "imagePrompt": "Better opening frame",
+            })
+        sync.assert_not_called()
+        self.assertEqual(w.segments[0].prompt, "Refined opening only")
+        self.assertEqual(w.segments[1].prompt, original_second)
+        self.assertEqual((current.id, current.kind, current.role),
+                         (original_id, original_kind, original_role))
+        self.assertEqual(w.minimax_prompt_text, original_combined)
+
+    def test_editor_action_icons_and_sync_direction(self):
+        w = self.make_window("minimax_frames")
+        for button in (w.magic_button, w.prompt_refine_button,
+                       w.combined_generate_button, w.combined_refine_button,
+                       w.sync_timeline_button, w.sync_combined_button):
+            self.assertFalse(button.icon().isNull())
+        self.assertIn("↓", w.sync_timeline_button.toolTip())
+        self.assertIn("↑", w.sync_combined_button.toolTip())
+        self.assertEqual(w.sync_timeline_button.text(), "")
+        self.assertEqual(w.sync_combined_button.text(), "")
+        self.assertIn("Segment", w.prompt_refine_button.toolTip())
+        self.assertIn("Global", w.prompt_refine_button.toolTip())
+
     def test_lower_buttons_only_generate_or_refine_combined(self):
         w = self.make_window("minimax_frames")
         with (patch.object(w, "_generate_minimax_prompt") as generated,
@@ -592,8 +669,8 @@ class UnifiedEditorTests(unittest.TestCase):
             w.combined_refine_button.click()
         generated.assert_called_once_with(w.minimax_prompt_mode)
         refined.assert_called_once_with()
-        self.assertEqual(w.magic_button.text(), "✦ Generate")
-        self.assertEqual(w.prompt_refine_button.text(), "✦ Refine")
+        self.assertEqual(w.magic_button.text(), "Generate")
+        self.assertEqual(w.prompt_refine_button.text(), "Refine")
 
     def test_reverse_sync_uses_all_segments_and_never_selected_subset(self):
         from ltx_prompt_director.segment_plan import sync_combined_from_timeline
@@ -611,7 +688,7 @@ class UnifiedEditorTests(unittest.TestCase):
         self.assertEqual([seg.id for seg in args[1][0]],
                          [seg.id for seg in w.segments])
         self.assertEqual(args[1][4], "Outdated combined scene")
-        self.assertIs(args[3], w.sync_combined_finished)
+        self.assertEqual(args[3], w.sync_combined_finished)
         self.assertIn("ALL project timeline segments", args[2])
 
     def test_reverse_sync_completion_updates_only_combined_prompt(self):
