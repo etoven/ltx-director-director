@@ -146,6 +146,35 @@ def reference_inventory(segments: list[Segment], references: list | None = None)
 
 
 
+def timeline_motion_context(segments: list[Segment]) -> list[dict]:
+    """Bind each interval to its own frame role and neighboring visual anchors."""
+    records = reference_inventory(segments)
+    visuals = {}
+    for record, segment in zip(records, segments):
+        if segment.kind not in {"image", "video"}:
+            continue
+        anchor = {key: record[key] for key in (
+            "timeline_index", "label", "name", "kind", "role", "start_time", "end_time")}
+        anchor["segment_id"] = segment.id
+        if segment.kind == "image":
+            anchor["anchor_time"] = record["checkpoint_time"]
+        else:
+            anchor.update(source_start=record["source_start"], source_end=record["source_end"])
+        visuals[record["timeline_index"]] = anchor
+    before, previous = [], None
+    for index in range(len(segments)):
+        before.append(previous)
+        previous = visuals.get(index, previous)
+    after, following = [None] * len(segments), None
+    for index in reversed(range(len(segments))):
+        after[index] = following
+        following = visuals.get(index, following)
+    return [{"interval_start": record["start_time"], "interval_end": record["end_time"],
+             "current_visual": visuals.get(index),
+             "previous_visual": before[index], "next_visual": after[index]}
+            for index, record in enumerate(records)]
+
+
 def reference_rules(segments: list[Segment], intent: str, global_prompt: str,
                     sfx: bool, spoken_dialog: bool, reduce_music: bool,
                     references: list | None = None) -> str:

@@ -112,7 +112,7 @@ class MiniMaxH3PromptTests(unittest.TestCase):
         self.assertIn('opening visual anchor', inputs[0]['continuity_function'])
         self.assertIn('end-frame target reached by this interval\'s end', inputs[-1]['continuity_function'])
         self.assertEqual([item['cue_timestamp'] for item in inputs],
-                         ['00:00:00:00', '00:00:03:00', '00:00:06:00', '00:00:09:00'])
+                         ['00:00:00:00', '00:00:03:00', '00:00:06:00', '00:00:12:21'])
         self.assertTrue(inputs[-1]['frame_mode_checkpoint'])
         self.assertNotIn('recommended_detail', inputs[-1])
 

@@ -566,7 +566,8 @@ def sync_combined_from_timeline(segments, provider, model, api_key,
         + "\n\nPREVIOUS COMBINED PROMPT (reuse only compatible details):\n"
         + (str(current_combined_prompt).strip() or "[No previous combined prompt]")
     )
-    raw = ai._provider_raw(inputs, provider, model, api_key, rules + ai.CONTENT_FIDELITY, timeout)
+    raw = ai._provider_raw(inputs, provider, model, api_key,
+                           rules + ai.CONTENT_FIDELITY + ai.FRAME_MOTION_GUIDANCE, timeout)
     result = ai._parse_json(raw)
     if not isinstance(result, dict):
         raise ai.AIResponseFormatError("Reverse timeline sync returned no JSON prompt.")

@@ -13,7 +13,7 @@ from ltx_prompt_director import ai, ui
 def test_factory_workspaces_and_audio_only_ltx_response(tmp_path):
     store = WorkspaceStore(tmp_path / 'workspaces')
     assert set(store.load()) == {'shot_sequence', 'minimax_prompt_refinement', 'ltx', 'minimax_official_skill_base', 'minimax_official_skill_reference', 'minimax_base_guide', 'minimax_full_reference_guide'}
-    assert store.load()['minimax_full_reference_guide']['name'] == 'MiniMax · Full Reference'
+    assert store.load()['minimax_full_reference_guide']['name'] == 'MiniMax · Full Guide'
     for kind in ['generate', 'refine']:
         text = stock_prompt('ltx', kind)
         assert 'imagePrompt' not in text

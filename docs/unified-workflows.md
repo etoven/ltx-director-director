@@ -7,14 +7,14 @@ All timeline workspaces use the same segment editor. The Prompt Refinement works
 | Workspace | Production format |
 | --- | --- |
 | LTX Video | Segment prompts and shared global direction for LTX timeline export |
-| MiniMax Standard / Keyframes | Guide-based integrated description, soundscape and music sections |
-| MiniMax Full Reference | Guide-based subject definitions, summary, retention analysis, detailed description, soundscape and music |
-| MiniMax Official Skill · Standard / Keyframes | Supplied skill conventions for T2VA, I2VA, FL2VA and L2VA, with project variables |
-| MiniMax Official Skill · Full Reference | Supplied six-section reference skill, including companion camera, speech and sound rules |
+| MiniMax · Standard Guide | Guide-based integrated description, soundscape and music sections |
+| MiniMax · Full Guide | Guide-based subject definitions, summary, retention analysis, detailed description, soundscape and music |
+| MiniMax · Standard | Supplied skill conventions for T2VA, I2VA, FL2VA and L2VA, with project variables |
+| MiniMax · Full | Supplied six-section reference skill, including companion camera, speech and sound rules |
 
 ## Refine a prompt on its own
 
-Choose **MiniMax · Prompt Refinement · Annotations Only** from Project Type. Write or paste a production prompt, then click **Refine Prompt**. No media or segments are required. The editor fills the workspace; timeline, conditioning, segment timing, reference media and Director’s Intent controls are hidden.
+Choose **MiniMax · Refine** from Project Type. Write or paste a production prompt, then click **Refine Prompt**. No media or segments are required. The editor fills the workspace; timeline, conditioning, segment timing, reference media and Director’s Intent controls are hidden.
 
 Type `/` and use the existing annotation suggestions: `/refine` edits a nearby passage, `/refine-global` applies across the prompt, `/keep` protects a detail, `/avoid` excludes a detail and `/focus` adds emphasis. These remain editable note boxes, with the same completion and spelling features as the other prompt editors. A leading `/refine` note before the scene applies to the full prompt unless it identifies a narrower target. Completed global refinement notes are removed after a successful revision; other annotations remain. If the model returns the production text unchanged, the editor keeps your draft and annotations and reports **no text changes**.
 
@@ -58,6 +58,17 @@ The lower **Generate** and **Refine** buttons edit only the combined production 
 **Refine** above the segment editor improves the selected beat and can resize that segment when its action or dialogue needs a different duration. **Refine Timing** changes its duration while preserving its wording. Other segments and the combined production text remain unchanged.
 
 Select **Global** in the segment editor to edit shared direction. Add an instruction such as `/refine-global Resize the segments proportionally to 15 seconds`, then choose **Refine Prompt**. Director scales the current segment durations to the requested total while preserving their proportions and individual prompt text. Other explicit global timing edits can change multiple segment durations. In MiniMax, the unified production prompt is then generated from the updated sequence. Manual segment edits preserve the draft until you request generation or refinement.
+
+## Direct motion through frame anchors
+
+A **Start** frame defines the state at the beginning of its segment; motion
+continues from that state toward the following visual anchor. An **End** frame
+defines the target at the end of its segment; preceding motion must reach it.
+Generate and Refine compare the surrounding timeline visuals and their actual
+anchor times, including images separated by text-only beats. Camera direction
+uses changes in viewpoint, background landmarks and subject placement together;
+a subject moving left does not by itself imply a left pan. Untimed references
+retain their selected roles rather than becoming timeline endpoints.
 
 ## Check conditioning at a glance
 

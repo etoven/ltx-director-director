@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "id": "minimax_official_skill_reference",
-  "name": "MiniMax · Official Skill · Full Reference",
+  "name": "MiniMax · Full",
   "engine": "minimax_references",
   "prompt_mode": "unified",
   "global_prompt": true,

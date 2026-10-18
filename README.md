@@ -8,7 +8,7 @@ Build a visual plan for AI video, turn it into a detailed production prompt, and
 
 ![The Aurora workspace: a visual timeline, creative direction and one continuous MiniMax production brief](docs/images/ltx-director-director-overview.png)
 
-*Current release: Aurora 1.13.0a89 on `experimental`. Screenshots show the native app with an authored demonstration project.*
+*Current release: Aurora 1.13.0a90 on `experimental`. Screenshots show the native app with an authored demonstration project.*
 
 ## See the story before you generate
 
@@ -44,9 +44,9 @@ In LTX, **Magic Build** develops the whole sequence; **Refine Prompt** and **Ref
 
 **[Choose your workflow →](docs/unified-workflows.md)**
 
-Timeline workspaces share the LTX segment editor. MiniMax adds a separate editable unified prompt below it, plus a compact conditioning guide beneath the timeline. The shipped defaults include LTX Video, the two guide-based MiniMax templates, and two **Official Skill** variants: Standard / Keyframes and Full Reference. The skill variants retain the supplied writing conventions and add variables for the detected workflow, asset map, timing, creative direction and audio options.
+Timeline workspaces share the LTX segment editor. MiniMax adds a separate editable unified prompt below it, plus a compact conditioning guide beneath the timeline. The shipped defaults include LTX Video, the two guide-based MiniMax templates, and two **Official Skill** variants labeled **MiniMax · Standard** and **MiniMax · Full**. The skill variants retain the supplied writing conventions and add variables for the detected workflow, asset map, timing, creative direction and audio options.
 
-Refining a prompt you already have? Choose **MiniMax · Prompt Refinement · Annotations Only** for a full-size editor with no timeline. Paste your text, add inline notes and click **Refine Prompt**. It preserves your production format and uses only the text and annotations you supply.
+Refining a prompt you already have? Choose **MiniMax · Refine** for a full-size editor with no timeline. Paste your text, add inline notes and click **Refine Prompt**. It preserves your production format and uses only the text and annotations you supply.
 
 Bring up to **four reference images, videos or audio samples** into your MiniMax workspace. Use a video’s soundtrack alone when its sound matters more than its appearance. **Export ComfyUI** turns the timeline and production prompt into the supplied MiniMax workflow, copies its media into ComfyUI’s input folder and wires the conditioning guides at their timeline times.
 
@@ -117,7 +117,7 @@ Customize the workspace itself in **Settings → Workspaces**: choose the editor
 Install the current experimental wheel:
 
 ```bash
-python3 -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a89-py3-none-any.whl'
+python3 -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a90-py3-none-any.whl'
 ltx-director-director
 ```
 

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "id": "minimax_prompt_refinement",
-  "name": "MiniMax · Prompt Refinement · Annotations Only",
+  "name": "MiniMax · Refine",
   "engine": "minimax_prompt",
   "prompt_mode": "prompt_only",
   "global_prompt": false,

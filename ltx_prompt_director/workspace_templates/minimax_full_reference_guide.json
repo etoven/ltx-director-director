@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "id": "minimax_full_reference_guide",
-  "name": "MiniMax · Full Reference",
+  "name": "MiniMax · Full Guide",
   "engine": "minimax_references",
   "prompt_mode": "unified",
   "global_prompt": true,

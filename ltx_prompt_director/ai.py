@@ -5,7 +5,7 @@ import math
 import json
 import re
 from functools import lru_cache
-from .prompt_templates import CONTENT_FIDELITY, WORKSPACE_PROMPTS as WORKSPACE_INSTRUCTIONS, render_workspace_prompt
+from .prompt_templates import CONTENT_FIDELITY, FRAME_MOTION_GUIDANCE, WORKSPACE_PROMPTS as WORKSPACE_INSTRUCTIONS, render_workspace_prompt
 from pathlib import Path
 
 import requests
@@ -14,7 +14,7 @@ from .media import data_url, video_storyboard_data_urls
 from .project_archive import materialize_source
 from .models import Segment
 from .ai_stream import send_stream, streaming_enabled
-from .minimax_reference import reference_image_for_provider, reference_inventory, reference_rules, reference_slots, WORKFLOW_NAMES, WORKFLOW_DIRECTIONS, detect_workflow
+from .minimax_reference import reference_image_for_provider, reference_inventory, reference_rules, reference_slots, timeline_motion_context, WORKFLOW_NAMES, WORKFLOW_DIRECTIONS, detect_workflow
 
 
 GEMINI_MODELS = [
@@ -100,6 +100,8 @@ def combined_timeline_contract(segments: list[Segment]) -> str:
                   "kind": item.kind, "role": item.role, "start": round(cursor, 6),
                   "end": round(end, 6), "duration": item.duration,
                   "prompt": item.prompt, "imagePrompt": item.image_prompt}
+        if item.kind == "image":
+            record["frameAnchorTime"] = round(end if item.role == "end" else cursor, 6)
         if item.kind == "video":
             start = max(0.0, float(item.trim_start or 0) / 24)
             record.update(sourceStart=start, sourceEnd=start + item.duration)
@@ -353,7 +355,7 @@ def generate_segment_prompt(segments: list[Segment], selected_index: int, provid
         "\\n" + _refinement_duration_instruction(requested_total)
     )
     raw = _provider_raw(_refinement_images(segments, selected_index),
-                        provider, model, api_key, rules + CONTENT_FIDELITY, timeout)
+                        provider, model, api_key, rules + CONTENT_FIDELITY + FRAME_MOTION_GUIDANCE, timeout)
     result = _parse_json(raw)
     if not isinstance(result, dict):
         raise AIResponseFormatError("Segment generation returned invalid JSON; retrying.")
@@ -476,6 +478,7 @@ def _minimax_timestamp(seconds: float) -> str:
 
 def _minimax_h3_inputs(segments: list[Segment], provider: str = "gemini", refinement: bool = False, frame_checkpoints: bool = False) -> list[dict]:
     inputs = []
+    motion_contexts = timeline_motion_context(segments)
     cursor = 0.0
     picture_number = 0
     video_number = 0
@@ -489,16 +492,14 @@ def _minimax_h3_inputs(segments: list[Segment], provider: str = "gemini", refine
             video_number += 1
         if item.kind == "text":
             continuity_function = "action instruction spanning this complete timeline interval"
-        elif not seen_visual and not (frame_checkpoints and item.kind == "image" and item.role == "end"):
+        elif not seen_visual and not (item.kind == "image" and item.role == "end"):
             continuity_function = "opening visual anchor establishing the initial continuous state"
             seen_visual = True
         elif item.kind == "video":
             continuity_function = "temporal motion evidence spanning this complete timeline interval"
-        elif frame_checkpoints:
+        elif item.kind == "image":
             continuity_function = ("end-frame target reached by this interval's end, then carried forward" if item.role == "end"
                                    else "start-frame checkpoint present at this interval's beginning; develop onward from it")
-        elif item.role == "end":
-            continuity_function = "visual target to approach progressively and resolve by this interval's end"
         else:
             continuity_function = "continuity checkpoint to reach progressively from the preceding interval"
         if item.kind in ("image", "video"):
@@ -510,6 +511,7 @@ def _minimax_h3_inputs(segments: list[Segment], provider: str = "gemini", refine
             "role": item.role,
             "frame_mode_checkpoint": frame_checkpoints and item.kind == "image",
             "kind": item.kind,
+            "motion_context": motion_contexts[index],
             "start_time": start,
             "end_time": end,
             "duration": item.duration,
@@ -522,7 +524,7 @@ def _minimax_h3_inputs(segments: list[Segment], provider: str = "gemini", refine
                 "observable intermediate stages that connect adjacent frame states, including onset, progressive change, physical cause, material or "
                 "anatomical response, momentum carried across the cue, and the exact state reached at the next frame; never jump directly between states."
             ),
-            "cue_timestamp": _minimax_timestamp(start),
+            "cue_timestamp": _minimax_timestamp(end if item.kind == "image" and item.role == "end" else start),
             "next_cue_timestamp": _minimax_timestamp(end) if index + 1 < len(segments) else None,
             "continuity_function": continuity_function,
             "prompt": item.prompt.strip() or "[No existing segment prompt; infer conservatively from supplied visual and sequence context.]",
@@ -644,7 +646,7 @@ def _minimax_reference_inputs(segments: list[Segment], provider: str, reference_
         item = {**record, "reference_mode_input": True}
         if "timeline_index" in record:
             media = timeline_media[record["timeline_index"]]
-            for key in ("segment_id", "image", "video", "video_frames", "video_analysis_mode", "video_number"):
+            for key in ("segment_id", "motion_context", "image", "video", "video_frames", "video_analysis_mode", "video_number"):
                 if key in media:
                     item[key] = media[key]
         else:
@@ -671,26 +673,41 @@ def _minimax_reference_timestamp(seconds: float) -> str:
 def _refinement_images(segments: list[Segment], selected_index: int) -> list[dict]:
     start = max(0, selected_index - 1)
     end = min(len(segments), selected_index + 2)
+    motion_contexts = timeline_motion_context(segments)
+    indices = set(range(start, end))
+    # Text directions between checkpoints must not hide the actual visual pair.
+    for side in ("previous_visual", "next_visual"):
+        anchor = motion_contexts[selected_index][side]
+        if anchor is not None:
+            indices.add(anchor["timeline_index"])
     return [
         {
             "name": f"Segment {index + 1} {'SELECTED' if index == selected_index else ('PREVIOUS' if index < selected_index else 'NEXT')} — {item.name}",
             "role": item.role,
             "kind": item.kind,
             "selected": index == selected_index,
+            "segment_id": item.id,
+            "timeline_index": index,
+            "motion_context": motion_contexts[index],
             "prompt": item.prompt,
             **({"image": data_url(materialize_source(item) if item.kind == "image" else item.preview_path, max_edge=384)} if item.kind != "text" and item.preview_path else {}),
         }
-        for index, item in enumerate(segments[start:end], start)
+        for index in sorted(indices) for item in [segments[index]]
     ]
 
 
 def _segment_context(segments: list[Segment], selected_index: int) -> str:
     records = []
+    motion_contexts = timeline_motion_context(segments)
     for index, segment in enumerate(segments):
         relation = "SELECTED" if index == selected_index else ("PREVIOUS" if index == selected_index - 1 else ("NEXT" if index == selected_index + 1 else "SEQUENCE CONTEXT"))
-        anchor = "TEXT-ONLY SEGMENT" if segment.kind == "text" else f"{segment.role.upper()} FRAME"
+        context = motion_contexts[index]
+        anchor = "TEXT-ONLY SEGMENT" if segment.kind == "text" else "SOURCE VIDEO" if segment.kind == "video" else f"{segment.role.upper()} FRAME"
+        if segment.kind == "image":
+            anchor += f" anchored at {context['current_visual']['anchor_time']:.3f}s"
         records.append(
-            f"Segment {index + 1} [{relation}; {anchor}; current duration {segment.duration:.2f}s]\n"
+            f"Segment {index + 1} [{relation}; {anchor}; current duration {segment.duration:.2f}s; "
+            f"interval {context['interval_start']:.3f}–{context['interval_end']:.3f}s]\n"
             f"Existing prompt (immutable unless SELECTED prompt refinement): {segment.prompt or '[empty]'}"
         )
     return "\n\n".join(records)
@@ -717,7 +734,7 @@ Director's intent and planning controls:
 ORDERED EXISTING PLAN:
 {_segment_context(segments, selected_index)}
 
-Return strict JSON containing only: {{"duration": 5.0}}"""
+Return strict JSON containing only: {{"duration": 5.0}}""" + FRAME_MOTION_GUIDANCE
 
 
 def _prompt_refinement_rules(segments: list[Segment], selected_index: int, intent: str, requested_total: float) -> str:
@@ -834,11 +851,13 @@ def _gemini_raw(images: list[dict], key: str, model: str, rules: str, timeout: i
         if "start_time" in item and "end_time" in item:
             timing = f" — {float(item['start_time']):.3f}s to {float(item['end_time']):.3f}s ({float(item.get('duration', 0)):.3f}s)"
         cue = f" — REQUIRED OUTPUT CUE {item['cue_timestamp']}" if item.get("cue_timestamp") else ""
-        next_cue = f" — NEXT CUE BOUNDARY {item['next_cue_timestamp']}" if item.get("next_cue_timestamp") else " — FINAL INTERVAL"
+        next_cue = f" — INTERVAL END BOUNDARY {item['next_cue_timestamp']}" if item.get("next_cue_timestamp") else " — FINAL INTERVAL"
         continuity = f" — CONTINUITY ROLE: {item['continuity_function']}" if item.get("continuity_function") else ""
         analysis_mode = f" — {item['video_analysis_mode']}" if item.get("video_analysis_mode") else ""
         source_duration = f" — source clip {float(item['source_duration']):.3f}s" if item.get("source_duration") else ""
         parts.append({"text": _minimax_reference_header(item) if item.get("reference_mode_input") else f"SEGMENT {index} OF {len(images)} — {label}{picture}{video} — {item['name']}{timing}{cue}{next_cue}{continuity}{source_duration}{analysis_mode}"})
+        if item.get("motion_context") and not item.get("reference_mode_input"):
+            parts.append({"text": "TIMED FRAME MOTION CONTEXT: " + json.dumps(item["motion_context"], ensure_ascii=False)})
         if item.get("audio"):
             mime, encoded = re.match(r"^data:([^;]+);base64,(.+)$", item["audio"], re.S).groups()
             parts.append({"inline_data": {"mime_type": mime, "data": encoded}})
@@ -985,11 +1004,13 @@ def _openai_raw(images: list[dict], key: str, rules: str, timeout: int, *,
         if "start_time" in item and "end_time" in item:
             timing = f" — {float(item['start_time']):.3f}s to {float(item['end_time']):.3f}s ({float(item.get('duration', 0)):.3f}s)"
         cue = f" — REQUIRED OUTPUT CUE {item['cue_timestamp']}" if item.get("cue_timestamp") else ""
-        next_cue = f" — NEXT CUE BOUNDARY {item['next_cue_timestamp']}" if item.get("next_cue_timestamp") else " — FINAL INTERVAL"
+        next_cue = f" — INTERVAL END BOUNDARY {item['next_cue_timestamp']}" if item.get("next_cue_timestamp") else " — FINAL INTERVAL"
         continuity = f" — CONTINUITY ROLE: {item['continuity_function']}" if item.get("continuity_function") else ""
         analysis_mode = f" — {item['video_analysis_mode']}" if item.get("video_analysis_mode") else ""
         source_duration = f" — source clip {float(item['source_duration']):.3f}s" if item.get("source_duration") else ""
         content.append({"type": "input_text", "text": _minimax_reference_header(item) if item.get("reference_mode_input") else f"SEGMENT {index} OF {len(images)} — {label}{picture}{video} — {item['name']}{timing}{cue}{next_cue}{continuity}{source_duration}{analysis_mode}"})
+        if item.get("motion_context") and not item.get("reference_mode_input"):
+            content.append({"type": "input_text", "text": "TIMED FRAME MOTION CONTEXT: " + json.dumps(item["motion_context"], ensure_ascii=False)})
         for frame in item.get("video_frames") or []:
             content.append({"type": "input_text", "text": f"VIDEO {item['video_number']} OBSERVATION AT SOURCE {float(frame['timestamp']):.3f}s"})
             content.append({"type": "input_image", "image_url": frame["image"], "detail": "high"})
