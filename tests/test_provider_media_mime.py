@@ -1,5 +1,6 @@
 """Media transport must identify archive/cache contents, not narrative suffixes."""
 import base64
+import io
 import json
 import subprocess
 import zipfile
@@ -12,6 +13,7 @@ from ltx_prompt_director import ai, project_archive
 from ltx_prompt_director.ai_stream import STREAM_SINK
 from ltx_prompt_director.media import data_url, media_mime, safe_media_filename
 from ltx_prompt_director.models import Segment
+from ltx_prompt_director.minimax_reference import reference_inventory
 
 
 def test_media_signatures_override_misleading_cache_suffixes(tmp_path):
@@ -86,3 +88,59 @@ def test_media_names_are_safe_and_keep_the_actual_extension():
     assert safe_media_filename(r'C:\folder\NUL.png', suffix='.jpg') == '_NUL.jpg'
     assert safe_media_filename('../bad:*?name.webm', suffix='.mp4') == 'bad_name.mp4'
     assert len(safe_media_filename('🐾' * 300 + 'a' * 300, suffix='.mp4').encode()) < 180
+
+
+def test_reference_source_names_survive_thumbnails_load_and_resave(tmp_path):
+    thumbnail = io.BytesIO()
+    Image.new('RGB', (24, 16), 'blue').save(thumbnail, 'JPEG')
+    image = io.BytesIO()
+    Image.new('RGB', (24, 16), 'red').save(image, 'PNG')
+    video = b'\x00\x00\x00\x20ftypisom\x00\x00\x02\x00original video bytes'
+    audio = b'RIFF\x20\x00\x00\x00WAVEoriginal audio bytes'
+    references = [
+        dict(name='Leadin-Marker.jpg', kind='video', role='scene', notes='Opening shot',
+             archiveMedia='references/1-path.jpg', archiveAudio='references/1-audio.png',
+             archiveImage='references/1.png', audio_only=False),
+        dict(name='Voice.jpg', kind='audio', role='voice', notes='Voice reference',
+             archiveMedia='references/2-path.png', archiveAudio='references/2-audio.png',
+             archiveImage='references/2.png'),
+        dict(name='Still.webm', role='style', notes='Still reference', archiveImage='references/3.png'),
+    ]
+    legacy = tmp_path / 'legacy.LTXD'
+    with zipfile.ZipFile(legacy, 'w') as archive:
+        archive.writestr('project.json', json.dumps(dict(frames=[], minimaxH3=dict(referenceImages=references))))
+        archive.writestr('references/1-path.jpg', video)
+        archive.writestr('references/1-audio.png', audio)
+        archive.writestr('references/2-path.png', audio)
+        archive.writestr('references/2-audio.png', audio)
+        archive.writestr('references/1.png', thumbnail.getvalue())
+        archive.writestr('references/2.png', thumbnail.getvalue())
+        archive.writestr('references/3.png', image.getvalue())
+    original = legacy.read_bytes()
+    with patch.object(project_archive, 'APP_CACHE', tmp_path / 'cache'):
+        loaded = project_archive.read_project(legacy)
+        refs = loaded['minimaxH3']['referenceImages']
+        assert [ref['name'] for ref in refs] == ['Leadin-Marker.mp4', 'Voice.wav', 'Still.png']
+        assert [ref['label'] for ref in reference_inventory([], refs)] == ['Video1', 'Audio2', 'Image1']
+        assert reference_inventory([], refs)[0]['audio_label'] == 'Audio1'
+        assert refs[0]['notes'] == 'Opening shot'
+        assert refs[0]['kind'] == 'video'
+        assert base64.b64decode(refs[0]['image'].split(',', 1)[1]) == thumbnail.getvalue()
+        # Also repair a stale display name and mismatched source suffix on save.
+        refs[0]['name'] = 'Leadin-Marker.jpg'
+        stale_source = tmp_path / 'original.jpg'
+        stale_source.write_bytes(video)
+        refs[0]['path'] = str(stale_source)
+        saved = tmp_path / 'saved.LTXD'
+        project_archive.save_project_archive(saved, loaded, [])
+        with zipfile.ZipFile(saved) as archive:
+            manifest = json.loads(archive.read('project.json'))['minimaxH3']['referenceImages']
+            assert manifest[0]['name'] == 'Leadin-Marker.mp4'
+            assert manifest[0]['archiveMedia'].endswith('.mp4')
+            assert manifest[0]['archiveAudio'].endswith('.wav')
+            assert archive.read(manifest[0]['archiveMedia']) == video
+            assert archive.read(manifest[0]['archiveAudio']) == audio
+        reopened = project_archive.read_project(saved)['minimaxH3']['referenceImages']
+        assert [ref['name'] for ref in reopened] == ['Leadin-Marker.mp4', 'Voice.wav', 'Still.png']
+        assert stale_source.read_bytes() == video
+    assert legacy.read_bytes() == original

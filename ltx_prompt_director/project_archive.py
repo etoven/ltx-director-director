@@ -133,9 +133,13 @@ def save_project_archive(path: str | Path, payload: dict, segments: list) -> Non
                     for key, archive_key in [('path','archiveMedia'),('audio_path','archiveAudio')]:
                         if ref.get(key):
                             source = Path(ref.pop(key))
-                            member = f'references/{index}-{key}{source.suffix}'
                             with source.open('rb') as stream:
+                                suffix = MEDIA_SUFFIXES.get(media_mime_from_header(stream.read(4096), source.suffix), source.suffix)
+                                stream.seek(0)
+                                member = f'references/{index}-{key}{suffix}'
                                 _copy_to_archive(archive,member,stream)
+                            if key == 'path':
+                                ref['name'] = safe_media_filename(ref.get('name', ''), 'Reference', suffix=suffix)
                             ref[archive_key] = member
                 if not ref or not ref.get("image"):
                     continue
@@ -209,7 +213,10 @@ def load_project_archive(path: str | Path) -> dict:
                 raw = archive.read(ref["archiveImage"])
                 mime = media_mime_from_header(raw[:4096], Path(ref["archiveImage"]).suffix)
                 ref["imageMime"] = mime
-                ref["name"] = safe_media_filename(ref.get("name", ""), "Reference", suffix=MEDIA_SUFFIXES.get(mime, ".png"))
+                # A video's image is its thumbnail, not its source file. Keep
+                # the source extension repaired above, including in older saves.
+                if ref.get('kind', 'image') == 'image':
+                    ref["name"] = safe_media_filename(ref.get("name", ""), "Reference", suffix=MEDIA_SUFFIXES.get(mime, ".png"))
                 ref["image"] = f"data:{mime};base64," + base64.b64encode(raw).decode()
     return payload
 

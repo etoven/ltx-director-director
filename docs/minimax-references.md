@@ -26,7 +26,7 @@ Open **Reference media** in a MiniMax timeline workspace. Drop an image, video o
 
 For the Aurora scene, choose **Visual style** and write “Use the cool sky, warm lanterns and luminous atmosphere.” That gives the picture a clear job while the timeline continues to describe when the traveler moves and arrives.
 
-References keep their original resolution in the saved project. AI analysis uses a size-limited copy. Roles and notes travel with the .LTXD project. Right-click the reference image and choose **Export Media** to save the full-resolution stored image into the project’s export folder. It also appears in Recent exports. Automatic filenames avoid overwriting earlier exports. **Clear** in the same context menu removes only that slot’s reference; it does not remove timeline media or change the sequence’s duration.
+References keep their original resolution in the saved project. AI analysis uses a size-limited copy. Roles and notes travel with the .LTXD project. Right-click the reference image and choose **Export Media** to save the full-resolution stored image into the project’s export folder. It also appears in Recent exports. Video and audio references retain their original media extension when reopened or exported; their thumbnail does not change the filename. Existing .LTXD references recover the extension from the stored source. Automatic filenames avoid overwriting earlier exports. **Clear** in the same context menu removes only that slot’s reference; it does not remove timeline media or change the sequence’s duration.
 
 ## Use a video for its soundtrack
 
