@@ -30,31 +30,31 @@ class UnifiedEditorTests(unittest.TestCase):
         self.addCleanup(window.close)
         return window
 
-    def test_single_ai_button_follows_active_prompt_editor(self):
+    def test_editor_specific_generate_and_refine_buttons_do_not_move(self):
         from PySide6.QtWidgets import QPushButton
-        w = self.make_window('ltx')
-        self.assertEqual(len([x for x in w.findChildren(QPushButton, 'promptAction') if x is w.magic_button]), 1)
-        self.assertTrue(w.segment_header.indexOf(w.magic_button) >= 0)
-        self.assertTrue(w.refine_prompt_button.isHidden())
-        self.assertTrue(w.refine_timing_button.isHidden())
-        self.assertIsNone(w.magic_button.menu())
-        w.set_project_type('minimax_frames')
-        self.assertTrue(w.director_intent_row.indexOf(w.magic_button) >= 0)
-        self.assertEqual(len([x for x in w.findChildren(QPushButton, 'promptAction') if x is w.magic_button]), 1)
-        w.unified_prompt.setPlainText('Existing unified draft')
-        w.refresh_primary_ai_action()
-        self.assertEqual(w.primary_ai_command, 'refine')
-        w.set_project_type('minimax_prompt_refinement')
-        self.assertEqual(w.minimax_panel.header.indexOf(w.magic_button) >= 0, True)
-        w.unified_prompt.clear()
-        w.minimax_prompt_text = ''
-        w.refresh_primary_ai_action()
-        self.assertTrue(w.magic_button.isEnabled())  # unified workspace can generate
-        w.unified_prompt.setPlainText('Text to refine')
-        w.refresh_primary_ai_action()
-        self.assertTrue(w.magic_button.isEnabled())
-        w.set_project_type('ltx')
-        self.assertTrue(w.segment_header.indexOf(w.magic_button) >= 0)
+        w = self.make_window("ltx")
+        self.assertGreaterEqual(w.segment_header.indexOf(w.magic_button), 0)
+        self.assertGreaterEqual(w.segment_header.indexOf(w.prompt_refine_button), 0)
+        self.assertTrue(w.combined_generate_button.isHidden())
+        self.assertTrue(w.combined_refine_button.isHidden())
+        w.set_project_type("minimax_frames")
+        self.assertGreaterEqual(w.director_intent_row.indexOf(w.magic_button), 0)
+        self.assertGreaterEqual(w.director_intent_row.indexOf(w.prompt_refine_button), 0)
+        self.assertGreaterEqual(w.minimax_panel.header.indexOf(w.combined_generate_button), 0)
+        self.assertGreaterEqual(w.minimax_panel.header.indexOf(w.combined_refine_button), 0)
+        self.assertNotEqual(w.magic_button, w.combined_generate_button)
+        self.assertFalse(w.combined_generate_button.isHidden())
+        self.assertFalse(w.combined_refine_button.isHidden())
+        self.assertEqual(w.magic_button.text(), "✦ Generate")
+        self.assertEqual(w.prompt_refine_button.text(), "✦ Refine")
+        w.set_project_type("minimax_prompt_refinement")
+        self.assertTrue(w.magic_button.isHidden())
+        self.assertTrue(w.prompt_refine_button.isHidden())
+        self.assertGreaterEqual(w.minimax_panel.header.indexOf(w.combined_generate_button), 0)
+        w.set_project_type("ltx")
+        self.assertGreaterEqual(w.segment_header.indexOf(w.magic_button), 0)
+        self.assertGreaterEqual(w.segment_header.indexOf(w.prompt_refine_button), 0)
+        self.assertEqual(len(w.findChildren(QPushButton, "promptAction")), 4)
 
     def test_sync_button_follows_unified_timeline_capability(self):
         w = self.make_window("ltx")
@@ -423,11 +423,12 @@ class UnifiedEditorTests(unittest.TestCase):
         self.assertTrue(w.director_intent_row.indexOf(w.magic_button) >= 0)
         self.assertEqual(w.magic_button.objectName(), "promptAction")
         w.set_project_type("minimax_prompt_refinement")
-        self.assertGreaterEqual(w.minimax_panel.header.indexOf(w.magic_button), 0)
+        self.assertGreaterEqual(w.minimax_panel.header.indexOf(w.combined_generate_button), 0)
         w.set_project_type("ltx")
         self.assertGreaterEqual(w.segment_header.indexOf(w.magic_button), 0)
         w.set_project_type("minimax_frames")
         self.assertGreaterEqual(w.director_intent_row.indexOf(w.magic_button), 0)
+        self.assertGreaterEqual(w.minimax_panel.header.indexOf(w.combined_refine_button), 0)
         self.assertFalse(any(label.text() in {"TIMELINE", "OUTPUT", "SCALE"}
                              for label in w.timeline_shell.findChildren(QLabel)))
 
@@ -558,34 +559,75 @@ class UnifiedEditorTests(unittest.TestCase):
             self.assertTrue(w.unified_panel.isHidden())
             worker.assert_not_called()
 
-    def test_one_button_handles_generate_and_refine_without_dropdown(self):
-        w = self.make_window('minimax_frames')
-        self.assertIsNone(w.magic_button.menu())
-        w.minimax_prompt_text = ""
-        w.unified_prompt.clear()
-        w.refresh_primary_ai_action()
-        self.assertIn("Generate", w.magic_button.text())
-        with patch.object(w, '_generate_minimax_prompt') as generate:
+    def test_upper_buttons_target_segment_or_global_only(self):
+        from ltx_prompt_director.ai import generate_segment_prompt
+        w = self.make_window("minimax_frames")
+        w.prompt_scope.setCurrentIndex(1)
+        w.intent_segment_prompt.setPlainText("Selected segment direction")
+        w.unified_prompt.setPlainText("Authoritative combined draft")
+        with (patch.object(w, "ai_credentials",
+                           return_value=("gemini", "gemini-3.5-flash", "key")),
+              patch.object(w, "start_ai_worker") as start):
             w.magic_button.click()
-        generate.assert_called_once_with(w.minimax_prompt_mode)
-        w.minimax_prompt_text = "Existing unified prompt"
-        w.refresh_primary_ai_action()
-        self.assertIn("Refine", w.magic_button.text())
-        with patch.object(w, 'refine_minimax_prompt') as refine:
+        self.assertIs(start.call_args.args[0], generate_segment_prompt)
+        self.assertEqual(start.call_args.args[1][1], w.timeline.currentRow())
+        self.assertEqual(w.minimax_prompt_text, "Authoritative combined draft")
+        with patch.object(w, "refine_selected_prompt") as refined:
+            w.prompt_refine_button.click()
+        refined.assert_called_once_with()
+        w.prompt_scope.setCurrentIndex(0)
+        with patch.object(w, "_generate_or_refine_upper_global") as global_call:
             w.magic_button.click()
-        refine.assert_called_once_with()
+            w.intent.setPlainText("Keep it in one shot")
+            w.prompt_refine_button.click()
+        self.assertEqual([call.args for call in global_call.call_args_list],
+                         [(False,), (True,)])
 
-    def test_slash_tags_anywhere_activate_refine_without_a_menu(self):
-        w = self.make_window('minimax_frames')
-        w.minimax_prompt_text = ""
-        w.unified_prompt.clear()
-        w.segments[0].prompt = "Keep composition\\n/refine Adjust segment timing"
-        w.refresh_primary_ai_action()
-        self.assertIn("Refine", w.magic_button.text())
-        self.assertIsNone(w.magic_button.menu())
-        with patch.object(w, '_generate_minimax_prompt') as generate:
-            w.magic_button.click()
-        generate.assert_called_once_with(w.minimax_prompt_mode)
+    def test_lower_buttons_only_generate_or_refine_combined(self):
+        w = self.make_window("minimax_frames")
+        with (patch.object(w, "_generate_minimax_prompt") as generated,
+              patch.object(w, "refine_minimax_prompt") as refined):
+            w.combined_generate_button.click()
+            w.unified_prompt.setPlainText("Combined with /refine instructions")
+            w.combined_refine_button.click()
+        generated.assert_called_once_with(w.minimax_prompt_mode)
+        refined.assert_called_once_with()
+        self.assertEqual(w.magic_button.text(), "✦ Generate")
+        self.assertEqual(w.prompt_refine_button.text(), "✦ Refine")
+
+    def test_reverse_sync_uses_all_segments_and_never_selected_subset(self):
+        from ltx_prompt_director.segment_plan import sync_combined_from_timeline
+        w = self.make_window("minimax_frames")
+        w.segments.append(Segment("Third", "", "", kind="text",
+                                  prompt="Final beat at the end", duration=4))
+        w.refresh_timeline(0)
+        w.unified_prompt.setPlainText("Outdated combined scene")
+        with (patch.object(w, "ai_credentials",
+                           return_value=("gemini", "gemini-3.5-flash", "key")),
+              patch.object(w, "start_ai_worker") as start):
+            w.sync_combined_button.click()
+        args = start.call_args.args
+        self.assertIs(args[0], sync_combined_from_timeline)
+        self.assertEqual([seg.id for seg in args[1][0]],
+                         [seg.id for seg in w.segments])
+        self.assertEqual(args[1][4], "Outdated combined scene")
+        self.assertIs(args[3], w.sync_combined_finished)
+        self.assertIn("ALL project timeline segments", args[2])
+
+    def test_reverse_sync_completion_updates_only_combined_prompt(self):
+        import copy
+        w = self.make_window("minimax_frames")
+        w.unified_prompt.setPlainText("Old combined")
+        original = copy.deepcopy(w.segments)
+        w.sync_combined_source = w.minimax_prompt_text
+        w.sync_combined_signature = tuple(
+            (seg.id, seg.name, seg.kind, seg.role, seg.duration,
+             seg.prompt, seg.image_prompt, seg.media_path) for seg in w.segments)
+        w.sync_combined_finished({"prompt": "Revised complete combined sequence"})
+        self.assertEqual(w.minimax_prompt_text, "Revised complete combined sequence")
+        self.assertEqual(w.unified_prompt.toPlainText(), "Revised complete combined sequence")
+        self.assertEqual([(s.id, s.prompt, s.duration) for s in w.segments],
+                         [(s.id, s.prompt, s.duration) for s in original])
 
     def test_unified_editor_and_timeline_controls_lock_during_ai(self):
         w = self.make_window('minimax_frames')
@@ -607,8 +649,11 @@ class UnifiedEditorTests(unittest.TestCase):
         self.assertTrue(w.segment_panel.isHidden())
         self.assertFalse(w.unified_panel.isHidden())
         self.assertTrue(w.director_intent_row.indexOf(w.magic_button) >= 0)
+        self.assertTrue(w.director_intent_row.indexOf(w.prompt_refine_button) >= 0)
         self.assertTrue(w.director_intent_row.indexOf(w.prompt_scope) >= 0)
-        self.assertEqual(len([x for x in w.findChildren(QPushButton, 'promptAction') if x is w.magic_button]), 1)
+        self.assertGreaterEqual(w.minimax_panel.header.indexOf(w.combined_generate_button), 0)
+        self.assertGreaterEqual(w.minimax_panel.header.indexOf(w.combined_refine_button), 0)
+        self.assertEqual(len(w.findChildren(QPushButton, 'promptAction')), 4)
 
     def test_timeline_plan_rewrite_typing_matches_prompt_and_rolls_back(self):
         w = self.make_window("minimax_frames")
