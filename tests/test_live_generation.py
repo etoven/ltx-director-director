@@ -82,6 +82,26 @@ class ProviderStreams(unittest.TestCase):
         self.assertIn("thinkingConfig", seen[0])
         self.assertNotIn("thinkingConfig", seen[1])
 
+    def test_gemini_preserves_error_body_after_stream_closes(self):
+        import io
+        import requests
+        class ClosingResponse(requests.Response):
+            def close(self):
+                self.raw.close()
+                super().close()
+        response = ClosingResponse()
+        response.status_code = 400
+        response.url = "https://generativelanguage.googleapis.com/v1beta/models/demo:streamGenerateContent"
+        response.raw = io.BytesIO(b'{"error":{"message":"The supplied media is not supported."}}')
+        unsupported = StreamResponse([])
+        unsupported.status_code = 400
+        with patch.object(ai.requests, "post", side_effect=[unsupported, response]):
+            with self.assertRaises(requests.HTTPError) as caught:
+                ai._gemini_stream([], "key", "demo", 20)
+        self.assertTrue(response.raw.closed)
+        self.assertIn("The supplied media is not supported.",
+                      ai.provider_error_message(caught.exception))
+
     def test_openai_stream_shows_only_published_summary_and_generated_text(self):
         messages = []
         events = [

@@ -43,7 +43,7 @@ from .artwork_tools import IMAGE_MODEL_CHOICES, available_artwork_tools, render_
 from .cache_maintenance import cover_path, mark_ready, needs_refresh, warm_metadata
 from .ai import AIResponseFormatError, GEMINI_MODELS, build_minimax_h3_prompt, build_minimax_h3_reference_prompt, build_prompts, minimax_h3_cache_key, provider_error_message, WORKSPACE_INSTRUCTIONS, refine_minimax_text_prompt, refine_minimax_h3_prompt, refine_minimax_h3_reference_prompt, refine_segment_prompt, generate_segment_prompt, refine_global_prompt, generate_global_direction, refine_sequence_prompts, refine_timing, retryable_connection_error
 from .media import APP_CACHE, TIMELINE_VIDEO_SUFFIXES, comfy_input_references, copy_media_for_export, data_url, extract_audio_for_export, prepare_media, safe_media_filename, thumbnail_for_image, unique_media_filename, video_source_dimensions, write_data_url
-from .project_archive import materialize_source, project_thumbnail_data, read_project, save_project_archive
+from .project_archive import clear_archived_source, materialize_source, project_thumbnail_data, read_project, save_project_archive
 from .minimax_reference import WORKFLOW_NAMES, detect_workflow, reference_inventory, reference_slots
 from .minimax_reference_widgets import MiniMaxReferenceSlot
 from .generic_ai import build_generic_prompt, refine_generic_prompt, build_generic_segments, refine_generic_segment
@@ -3261,7 +3261,7 @@ class MiniMaxPromptPanel(QFrame):
         self.timeline_refine_button.hide()
         self.message_panel.hide()
 
-    def set_busy(self, busy: bool, status: str = "") -> None:
+    def set_busy(self, busy: bool, status: str = "", *, show_progress: bool = True) -> None:
         self.busy = busy
         if status:
             self.set_cache_state(status)
@@ -3270,7 +3270,10 @@ class MiniMaxPromptPanel(QFrame):
                     and not getattr(self.owner, "pending_minimax_result", "")
                     and self.message_panel.property("level") == "success"):
                 self.clear_message()  # Don't stack a stale success banner over a new job.
-            self.ai_marquee.begin("✦ " + (status or "AI working…"))
+            if show_progress:
+                self.ai_marquee.begin("✦ " + (status or "AI working…"))
+            else:
+                self.ai_marquee.finish()
         elif not getattr(self.owner, "_artwork_jobs", 0):
             self.ai_marquee.finish()
         self.update_actions()
@@ -3818,6 +3821,8 @@ class MainWindow(QMainWindow):
         self.magic_button.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         # The sole Generate/Refine action lives in the active prompt header.
         self.director_controls.addLayout(intent_row)
+        self.director_ai_marquee = AIWorkingMarquee(director_panel)
+        self.director_controls.addWidget(self.director_ai_marquee)
         self.director_controls.addWidget(self.director_intent_stack, 1)
         # Length and the quality/audio options sit directly below the
         # conditioning preview, not underneath the text editor.
@@ -3924,7 +3929,7 @@ class MainWindow(QMainWindow):
         # Combined-prompt actions are created separately below.
         self.refine_timing_button = QPushButton("⏱ Refine Timing")
         self.refine_timing_button.setObjectName("refineButton")
-        self.refine_timing_button.setToolTip("Analyze the existing sequence and retime only the selected segment; MiniMax then generates the unified prompt")
+        self.refine_timing_button.setToolTip("Analyze the existing sequence and retime only the selected segment")
         self.refine_timing_button.clicked.connect(self.refine_selected_timing)
         self.refine_timing_button.setEnabled(False)
         self.refine_prompt_button = QPushButton("✎ Refine Prompt")
@@ -4031,11 +4036,11 @@ class MainWindow(QMainWindow):
         # Heading, character count, cache state and copy share ONE title bar.
         self.minimax_panel.header.insertWidget(1, self.unified_count)
         self.sync_timeline_button = QPushButton("")
-        self.sync_timeline_button.setObjectName("refineButton")
+        self.sync_timeline_button.setObjectName("addTile")
         self.sync_timeline_button.setToolTip(
-            "↓ Combined prompt → Timeline: match the complete sequence to the "
-            "combined prompt. Combined prose and real media stay unchanged.")
-        self.sync_timeline_button.setAccessibleName("Sync timeline from combined prompt")
+            "Rewrite timeline from combined prompt: match segment wording and "
+            "timing to the production brief, then review the timeline changes.")
+        self.sync_timeline_button.setAccessibleName("Rewrite timeline from combined prompt")
         self.sync_timeline_button.clicked.connect(self.sync_timeline_from_prompt)
         self.sync_timeline_button.setSizePolicy(
             QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
@@ -4060,7 +4065,8 @@ class MainWindow(QMainWindow):
         self.sync_combined_button.clicked.connect(self.sync_combined_from_segments)
         self.minimax_panel.header.addWidget(self.combined_generate_button)
         self.minimax_panel.header.addWidget(self.combined_refine_button)
-        self.minimax_panel.header.addWidget(self.sync_timeline_button)
+        self.add_tile_layout.insertWidget(
+            2, self.sync_timeline_button, 0, Qt.AlignmentFlag.AlignHCenter)
         self.minimax_panel.header.addWidget(self.sync_combined_button)
         self.minimax_panel.header.addWidget(self.minimax_panel.copy_button)
         unified_layout.addWidget(self.minimax_panel)
@@ -4591,7 +4597,6 @@ class MainWindow(QMainWindow):
                 metric(71),
                 action.fontMetrics().horizontalAdvance(action.text()) + metric(26)))
         for action, image in (
-            (self.sync_timeline_button, "sync-down"),
             (self.sync_combined_button, "sync-up"),
         ):
             action.setIcon(prompt_action_icon(image))
@@ -4605,6 +4610,9 @@ class MainWindow(QMainWindow):
         self.add_tile_wrap.setFixedWidth(metric(44))
         self.add_tile.setFixedSize(metric(32), metric(32))
         self.add_text_tile.setFixedSize(metric(32), metric(32))
+        self.sync_timeline_button.setIcon(toolbar_icon("rewrite-timeline"))
+        self.sync_timeline_button.setIconSize(QSize(metric(20), metric(20)))
+        self.sync_timeline_button.setFixedSize(metric(32), metric(32))
         self.add_tile_layout.setContentsMargins(metric(3), metric(4), metric(3), metric(4))
         self.segment_ai_marquee.setMinimumWidth(0)
         for button in (self.copy_segment,):
@@ -6344,6 +6352,7 @@ class MainWindow(QMainWindow):
         segment.preview_path = thumbnail_for_image(str(destination))
         segment.media_duration_frames = None
         segment.trim_start = None
+        clear_archived_source(segment)
         self.mark_dirty()
         self.refresh_timeline(row)
         self.statusBar().showMessage(f"Image replaced from clipboard at full resolution: {image.width()} × {image.height()}")
@@ -6372,6 +6381,7 @@ class MainWindow(QMainWindow):
         segment.role = "end" if row % 2 else "start"
         segment.media_duration_frames = frames
         segment.trim_start = trim
+        clear_archived_source(segment)
         self.settings.setValue("last_media_dir", str(Path(path).parent))
         self.mark_dirty()
         self.refresh_timeline(row)
@@ -6403,6 +6413,7 @@ class MainWindow(QMainWindow):
             kind, preview, frames, trim = prepare_media(path)
             segment.name, segment.media_path, segment.preview_path, segment.kind = Path(path).name, path, preview, kind
             segment.media_duration_frames, segment.trim_start = frames, trim
+            clear_archived_source(segment)
             self.mark_dirty()
             self.refresh_timeline(self.timeline.currentRow())
             self.statusBar().showMessage("Media replaced; timing, role and prompt preserved")
@@ -6538,6 +6549,7 @@ class MainWindow(QMainWindow):
             editor.setReadOnly(not enabled)
         for widget in (self.prompt_scope, self.project_type_combo, self.duration_spin,
                        self.start_button, self.end_button, self.voice_options_button, self.requested_length,
+                       self.timeline_approve_all, self.timeline_deny_all,
                        self.add_tile, self.add_text_tile,
                        self.hdr, self.sfx, self.spoken_dialog, self.reduce_music,
                        self.output_width, self.output_height, self.references_button):
@@ -6548,6 +6560,8 @@ class MainWindow(QMainWindow):
             card = self.timeline.itemWidget(self.timeline.item(row))
             if isinstance(card, SegmentCard):
                 card.resize_handle.setEnabled(enabled)
+                card.review_accept.setEnabled(enabled)
+                card.review_reject.setEnabled(enabled)
                 for button in card.findChildren(QPushButton, "tileDelete"):
                     button.setEnabled(enabled)
         if enabled:
@@ -6555,11 +6569,18 @@ class MainWindow(QMainWindow):
         segment = self.current_segment()
         self.refine_timing_button.setEnabled(enabled and not self.prompt_only_workspace and bool(segment))
         self.update_refine_prompt_enabled()
+        target = getattr(self, "ai_request_editor", None)
+        if not hasattr(self, "ai_request_editor"):
+            target = self.unified_prompt if self.unified_workspace else self.segment_prompt
         if self.minimax_panel:
-            self.minimax_panel.set_busy(not enabled)
+            self.minimax_panel.set_busy(not enabled, show_progress=target is self.unified_prompt)
+        if target in {self.intent, self.intent_segment_prompt} and not enabled:
+            self.director_ai_marquee.begin(getattr(self, "ai_request_activity", "✦ AI working…"))
+        else:
+            self.director_ai_marquee.finish()
         # The LTX segment editor shares exactly the same blue progress style.
         if hasattr(self, "segment_ai_marquee"):
-            if not enabled and not self.unified_workspace and not self.prompt_only_workspace:
+            if not enabled and target is self.segment_prompt and not self.prompt_only_workspace:
                 self.segment_ai_marquee.begin(
                     "✦ Refining segment…" if self.prompt_scope.currentData() == "segment"
                     else "✦ Refining prompt…"
@@ -6568,9 +6589,37 @@ class MainWindow(QMainWindow):
                 self.segment_ai_marquee.finish()
         self.refresh_primary_ai_action()
 
+    def ai_editor_target(self, operation):
+        """Choose the editor that owns streaming, progress, and final approvals."""
+        if operation in {
+            generate_combined, sync_combined_from_timeline,
+            build_minimax_h3_prompt, build_minimax_h3_reference_prompt,
+            refine_minimax_h3_prompt, refine_minimax_h3_reference_prompt,
+            refine_minimax_text_prompt, build_generic_prompt, refine_generic_prompt,
+        } and self.unified_workspace:
+            return self.unified_prompt, "unified", 0
+        if operation in {refine_segment_prompt, generate_segment_prompt, refine_generic_segment, refine_timing}:
+            if self.unified_workspace:
+                self.prompt_scope.setCurrentIndex(self.prompt_scope.findData("segment"))
+            return (self.intent_segment_prompt if self.unified_workspace else self.segment_prompt), "segment", 0
+        if operation in {refine_global_prompt, generate_global_direction, refine_sequence_prompts,
+                         build_prompts, build_generic_segments}:
+            kind = "global" if self.prompt_scope.currentData() == "global" else "segment"
+            target = (self.intent if kind == "global" else self.intent_segment_prompt) if self.unified_workspace else self.segment_prompt
+            return target, kind, max(0, self.timeline.currentRow()) if kind == "segment" else 0
+        return None, "unified", 0
+
     def start_ai_worker(self, operation, args: tuple, activity: str, finished, show_main_overlay: bool = True) -> None:
         if self.ai_busy:
             return
+        self.paragraph_review.finish()
+        self.inline_typing.finish()
+        target, kind, selected_index = self.ai_editor_target(operation)
+        self.ai_request_editor = target
+        self.ai_request_activity = activity
+        self.ai_review_baseline = (self.minimax_prompt_text if target is self.unified_prompt
+                                   else target.toPlainText() if target is not None else "")
+        self.ai_review_segment_id = self.current_segment().id if kind == "segment" and self.current_segment() else None
         retries = self.settings.value("api_retries", 2, int)
         retry_cooldown = self.settings.value("api_retry_cooldown", 10, int)
         self.set_ai_controls_enabled(False)
@@ -6614,37 +6663,9 @@ class MainWindow(QMainWindow):
         )
         self.active_live_panel = self.reasoning_dock
         self.active_live_panel.begin(activity, model)
-        # A new refinement supersedes earlier review controls; any already
-        # rejected paragraphs remain in the authoritative draft.
-        self.paragraph_review.finish()
-        self.inline_typing.finish()
-        target = None
-        kind = "unified"
-        selected_index = 0
-        if operation in {
-            generate_combined,
-            build_minimax_h3_prompt, build_minimax_h3_reference_prompt,
-            refine_minimax_h3_prompt, refine_minimax_h3_reference_prompt,
-            refine_minimax_text_prompt, build_generic_prompt, refine_generic_prompt,
-        } and self.unified_workspace:
-            target = self.unified_prompt
-        elif operation in {refine_segment_prompt, generate_segment_prompt, refine_generic_segment}:
-            target = self.intent_segment_prompt if self.unified_workspace else self.segment_prompt
-            kind = "segment"
-        elif operation in {refine_global_prompt, generate_global_direction, refine_sequence_prompts}:
-            target = self.intent if self.unified_workspace else self.segment_prompt
-            kind = "global"
-        elif operation in {build_prompts, build_generic_segments} and self.segments:
-            target = self.segment_prompt
-            kind = "global" if self.prompt_scope.currentData() == "global" else "segment"
-            selected_index = max(0, self.timeline.currentRow()) if kind == "segment" else 0
         if target is not None and target.isVisible():
             # Save the authoritative text before any temporary red diff is shown.
-            baseline = (self.minimax_prompt_text if target is self.unified_prompt else
-                        target.toPlainText() if target in {self.intent, self.intent_segment_prompt} else
-                        self.global_prompt.toPlainText() if kind == "global" else
-                        self.segment_prompt.toPlainText())
-            self.inline_typing.start(target, baseline, kind, selected_index)
+            self.inline_typing.start(target, self.ai_review_baseline, kind, selected_index)
         worker.signals.stream.connect(self.ai_stream_received)
         worker.signals.progress.connect(self.magic_progress)
         self.ai_request_workspace = (self.workspace_revision, self.current_project_id, self.project_type)
@@ -6710,9 +6731,15 @@ class MainWindow(QMainWindow):
 
     def ai_result_received(self, result) -> None:
         # Keep the exact pre-generation draft for paragraph-level review.
-        review_editor = (self.inline_typing.editor if self.inline_typing.active
-                         and not self.inline_typing.suspended else None)
-        review_baseline = self.inline_typing.baseline if review_editor else ""
+        review_editor = getattr(self, "ai_request_editor", None)
+        review_baseline = getattr(self, "ai_review_baseline", "")
+        if review_editor is None and self.inline_typing.active:
+            review_editor = self.inline_typing.editor
+            review_baseline = self.inline_typing.baseline
+        segment_id = getattr(self, "ai_review_segment_id", None)
+        if (self.inline_typing.suspended or (segment_id and
+                (self.current_segment() is None or self.current_segment().id != segment_id))):
+            review_editor = None
         self.inline_typing.finish()
         self.ai_plan_stream_active = False
         if hasattr(self, "_ai_plan_timer"):
@@ -6723,7 +6750,7 @@ class MainWindow(QMainWindow):
         if getattr(self, "active_live_panel", None) is not None:
             self.active_live_panel.finish(True)
         self.ai_finished_callback(result)
-        if (review_editor is not None and review_baseline.strip()
+        if (review_editor is not None
                 and review_editor.isVisible() and not self.ai_busy
                 and self.ai_request_is_current()):
             self.paragraph_review.begin(
@@ -6846,8 +6873,6 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"Segment {index + 1} timing refined to {self.segments[index].duration:.2f}s; prompt text unchanged")
         self.set_ai_controls_enabled(True)
         self.magic_overlay.hide_overlay()
-        if target and self.unified_workspace:
-            self._generate_minimax_prompt(self.minimax_prompt_mode)
 
     def refine_prompt_finished(self, result: dict) -> None:
         target = self.refinement_target()
@@ -6891,7 +6916,9 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"{self.ai_activity_title}: {detail} (attempt {attempt}/{total})")
         if getattr(self, "ai_activity_in_minimax", False) and self.minimax_panel:
             action = "Refining" if str(getattr(self, "minimax_operation_kind", "")).startswith("refine_") else "Generating"
-            self.minimax_panel.set_busy(True, f"{detail}  •  attempt {attempt}/{total}")
+            self.minimax_panel.set_busy(
+                True, f"{detail}  •  attempt {attempt}/{total}",
+                show_progress=getattr(self, "ai_request_editor", None) is self.unified_prompt)
             self.minimax_panel.set_cache_state(f"{action}… attempt {attempt}/{total}")
         else:
             self.magic_overlay.update_attempt(attempt, total, detail)
@@ -7730,14 +7757,6 @@ class MainWindow(QMainWindow):
         if not self.ai_busy and self.unified_workspace:
             self.refine_minimax_prompt()
 
-    def _combined_enabled(self) -> bool:
-        provider = str(self.settings.value("provider", "gemini"))
-        model = str(self.settings.value(
-            "chatgpt_model" if provider == "chatgpt" else
-            "openai_model" if provider == "openai" else "gemini_model", ""
-        ))
-        return supports_structured_edit(provider, model)
-
     def run_primary_ai_action(self) -> None:
         """Compatibility action: route to the upper editor's Generate/Refine."""
         if self.primary_ai_command == "refine":
@@ -7985,39 +8004,6 @@ class MainWindow(QMainWindow):
         )
         self.ai_timeline_status.show()
 
-    def _start_combined_ai(self, provider, model, key, timeout, mode, refine):
-        """The existing Generate/Refine button now returns prompt + segment JSON."""
-        self.ai_segment_snapshot = copy.deepcopy(self.segments)
-        self.ai_plan_raw = ""
-        self.ai_plan_record_count = 0
-        self.ai_plan_stream_active = True
-        if not hasattr(self, "_ai_plan_timer"):
-            self._ai_plan_timer = QTimer(self)
-            self._ai_plan_timer.setSingleShot(True)
-            self._ai_plan_timer.setInterval(90)
-            self._ai_plan_timer.timeout.connect(self._flush_ai_plan_preview)
-        self._clear_ai_timeline_preview()
-        self.ai_timeline_status.setText("✦ Planning…")
-        self.ai_timeline_status.setToolTip(
-            "Reading the unified production prompt and ordered segment JSON"
-        )
-        self.ai_timeline_status.show()
-        self.start_ai_worker(
-            generate_combined,
-            (self.ai_segment_snapshot, provider, model, key,
-             self.build_director_request(include_requested_length=False),
-             self.global_prompt.toPlainText(), self.sfx.isChecked(),
-             self.spoken_dialog.isChecked(), self.reduce_music.isChecked(),
-             self.minimax_prompt_text, self.minimax_refinement_instructions,
-             timeout, self.active_reference_images(),
-             self.workspace_engine, mode, refine,
-             getattr(self, "combined_focus", "all")),
-            "Refining unified prompt and timeline…" if refine else
-            "Generating unified prompt and timeline…",
-            self.combined_refinement_finished, show_main_overlay=False,
-        )
-        self.combined_focus = "all"
-
     def _animate_ai_timeline(self, before, inserted):
         """Slide new tiles to the model-assigned duration and settle moved tiles."""
         if getattr(self, "_ai_tile_animation", None):
@@ -8232,6 +8218,8 @@ class MainWindow(QMainWindow):
 
     def resolve_segment_review(self, segment_id: str, approved: bool) -> None:
         """One-click timeline review: retain proposal or restore source data."""
+        if self.ai_busy:
+            return
         pending = getattr(self, "timeline_review_pending", set())
         if segment_id not in pending:
             return
@@ -8257,6 +8245,8 @@ class MainWindow(QMainWindow):
             self.refresh_timeline(max(0, min(location, len(self.segments)-1)))
         else:
             self._show_segment_review_controls()
+            if self.current_segment() and self.current_segment().id == segment_id:
+                self._finish_segment_text_review()
         if not pending:
             self.timeline_review_originals = {}
             self.timeline_review_positions = {}
@@ -8266,6 +8256,8 @@ class MainWindow(QMainWindow):
                 f"{len(pending)} timeline change(s) awaiting review", 5000)
 
     def resolve_all_segment_reviews(self, approved: bool) -> None:
+        if self.ai_busy:
+            return
         if not getattr(self, "timeline_review_pending", set()):
             return
         if not approved:
@@ -8284,6 +8276,7 @@ class MainWindow(QMainWindow):
         self.timeline_deny_all.setChecked(False)
         self.timeline_approve_all.blockSignals(False)
         self.timeline_deny_all.blockSignals(False)
+        self._finish_segment_text_review()
         if not approved:
             self.refresh_timeline()
             self.mark_dirty()
@@ -8292,6 +8285,23 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             "✓ Approved all timeline changes" if approved else
             "× Restored timeline before the AI changes", 6000)
+
+    def _finish_segment_text_review(self) -> None:
+        """Timeline approval must also leave its segment's editor out of diff mode."""
+        editors = (self.segment_prompt, self.intent_segment_prompt)
+        if self.inline_typing.editor in editors:
+            self.inline_typing.finish()
+        if self.paragraph_review.editor in editors:
+            self.paragraph_review.finish()
+        if self.prompt_scope.currentData() == "segment":
+            segment = self.current_segment()
+            text = segment.prompt if segment else ""
+            if self.segment_prompt.toPlainText() != text:
+                self.segment_prompt.blockSignals(True)
+                self.segment_prompt.setPlainText(text)
+                render_prompt_notes(self.segment_prompt)
+                self.segment_prompt.blockSignals(False)
+            self.refresh_director_scope_editor()
 
     def _start_segment_review(self, before: list[Segment], updated: list[Segment],
                               changes: list[dict]) -> None:
@@ -8522,6 +8532,7 @@ class MainWindow(QMainWindow):
                                     else "start")
                 # Only the project reference changes; source file is untouched.
                 segment.media_path = segment.preview_path = path
+                clear_archived_source(segment)
                 segment.artwork_status = "complete"
                 self.statusBar().showMessage(
                     f"✦ {'Edited frame' if original_kind == 'image' else 'New frame'} ready: {segment.name}",
@@ -8620,9 +8631,6 @@ class MainWindow(QMainWindow):
         )
         timeout = self.settings.value("api_timeout", 400, int)
         window.set_busy(True, f"Generating {mode_label} prompt…")
-        if supports_structured_edit(provider, model):
-            self._start_combined_ai(provider, model, key, timeout, mode, False)
-            return
         operation = build_generic_prompt if self.workspace_engine == "generic" else (build_minimax_h3_reference_prompt if reference_mode else build_minimax_h3_prompt)
         self.start_ai_worker(
             operation,
@@ -8736,9 +8744,6 @@ class MainWindow(QMainWindow):
                 (provider, model, key, self.minimax_prompt_text, timeout),
                 "Refining the annotated MiniMax prompt…", self.minimax_h3_finished,
                 show_main_overlay=False)
-            return
-        if supports_structured_edit(provider, model):
-            self._start_combined_ai(provider, model, key, timeout, self.minimax_prompt_mode, True)
             return
         operation = refine_generic_prompt if self.workspace_engine == "generic" else (refine_minimax_h3_reference_prompt if reference_mode else refine_minimax_h3_prompt)
         self.start_ai_worker(

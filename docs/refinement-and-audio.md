@@ -12,7 +12,21 @@ Set **Total length** to guide the sequence’s pacing, or use Auto to let the in
 
 ## Edit directly, then refine
 
-Write in the prompt editor as you would in any draft. In LTX, select the segment whose action needs attention. In MiniMax, work on the full production brief. **Refine Prompt** considers the text you have edited and the direction you add.
+Write in the prompt editor as you would in any draft. Click a timeline card to
+switch the upper editor to **Segment**, then use its **Generate** or **Refine**
+button. The AI works on that segment's text, with nearby beats supplying
+continuity context. Other segment prompts and the lower production brief stay
+as you wrote them.
+
+The working animation and streamed text appear in that same upper editor.
+When the result is ready, approve or reject individual paragraph changes there,
+or use **Approve all** / **Deny all**. These controls also let you review text
+generated for an initially empty segment. Use the lower editor's own buttons
+when you want to generate or refine the combined production brief.
+
+![Segment refinement progress inside the upper editor](images/segment-working.png)
+
+![Paragraph diff and approval controls inside the selected segment editor](images/segment-review.png)
 
 LTX’s **Refine Timing** is useful when the words are right but the beat needs a different duration. It keeps the selected prompt’s wording. Prompt refinement can change both wording and the selected duration; the rest of the LTX sequence remains intact.
 

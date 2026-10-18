@@ -75,9 +75,12 @@ class UnifiedEditorTests(unittest.TestCase):
         w = self.make_window("minimax_frames")
         w.unified_prompt.setPlainText("00:00-00:01 opening; 00:01-00:09 closing")
         snapshot = w.minimax_prompt_text
+        self.assertEqual(w.add_tile_layout.indexOf(w.sync_timeline_button), 2)
+        self.assertEqual(w.minimax_panel.header.indexOf(w.sync_timeline_button), -1)
+        self.assertEqual(w.sync_timeline_button.size(), w.add_tile.size())
         with (patch.object(w, "ai_credentials", return_value=("gemini", "gemini-3.5-flash", "key")),
               patch.object(w, "start_ai_worker") as start):
-            w.sync_timeline_from_prompt()
+            w.sync_timeline_button.click()
         args = start.call_args.args
         self.assertIs(args[0], sync_timeline_to_prompt)
         self.assertEqual(args[1][4], snapshot)
@@ -404,7 +407,7 @@ class UnifiedEditorTests(unittest.TestCase):
         self.assertEqual(w.conditioning_guide.height(), 48)
         self.assertEqual(w.start_button.text(), "Start")
         self.assertEqual(w.end_button.text(), "End")
-        self.assertEqual(w.director_controls.count(), 2)
+        self.assertEqual(w.director_controls.count(), 3)
         self.assertIn("chars", w.unified_count.text())
         self.assertEqual(w.minimax_panel.header.indexOf(w.unified_count),
                          w.minimax_panel.header.indexOf(w.minimax_panel.prompt_label) + 1)
@@ -528,6 +531,74 @@ class UnifiedEditorTests(unittest.TestCase):
             w.minimax_prompt_text,
             "Opening original.\n\nUnchanged center.\n\nEnding revised."
         )
+
+    def test_segment_generate_and_refine_own_the_request_stream_progress_and_review(self):
+        import json
+        from ltx_prompt_director import ui
+        for generate, baseline in ((False, "Original segment action."),
+                                   (True, "Original segment action."), (True, "")):
+            with self.subTest(generate=generate, baseline=baseline):
+                w = self.make_window("minimax_frames")
+                w.resize(1150, 850)
+                w.show()
+                self.app.processEvents()
+                w.prompt_scope.setCurrentIndex(1)
+                w.intent_segment_prompt.setPlainText(baseline)
+                w.unified_prompt.setPlainText("Untouched production draft")
+                neighbor = w.segments[1].to_dict()
+                with (patch.object(w, "ai_credentials", return_value=("gemini", "test-model", "key")),
+                      patch.object(w, "start_ai_worker", wraps=w.start_ai_worker) as dispatch,
+                      patch.object(w.thread_pool, "start") as pool):
+                    (w.generate_upper_prompt if generate else w.refine_upper_prompt)()
+                    operation, args = dispatch.call_args.args[:2]
+                    self.assertIs(operation, ui.generate_segment_prompt if generate else ui.refine_segment_prompt)
+                    self.assertEqual(args[1], 0)
+                    self.assertEqual(args[0][0].prompt, baseline)
+                    self.assertNotIn("Untouched production draft", str(args))
+                    # Exercise the real prompt builder, with only the provider transport mocked.
+                    result = {"prompt": "Revised segment action.", "duration": 2.5}
+                    with patch.object(ai, "_provider_raw", return_value=json.dumps(result)) as provider:
+                        self.assertEqual(operation(*args)["prompt"], result["prompt"])
+                    images = provider.call_args.args[0]
+                    self.assertEqual(next(i["prompt"] for i in images if i["selected"]), baseline)
+                    self.assertIs(w.inline_typing.editor, w.intent_segment_prompt)
+                    self.assertFalse(w.director_ai_marquee.isHidden())
+                    self.assertTrue(w.minimax_panel.ai_marquee.isHidden())
+                    worker = pool.call_args.args[0]
+                    worker.signals.stream.emit("output", json.dumps(result))
+                    w.inline_typing.render()
+                    self.assertEqual(w.segments[0].prompt, baseline)
+                    self.assertEqual(w.unified_prompt.toPlainText(), "Untouched production draft")
+                    worker.signals.finished.emit(result)
+                self.assertTrue(w.director_ai_marquee.isHidden())
+                self.assertIs(w.paragraph_review.editor, w.intent_segment_prompt)
+                self.assertIs(w.paragraph_review.approve_all.parent(), w.intent_segment_prompt)
+                self.assertEqual(w.paragraph_review.pending_count, 1)
+                w.paragraph_review.deny_all.setChecked(True)
+                self.assertEqual(w.segments[0].prompt, baseline)
+                self.assertEqual(w.segments[1].to_dict(), neighbor)
+                self.assertEqual(w.unified_prompt.toPlainText(), "Untouched production draft")
+                w._close_saves_queued = True
+                w.project_dirty = False
+                w.close()
+
+    def test_pasting_image_discards_the_previous_archive_origin_before_split(self):
+        from PySide6.QtGui import QImage, QColor
+        from ltx_prompt_director import ui
+        w = self.make_window("minimax_frames")
+        w.segments[0].kind = "image"
+        w.segments[0]._archive_source = ("old.LTXD", "media/0000.png")
+        w.segments[0]._media_digest = "previous-image"
+        w.refresh_timeline(0)
+        image = QImage(64, 48, QImage.Format.Format_RGB32)
+        image.fill(QColor("#25a866"))
+        self.app.clipboard().setImage(image)
+        w.paste_image_to_replace()
+        w.split_timeline_segment(w.segments[0].id, 1)
+        for segment in w.segments[:2]:
+            self.assertFalse(hasattr(segment, "_archive_source"))
+            self.assertFalse(hasattr(segment, "_media_digest"))
+            self.assertEqual(QImage(segment.media_path).pixelColor(0, 0), QColor("#25a866"))
 
     def test_ltx_segment_editor_remains_authoritative(self):
         w = self.make_window('ltx')
@@ -676,13 +747,27 @@ class UnifiedEditorTests(unittest.TestCase):
                          (original_id, original_kind, original_role))
         self.assertEqual(w.minimax_prompt_text, original_combined)
 
+    def test_timing_refinement_keeps_combined_prompt_and_other_segments(self):
+        w = self.make_window("minimax_frames")
+        w.unified_prompt.setPlainText("Preserved production draft")
+        original = w.segments[0].prompt
+        neighbor = w.segments[1].to_dict()
+        w.refinement_segment_id = w.segments[0].id
+        with patch.object(w, "_generate_minimax_prompt") as generate:
+            w.refine_timing_finished({"duration": 2.5})
+        generate.assert_not_called()
+        self.assertEqual(w.segments[0].duration, 2.5)
+        self.assertEqual(w.segments[0].prompt, original)
+        self.assertEqual(w.segments[1].to_dict(), neighbor)
+        self.assertEqual(w.unified_prompt.toPlainText(), "Preserved production draft")
+
     def test_editor_action_icons_and_sync_direction(self):
         w = self.make_window("minimax_frames")
         for button in (w.magic_button, w.prompt_refine_button,
                        w.combined_generate_button, w.combined_refine_button,
                        w.sync_timeline_button, w.sync_combined_button):
             self.assertFalse(button.icon().isNull())
-        self.assertIn("↓", w.sync_timeline_button.toolTip())
+        self.assertIn("Rewrite timeline", w.sync_timeline_button.toolTip())
         self.assertIn("↑", w.sync_combined_button.toolTip())
         self.assertEqual(w.sync_timeline_button.text(), "")
         self.assertEqual(w.sync_combined_button.text(), "")
@@ -932,6 +1017,38 @@ class UnifiedEditorTests(unittest.TestCase):
         w.set_ai_controls_enabled(True)
         self.assertTrue(w.segment_ai_marquee.isHidden())
 
+    def test_timeline_approve_all_clears_the_selected_segment_diff_projection(self):
+        import copy
+        from PySide6.QtGui import QTextCursor
+        for preview in ("paragraph", "stream"):
+            with self.subTest(preview=preview):
+                w = self.make_window("minimax_frames")
+                before = copy.deepcopy(w.segments)
+                after = "A completely revised segment action."
+                w.segments[0].prompt = after
+                w.prompt_scope.setCurrentIndex(1)
+                w.refresh_timeline(0)
+                w._start_segment_review(before, w.segments,
+                                        [{"id": w.segments[0].id, "kind": "rewrite"}])
+                editor = w.intent_segment_prompt
+                if preview == "paragraph":
+                    self.assertTrue(w.paragraph_review.begin(editor, before[0].prompt, after))
+                else:
+                    w.inline_typing.start(editor, before[0].prompt, "segment")
+                    w.inline_typing.last_candidate = after
+                    w.inline_typing.render()
+                w.timeline_approve_all.setChecked(True)
+                self.assertFalse(w.timeline_review_pending)
+                self.assertIsNone(w.paragraph_review.editor)
+                self.assertFalse(w.inline_typing.active)
+                self.assertEqual(editor.toPlainText(), after)
+                cursor = QTextCursor(editor.document())
+                cursor.movePosition(QTextCursor.MoveOperation.NextCharacter, QTextCursor.MoveMode.KeepAnchor)
+                self.assertFalse(cursor.charFormat().fontStrikeOut())
+                w._close_saves_queued = True
+                w.project_dirty = False
+                w.close()
+
     def test_combined_json_inserts_animated_artwork_placeholder_without_deleting_media(self):
         from unittest.mock import patch
         w = self.make_window('minimax_frames')
@@ -1141,13 +1258,49 @@ class UnifiedEditorTests(unittest.TestCase):
             w.unified_prompt.setPlainText('/refine-global Preserve my ending\nUser-edited production prompt')
             with patch.object(w, 'ai_credentials', return_value=(w.settings.value('provider', 'gemini'), w.settings.value('gemini_model', ai.GEMINI_MODELS[0]), 'unused')), patch.object(w, 'start_ai_worker') as worker:
                 w.refine_minimax_prompt()
-            self.assertEqual(worker.call_args.args[0].__name__, 'generate_combined')
+            self.assertEqual(worker.call_args.args[0].__name__,
+                             'refine_minimax_h3_prompt' if kind == 'minimax_frames' else
+                             'refine_minimax_h3_reference_prompt')
             self.assertIn('User-edited production prompt', worker.call_args.args[1][9])
             self.assertIn('/refine-global Preserve my ending', worker.call_args.args[1][9])
             self.assertEqual(w.minimax_operation_editor_snapshot, ('/refine-global Preserve my ending\nUser-edited production prompt', ''))
             w.minimax_h3_finished('Refined production prompt')
             self.assertEqual(w.unified_prompt.toPlainText(), 'Refined production prompt')
             self.assertFalse(hasattr(w.minimax_panel, 'instructions'))
+
+    def test_combined_generate_and_refine_never_rewrite_timeline_for_any_provider(self):
+        import json
+        for provider, model in (("openai", "gpt-6"), ("gemini", "gemini-3.5-flash-lite")):
+            for kind in ("minimax_frames", "minimax_references"):
+                for refine in (False, True):
+                    with self.subTest(provider=provider, kind=kind, refine=refine):
+                        w = self.make_window(kind)
+                        w.resize(1150, 850)
+                        w.show()
+                        self.app.processEvents()
+                        w.unified_prompt.setPlainText("Existing production brief")
+                        before = [segment.to_dict() for segment in w.segments]
+                        with (patch.object(w, "ai_credentials", return_value=(provider, model, "key")),
+                              patch.object(w.thread_pool, "start") as pool):
+                            (w.combined_refine_button if refine else w.combined_generate_button).click()
+                        worker = pool.call_args.args[0]
+                        # Exercise the actual production rules and extractor. Even
+                        # unsolicited timeline records cannot enter the segment path.
+                        response = json.dumps({"prompt": "Updated production brief", "segments": []})
+                        with patch.object(ai, "_provider_raw", return_value=response) as raw:
+                            result = worker.operation(*worker.args)
+                        self.assertIn(ai.UNIFIED_PROMPT_TRANSPORT, raw.call_args.args[4])
+                        self.assertNotIn("ADDITIVE STRUCTURED SEGMENT JSON CONTRACT", raw.call_args.args[4])
+                        self.assertFalse(getattr(w, "ai_plan_stream_active", False))
+                        self.assertIs(w.ai_request_editor, w.unified_prompt)
+                        worker.signals.finished.emit(result)
+                        self.assertEqual(w.minimax_prompt_text, "Updated production brief")
+                        self.assertEqual([segment.to_dict() for segment in w.segments], before)
+                        self.assertIs(w.paragraph_review.editor, w.unified_prompt)
+                        w.paragraph_review.finish()
+                        w._close_saves_queued = True
+                        w.project_dirty = False
+                        w.close()
 
 
     def test_both_minimax_drafts_and_type_survive_export_and_workspace_switch(self):

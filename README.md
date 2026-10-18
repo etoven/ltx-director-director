@@ -8,7 +8,7 @@ Build a visual plan for AI video, turn it into a detailed production prompt, and
 
 ![The Aurora workspace: a visual timeline, creative direction and one continuous MiniMax production brief](docs/images/ltx-director-director-overview.png)
 
-*Current release: Aurora 1.13.0a84 on `experimental`. Screenshots show the native app with an authored demonstration project.*
+*Current release: Aurora 1.13.0a85 on `experimental`. Screenshots show the native app with an authored demonstration project.*
 
 ## See the story before you generate
 
@@ -30,13 +30,13 @@ Replace a frame without rebuilding the beat. Copy an original image to the clipb
 
 **Two dedicated button pairs, exactly where you write.** The upper editor has **Generate** (sparkle) and **Refine** (Möbius loop). Choose **Segment** to change only the selected segment, without disturbing its neighbors or rebuilding the combined prompt. Choose **Global** to use the Director's Intent as whole-sequence Magic Build guidance: Generate builds every beat; Refine updates all beats together. A completed Global operation automatically rebuilds the combined prompt below, without rewriting the newly completed segment plan.
 
-The lower combined-prompt editor has its own **Generate** and **Refine** controls to synthesize or revise the complete production brief from the timeline and final notes. Directional synchronization is separate: the **down arrow** syncs the combined prompt to the timeline; the **up arrow** syncs the **entire timeline**, not merely the selected beat, back into the combined prompt while preserving the original segment media and words. Both keep the source side unchanged.
+The lower combined-prompt editor has its own **Generate** and **Refine** controls to synthesize or revise the complete production brief from the timeline and final notes. These edit only the production text. Use **Rewrite timeline from combined prompt**, the third button in the timeline’s right-hand rail below **＋** and **T＋**, when you want to apply that brief to the segments. The **up arrow** beside the combined editor rebuilds its text from the **entire timeline** while preserving the segment media and words. Both synchronization actions keep the source side unchanged.
 
-**Sync Timeline** reads the existing image checkpoints and segment JSON alongside your completed combined prompt. It retimes the original frames, updates each segment's action, and creates missing beats when needed—without rewriting the combined prompt. New visual checkpoints can use the existing artwork-generation flow. The familiar timeline resizing and review animations show exactly what changed.
+**Rewrite timeline** reads the existing image checkpoints and segment JSON alongside your completed combined prompt. It retimes the original frames, updates each segment's action, and creates missing beats when needed—without rewriting the combined prompt. New visual checkpoints can use the existing artwork-generation flow. The familiar timeline resizing and review animations show exactly what changed.
 
 **Generate Artwork** is available on each text or image segment's right-click menu. For a text beat, create its image from the current segment prompt plus nearby written and visual references. For an existing image, refine its original artwork toward the segment prompt while preserving its subject, composition, and visual continuity. Image generation uses your configured image API provider and keeps the current media in place until a successful result.
 
-MiniMax action cues and timeline segments stay connected. Select a beat to focus its action. Change its timing and the cue boundaries follow. Paste a timed production brief to reshape the timeline around the new plan.
+MiniMax action cues and timeline segments stay connected. Select a beat to focus its action. Change its timing and the cue boundaries follow. Paste a timed production brief, then use **Rewrite timeline** to reshape the sequence around that plan.
 
 In LTX, **Magic Build** develops the whole sequence; **Refine Prompt** and **Refine Timing** let you concentrate on the selected beat. You can switch between workflows while keeping their stored drafts with the project.
 
@@ -117,7 +117,7 @@ Customize the workspace itself in **Settings → Workspaces**: choose the editor
 Install the current experimental wheel:
 
 ```bash
-python3 -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a84-py3-none-any.whl'
+python3 -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a85-py3-none-any.whl'
 ltx-director-director
 ```
 

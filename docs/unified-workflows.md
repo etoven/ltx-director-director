@@ -30,9 +30,15 @@ The two editors retain separate text. Pasting or editing the unified prompt does
 
 ![A selected segment prompt with the full production draft below](images/shared-segment-editors.png)
 
+## Apply a production brief to the timeline
+
+The lower **Generate** and **Refine** buttons edit only the combined production text. To apply that text to your sequence, click **Rewrite timeline from combined prompt** in the timeline’s right-hand rail, below **＋** and **T＋**. It aligns segment wording and timing to the complete brief and presents the timeline changes for review. Your combined prompt stays unchanged.
+
+![Timeline controls, including the separate rewrite action beneath the add buttons](images/timeline-navigation.png)
+
 ## Adjust timing through the shared editor
 
-**Refine Prompt** above the segment editor improves the selected beat and can resize that segment when the requested action or dialogue needs a different duration. **Refine Timing** changes its duration while preserving its wording. Both update the timeline in LTX and MiniMax. In MiniMax, each button then generates the unified production prompt from the updated segment prompts, timing, references and creative direction.
+**Refine** above the segment editor improves the selected beat and can resize that segment when its action or dialogue needs a different duration. **Refine Timing** changes its duration while preserving its wording. Other segments and the combined production text remain unchanged.
 
 Select **Global** in the segment editor to edit shared direction. Add an instruction such as `/refine-global Resize the segments proportionally to 15 seconds`, then choose **Refine Prompt**. Director scales the current segment durations to the requested total while preserving their proportions and individual prompt text. Other explicit global timing edits can change multiple segment durations. In MiniMax, the unified production prompt is then generated from the updated sequence. Manual segment edits preserve the draft until you request generation or refinement.
 

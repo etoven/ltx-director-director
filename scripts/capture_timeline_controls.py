@@ -38,6 +38,9 @@ with tempfile.TemporaryDirectory(prefix="director-timeline-docs-") as folder:
     ]
     window.refresh_timeline(1)
     window.split_timeline_segment(window.segments[1].id, 3)
+    window.unified_prompt.setPlainText(
+        "Establish the aurora-lit mountains. Follow the traveler toward the overlook, "
+        "then hold on the quiet horizon.")
     window.resize(1300, 850)
     window.show()
     for _ in range(5):
@@ -49,6 +52,22 @@ with tempfile.TemporaryDirectory(prefix="director-timeline-docs-") as folder:
     target = ROOT / "docs/images/timeline-navigation.png"
     assert window.grab(QRect(top, bottom)).save(str(target))
     print(target, flush=True)
+    window.prompt_scope.setCurrentIndex(window.prompt_scope.findData("segment"))
+    window.set_director_intent_expanded(True)
+    window.intent_prompt_splitter.setSizes([230, 330])
+    window.ai_request_editor = window.intent_segment_prompt
+    window.ai_request_activity = "Refining the selected segment…"
+    window.set_ai_controls_enabled(False)
+    app.processEvents()
+    assert window.director_panel.grab().save(str(ROOT / "docs/images/segment-working.png"))
+    window.set_ai_controls_enabled(True)
+    before = window.intent_segment_prompt.toPlainText()
+    after = "Follow the traveler at a slower, steadier pace toward the overlook."
+    window.intent_segment_prompt.setPlainText(after)
+    assert window.paragraph_review.begin(window.intent_segment_prompt, before, after)
+    app.processEvents()
+    assert window.director_panel.grab().save(str(ROOT / "docs/images/segment-review.png"))
+    window.paragraph_review.finish()
     window.project_dirty = False
     window._close_saves_queued = True
     window.close()

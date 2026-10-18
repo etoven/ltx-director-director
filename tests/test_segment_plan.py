@@ -166,6 +166,9 @@ class SegmentPlanTests(unittest.TestCase):
         self.assertTrue(segment_plan.supports_structured_edit("openai", "gpt-6.1-mini"))
         self.assertFalse(segment_plan.supports_structured_edit("gemini", "gpt-6"))
         self.assertFalse(segment_plan.supports_structured_edit("openai", "gpt-5.4-mini"))
+        for model in ("gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-flash-lite-latest"):
+            self.assertTrue(segment_plan.supports_structured_edit("gemini", model))
+        self.assertFalse(segment_plan.supports_structured_edit("gemini", "gemini-3.1-flash-lite-image"))
 
     def test_original_media_stays_and_segment_json_is_appended(self):
         items = seeded()

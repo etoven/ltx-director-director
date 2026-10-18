@@ -1,4 +1,5 @@
 import base64
+import copy
 import io
 import json
 import os
@@ -18,7 +19,7 @@ from PySide6.QtWidgets import QApplication
 from ltx_prompt_director import ai
 from ltx_prompt_director.media import prepare_media
 from ltx_prompt_director import media, ui
-from ltx_prompt_director.models import Segment
+from ltx_prompt_director.models import Segment, split_segment
 from ltx_prompt_director.project_archive import materialize_source, read_project, save_project_archive
 from ltx_prompt_director.ui import MainWindow
 
@@ -34,6 +35,39 @@ class ProjectArchiveTests(unittest.TestCase):
         window.segments = segments
         self.addCleanup(lambda: (setattr(window, "_close_saves_queued", True), setattr(window, "project_dirty", False), window.close()))
         return window
+
+    def test_saved_split_recovers_live_media_references_without_using_the_old_slot(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            sources = [root / "red.png", root / "blue.png"]
+            for source, color in zip(sources, ("red", "blue")):
+                Image.new("RGB", (40, 30), color).save(source)
+            segments = [Segment("0.4400 — plant feet and turn downhill", str(p), str(p), duration=4)
+                        for p in sources]
+            project = root / "project.LTXD"
+            save_project_archive(project, {"frames": [s.to_dict() for s in segments]}, segments)
+            loaded = read_project(project)
+            live = []
+            for frame in loaded["frames"]:
+                s = Segment.from_dict(frame)
+                s.media_path = frame["_archiveMediaPath"]
+                s.preview_path = frame["_archivePreviewPath"]
+                s._archive_source = (str(project), frame["archiveSource"])
+                s._media_digest = frame["mediaDigest"]
+                live.append(s)
+            expected = sources[1].read_bytes()
+            for source in sources:
+                source.unlink()
+            live[:1] = split_segment(live[0], 2)
+            stale = live[2]._archive_source[1]
+            save_project_archive(project, {"frames": [s.to_dict() for s in live]}, copy.deepcopy(live))
+            with zipfile.ZipFile(project) as archive:
+                manifest = json.loads(archive.read("project.json"))
+                self.assertNotEqual(manifest["frames"][2]["archiveSource"], stale)
+                self.assertTrue(all(f["archiveSource"].endswith(".png") for f in manifest["frames"]))
+            self.assertEqual(Path(materialize_source(live[2])).read_bytes(), expected)
+            # A subsequent save also resolves the still-stale source of a split half.
+            save_project_archive(project, {"frames": [s.to_dict() for s in live]}, copy.deepcopy(live))
 
     def test_portable_image_and_video_round_trip_is_lazy_and_preserves_original(self):
         with tempfile.TemporaryDirectory() as directory:

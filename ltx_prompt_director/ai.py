@@ -823,6 +823,10 @@ def _gemini_stream(parts: list[dict], key: str, model: str, timeout: int) -> str
                 payload = base
                 send_stream("status", "This model does not expose thinking summaries; streaming generated text.")
                 continue
+            if getattr(response, "status_code", 200) >= 400:
+                # Cache the provider's error before the streaming context closes
+                # its socket, so the UI can explain the rejected request.
+                _ = response.content
             response.raise_for_status()
             saw_payload = False
             for line in response.iter_lines(decode_unicode=True):

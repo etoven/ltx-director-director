@@ -34,9 +34,40 @@ def _source_stream(segment):
     if original:
         archive_path, member = original
         archive = zipfile.ZipFile(archive_path)
-        stream = archive.open(member)
+        try:
+            stream = archive.open(_resolve_source_member(archive, segment, member))
+        except Exception:
+            archive.close()
+            raise
         return archive, stream
     raise FileNotFoundError(f"Original media unavailable: {segment.name}")
+
+
+def clear_archived_source(segment) -> None:
+    """A replacement must never fall back to the previous image or its digest."""
+    for key in ("_archive_source", "_media_digest", "_source_size", "_materialized_stat"):
+        if hasattr(segment, key):
+            delattr(segment, key)
+
+
+def _resolve_source_member(archive: zipfile.ZipFile, segment, member: str) -> str:
+    """Resolve source identity after a saved split or reorder changes ZIP indices."""
+    names = set(archive.namelist())
+    frames = json.loads(archive.read(MANIFEST)).get("frames", []) if MANIFEST in names else []
+    digest = getattr(segment, "_media_digest", "")
+    for frame in frames:
+        if (frame.get("id") == segment.id and frame.get("archiveSource") in names
+                and (not digest or frame.get("mediaDigest") == digest)):
+            return frame["archiveSource"]
+    if digest:
+        for frame in frames:
+            if frame.get("mediaDigest") == digest and frame.get("archiveSource") in names:
+                return frame["archiveSource"]
+    if member in names and (not digest or not frames or any(
+            f.get("archiveSource") == member and f.get("mediaDigest") == digest for f in frames)):
+        return member
+    raise FileNotFoundError(
+        f"Original media unavailable for {segment.name}. Reopen the project or replace this segment's media.")
 
 
 def save_project_archive(path: str | Path, payload: dict, segments: list) -> None:
@@ -57,7 +88,11 @@ def save_project_archive(path: str | Path, payload: dict, segments: list) -> Non
                 with preview.open("rb") as stream:
                     _copy_to_archive(archive, member, stream)
                 frame["archivePreview"] = member
-                suffix = Path(segment.name).suffix.lower() or Path(segment.media_path).suffix.lower() or ".png"
+                allowed = ({".webm", ".mp4", ".mov", ".mkv", ".avi", ".m4v"} if segment.kind == "video"
+                           else {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tif", ".tiff"})
+                suffix = next((value for value in (Path(segment.media_path).suffix.lower(),
+                                                   Path(segment.name).suffix.lower()) if value in allowed),
+                              ".webm" if segment.kind == "video" else ".png")
                 member = f"media/{index:04d}{suffix}"
                 original = _source_stream(segment)
                 if isinstance(original, tuple):
@@ -164,7 +199,9 @@ def materialize_source(segment) -> str:
     if not original:
         return str(source)
     with zipfile.ZipFile(original[0]) as archive:
-        actual = _cached_member(archive, original[1], Path(original[0]))
+        member = _resolve_source_member(archive, segment, original[1])
+        actual = _cached_member(archive, member, Path(original[0]))
+    segment._archive_source = (original[0], member)
     segment.media_path = str(actual)
     stat = actual.stat()
     segment._materialized_stat = (stat.st_size, stat.st_mtime_ns)

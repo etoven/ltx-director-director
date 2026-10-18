@@ -19,7 +19,8 @@ def supports_structured_edit(provider, model):
     # Gemini Flash reasoning models support structured text/JSON output, but
     # Nano Banana image models don't support the segment-planning JSON schema.
     if provider == "gemini":
-        return bool(re.match(r"^gemini-(?:[3-9]|[1-9]\d)(?:[.-]|$)", name)) and not (
+        return (name == "gemini-flash-lite-latest" or bool(
+            re.match(r"^gemini-(?:[3-9]|[1-9]\d)(?:[.-]|$)", name))) and not (
             "-image" in name or "-tts" in name or "-transcribe" in name
         )
     return provider in {"openai", "chatgpt"} and bool(

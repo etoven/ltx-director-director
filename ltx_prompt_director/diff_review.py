@@ -103,7 +103,7 @@ class ParagraphDiffReview(QObject):
 
     def begin(self, editor: QTextEdit, before: str, after: str) -> bool:
         self.finish()
-        if not before.strip() or before == after or editor.toPlainText() != after:
+        if before == after or editor.toPlainText() != after:
             return False
         parts = paragraph_changes(before, after)
         if not any(part.decision == "pending" for part in parts):
