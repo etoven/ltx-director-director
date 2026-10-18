@@ -504,3 +504,72 @@ def sync_timeline_to_prompt(segments, provider, model, api_key, combined_prompt,
     )
     raw = ai._provider_raw(inputs, provider, model, api_key, rules, timeout)
     return normalize_timeline_sync(raw, segments, combined_prompt)
+
+
+def sync_combined_from_timeline(segments, provider, model, api_key,
+                                current_combined_prompt, timeout,
+                                reference_images, workspace_engine, mode,
+                                director_notes=""):
+    """One-way sync from ALL ordered timeline segments to combined prose.
+
+    The selected timeline row is deliberately not an argument. The entire
+    project timeline, including every text/image/video beat, is authoritative.
+    """
+    if not segments:
+        raise ValueError("Add timeline segments before syncing the combined prompt.")
+    if mode == "references" or workspace_engine == "generic":
+        inputs = ai._minimax_reference_inputs(
+            segments, provider, reference_images, refinement=True)
+    else:
+        inputs = ai._minimax_frames_inputs(
+            segments, provider, reference_images, refinement=True)
+    plan = [
+        {"id": item.id, "name": item.name, "kind": item.kind,
+         "role": item.role, "duration": item.duration,
+         "prompt": item.prompt, "imagePrompt": item.image_prompt,
+         "hasMedia": bool(item.media_path)}
+        for item in segments
+    ]
+    for index, asset in enumerate(inputs):
+        slot = asset.get("timeline_index")
+        if (slot is None and "reference_slot" not in asset
+                and workspace_engine != "generic" and mode != "references"):
+            slot = index if index < len(segments) else None
+        if isinstance(slot, int) and 0 <= slot < len(segments):
+            item = segments[slot]
+            asset["name"] = (
+                f"AUTHORITATIVE SEGMENT {slot + 1}, ID={item.id}, ROLE={item.role}: "
+                f"{asset.get('name', item.name)}"
+            )
+    rules = (
+        "REVERSE ONE-WAY SYNC. Rewrite ONLY the complete combined production "
+        "prompt so that it precisely follows ALL CURRENT TIMELINE SEGMENTS "
+        "in their given order, including EVERY text, image and video segment "
+        "from the first to the last. The selected segment, viewport, and "
+        "playhead are irrelevant: NO subset or active-sequence-only sync. "
+        "Existing segment prompts, durations, roles, order and attached media "
+        "are authoritative and immutable. Reflect their exact chronology and "
+        "timecodes across the ENTIRE combined prompt, with no omitted sequences. "
+        "Preserve non-conflicting character, setting, dialogue, sound, style "
+        "and production details from the previous combined draft, plus the "
+        "director notes, but remove or reconcile conflicting old events and "
+        "old timecodes. Use real attached multimodal imagery as visual "
+        "reference; never invent media or unseen observations. Do NOT return "
+        "a segments array, timeline edits, artwork instructions or prose "
+        "commentary. Return strict JSON only, containing one nonempty field: "
+        '{"prompt":"complete revised combined production prompt"}.'
+        "\nAUTHORITATIVE FULL TIMELINE (ALL SEGMENTS):\n"
+        + json.dumps(plan, ensure_ascii=False)
+        + "\n\nDIRECTOR / FINAL PROMPT NOTES:\n"
+        + (str(director_notes).strip() or "No additional director notes.")
+        + "\n\nPREVIOUS COMBINED PROMPT (reuse only compatible details):\n"
+        + (str(current_combined_prompt).strip() or "[No previous combined prompt]")
+    )
+    raw = ai._provider_raw(inputs, provider, model, api_key, rules, timeout)
+    result = ai._parse_json(raw)
+    if not isinstance(result, dict):
+        raise ai.AIResponseFormatError("Reverse timeline sync returned no JSON prompt.")
+    prompt = result.get("prompt")
+    if not isinstance(prompt, str) or not prompt.strip():
+        raise ai.AIResponseFormatError("Reverse timeline sync returned an empty combined prompt.")
+    return {"prompt": prompt.strip()}
