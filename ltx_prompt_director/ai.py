@@ -219,6 +219,44 @@ def refine_timing(segments: list[Segment], selected_index: int, provider: str, m
     return {"duration": duration}
 
 
+def generate_segment_prompt(segments: list[Segment], selected_index: int, provider: str,
+                            model: str, api_key: str, intent: str, requested_total: float,
+                            timeout: int = 400) -> dict:
+    """Generate one selected timeline beat, not the full unified prompt."""
+    if not 0 <= selected_index < len(segments):
+        raise ValueError("Select a timeline segment to generate its prompt.")
+    target = segments[selected_index]
+    rules = (
+        "Generate the motion/action prompt for ONLY the SELECTED timeline segment. "
+        "Use its media and already-authored text as authoritative starting context; "
+        "use adjacent images and written neighboring prompts to bridge the action "
+        "without copying the entire sequence. Keep its subject, stage of transformation, "
+        "environment, composition, and camera continuity grounded in supplied media. "
+        "Respect any inline /refine directives in selected text as edit instructions. "
+        "Never modify or return the combined/unified prompt, any other segment, or "
+        "global direction. Do not change segment IDs or its media role. "
+        "Return strict JSON with exactly the selected prompt, optional imagePrompt "
+        "and a positive finite duration: "
+        '{"prompt":"generated action direction","imagePrompt":"visual description","duration":3.0}.'
+        "\\nDIRECTOR / GLOBAL NOTES:\\n" + (intent.strip() or "None supplied.") +
+        "\\nORDERED TIMELINE:\\n" + _segment_context(segments, selected_index) +
+        f"\\nSELECTED SEGMENT INDEX: {selected_index + 1}." +
+        f"\\nSELECTED PROMPT AS PROVIDED: {target.prompt or '[generate from adjacent context]'}" +
+        f"\\nCURRENT DURATION: {target.duration:.2f} seconds." +
+        "\\n" + _refinement_duration_instruction(requested_total)
+    )
+    raw = _provider_raw(_refinement_images(segments, selected_index),
+                        provider, model, api_key, rules, timeout)
+    result = _parse_json(raw)
+    if not isinstance(result, dict):
+        raise AIResponseFormatError("Segment generation returned invalid JSON; retrying.")
+    prompt = result.get("prompt") or result.get("segmentPrompt")
+    if not isinstance(prompt, str) or not prompt.strip():
+        raise AIResponseFormatError("Segment generation returned no prompt; retrying.")
+    return {"prompt": prompt.strip(), "imagePrompt": _image_prompt_value(result),
+            "duration": _strict_duration(result.get("duration"))}
+
+
 def refine_segment_prompt(segments: list[Segment], selected_index: int, provider: str, model: str, api_key: str, intent: str, requested_total: float, timeout: int = 400) -> dict:
     """Refine only the selected prompt, with an optional selected-duration change."""
     if not 0 <= selected_index < len(segments):
