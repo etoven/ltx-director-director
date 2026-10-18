@@ -1,6 +1,8 @@
 """Prompt-aware splits with fixed source intervals and bounded AI output."""
 from __future__ import annotations
 
+from . import response_schemas
+
 import json
 
 from . import ai
@@ -47,8 +49,8 @@ def divide_segment_prompt(segments: list[Segment], selected_index: int, count: i
         "\nAUTHORITATIVE SELECTED PROMPT:\n" + target.prompt +
         "\nFIXED PART DURATIONS IN SECONDS:\n" + json.dumps([part.duration for part in parts])
     )
-    raw = ai._provider_raw(ai._refinement_images(segments, selected_index),
-                           provider, model, api_key, rules, timeout)
+    raw = ai._structured_raw(ai._refinement_images(segments, selected_index),
+                           provider, model, api_key, rules, timeout, schema=response_schemas.split(count))
     result = ai._parse_json(raw)
     prompts = result.get("prompts") if isinstance(result, dict) else None
     if (not isinstance(prompts, list) or len(prompts) != count

@@ -1,6 +1,8 @@
 """Template-driven prompt generation without model-specific creative defaults."""
 from __future__ import annotations
 
+from . import response_schemas
+
 import json
 
 from . import ai
@@ -30,8 +32,8 @@ def build_generic_prompt(segments, provider, model, api_key, intent, global_prom
                          spoken_dialog, reduce_music, timeout=400, reference_images=None):
     inputs = ai._minimax_reference_inputs(segments, provider, reference_images)
     rules = _rules(segments, intent, global_prompt, sfx, spoken_dialog, reduce_music, reference_images)
-    raw = ai._provider_raw(inputs, provider, model, api_key,
-                           rules + UNIFIED_CONTRACT + ai.combined_timeline_contract(segments), timeout)
+    raw = ai._structured_raw(inputs, provider, model, api_key,
+                           rules + UNIFIED_CONTRACT + ai.combined_timeline_contract(segments), timeout, schema=response_schemas.PROMPT)
     return ai._extract_minimax_h3_prompt(raw, segments)
 
 
@@ -41,7 +43,7 @@ def refine_generic_prompt(segments, provider, model, api_key, intent, global_pro
     inputs = ai._minimax_reference_inputs(segments, provider, reference_images, refinement=True)
     rules = _rules(segments, intent, global_prompt, sfx, spoken_dialog, reduce_music, reference_images,
                    current_prompt, refinement_instructions, refine=True)
-    raw = ai._provider_raw(inputs, provider, model, api_key, rules + UNIFIED_CONTRACT, timeout)
+    raw = ai._structured_raw(inputs, provider, model, api_key, rules + UNIFIED_CONTRACT, timeout, schema=response_schemas.PROMPT)
     return ai._extract_minimax_h3_prompt(raw, segments)
 
 
@@ -50,7 +52,7 @@ def build_generic_segments(segments, provider, model, api_key, intent, sfx, spok
     inputs = ai._minimax_reference_inputs(segments, provider, reference_images)
     rules = _rules(segments, intent, "", sfx, spoken_dialog, reduce_music, reference_images)
     rules += f'\nRequired transport: return JSON with exactly {len(segments)} "segments" records in input order, each with positive "duration" and "prompt", and a "globalPrompt" string (empty if this workspace has no global prompt). Do not return a unified timed brief.'
-    result = ai._parse_json(ai._provider_raw(inputs, provider, model, api_key, rules, timeout))
+    result = ai._parse_json(ai._structured_raw(inputs, provider, model, api_key, rules, timeout, schema=response_schemas.sequence(len(segments), generic=True)))
     if not isinstance(result, dict) or not isinstance(result.get("segments"), list):
         raise ai.AIResponseFormatError("The AI returned no segmented plan.")
     if len(result["segments"]) != len(segments):
@@ -76,7 +78,7 @@ def refine_generic_segment(segments, selected_index, provider, model, api_key, i
     rules = _rules(segments, intent, "", False, False, False, reference_images,
                    selected.prompt, f"Refine only segment {selected_index + 1}; preserve all other segments.", refine=True)
     rules += '\nRequired transport: return only JSON with "prompt" and a positive "duration" for the selected segment.'
-    result = ai._parse_json(ai._provider_raw(inputs, provider, model, api_key, rules, timeout))
+    result = ai._parse_json(ai._structured_raw(inputs, provider, model, api_key, rules, timeout, schema=response_schemas.SEGMENT_TEXT))
     if not isinstance(result, dict) or not isinstance(result.get("prompt"), str) or not result["prompt"].strip():
         raise ai.AIResponseFormatError("The AI returned no refined segment prompt.")
     return {"prompt": result["prompt"].strip(), "imagePrompt": "",

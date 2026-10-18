@@ -24,6 +24,16 @@ or use **Approve all** / **Deny all**. These controls also let you review text
 generated for an initially empty segment. Use the lower editor's own buttons
 when you want to generate or refine the combined production brief.
 
+Generate and Refine request a defined response format for the chosen operation.
+Segment requests return that segment's prompt and duration; the combined editor
+returns production text, and timing-only actions return durations. Quick Fix uses
+the contract of the editor where you clicked it.
+
+Director checks the completed response before offering it for review. An
+unfinished stream, missing fields, invalid timing or a response for a different
+operation is rejected and follows your configured retry settings. The existing
+draft stays available if the provider cannot complete a valid response.
+
 ![Segment refinement progress inside the upper editor](images/segment-working.png)
 
 ![Paragraph diff and approval controls inside the selected segment editor](images/segment-review.png)

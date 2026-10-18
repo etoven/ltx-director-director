@@ -4,6 +4,8 @@ Retain each workspace's production prompt template. Add only the segment JSON
 contract to the existing generation input; never fabricate local media.
 """
 from __future__ import annotations
+
+from . import response_schemas
 import copy
 import json
 import math
@@ -262,7 +264,7 @@ def generate_combined(segments, provider, model, api_key, intent, global_prompt,
         # and refinement functions. No creative prompt text is rewritten.
         rules += "\nCURRENT MEDIA CONTRACT: The asset map may include uploaded reference audio and video soundtracks. Audio-only video samples condition sound only. Follow the supplied labels and observation availability. Never invent unheard audio or visual observations. This overrides legacy template text saying audio references are unavailable."
     rules += response_contract(segments, current_prompt, refine=refine, focus=focus)
-    raw = ai._provider_raw(inputs, provider, model, api_key, rules, timeout)
+    raw = ai._structured_raw(inputs, provider, model, api_key, rules, timeout, schema=response_schemas.timeline(combined=True))
     # Return the validated plan immediately. Image rendering runs AFTER the
     # proposed segments have slid into the UI so the user sees progress.
     try:
@@ -297,7 +299,7 @@ def generate_combined(segments, provider, model, api_key, intent, global_prompt,
               "refinement.\nPREVIOUS PROMPT-ONLY RESPONSE:\n"
             + json.dumps(initial, ensure_ascii=False)
         )
-        repaired_raw = ai._provider_raw(inputs, provider, model, api_key, repair_rules, timeout)
+        repaired_raw = ai._structured_raw(inputs, provider, model, api_key, repair_rules, timeout, schema=response_schemas.timeline(combined=True))
         repaired = ai._parse_json(repaired_raw)
         if not isinstance(repaired, dict) or not isinstance(repaired.get("segments"), list):
             raise ai.AIResponseFormatError(
@@ -509,7 +511,7 @@ def sync_timeline_to_prompt(segments, provider, model, api_key, combined_prompt,
         + "\n\nAUTHORITATIVE COMBINED PROMPT (READ ONLY):\n"
         + combined_prompt
     )
-    raw = ai._provider_raw(inputs, provider, model, api_key, rules, timeout)
+    raw = ai._structured_raw(inputs, provider, model, api_key, rules, timeout, schema=response_schemas.timeline(combined=False))
     return normalize_timeline_sync(raw, segments, combined_prompt)
 
 
@@ -572,8 +574,8 @@ def sync_combined_from_timeline(segments, provider, model, api_key,
         + "\n\nPREVIOUS COMBINED PROMPT (reuse only compatible details):\n"
         + (str(current_combined_prompt).strip() or "[No previous combined prompt]")
     )
-    raw = ai._provider_raw(inputs, provider, model, api_key,
-                           rules + ai.CONTENT_FIDELITY + ai.FRAME_MOTION_GUIDANCE, timeout)
+    raw = ai._structured_raw(inputs, provider, model, api_key,
+                           rules + ai.CONTENT_FIDELITY + ai.FRAME_MOTION_GUIDANCE, timeout, schema=response_schemas.PROMPT)
     result = ai._parse_json(raw)
     if not isinstance(result, dict):
         raise ai.AIResponseFormatError("Reverse timeline sync returned no JSON prompt.")

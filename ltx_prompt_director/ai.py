@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from . import response_schemas
+
 import hashlib
 import math
 import json
@@ -35,12 +37,13 @@ def build_prompts(segments: list[Segment], provider: str, model: str, api_key: s
     images = [_segment_input(item) for item in segments]
     rules = _rules(len(images), intent, sfx, spoken_dialog, hdr, reduce_music, sum(item.kind == "text" for item in segments))
     rules += f'\n\nRequired transport: exactly {len(segments)} segment records in input order. Return JSON with segments (each duration, prompt) and globalPrompt. Each duration must be positive and finite. Preserve all media and segment identities.'
-    if provider == "openai":
-        return _openai(images, api_key, rules, timeout, sfx, spoken_dialog, model)
-    if provider == "chatgpt":
-        raw = _openai_raw(images, api_key, rules, timeout, model=model, chatgpt=True)
-        return _validate(raw, len(images), sfx, spoken_dialog)
-    return _gemini(images, api_key, model, rules, timeout, sfx, spoken_dialog)
+    with response_schemas.using(response_schemas.sequence(len(segments))):
+        if provider == "openai":
+            return _openai(images, api_key, rules, timeout, sfx, spoken_dialog, model)
+        if provider == "chatgpt":
+            raw = _openai_raw(images, api_key, rules, timeout, model=model, chatgpt=True)
+            return _validate(raw, len(images), sfx, spoken_dialog)
+        return _gemini(images, api_key, model, rules, timeout, sfx, spoken_dialog)
 
 
 def refine_sequence_prompts(segments: list[Segment], provider: str, model: str,
@@ -76,13 +79,13 @@ def refine_sequence_prompts(segments: list[Segment], provider: str, model: str,
         "Refine prompts and timings across segments as appropriate to meet "
         "the GLOBAL creative direction, including spoken-dialog continuity. "
         "Return exactly JSON with globalPrompt and segments containing "
-        "prompt, optional imagePrompt and positive duration. "
+        "prompt, imagePrompt (empty when unchanged) and positive duration. "
         "\nCURRENT GLOBAL PRODUCTION NOTES:\n" + (global_prompt.strip() or "None") +
         "\nAUTHORITATIVE CURRENT TIMELINE (ALL SEGMENTS):\n"
         + json.dumps(existing, ensure_ascii=False)
     )
     result = _validate(
-        _provider_raw(images, provider, model, api_key, rules, timeout),
+        _structured_raw(images, provider, model, api_key, rules, timeout, schema=response_schemas.sequence(len(segments))),
         len(images), sfx, spoken_dialog)
     return result
 
@@ -163,7 +166,7 @@ def build_minimax_h3_prompt(segments: list[Segment], provider: str, model: str, 
     rules = _minimax_h3_rules(segments, intent, global_prompt, sfx, spoken_dialog, reduce_music, reference_images)
     rules += "\nCURRENT MEDIA CONTRACT: The asset map may include uploaded reference audio and video soundtracks. Audio-only video samples condition sound only. Follow the supplied labels and observation availability; never invent unheard audio or visual observations. This overrides legacy template text saying audio references are unavailable."
     rules += UNIFIED_PROMPT_TRANSPORT + combined_timeline_contract(segments)
-    raw = _provider_raw(inputs, provider, model, api_key, rules, timeout)
+    raw = _structured_raw(inputs, provider, model, api_key, rules, timeout, schema=response_schemas.PROMPT)
     return _extract_minimax_h3_prompt(raw, segments)
 
 
@@ -175,7 +178,7 @@ def build_minimax_h3_reference_prompt(segments: list[Segment], provider: str, mo
     rules = _minimax_h3_reference_rules(segments, intent, global_prompt, sfx, spoken_dialog, reduce_music, reference_images)
     rules += "\nCURRENT MEDIA CONTRACT: The asset map may include uploaded reference audio and video soundtracks. Audio-only video samples condition sound only. Follow the supplied labels and observation availability; never invent unheard audio or visual observations. This overrides legacy template text saying audio references are unavailable."
     rules += UNIFIED_PROMPT_TRANSPORT + combined_timeline_contract(segments)
-    raw = _provider_raw(inputs, provider, model, api_key, rules, timeout)
+    raw = _structured_raw(inputs, provider, model, api_key, rules, timeout, schema=response_schemas.PROMPT)
     return _extract_minimax_h3_prompt(raw, segments)
 
 
@@ -191,7 +194,7 @@ def refine_minimax_text_prompt(provider: str, model: str, api_key: str, current_
     rules += '\n\nEXPLICIT ANNOTATION EDIT REQUESTS (highest priority):\n' + (annotations or 'No annotations. Improve clarity, continuity and production readiness while preserving intent.')
     rules += '\nApply every requested edit in the returned text, rather than merely retaining its instruction. A leading /refine annotation before the scene applies to the whole prompt unless it explicitly identifies a narrower passage. Requests such as "all this" refer to the complete prompt. Preservation rules do not block changes required by those requests. For a continuous-shot request, reconcile camera and action wording throughout the scene into one uninterrupted shot; remove contradictory cuts or shot transitions, and preserve reference alignment and sound unless explicitly asked to change them. Verify the resulting prose satisfies each request before returning.'
     rules += '\nRESPONSE TRANSPORT: Return strict JSON with one nonempty "prompt" string containing the complete refined text. No segment records, timed_actions or commentary.'
-    raw = _provider_raw([], provider, model, api_key, rules, timeout)
+    raw = _structured_raw([], provider, model, api_key, rules, timeout, schema=response_schemas.PROMPT)
     return _extract_minimax_h3_prompt(raw)
 
 
@@ -209,7 +212,7 @@ def refine_minimax_h3_prompt(segments: list[Segment], provider: str, model: str,
     })
     rules += "\nCURRENT MEDIA CONTRACT: The asset map may include uploaded reference audio and video soundtracks. Audio-only video samples condition sound only. Follow the supplied labels and observation availability; never invent unheard audio or visual observations. This overrides legacy template text saying audio references are unavailable."
     rules += UNIFIED_PROMPT_TRANSPORT
-    raw = _provider_raw(inputs, provider, model, api_key, rules, timeout)
+    raw = _structured_raw(inputs, provider, model, api_key, rules, timeout, schema=response_schemas.PROMPT)
     return _extract_minimax_h3_prompt(raw, segments)
 
 
@@ -227,7 +230,7 @@ def refine_minimax_h3_reference_prompt(segments: list[Segment], provider: str, m
     })
     rules += "\nCURRENT MEDIA CONTRACT: The asset map may include uploaded reference audio and video soundtracks. Audio-only video samples condition sound only. Follow the supplied labels and observation availability; never invent unheard audio or visual observations. This overrides legacy template text saying audio references are unavailable."
     rules += UNIFIED_PROMPT_TRANSPORT
-    raw = _provider_raw(inputs, provider, model, api_key, rules, timeout)
+    raw = _structured_raw(inputs, provider, model, api_key, rules, timeout, schema=response_schemas.PROMPT)
     return _extract_minimax_h3_prompt(raw, segments)
 
 
@@ -320,7 +323,7 @@ def refine_timing(segments: list[Segment], selected_index: int, provider: str, m
         raise ValueError("Select a segment to refine its timing.")
     images = _refinement_images(segments, selected_index)
     rules = _timing_rules(segments, selected_index, intent, requested_total)
-    raw = _provider_raw(images, provider, model, api_key, rules, timeout)
+    raw = _structured_raw(images, provider, model, api_key, rules, timeout, schema=response_schemas.TIMING)
     result = _parse_json(raw)
     if not isinstance(result, dict):
         raise AIResponseFormatError("The AI returned an invalid timing response. The operation will retry.")
@@ -344,7 +347,7 @@ def generate_segment_prompt(segments: list[Segment], selected_index: int, provid
         "Respect any inline /refine directives in selected text as edit instructions. "
         "Never modify or return the combined/unified prompt, any other segment, or "
         "global direction. Do not change segment IDs or its media role. "
-        "Return strict JSON with exactly the selected prompt, optional imagePrompt "
+        "Return strict JSON with exactly the selected prompt, imagePrompt (empty when unchanged) "
         "and a positive finite duration: "
         '{"prompt":"generated action direction","imagePrompt":"visual description","duration":3.0}.'
         "\\nDIRECTOR / GLOBAL NOTES:\\n" + (intent.strip() or "None supplied.") +
@@ -354,8 +357,8 @@ def generate_segment_prompt(segments: list[Segment], selected_index: int, provid
         f"\\nCURRENT DURATION: {target.duration:.2f} seconds." +
         "\\n" + _refinement_duration_instruction(requested_total)
     )
-    raw = _provider_raw(_refinement_images(segments, selected_index),
-                        provider, model, api_key, rules + CONTENT_FIDELITY + FRAME_MOTION_GUIDANCE, timeout)
+    raw = _structured_raw(_refinement_images(segments, selected_index),
+                        provider, model, api_key, rules + CONTENT_FIDELITY + FRAME_MOTION_GUIDANCE, timeout, schema=response_schemas.SEGMENT)
     result = _parse_json(raw)
     if not isinstance(result, dict):
         raise AIResponseFormatError("Segment generation returned invalid JSON; retrying.")
@@ -375,8 +378,8 @@ def refine_segment_prompt(segments: list[Segment], selected_index: int, provider
         raise ValueError("The selected segment needs an existing prompt before it can be refined.")
     images = _refinement_images(segments, selected_index)
     rules = _prompt_refinement_rules(segments, selected_index, intent, requested_total)
-    rules += '\n\nRequired response schema: {"prompt":"refined selected prompt","duration":5.0}. Return only the selected segment, with a positive finite duration.'
-    raw = _provider_raw(images, provider, model, api_key, rules, timeout)
+    rules += '\n\nRequired response schema: {"prompt":"refined selected prompt","imagePrompt":"","duration":5.0}. Return only the selected segment, with a positive finite duration. Use an empty imagePrompt when no visual update is needed.'
+    raw = _structured_raw(images, provider, model, api_key, rules, timeout, schema=response_schemas.SEGMENT)
     result = _parse_json(raw)
     if not isinstance(result, dict):
         raise AIResponseFormatError("The AI returned an invalid prompt-refinement response. The operation will retry.")
@@ -406,8 +409,8 @@ def generate_global_direction(segments: list[Segment], provider: str, model: str
         "\nDIRECTOR NOTES:\n" + (director_notes.strip() or "None supplied.") +
         "\nSEGMENTS:\n" + _segment_context(segments, -1)
     )
-    raw = _provider_raw([_segment_input(item) for item in segments],
-                        provider, model, api_key, rules, timeout)
+    raw = _structured_raw([_segment_input(item) for item in segments],
+                        provider, model, api_key, rules, timeout, schema=response_schemas.GLOBAL)
     result = _parse_json(raw)
     if not isinstance(result, dict) or not isinstance(result.get("globalPrompt"), str) or not result["globalPrompt"].strip():
         raise AIResponseFormatError("Global direction generation returned no prompt; retrying.")
@@ -427,6 +430,7 @@ def refine_global_prompt(segments: list[Segment], provider: str, model: str, api
         'Apply explicit timing instructions in the global prompt to the timeline. '
         'For a request to resize or conform the whole sequence proportionally to a total, '
         'return that total in proportionalTotal; the client calculates each duration from the current ratios. '
+        'In that case set durations to null. Otherwise set proportionalTotal to null. '
         'For other explicit retiming requests return one positive duration per segment in input order. '
         'Without a timing request, preserve every duration. Never rewrite segment prompts, reorder, add or delete segments. '
         'The requested-length UI preference must not override the edit request. '
@@ -434,7 +438,7 @@ def refine_global_prompt(segments: list[Segment], provider: str, model: str, api
         '\nDIRECTOR CONTEXT:\n' + intent + '\nCURRENT GLOBAL PROMPT:\n' + current_prompt +
         '\nCURRENT TIMELINE:\n' + json.dumps(plan, ensure_ascii=False)
     )
-    result = _parse_json(_provider_raw([_segment_input(s) for s in segments], provider, model, api_key, rules, timeout))
+    result = _parse_json(_structured_raw([_segment_input(s) for s in segments], provider, model, api_key, rules, timeout, schema=response_schemas.global_refinement(len(segments))))
     if not isinstance(result, dict) or not isinstance(result.get('globalPrompt'), str) or not result['globalPrompt'].strip():
         raise AIResponseFormatError("The AI returned no global prompt. The operation will retry.")
     total = result.get('proportionalTotal')
@@ -836,6 +840,22 @@ def _provider_raw(images: list[dict], provider: str, model: str, key: str, rules
     return _gemini_raw(images, key, model, rules, timeout)
 
 
+def _structured_raw(images, provider, model, key, rules, timeout, *, schema):
+    """Bind an explicit operation contract for this worker's entire request."""
+    with response_schemas.using(schema):
+        return _provider_raw(images, provider, model, key, rules, timeout)
+
+
+def _checked_response(raw: str) -> str:
+    try:
+        response_schemas.validate(raw)
+    except ValueError as error:
+        raise AIResponseFormatError(
+            f"The AI response did not match the {response_schemas.current()['title']} schema "
+            f"({error}). The result was not applied; the operation will retry.") from error
+    return raw
+
+
 def _gemini_raw(images: list[dict], key: str, model: str, rules: str, timeout: int) -> str:
     parts: list[dict] = [{"text": rules}]
     for index, item in enumerate(images, 1):
@@ -877,16 +897,16 @@ def _gemini_raw(images: list[dict], key: str, model: str, rules: str, timeout: i
         if item.get("image_prompt"):
             parts.append({"text": f"AUDIO-FREE VISUAL CONTEXT FOR THIS SEGMENT:\n{item['image_prompt']}"})
     if streaming_enabled():
-        return _gemini_stream(parts, key, model, timeout)
+        return _checked_response(_gemini_stream(parts, key, model, timeout))
     response = requests.post(
         f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
         headers={"x-goog-api-key": key, "content-type": "application/json"},
-        json={"contents": [{"role": "user", "parts": parts}], "generationConfig": {"temperature": 0.25, "responseMimeType": "application/json"}},
+        json={"contents": [{"role": "user", "parts": parts}], "generationConfig": response_schemas.gemini_config()},
         timeout=timeout,
     )
     response.raise_for_status()
     data = response.json()
-    return _gemini_response_text(data)
+    return _checked_response(_gemini_response_text(data))
 
 
 
@@ -894,7 +914,7 @@ def _gemini_stream(parts: list[dict], key: str, model: str, timeout: int) -> str
     """Stream public Gemini text and opt-in thought summaries when supported."""
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:streamGenerateContent?alt=sse"
     base = {"contents": [{"role": "user", "parts": parts}],
-            "generationConfig": {"temperature": 0.25, "responseMimeType": "application/json"}}
+            "generationConfig": response_schemas.gemini_config()}
     payload = json.loads(json.dumps(base))
     payload["generationConfig"]["thinkingConfig"] = {"includeThoughts": True}
     chunks: list[str] = []
@@ -912,6 +932,7 @@ def _gemini_stream(parts: list[dict], key: str, model: str, timeout: int) -> str
                 _ = response.content
             response.raise_for_status()
             saw_payload = False
+            completed = False
             for line in response.iter_lines(decode_unicode=True):
                 if isinstance(line, bytes):
                     line = line.decode("utf-8", errors="replace")
@@ -931,6 +952,7 @@ def _gemini_stream(parts: list[dict], key: str, model: str, timeout: int) -> str
                     raise AIResponseFormatError("Gemini blocked this request: " + str(feedback["blockReason"]))
                 for candidate in data.get("candidates", []):
                     _check_gemini_completion(candidate)
+                    completed = completed or candidate.get("finishReason") == "STOP"
                     for part in candidate.get("content", {}).get("parts", []):
                         content = part.get("text", "")
                         if not content:
@@ -943,6 +965,8 @@ def _gemini_stream(parts: list[dict], key: str, model: str, timeout: int) -> str
                             send_stream("output", content)
             if not saw_payload or not "".join(chunks).strip():
                 raise AIResponseFormatError("Gemini streamed no final generated text.")
+            if not completed:
+                raise AIResponseFormatError("Gemini response ended before completion. The operation will retry.")
             return "".join(chunks)
     raise AIResponseFormatError("Gemini did not accept the streaming request.")
 
@@ -953,6 +977,9 @@ def _check_gemini_completion(candidate: dict) -> None:
             "Gemini reached its output limit before completing the prompt. "
             "The incomplete result was not accepted. Retry with a model that "
             "supports a longer response; preserve all segment details.")
+    reason = candidate.get("finishReason")
+    if reason and reason not in {"STOP", "FINISH_REASON_UNSPECIFIED"}:
+        raise AIResponseFormatError(f"Gemini stopped without completing the response ({reason}). The result was not accepted.")
 
 
 def _gemini_response_text(data: object) -> str:
@@ -975,7 +1002,8 @@ def _gemini_response_text(data: object) -> str:
         finish_reason = candidate.get("finishReason")
         detail = f" ({finish_reason})" if finish_reason else ""
         raise AIResponseFormatError(f"Gemini returned no generated text{detail}. Magic Build will retry.")
-    raw = "".join(part.get("text", "") for part in response_parts if isinstance(part, dict))
+    raw = "".join(part.get("text", "") for part in response_parts
+                  if isinstance(part, dict) and part.get("thought") is not True)
     if not raw.strip():
         finish_reason = candidate.get("finishReason")
         detail = f" ({finish_reason})" if finish_reason else ""
@@ -1021,17 +1049,15 @@ def _openai_raw(images: list[dict], key: str, rules: str, timeout: int, *,
             content.append({"type": "input_text", "text": f"{authority}:\n{item.get('prompt') or '[empty]'}"})
         if item.get("image_prompt"):
             content.append({"type": "input_text", "text": f"AUDIO-FREE VISUAL CONTEXT FOR THIS SEGMENT:\n{item['image_prompt']}"})
-    payload = {"model": model, "input": [{"role": "user", "content": content}]}
+    payload = {"model": model, "input": [{"role": "user", "content": content}],
+               "text": {"format": response_schemas.openai_format()}}
     if chatgpt or streaming_enabled():
         # Plan OAuth requires streaming and store=false; API-key mode streams too.
         payload.update({"stream": True, "reasoning": {"summary": "auto"}})
         if chatgpt:
             payload["store"] = False
-        else:
-            payload["text"] = {"format": {"type": "json_object"}}
         token = key.access_token() if hasattr(key, "access_token") else key
-        return _chatgpt_stream(token, payload, timeout)
-    payload["text"] = {"format": {"type": "json_object"}}
+        return _checked_response(_chatgpt_stream(token, payload, timeout))
     response = requests.post(
         "https://api.openai.com/v1/responses",
         headers={"authorization": f"Bearer {key}", "content-type": "application/json"},
@@ -1044,10 +1070,18 @@ def _openai_raw(images: list[dict], key: str, rules: str, timeout: int, *,
         raise AIResponseFormatError(
             "OpenAI returned an incomplete response. The partial prompt was not accepted. "
             "Retry with a model that supports a longer response.")
+    _check_openai_refusal(data)
     raw = data.get("output_text") or "".join(c.get("text", "") for item in data.get("output", []) for c in item.get("content", []) if c.get("type") == "output_text")
     if not str(raw).strip():
         raise AIResponseFormatError("OpenAI returned no generated text. The operation will retry.")
-    return raw
+    return _checked_response(raw)
+
+
+def _check_openai_refusal(data: dict) -> None:
+    for item in data.get("output", []):
+        for part in item.get("content", []):
+            if part.get("type") == "refusal":
+                raise RuntimeError("OpenAI declined this request: " + str(part.get("refusal") or "No reason supplied."))
 
 
 def _chatgpt_stream(token: str, payload: dict, timeout: int) -> str:
@@ -1090,6 +1124,7 @@ def _chatgpt_stream(token: str, payload: dict, timeout: int) -> str:
             elif kind == "response.reasoning_summary_text.done" and not received_summary_delta:
                 send_stream("reasoning", event.get("text", ""))
             elif kind == "response.completed":
+                _check_openai_refusal(event.get("response", {}))
                 completed = True
                 # Some clients send a complete output object without text deltas.
                 if not chunks:

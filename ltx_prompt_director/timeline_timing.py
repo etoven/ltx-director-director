@@ -1,6 +1,8 @@
 """Timing-only sequence planning, bounded by the target length and source media."""
 from __future__ import annotations
 
+from . import response_schemas
+
 import copy
 import json
 import math
@@ -133,8 +135,8 @@ def plan_sequence_timing(segments: list[Segment], provider: str, model: str, api
         + "\nDIRECTOR GUIDANCE:\n" + intent
         + "\nCOMBINED DRAFT — PACING CONTEXT ONLY:\n" + combined_prompt
     )
-    raw = ai._provider_raw(ai._minimax_reference_inputs(segments, provider, reference_images),
-                           provider, model, api_key, rules, timeout)
+    raw = ai._structured_raw(ai._minimax_reference_inputs(segments, provider, reference_images),
+                           provider, model, api_key, rules, timeout, schema=response_schemas.timings(len(segments)))
     response = ai._parse_json(raw)
     durations = response.get('durations') if isinstance(response, dict) else None
     try:
