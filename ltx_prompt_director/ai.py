@@ -280,6 +280,31 @@ def refine_segment_prompt(segments: list[Segment], selected_index: int, provider
 
 
 
+def generate_global_direction(segments: list[Segment], provider: str, model: str,
+                              api_key: str, director_notes: str, timeout: int = 400) -> dict:
+    """Generate ONLY the global/intent editor's creative direction."""
+    if not segments:
+        raise ValueError("Add timeline segments before generating global direction.")
+    rules = (
+        "Generate one globally applicable Director's Intent / global prompt "
+        "from the existing ordered segment sequence and any notes supplied. "
+        "Preserve named subjects, intended actions, setting, chronology, "
+        "continuity and image-established facts. Summarize the creative "
+        "direction for use across segments, rather than rewriting each "
+        "segment or producing a completed combined production prompt. "
+        "No timeline changes, durations or invented media. Return strict "
+        'JSON only: {"globalPrompt":"complete global direction"}.'
+        "\nDIRECTOR NOTES:\n" + (director_notes.strip() or "None supplied.") +
+        "\nSEGMENTS:\n" + _segment_context(segments, -1)
+    )
+    raw = _provider_raw([_segment_input(item) for item in segments],
+                        provider, model, api_key, rules, timeout)
+    result = _parse_json(raw)
+    if not isinstance(result, dict) or not isinstance(result.get("globalPrompt"), str) or not result["globalPrompt"].strip():
+        raise AIResponseFormatError("Global direction generation returned no prompt; retrying.")
+    return {"globalPrompt": result["globalPrompt"].strip()}
+
+
 def refine_global_prompt(segments: list[Segment], provider: str, model: str, api_key: str,
                          intent: str, current_prompt: str, timeout: int = 400) -> dict:
     """Refine shared direction and explicitly requested timeline timing only."""
