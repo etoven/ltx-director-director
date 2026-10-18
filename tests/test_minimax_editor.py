@@ -1019,7 +1019,7 @@ class UnifiedEditorTests(unittest.TestCase):
 
     def test_timeline_approve_all_clears_the_selected_segment_diff_projection(self):
         import copy
-        from PySide6.QtGui import QTextCursor
+        from PySide6.QtGui import QColor, QTextCharFormat, QTextCursor
         for preview in ("paragraph", "stream"):
             with self.subTest(preview=preview):
                 w = self.make_window("minimax_frames")
@@ -1037,7 +1037,19 @@ class UnifiedEditorTests(unittest.TestCase):
                     w.inline_typing.start(editor, before[0].prompt, "segment")
                     w.inline_typing.last_candidate = after
                     w.inline_typing.render()
+                # Reproduce styling that survived a document swap even when
+                # the authoritative prompt's characters already match.
+                document = (w.paragraph_review.source_document if preview == "paragraph"
+                            else w.inline_typing.original_document)
+                stale = QTextCharFormat()
+                stale.setFontStrikeOut(True)
+                stale.setBackground(QColor("#9c3f4b"))
+                cursor = QTextCursor(document)
+                cursor.select(QTextCursor.SelectionType.Document)
+                cursor.setCharFormat(stale)
+                QTimer.singleShot(0, w.inline_typing.render)
                 w.timeline_approve_all.setChecked(True)
+                self.app.processEvents()
                 self.assertFalse(w.timeline_review_pending)
                 self.assertIsNone(w.paragraph_review.editor)
                 self.assertFalse(w.inline_typing.active)
@@ -1045,9 +1057,32 @@ class UnifiedEditorTests(unittest.TestCase):
                 cursor = QTextCursor(editor.document())
                 cursor.movePosition(QTextCursor.MoveOperation.NextCharacter, QTextCursor.MoveMode.KeepAnchor)
                 self.assertFalse(cursor.charFormat().fontStrikeOut())
+                self.assertEqual(cursor.charFormat().background().style(), Qt.BrushStyle.NoBrush)
+                self.assertFalse(editor.currentCharFormat().fontStrikeOut())
+                self.assertEqual(editor.currentCharFormat().background().style(), Qt.BrushStyle.NoBrush)
+                self.assertFalse(editor.extraSelections())
                 w._close_saves_queued = True
                 w.project_dirty = False
                 w.close()
+
+    def test_timeline_checkmark_resolves_segment_text_review_without_timeline_changes(self):
+        for approve in (True, False):
+            with self.subTest(approve=approve):
+                w = self.make_window("minimax_frames")
+                w.prompt_scope.setCurrentIndex(1)
+                before = w.segments[0].prompt
+                after = "Revised segment text."
+                w.intent_segment_prompt.setPlainText(after)
+                self.assertTrue(w.paragraph_review.begin(w.intent_segment_prompt, before, after))
+                self.assertFalse(getattr(w, "timeline_review_pending", set()))
+                button = w.timeline_approve_all if approve else w.timeline_deny_all
+                button.setChecked(True)
+                self.assertIsNone(w.paragraph_review.editor)
+                expected = after if approve else before
+                self.assertEqual(w.segments[0].prompt, expected)
+                self.assertEqual(w.intent_segment_prompt.toPlainText(), expected)
+                self.assertFalse(w.intent_segment_prompt.extraSelections())
+                self.assertFalse(button.isChecked())
 
     def test_combined_json_inserts_animated_artwork_placeholder_without_deleting_media(self):
         from unittest.mock import patch

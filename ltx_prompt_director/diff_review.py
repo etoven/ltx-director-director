@@ -74,6 +74,20 @@ def _utf16_len(text: str) -> int:
     return len(text.encode("utf-16-le")) // 2
 
 
+def reset_plain_review_text(editor: QTextEdit, text: str) -> None:
+    """Discard all review styling, including the editor's insertion format."""
+    scroll = editor.verticalScrollBar().value()
+    with QSignalBlocker(editor):
+        editor.setCurrentCharFormat(QTextCharFormat())
+        editor.setPlainText(text)
+        cursor = QTextCursor(editor.document())
+        cursor.select(QTextCursor.SelectionType.Document)
+        cursor.setCharFormat(QTextCharFormat())
+        editor.setCurrentCharFormat(QTextCharFormat())
+        editor.setExtraSelections([])
+    editor.verticalScrollBar().setValue(min(scroll, editor.verticalScrollBar().maximum()))
+
+
 class ParagraphDiffReview(QObject):
     """Inline red/green word changes with individually reversible paragraphs.
 
@@ -169,19 +183,18 @@ class ParagraphDiffReview(QObject):
 
     def _approve_all_toggled(self, checked):
         if checked:
-            for part in self.parts:
-                if part.decision == "pending":
-                    part.decision = "approved"
-            self._apply()
-            self.finish()
+            self.resolve_all(True)
 
     def _deny_all_toggled(self, checked):
         if checked:
-            for part in self.parts:
-                if part.decision == "pending":
-                    part.decision = "rejected"
-            self._apply()
-            self.finish()
+            self.resolve_all(False)
+
+    def resolve_all(self, approve: bool):
+        for part in self.parts:
+            if part.decision == "pending":
+                part.decision = "approved" if approve else "rejected"
+        self._apply()
+        self.finish(plain=True)
 
     def decide(self, index: int, approve: bool):
         if self.editor is None or index < 0 or index >= len(self.parts):
@@ -192,7 +205,7 @@ class ParagraphDiffReview(QObject):
         part.decision = "approved" if approve else "rejected"
         self._apply()
         if not self.pending_count:
-            self.finish()
+            self.finish(plain=True)
         else:
             self._refresh()
 
@@ -333,7 +346,7 @@ class ParagraphDiffReview(QObject):
                 else:
                     button.hide()
 
-    def finish(self):
+    def finish(self, *, plain: bool = False):
         editor = self.editor
         if editor is None:
             self.parts = []
@@ -372,6 +385,8 @@ class ParagraphDiffReview(QObject):
             self.preview_document.deleteLater()
             self.preview_document = None
         editor.setViewportMargins(0, 0, 0, 0)
+        if plain:
+            reset_plain_review_text(editor, reviewed_text(self.parts))
         editor.viewport().update()
         self.removed_labels = []
         self.parts = []

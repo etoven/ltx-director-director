@@ -95,6 +95,17 @@ def save_project_archive(path: str | Path, payload: dict, segments: list) -> Non
                               ".webm" if segment.kind == "video" else ".png")
                 member = f"media/{index:04d}{suffix}"
                 original = _source_stream(segment)
+                # Older projects may use a narrative as the suffix, or label an
+                # MP4 as WebM. Normalize the archive name from the actual stream.
+                input_stream = original[1] if isinstance(original, tuple) else original
+                header = input_stream.read(4096)
+                input_stream.seek(0)
+                if segment.kind == "video" and header[4:8] == b"ftyp":
+                    member = f"media/{index:04d}.{'mov' if header[8:12] == b'qt  ' else 'mp4'}"
+                elif segment.kind == "video" and header.startswith(b"\x1aE\xdf\xa3"):
+                    member = f"media/{index:04d}.{'webm' if b'webm' in header else 'mkv'}"
+                elif segment.kind == "video" and header[:4] == b"RIFF" and header[8:12] == b"AVI ":
+                    member = f"media/{index:04d}.avi"
                 if isinstance(original, tuple):
                     input_archive, stream = original
                     try:

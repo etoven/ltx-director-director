@@ -94,6 +94,41 @@ def comfy_input_references(filename: str, subfolder: str = "whatdreamscost") -> 
     return relative, preview
 
 
+def media_mime(path: str | Path) -> str:
+    """Identify cached/archived media by its bytes, regardless of its filename."""
+    source = Path(path)
+    with source.open("rb") as stream:
+        header = stream.read(4096)
+    if header[4:8] == b"ftyp":
+        brand = header[8:12]
+        if brand in {b"M4A ", b"M4B "} or source.suffix.lower() == ".m4a":
+            return "audio/mp4"
+        if brand == b"qt  ":
+            return "video/quicktime"
+        if brand in {b"heic", b"heix", b"hevc", b"hevx", b"mif1"}:
+            return "image/heif"
+        if brand in {b"avif", b"avis"}:
+            return "image/avif"
+        return "video/mp4"
+    if header.startswith(b"\x1aE\xdf\xa3"):
+        return "video/webm" if b"webm" in header else "video/x-matroska"
+    if header.startswith(b"RIFF"):
+        return {b"WEBP": "image/webp", b"WAVE": "audio/wav",
+                b"AVI ": "video/x-msvideo"}.get(header[8:12], "application/octet-stream")
+    for signature, mime in ((b"\x89PNG\r\n\x1a\n", "image/png"),
+                            (b"\xff\xd8\xff", "image/jpeg"), (b"GIF8", "image/gif"),
+                            (b"BM", "image/bmp"), (b"II*\x00", "image/tiff"),
+                            (b"MM\x00*", "image/tiff"), (b"fLaC", "audio/flac"),
+                            (b"OggS", "audio/ogg"), (b"ID3", "audio/mpeg")):
+        if header.startswith(signature):
+            return mime
+    return {".webm": "video/webm", ".mp4": "video/mp4", ".mov": "video/quicktime",
+            ".mkv": "video/x-matroska", ".avi": "video/x-msvideo", ".m4v": "video/mp4",
+            ".wav": "audio/wav", ".mp3": "audio/mpeg", ".flac": "audio/flac",
+            ".ogg": "audio/ogg", ".m4a": "audio/mp4", ".aac": "audio/aac",
+            ".opus": "audio/ogg"}.get(source.suffix.lower(), _image_mime(source))
+
+
 def data_url(path: str, max_edge: int | None = None, quality: int = 82) -> str:
     source = Path(path)
     if max_edge:
@@ -103,8 +138,7 @@ def data_url(path: str, max_edge: int | None = None, quality: int = 82) -> str:
             output = io.BytesIO()
             image.save(output, "WEBP", quality=quality, method=6)
         return "data:image/webp;base64," + base64.b64encode(output.getvalue()).decode()
-    video_mimes = {".webm": "video/webm", ".mp4": "video/mp4", ".mov":"video/quicktime", ".mkv":"video/x-matroska", ".wav":"audio/wav", ".mp3":"audio/mpeg", ".flac":"audio/flac", ".ogg":"audio/ogg", ".m4a":"audio/mp4", ".aac":"audio/aac", ".opus":"audio/ogg"}
-    mime = video_mimes.get(source.suffix.lower(), _image_mime(source))
+    mime = media_mime(source)
     return f"data:{mime};base64," + base64.b64encode(source.read_bytes()).decode()
 
 

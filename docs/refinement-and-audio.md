@@ -28,6 +28,10 @@ when you want to generate or refine the combined production brief.
 
 ![Paragraph diff and approval controls inside the selected segment editor](images/segment-review.png)
 
+Approving a change removes its review colors and strikethrough. **Approve all**
+also clears the selected segment's text review, leaving its accepted wording
+plain and editable.
+
 LTX’s **Refine Timing** is useful when the words are right but the beat needs a different duration. It keeps the selected prompt’s wording. Prompt refinement can change both wording and the selected duration; the rest of the LTX sequence remains intact.
 
 ## Keep requests beside the passage

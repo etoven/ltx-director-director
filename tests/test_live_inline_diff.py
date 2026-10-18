@@ -30,6 +30,7 @@ class LiveInlineDiffTests(unittest.TestCase):
 
     def test_paragraph_review_is_compact_inside_editor(self):
         script = r'''
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QTextEdit
 from ltx_prompt_director.diff_review import ParagraphDiffReview
 app = QApplication([])
@@ -68,6 +69,9 @@ review.approve_all.setChecked(True)
 assert review.editor is None
 assert not review.removed_labels
 assert editor.toPlainText() == "First original.\n\nSecond original.\n\nThird revised."
+assert not editor.extraSelections()
+assert not editor.document().find("revised").charFormat().fontStrikeOut()
+assert editor.document().find("revised").charFormat().background().style() == Qt.BrushStyle.NoBrush
 # A new review can independently deny every pending paragraph.
 editor.setPlainText("First revised.\n\nSecond original.\n\nThird revised.")
 assert review.begin(editor,

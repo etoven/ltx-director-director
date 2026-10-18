@@ -35,7 +35,7 @@ from .chatgpt_widgets import ChatGPTSettingsPanel
 from .ai_stream import STREAM_SINK
 from .stream_widgets import ReasoningActivityDock, LiveOutputPane
 from .ai_inline_diff import LiveTypingPreview, rich_diff_html, typing_batch_size
-from .diff_review import ParagraphDiffReview
+from .diff_review import ParagraphDiffReview, reset_plain_review_text
 from .segment_plan import (supports_structured_edit, generate_combined, sync_timeline_to_prompt, sync_combined_from_timeline, preview_operations,
                            build_segment_objects, stream_operations, completed_stream_records,
                            explicit_existing_image_edit)
@@ -8259,6 +8259,18 @@ class MainWindow(QMainWindow):
         if self.ai_busy:
             return
         if not getattr(self, "timeline_review_pending", set()):
+            # The timeline checkmark can also finish the current segment's
+            # paragraph review when no structural timeline edits are pending.
+            if self.paragraph_review.editor in (self.segment_prompt, self.intent_segment_prompt):
+                self.paragraph_review.resolve_all(approved)
+            self._finish_segment_text_review()
+            self.timeline_approve_all.blockSignals(True)
+            self.timeline_deny_all.blockSignals(True)
+            self.timeline_approve_all.setChecked(False)
+            self.timeline_deny_all.setChecked(False)
+            self.timeline_approve_all.blockSignals(False)
+            self.timeline_deny_all.blockSignals(False)
+            self._show_segment_review_controls()
             return
         if not approved:
             self._artwork_cancelled_segments = getattr(
@@ -8292,16 +8304,15 @@ class MainWindow(QMainWindow):
         if self.inline_typing.editor in editors:
             self.inline_typing.finish()
         if self.paragraph_review.editor in editors:
-            self.paragraph_review.finish()
+            self.paragraph_review.finish(plain=True)
         if self.prompt_scope.currentData() == "segment":
             segment = self.current_segment()
             text = segment.prompt if segment else ""
-            if self.segment_prompt.toPlainText() != text:
-                self.segment_prompt.blockSignals(True)
-                self.segment_prompt.setPlainText(text)
-                render_prompt_notes(self.segment_prompt)
-                self.segment_prompt.blockSignals(False)
             self.refresh_director_scope_editor()
+            # Always rebuild from authoritative text, even when the words
+            # already match: a restored document can still carry diff formats.
+            for editor in editors:
+                reset_plain_review_text(editor, text)
 
     def _start_segment_review(self, before: list[Segment], updated: list[Segment],
                               changes: list[dict]) -> None:
