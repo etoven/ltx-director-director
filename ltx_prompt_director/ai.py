@@ -91,6 +91,47 @@ def refine_sequence_prompts(segments: list[Segment], provider: str, model: str,
 UNIFIED_PROMPT_TRANSPORT = '\n\nRESPONSE TRANSPORT: Return strict JSON with a single nonempty "prompt" string containing the complete editable production prompt in the workspace format. Do not return timed_actions, segment records or a timing reconciliation plan. The timeline is authoritative; describe its existing timing without changing segment count, duration, order or identity. Prompt editing never rebuilds the timeline. This response contract supersedes older structured timed-plan instructions.'
 
 
+def combined_timeline_contract(segments: list[Segment]) -> str:
+    """Fresh production synthesis must follow the current plan, not old notes."""
+    plan, cursor = [], 0.0
+    for index, item in enumerate(segments):
+        end = cursor + item.duration
+        record = {"index": index + 1, "id": item.id, "name": item.name,
+                  "kind": item.kind, "role": item.role, "start": round(cursor, 6),
+                  "end": round(end, 6), "duration": item.duration,
+                  "prompt": item.prompt, "imagePrompt": item.image_prompt}
+        if item.kind == "video":
+            start = max(0.0, float(item.trim_start or 0) / 24)
+            record.update(sourceStart=start, sourceEnd=start + item.duration)
+        plan.append(record)
+        cursor = end
+    return (
+        "\n\nCURRENT TIMELINE — AUTHORITATIVE GENERATION PLAN\n"
+        "Generate the complete production brief afresh from EVERY record below, "
+        "in this exact order. These are the current edited timeline segments, "
+        "including split, inserted, reordered and rewritten beats. Include each "
+        "beat's action, performance, dialogue and resulting state at its current "
+        "time. Never omit an intermediate or final beat, collapse split segments "
+        "because their images match, or revive deleted/replaced actions. A beat "
+        "does not require a camera cut: preserve continuous-shot direction when "
+        "appropriate while still describing its complete action progression. "
+        "AUTHORITY: The current segment prompts, order and durations override "
+        "conflicting older global direction, narrative examples and source-media "
+        "events. In particular, discard an old stopping point or narrative "
+        "restriction when the current later segments explicitly progress beyond it. "
+        "Use Director's Intent and global notes only where compatible with this "
+        "plan, retaining compatible identity, setting, style and sound guidance. "
+        "Images provide visual anchors; they must not replace authored motion "
+        "or suppress new segment text. For video, only its sourceStart/sourceEnd "
+        "interval belongs to that beat; other source footage must not replace "
+        "the subsequent timeline. Keep the workspace's production format. "
+        "Before returning, check the resulting prose against ALL records, "
+        "especially distinct beats sharing the same media. Return only the "
+        "production-prompt response; never change the timeline.\n"
+        + json.dumps(plan, ensure_ascii=False)
+    )
+
+
 def build_minimax_h3_prompt(segments: list[Segment], provider: str, model: str, api_key: str, intent: str, global_prompt: str, sfx: bool, spoken_dialog: bool, reduce_music: bool, timeout: int = 400, reference_images: list | None = None) -> str:
     """Synthesize the complete ordered timeline into one MiniMax H3 prompt."""
     if not segments:
@@ -98,7 +139,7 @@ def build_minimax_h3_prompt(segments: list[Segment], provider: str, model: str, 
     inputs = _minimax_frames_inputs(segments, provider, reference_images)
     rules = _minimax_h3_rules(segments, intent, global_prompt, sfx, spoken_dialog, reduce_music, reference_images)
     rules += "\nCURRENT MEDIA CONTRACT: The asset map may include uploaded reference audio and video soundtracks. Audio-only video samples condition sound only. Follow the supplied labels and observation availability; never invent unheard audio or visual observations. This overrides legacy template text saying audio references are unavailable."
-    rules += UNIFIED_PROMPT_TRANSPORT
+    rules += UNIFIED_PROMPT_TRANSPORT + combined_timeline_contract(segments)
     raw = _provider_raw(inputs, provider, model, api_key, rules, timeout)
     return _extract_minimax_h3_prompt(raw, segments)
 
@@ -110,7 +151,7 @@ def build_minimax_h3_reference_prompt(segments: list[Segment], provider: str, mo
     inputs = _minimax_reference_inputs(segments, provider, reference_images)
     rules = _minimax_h3_reference_rules(segments, intent, global_prompt, sfx, spoken_dialog, reduce_music, reference_images)
     rules += "\nCURRENT MEDIA CONTRACT: The asset map may include uploaded reference audio and video soundtracks. Audio-only video samples condition sound only. Follow the supplied labels and observation availability; never invent unheard audio or visual observations. This overrides legacy template text saying audio references are unavailable."
-    rules += UNIFIED_PROMPT_TRANSPORT
+    rules += UNIFIED_PROMPT_TRANSPORT + combined_timeline_contract(segments)
     raw = _provider_raw(inputs, provider, model, api_key, rules, timeout)
     return _extract_minimax_h3_prompt(raw, segments)
 
@@ -442,6 +483,8 @@ def _minimax_h3_inputs(segments: list[Segment], provider: str = "gemini", refine
         if item.kind in ("image", "video"):
             seen_visual = True
         value = {
+            "segment_id": item.id,
+            "timeline_index": index,
             "name": item.name,
             "role": item.role,
             "frame_mode_checkpoint": frame_checkpoints and item.kind == "image",
@@ -462,7 +505,7 @@ def _minimax_h3_inputs(segments: list[Segment], provider: str = "gemini", refine
             "next_cue_timestamp": _minimax_timestamp(end) if index + 1 < len(segments) else None,
             "continuity_function": continuity_function,
             "prompt": item.prompt.strip() or "[No existing segment prompt; infer conservatively from supplied visual and sequence context.]",
-            "prompt_label": "CURRENT TIMELINE PROMPT — SOURCE MATERIAL FOR MINIMAX H3 SYNTHESIS",
+            "prompt_label": "CURRENT TIMELINE SEGMENT PROMPT — AUTHORITATIVE ACTION AND PROGRESSION",
             "image_prompt": item.image_prompt.strip(),
             "picture_number": picture_number if item.kind == "image" else None,
             "video_number": video_number if item.kind == "video" else None,
@@ -580,7 +623,7 @@ def _minimax_reference_inputs(segments: list[Segment], provider: str, reference_
         item = {**record, "reference_mode_input": True}
         if "timeline_index" in record:
             media = timeline_media[record["timeline_index"]]
-            for key in ("image", "video", "video_frames", "video_analysis_mode", "video_number"):
+            for key in ("segment_id", "image", "video", "video_frames", "video_analysis_mode", "video_number"):
                 if key in media:
                     item[key] = media[key]
         else:

@@ -8730,6 +8730,8 @@ class MainWindow(QMainWindow):
             return
         if self.ai_busy:
             return
+        self.paragraph_review.finish()
+        self.inline_typing.finish()
         self.minimax_editor_changed()
         if not self.segments:
             window = self.show_minimax_panel("Not generated")
@@ -8748,33 +8750,46 @@ class MainWindow(QMainWindow):
         self.minimax_operation_signature = signature
         self.minimax_operation_provider_model = (provider, model)
         self.minimax_operation_kind = f"generate_{mode}"
+        self.combined_generation_source = self.combined_generation_source_key()
         self.minimax_operation_editor_snapshot = (
             self.minimax_prompt_text,
             self.minimax_refinement_instructions,
         )
         timeout = self.settings.value("api_timeout", 400, int)
-        window.set_busy(True, f"Generating {mode_label} prompt…")
+        window.set_busy(True, f"Generating from all {len(self.segments)} current segments…")
         operation = build_generic_prompt if self.workspace_engine == "generic" else (build_minimax_h3_reference_prompt if reference_mode else build_minimax_h3_prompt)
         self.start_ai_worker(
             operation,
             (
-                self.segments.copy(), provider, model, key, self.build_director_request(include_requested_length=False),
+                copy.deepcopy(self.segments), provider, model, key, self.build_director_request(include_requested_length=False),
                 self.global_prompt.toPlainText(), self.sfx.isChecked(), self.spoken_dialog.isChecked(),
                 self.reduce_music.isChecked(), timeout,
-            ) + (self.active_reference_images(),),
-            "Writing the generic workspace prompt…" if self.workspace_engine == "generic" else
-            "Writing the MiniMax H3 prompt for " + WORKFLOW_NAMES[detect_workflow(self.segments, self.minimax_reference_images)] + "…"
-            if reference_mode else
-            "Boiling the complete sequence down to one MiniMax H3 frame prompt…",
+            ) + (copy.deepcopy(self.active_reference_images()),),
+            f"Generating combined prompt from all {len(self.segments)} current segments…",
             self.minimax_h3_finished,
             show_main_overlay=False,
         )
+
+    def combined_generation_source_key(self):
+        return tuple((s.id, s.kind, s.role, s.duration, s.prompt, s.image_prompt,
+                      (getattr(s, "_media_digest", "") or s.media_path or s.preview_path)
+                      if s.kind != "text" else "", s.trim_start) for s in self.segments)
 
     def minimax_h3_finished(self, prompt: str) -> None:
         # The unified editor and timeline are locked while AI is running.
         # Project/workspace identity is checked once by ai_result_received().
         # Legacy editor-change fingerprint checks caused completed output loss.
         operation = str(getattr(self, "minimax_operation_kind", "generate_frames"))
+        source = getattr(self, "combined_generation_source", None)
+        self.combined_generation_source = None
+        if (operation.startswith("generate_") and source is not None
+                and source != self.combined_generation_source_key()):
+            self.pending_minimax_result = prompt
+            self.set_ai_controls_enabled(True)
+            self.minimax_panel.show_message(
+                "The timeline changed while Generate was running. The existing draft "
+                "was kept; generate again to use the latest segments.", "warning")
+            return
         if operation.startswith("refine_"):
             prompt = consume_global_refinements(prompt)
         unchanged = (self.prompt_only_workspace and operation.startswith("refine_") and

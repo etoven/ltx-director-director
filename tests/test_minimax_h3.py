@@ -12,6 +12,26 @@ from ltx_prompt_director.models import Segment
 
 
 class MiniMaxH3PromptTests(unittest.TestCase):
+    def test_all_combined_generators_end_with_the_current_complete_timeline(self):
+        from ltx_prompt_director.generic_ai import build_generic_prompt
+        segments = [Segment("Video", "", "", "video", "start", "Current opening", 1, trim_start=48),
+                    Segment("Inserted", "", "", "text", "text", "Current inserted action", 2),
+                    Segment("Final", "", "", "text", "text", "Current final state", 3)]
+        for builder in (ai.build_minimax_h3_prompt, ai.build_minimax_h3_reference_prompt, build_generic_prompt):
+            with self.subTest(builder=builder.__name__):
+                with patch.object(ai, "_provider_raw", return_value='{"prompt":"New complete brief"}') as raw:
+                    result = builder(segments, "gemini", "model", "key", "Style guidance",
+                                     "Older global notes", False, False, False, 30)
+                self.assertEqual(result, "New complete brief")
+                rules = raw.call_args.args[4]
+                plan = json.loads(rules.rsplit("\n", 1)[1])
+                self.assertEqual([r["id"] for r in plan], [s.id for s in segments])
+                self.assertEqual([r["prompt"] for r in plan], [s.prompt for s in segments])
+                self.assertEqual([(r["start"], r["end"]) for r in plan], [(0, 1), (1, 3), (3, 6)])
+                self.assertEqual((plan[0]["sourceStart"], plan[0]["sourceEnd"]), (2, 3))
+                self.assertIn("split segments", rules)
+                self.assertIn("override conflicting older global direction", rules)
+
     def segments(self):
         return [
             Segment('opening.png', '', '', 'image', 'start', 'She raises her hand.', 3.0),

@@ -1407,6 +1407,90 @@ class UnifiedEditorTests(unittest.TestCase):
                         w.close()
 
 
+    def test_combined_generate_sends_every_current_split_edited_and_inserted_beat(self):
+        import copy
+        import json
+        from tempfile import TemporaryDirectory
+        from PIL import Image
+        for kind in ("minimax_frames", "minimax_references"):
+            with self.subTest(kind=kind), TemporaryDirectory() as folder:
+                path = Path(folder) / "same-image.png"
+                Image.new("RGB", (48, 32), "blue").save(path)
+                w = self.make_window(kind)
+                w._close_saves_queued = True
+                w.resize(1150, 850)
+                w.show()
+                w.segments = [Segment("Checkpoint", str(path), str(path), "image", "start", "Old action", 4),
+                              Segment("Removed", "", "", "text", "text", "DELETED SHOT", 1)]
+                w.refresh_timeline(0)
+                w.split_timeline_segment(w.segments[0].id, 2)
+                first, last = w.segments[:2]
+                first.prompt, last.prompt = "Current opening action.", "Current final action beyond the old stopping point."
+                bridge = Segment("New bridge", "", "", "text", "text", "Current inserted action.", 1)
+                w.segments = [first, bridge, last]
+                w.refresh_timeline(0)
+                w.global_prompt.setPlainText("Old guidance: stop before the inserted and final actions.")
+                w.unified_prompt.setPlainText("OBSOLETE COMBINED DRAFT")
+                w.minimax_prompt_cache_key = "obsolete cached source"
+                w.prompt_scope.setCurrentIndex(1)
+                self.assertTrue(w.paragraph_review.begin(w.intent_segment_prompt, "Old action", first.prompt))
+                expected = copy.deepcopy([s.to_dict() for s in w.segments])
+                with (patch.object(w, "ai_credentials", return_value=("gemini", "gemini-flash-lite-latest", "key")),
+                      patch.object(w.thread_pool, "start") as pool):
+                    w.combined_generate_button.click()
+                worker = pool.call_args.args[0]
+                self.assertEqual([s.id for s in worker.args[0]], [s.id for s in w.segments])
+                self.assertTrue(all(a is not b for a, b in zip(worker.args[0], w.segments)))
+                with patch.object(ai, "_provider_raw", return_value='{"prompt":"All current actions combined."}') as raw:
+                    result = worker.operation(*worker.args)
+                rules = raw.call_args.args[4]
+                plan = json.loads(rules.rsplit("\n", 1)[1])
+                self.assertEqual([r["id"] for r in plan], [s.id for s in w.segments])
+                self.assertEqual([r["prompt"] for r in plan], [s.prompt for s in w.segments])
+                self.assertEqual([(r["start"], r["end"]) for r in plan], [(0, 2), (2, 3), (3, 5)])
+                self.assertEqual([r["segment_id"] for r in raw.call_args.args[0]], [s.id for s in w.segments])
+                self.assertIn("override conflicting older global direction", rules)
+                self.assertNotIn("DELETED SHOT", rules)
+                self.assertNotIn("OBSOLETE COMBINED DRAFT", rules)
+                worker.signals.finished.emit(result)
+                self.assertEqual(w.minimax_prompt_text, "All current actions combined.")
+                self.assertEqual([s.to_dict() for s in w.segments], expected)
+                w.paragraph_review.finish()
+                w.close()
+
+    def test_combined_generate_holds_result_if_background_work_changes_the_timeline(self):
+        w = self.make_window("minimax_frames")
+        w.unified_prompt.setPlainText("Keep this draft")
+        with (patch.object(w, "ai_credentials", return_value=("gemini", "gemini-flash-lite-latest", "key")),
+              patch.object(w.thread_pool, "start") as pool):
+            w.combined_generate_button.click()
+        worker = pool.call_args.args[0]
+        original = worker.args[0][0].prompt
+        w.segments[0].prompt = "Background update after Generate was clicked"
+        w.segments.append(Segment("New", "", "", kind="text", prompt="A newly inserted beat"))
+        self.assertEqual(worker.args[0][0].prompt, original)
+        self.assertEqual(len(worker.args[0]), 2)
+        worker.signals.finished.emit("Old snapshot's generated result")
+        self.assertEqual(w.minimax_prompt_text, "Keep this draft")
+        self.assertEqual(w.pending_minimax_result, "Old snapshot's generated result")
+        self.assertFalse(w.ai_busy)
+        self.assertEqual(w.paragraph_review.pending_count, 0)
+
+    def test_combined_generate_accepts_materialized_path_for_unchanged_archived_media(self):
+        w = self.make_window("minimax_frames")
+        w._close_saves_queued = True
+        w.segments[0].kind = "image"
+        w.segments[0].media_path = "/unmaterialized/source.png"
+        w.segments[0]._media_digest = "unchanged original media digest"
+        w.unified_prompt.setPlainText("Old draft")
+        with (patch.object(w, "ai_credentials", return_value=("gemini", "model", "key")),
+              patch.object(w.thread_pool, "start") as pool):
+            w.combined_generate_button.click()
+        w.segments[0].media_path = "/materialized/cache/source.png"
+        pool.call_args.args[0].signals.finished.emit("Fresh draft from the same media")
+        self.assertEqual(w.minimax_prompt_text, "Fresh draft from the same media")
+        self.assertFalse(w.pending_minimax_result)
+
     def test_both_minimax_drafts_and_type_survive_export_and_workspace_switch(self):
         w = self.make_window('minimax_frames')
         w.unified_prompt.setPlainText('/refine-global Frame notes\nFrame draft')

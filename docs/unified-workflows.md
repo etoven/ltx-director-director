@@ -28,6 +28,13 @@ MiniMax adds an editable **Unified Prompt** below the segment editor. Write or p
 
 The two editors retain separate text. Pasting or editing the unified prompt does not change the timeline. Changing segments marks the production draft as needing an update; regenerate when you want to incorporate those changes. Your manual draft remains available until you choose to replace it.
 
+The lower **Generate** button rebuilds the production brief from every current
+timeline segment, including newly split or inserted beats. Current segment
+actions, order and timing take precedence over conflicting older global notes;
+beats that share an image still retain their separate action progression.
+If the timeline changes while generation is running, the app keeps your draft
+and asks you to generate again from the updated sequence.
+
 ![A selected segment prompt with the full production draft below](images/shared-segment-editors.png)
 
 ## Apply a production brief to the timeline

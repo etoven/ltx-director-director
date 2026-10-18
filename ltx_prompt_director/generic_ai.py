@@ -30,7 +30,8 @@ def build_generic_prompt(segments, provider, model, api_key, intent, global_prom
                          spoken_dialog, reduce_music, timeout=400, reference_images=None):
     inputs = ai._minimax_reference_inputs(segments, provider, reference_images)
     rules = _rules(segments, intent, global_prompt, sfx, spoken_dialog, reduce_music, reference_images)
-    raw = ai._provider_raw(inputs, provider, model, api_key, rules + UNIFIED_CONTRACT, timeout)
+    raw = ai._provider_raw(inputs, provider, model, api_key,
+                           rules + UNIFIED_CONTRACT + ai.combined_timeline_contract(segments), timeout)
     return ai._extract_minimax_h3_prompt(raw, segments)
 
 
