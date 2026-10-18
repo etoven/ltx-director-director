@@ -3586,9 +3586,10 @@ class MainWindow(QMainWindow):
         self.timeline_scale.valueChanged.connect(self.set_timeline_scale)
         self.timeline_fit_button = QToolButton()
         self.timeline_fit_button.setObjectName("timelineFitButton")
-        self.timeline_fit_button.setText("Fit timeline")
+        self.timeline_fit_button.setAutoRaise(True)
+        self.timeline_fit_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.timeline_fit_button.setIcon(QIcon(str(files("ltx_prompt_director").joinpath("assets/timeline-fit.svg"))))
-        self.timeline_fit_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.timeline_fit_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
         self.timeline_fit_button.setAccessibleName("Fit timeline")
         self.timeline_fit_button.setToolTip("Auto-fit the complete timeline — show every segment without horizontal scrolling")
         self.timeline_fit_button.clicked.connect(self.autofit_timeline)
@@ -4500,10 +4501,9 @@ class MainWindow(QMainWindow):
         # Compact controls: retain visible checked/hover states without
         # consuming another line of writing space for padded buttons.
         theme += """
-        #timelineFitButton{background:#243b46;border:1px solid #6095ae;
-                           border-radius:5px;color:#e1f3fc;padding:0;
-                           min-height:0;font-weight:bold}
-        #timelineFitButton:hover{background:#243b46;border-color:#65a7c7;color:#fff}
+        #timelineFitButton{background:transparent;border:0;border-radius:4px;
+                           color:#e1f3fc;padding:0;min-height:0}
+        #timelineFitButton:hover{background:rgba(255,255,255,20)}
         #voiceOptions{background:transparent;border:1px solid #455057;border-radius:4px;
                       color:#bfccd2;padding:0;min-height:0}
         #voiceOptions:hover{background:#2b3940;border-color:#7195a8;color:#f0f8fb}
@@ -4544,8 +4544,7 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(theme)
         self.timeline_scale.setFixedWidth(metric(98))
         self.timeline_fit_button.setIconSize(QSize(metric(18), metric(18)))
-        self.timeline_fit_button.setFixedSize(
-            self.timeline_fit_button.fontMetrics().horizontalAdvance("Fit timeline") + metric(42), metric(32))
+        self.timeline_fit_button.setFixedSize(metric(32), metric(32))
         self.output_width.setFixedWidth(metric(75))
         self.output_height.setFixedWidth(metric(75))
         self.ui_scale_spin.setFixedWidth(metric(82))

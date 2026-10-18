@@ -394,7 +394,7 @@ class UnifiedEditorTests(unittest.TestCase):
         self.assertIn("Auto-fit", w.timeline_fit_button.toolTip())
         self.assertEqual(w.timeline_fit_button.accessibleName(), "Fit timeline")
 
-    def test_timeline_navigation_is_labeled_and_located_beside_ruler(self):
+    def test_timeline_navigation_is_located_beside_ruler(self):
         from PySide6.QtWidgets import QLabel, QToolBar, QToolButton
         w = self.make_window("minimax_frames")
         w.resize(1120, 780)
@@ -416,7 +416,8 @@ class UnifiedEditorTests(unittest.TestCase):
         self.assertEqual(w.output_size_control.accessibleName(), "Output resolution")
         self.assertEqual(w.timeline_scale.accessibleName(), "Timeline zoom")
         self.assertIsInstance(w.timeline_fit_button, QToolButton)
-        self.assertEqual(w.timeline_fit_button.text(), "Fit timeline")
+        self.assertEqual(w.timeline_fit_button.text(), "")
+        self.assertEqual(w.timeline_fit_button.toolButtonStyle(), Qt.ToolButtonStyle.ToolButtonIconOnly)
         self.assertFalse(w.timeline_fit_button.icon().isNull())
         self.assertGreaterEqual(w.timeline_fit_button.height(), 30)
         self.assertIn("Auto-fit", w.timeline_fit_button.toolTip())

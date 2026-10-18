@@ -27,8 +27,8 @@ Both parts keep the original media and prompt, and the total sequence duration
 stays the same. Video parts use consecutive source intervals. Each part needs
 at least one frame; approve or deny any pending timeline edits before splitting.
 
-Use **Zoom** beside the timeline ruler to inspect a passage. The labeled
-**Fit timeline** button next to it brings the whole sequence into view; moving
+Use **Zoom** beside the timeline ruler to inspect a passage. The
+**Fit timeline** icon at the right edge brings the whole sequence into view; moving
 Zoom all the way left also fits the sequence. Drag the dotted lower grip to
 make the visual previews taller. Smooth horizontal scrolling helps you move
 through longer plans.

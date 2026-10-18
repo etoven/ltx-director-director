@@ -137,7 +137,7 @@ def test_fit_control_is_visible_by_timeline_and_fits_the_complete_sequence(windo
     assert sum(window.timeline_item_widths()) <= window.timeline.viewport().width()
     assert window.timeline_fit_button.parent() is window.timeline_navigation
     assert window.timeline_navigation.parent() is window.timeline_shell
-    assert window.timeline_fit_button.text() == "Fit timeline"
+    assert window.timeline_fit_button.accessibleName() == "Fit timeline"
     assert window.timeline_fit_button.isVisible()
     window.timeline_scale.setValue(120)
     assert not window.timeline_fit_mode
