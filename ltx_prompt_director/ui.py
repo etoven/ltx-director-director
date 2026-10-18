@@ -61,7 +61,7 @@ from .models import Segment, order_segments_by_ids, split_segment, text_segment_
 from .project_data import ARCHIVE_COLOR, load_other_tags, load_project_tags, new_note, normalize_notes, normalize_project_labels
 from .spellcheck import install_spellcheck
 from .prompt_tags import prompt_content, consume_global_refinements, install_prompt_tags, render_prompt_notes, insert_note
-from .quick_fixes import QuickFixEditor, TARGETS as QUICK_FIX_TARGETS, load_presets
+from .quick_fixes import QuickFixEditor, load_presets
 from .inline_cues import PromptTextEdit
 
 FPS = 24
@@ -3438,8 +3438,6 @@ class MainWindow(QMainWindow):
         self.magic_overlay = MagicBuildOverlay(self)
         self.inline_typing = LiveTypingPreview(self)
         self.paragraph_review = ParagraphDiffReview(self)
-        self.quick_fix_review = ParagraphDiffReview(self)
-        self.quick_fix_run = None
         self.reasoning_dock = ReasoningActivityDock(self)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.reasoning_dock)
         geometry = self.settings.value("window/geometry")
@@ -3884,7 +3882,7 @@ class MainWindow(QMainWindow):
         self.prompt_refine_button.setObjectName("promptAction")
         self.prompt_refine_button.setAccessibleName("Refine selected segment or entire sequence (Global)")
         self.prompt_refine_button.clicked.connect(self.refine_upper_prompt)
-        self.segment_quick_fix_button = self.make_quick_fix_button("Segment quick fixes")
+        self.segment_quick_fix_button = self.make_quick_fix_button("Segment quick fixes", "segment")
         self.primary_ai_command = "generate"
         for button in (self.sfx, self.spoken_dialog, self.hdr, self.reduce_music):
             button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
@@ -4134,7 +4132,7 @@ class MainWindow(QMainWindow):
             "↑ ALL Timeline Segments → Combined Prompt: rebuild the combined "
             "prose from the entire ordered sequence, leaving segments unchanged.")
         self.sync_combined_button.clicked.connect(self.sync_combined_from_segments)
-        self.combined_quick_fix_button = self.make_quick_fix_button("Unified prompt quick fixes")
+        self.combined_quick_fix_button = self.make_quick_fix_button("Unified prompt quick fixes", "unified")
         self.minimax_panel.header.addWidget(self.combined_quick_fix_button)
         self.minimax_panel.header.addWidget(self.combined_generate_button)
         self.minimax_panel.header.addWidget(self.combined_refine_button)
@@ -6654,38 +6652,39 @@ class MainWindow(QMainWindow):
         ), key
 
     def finish_prompt_reviews(self) -> None:
-        for name in ("paragraph_review", "quick_fix_review"):
-            review = getattr(self, name, None)
-            if review is not None:
-                review.finish()
+        review = getattr(self, "paragraph_review", None)
+        if review is not None:
+            review.finish()
 
-    def make_quick_fix_button(self, accessible_name: str) -> QPushButton:
+    def make_quick_fix_button(self, accessible_name: str, editor: str) -> QPushButton:
         button = QPushButton("Quick Fix")
         button.setObjectName("quickFixAction")
         button.setAccessibleName(accessible_name)
-        button.setToolTip("Insert a saved refinement instruction and refine automatically")
+        button.setToolTip("Insert a saved instruction and refine this editor only")
         menu = QMenu(button)
-        menu.aboutToShow.connect(lambda: self.populate_quick_fix_menu(menu))
+        menu.aboutToShow.connect(lambda: self.populate_quick_fix_menu(menu, editor))
         button.setMenu(menu)
         return button
 
-    def quick_fix_available(self, target: str) -> bool:
+    def quick_fix_available(self, editor: str) -> bool:
         if self.ai_busy or self.workspace_engine == "shot_sequence":
             return False
-        segment = self.current_segment()
-        if target in {"segment", "both"} and (self.prompt_only_workspace or segment is None or not segment.prompt.strip()):
-            return False
-        if target in {"unified", "both"} and (not self.unified_workspace or not self.minimax_prompt_text.strip()):
-            return False
-        return target in QUICK_FIX_TARGETS
+        if editor == "segment":
+            segment = self.current_segment()
+            return not self.prompt_only_workspace and segment is not None and bool(segment.prompt.strip())
+        if editor == "unified":
+            return self.unified_workspace and bool(self.minimax_prompt_text.strip()) and (bool(self.segments) or self.prompt_only_workspace)
+        return False
 
-    def populate_quick_fix_menu(self, menu: QMenu) -> None:
+    def populate_quick_fix_menu(self, menu: QMenu, editor: str) -> None:
         menu.clear()
         for preset in load_presets(self.settings):
-            action = menu.addAction(f"{preset['name']} · {QUICK_FIX_TARGETS[preset['target']]}")
+            if preset["target"] not in (editor, "both"):
+                continue
+            action = menu.addAction(preset["name"])
             action.setToolTip(preset["prompt"])
-            action.setEnabled(self.quick_fix_available(preset["target"]))
-            action.triggered.connect(lambda _=False, value=preset: self.apply_quick_fix(value))
+            action.setEnabled(self.quick_fix_available(editor))
+            action.triggered.connect(lambda _=False, value=preset: self.apply_quick_fix(value, editor))
         menu.addSeparator()
         menu.addAction("Edit Quick Fixes…", self.edit_quick_fixes)
         menu.setToolTipsVisible(True)
@@ -6694,74 +6693,31 @@ class MainWindow(QMainWindow):
         if not self.ai_busy:
             QuickFixEditor(self.settings, self).exec()
 
-    def apply_quick_fix(self, preset: dict) -> None:
-        target, instruction = preset.get("target"), str(preset.get("prompt") or "").strip()
-        if not instruction or not self.quick_fix_available(target):
+    def apply_quick_fix(self, preset: dict, editor: str) -> None:
+        instruction = str(preset.get("prompt") or "").strip()
+        if (preset.get("target") not in (editor, "both") or not instruction
+                or not self.quick_fix_available(editor)):
             return
         self.finish_prompt_reviews()
         self.inline_typing.finish()
-        segment = self.current_segment()
-        run = {"identity": (self.workspace_revision, self.current_project_id, self.project_type),
-               "stage": "segment" if target in {"segment", "both"} else "unified",
-               "both": target == "both", "segment_id": segment.id if segment else None,
-               "segment_before": segment.prompt if segment else "",
-               "unified_before": self.minimax_prompt_text}
-        if target in {"segment", "both"}:
+        if editor == "segment":
             self.prompt_scope.setCurrentIndex(self.prompt_scope.findData("segment"))
-            editor = self.intent_segment_prompt if self.unified_workspace else self.segment_prompt
-            cursor = QTextCursor(editor.document())
-            cursor.movePosition(QTextCursor.MoveOperation.End)
+            target = self.intent_segment_prompt if self.unified_workspace else self.segment_prompt
+        else:
+            target = self.unified_prompt
+        baseline = target.toPlainText()
+        cursor = QTextCursor(target.document())
+        cursor.movePosition(QTextCursor.MoveOperation.End if editor == "segment" else QTextCursor.MoveOperation.Start)
+        if editor == "segment":
             cursor.insertText("\n\n")
-            insert_note(editor, cursor, "/refine-global", instruction)
-        if target in {"unified", "both"}:
-            cursor = QTextCursor(self.unified_prompt.document())
-            cursor.movePosition(QTextCursor.MoveOperation.Start)
-            insert_note(self.unified_prompt, cursor, "/refine-global", instruction)
-        self.quick_fix_run = run
-        self._start_quick_fix_stage()
-
-    def _start_quick_fix_stage(self) -> None:
-        run = self.quick_fix_run
-        if run["stage"] == "segment":
+        insert_note(target, cursor, "/refine-global", instruction)
+        if editor == "segment":
             self.refine_selected_prompt()
         else:
             self.refine_minimax_prompt()
         if self.ai_busy:
             # Review the prose change, not deletion of the injected instruction.
-            self.ai_review_baseline = run["segment_before" if run["stage"] == "segment" else "unified_before"]
-        else:
-            self.quick_fix_run = None
-            self.review_quick_fix_segment(run)
-
-    def finish_quick_fix_stage(self) -> None:
-        run = self.quick_fix_run
-        if not run:
-            return
-        if run["identity"] != (self.workspace_revision, self.current_project_id, self.project_type):
-            self.quick_fix_run = None
-            return
-        if run["both"] and run["stage"] == "segment":
-            segment = next((s for s in self.segments if s.id == run["segment_id"]), None)
-            if segment is None:
-                self.quick_fix_run = None
-                return
-            run["segment_after"] = segment.prompt
-            self.finish_prompt_reviews()
-            run["stage"] = "unified"
-            self._start_quick_fix_stage()
-            return
-        self.quick_fix_run = None
-        self.review_quick_fix_segment(run)
-
-    def review_quick_fix_segment(self, run) -> None:
-        # Both results remain independently reviewable in their own editors.
-        if (run and run["both"] and run.get("segment_after")
-                and run["identity"] == (self.workspace_revision, self.current_project_id, self.project_type)
-                and self.current_segment() and self.current_segment().id == run["segment_id"]):
-            segment = self.current_segment()
-            if segment.prompt == run.get("segment_after"):
-                editor = self.intent_segment_prompt if self.unified_workspace else self.segment_prompt
-                self.quick_fix_review.begin(editor, run["segment_before"], segment.prompt)
+            self.ai_review_baseline = baseline
 
     def set_ai_controls_enabled(self, enabled: bool) -> None:
         self.ai_busy = not enabled
@@ -6912,7 +6868,6 @@ class MainWindow(QMainWindow):
         return getattr(self, "ai_request_workspace", None) == (self.workspace_revision, self.current_project_id, self.project_type)
 
     def discard_obsolete_ai_result(self) -> None:
-        self.quick_fix_run = None
         self.inline_typing.finish()
         self.ai_plan_stream_active = False
         if hasattr(self, "_ai_plan_timer"):
@@ -6981,11 +6936,8 @@ class MainWindow(QMainWindow):
             self.paragraph_review.begin(
                 review_editor, review_baseline, review_editor.toPlainText()
             )
-        self.finish_quick_fix_stage()
 
     def ai_failure_received(self, error: str) -> None:
-        quick_fix_run = self.quick_fix_run
-        self.quick_fix_run = None
         self.inline_typing.finish()
         self.ai_plan_stream_active = False
         if hasattr(self, "_ai_plan_timer"):
@@ -6997,7 +6949,6 @@ class MainWindow(QMainWindow):
         if getattr(self, "active_live_panel", None) is not None:
             self.active_live_panel.finish(False)
         self.magic_failed(error)
-        self.review_quick_fix_segment(quick_fix_run)
 
     def refine_selected_timing(self) -> None:
         if self.prompt_only_workspace:
@@ -8538,9 +8489,8 @@ class MainWindow(QMainWindow):
         if not getattr(self, "timeline_review_pending", set()):
             # The timeline checkmark can also finish the current segment's
             # paragraph review when no structural timeline edits are pending.
-            for review in (self.paragraph_review, self.quick_fix_review):
-                if review.editor in (self.segment_prompt, self.intent_segment_prompt):
-                    review.resolve_all(approved)
+            if self.paragraph_review.editor in (self.segment_prompt, self.intent_segment_prompt):
+                self.paragraph_review.resolve_all(approved)
             self._finish_segment_text_review()
             self.timeline_approve_all.blockSignals(True)
             self.timeline_deny_all.blockSignals(True)
@@ -8581,9 +8531,8 @@ class MainWindow(QMainWindow):
         editors = (self.segment_prompt, self.intent_segment_prompt)
         if self.inline_typing.editor in editors:
             self.inline_typing.finish()
-        for review in (self.paragraph_review, self.quick_fix_review):
-            if review.editor in editors:
-                review.finish(plain=True)
+        if self.paragraph_review.editor in editors:
+            self.paragraph_review.finish(plain=True)
         if self.prompt_scope.currentData() == "segment":
             segment = self.current_segment()
             text = segment.prompt if segment else ""

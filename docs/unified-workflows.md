@@ -49,21 +49,20 @@ and asks you to generate again from the updated sequence.
 
 ## Apply a saved Quick Fix
 
-Use **Quick Fix** immediately before Generate in either prompt header. Choose a
-saved preset to insert its instruction and start refinement automatically.
-**Segment** applies to the selected segment, **Unified** applies to the lower
-production prompt, and **Both** refines the selected segment first and then the
-unified prompt using that updated context. Instructions appear at the bottom of
-the segment prompt or the top of the unified prompt. Each result has its own
-inline approve/reject controls; neighboring segments are preserved.
+Use **Quick Fix** immediately before Generate in either prompt header. A preset's
+**Show in** setting controls menu availability: **Segment** lists it in the
+segment menu, **Unified** lists it in the unified menu, and **Both** lists it in
+both. Selecting a preset always refines only the editor whose button you used.
+The segment button inserts the instruction at the bottom of the selected
+segment; the unified button inserts it at the top of the production prompt.
+The result uses that editor's normal inline approve/reject controls.
 
-The included **Refine Camera** preset targets Both with “refine camera angle and
-shot descriptions.” **Format Prompt** targets Unified with “Format the spacing
-between shots to make it more human legable”. Choose **Edit Quick Fixes…** to add,
-rename, edit or remove presets and select their targets. Presets are saved in
-your app settings and shared by both dropdowns. Options requiring an unavailable
-or empty editor are disabled. If refinement fails, the remaining stage stops;
-your text and its instruction remain available to retry.
+The included **Refine Camera** preset is available in Both menus with “refine
+camera angle and shot descriptions.” **Format Prompt** is available in Unified
+with “Format the spacing between shots to make it more human legable”. Choose
+**Edit Quick Fixes…** to add, rename, edit or remove presets and select where they
+appear. Presets are saved in your app settings. An empty editor disables its
+menu options; content in the other editor is not required.
 
 ![Quick Fix controls in both prompt headers](images/quick-fixes.png)
 
