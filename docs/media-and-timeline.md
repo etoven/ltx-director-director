@@ -22,7 +22,21 @@ Videos use a preview frame from the clip’s final second for the timeline and A
 
 Drag a card to reorder the sequence. Drag its resize edge to change the length, or select it and enter a precise value in **Duration**. The sequence summary shows the total; each card shows its starting time. Image and video cards also show source resolution.
 
-Use **Scale** to zoom into a passage. **Auto fit**, or the far-left scale position, brings the whole sequence into view. Drag the dotted lower grip to make the visual previews taller. Smooth horizontal scrolling helps you move through longer plans.
+Right-click at the desired cut within a card and choose **Split segment here**.
+Both parts keep the original media and prompt, and the total sequence duration
+stays the same. Video parts use consecutive source intervals. Each part needs
+at least one frame; approve or deny any pending timeline edits before splitting.
+
+Use **Zoom** beside the timeline ruler to inspect a passage. The labeled
+**Fit timeline** button next to it brings the whole sequence into view; moving
+Zoom all the way left also fits the sequence. Drag the dotted lower grip to
+make the visual previews taller. Smooth horizontal scrolling helps you move
+through longer plans.
+
+Use the reference strip beneath the timeline to inspect conditioning thumbnails
+and timing labels. Scroll horizontally to see additional references.
+
+![Zoom and Fit timeline beside the ruler, with a split text beat and roomier reference strip](images/timeline-navigation.png)
 
 There is no fixed segment-count or total-length cap in the editor. The renderer you use still determines which output lengths it can produce.
 

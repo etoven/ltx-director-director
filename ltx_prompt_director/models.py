@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import copy
+import math
 from pathlib import Path
 from uuid import uuid4
 
@@ -48,6 +50,25 @@ def order_segments_by_ids(segments: list[Segment], ordered_ids: list[str]) -> li
     seen = set(ordered_ids)
     ordered.extend(segment for segment in segments if segment.id not in seen)
     return ordered
+
+
+def split_segment(segment: Segment, offset: float, fps: int = 24) -> tuple[Segment, Segment]:
+    """Split at a local frame boundary, retaining source metadata and total time."""
+    if not math.isfinite(offset) or fps <= 0:
+        raise ValueError("Choose a split point inside the segment.")
+    frames = round(offset * fps)
+    left_duration = round(frames / fps, 6)
+    right_duration = round(segment.duration - left_duration, 6)
+    if frames < 1 or right_duration < 1 / fps - 0.000001:
+        raise ValueError("Each side of the split needs at least one frame.")
+    left, right = copy.deepcopy(segment), copy.deepcopy(segment)
+    left.duration, right.duration = left_duration, right_duration
+    right.id = str(uuid4())
+    if segment.kind == "video":
+        left.trim_start = segment.trim_start or 0
+        right.trim_start = left.trim_start + frames
+        left.shot_trimmed = right.shot_trimmed = True
+    return left, right
 
 
 def text_segment_from_ltx(value: dict, index: int, fps: float) -> Segment:

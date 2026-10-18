@@ -374,7 +374,7 @@ class UnifiedEditorTests(unittest.TestCase):
         self.app.processEvents()
         self.assertIs(w.options_row, w.sequence_controls)
         self.assertLessEqual(w.prompt_scope.width(), 100)
-        self.assertEqual(w.conditioning_guide.height(), 38)
+        self.assertEqual(w.conditioning_guide.height(), 48)
         self.assertEqual(w.start_button.text(), "Start")
         self.assertEqual(w.end_button.text(), "End")
         self.assertEqual(w.director_controls.count(), 2)
@@ -394,7 +394,7 @@ class UnifiedEditorTests(unittest.TestCase):
         self.assertIn("Auto-fit", w.timeline_fit_button.toolTip())
         self.assertEqual(w.timeline_fit_button.accessibleName(), "Fit timeline")
 
-    def test_timeline_controls_relocated_into_main_toolbar_and_top_row_removed(self):
+    def test_timeline_navigation_is_labeled_and_located_beside_ruler(self):
         from PySide6.QtWidgets import QLabel, QToolBar, QToolButton
         w = self.make_window("minimax_frames")
         w.resize(1120, 780)
@@ -403,21 +403,22 @@ class UnifiedEditorTests(unittest.TestCase):
         toolbar = w.findChild(QToolBar, "mainToolbar")
         self.assertIsNotNone(toolbar)
         self.assertFalse(hasattr(w, "timeline_controls"))
-        self.assertIs(w.timeline_scale.parent(), toolbar)
-        self.assertIs(w.timeline_fit_button.parent(), toolbar)
+        self.assertIs(w.timeline_scale.parent(), w.timeline_navigation)
+        self.assertIs(w.timeline_fit_button.parent(), w.timeline_navigation)
         self.assertIs(w.output_size_control.parent(), toolbar)
         self.assertIs(w.timeline_shell.layout().itemAt(1).layout().itemAt(1).widget(),
                       w.ruler)
         toolbar_widgets = [toolbar.widgetForAction(action)
                            for action in toolbar.actions()]
         positions = [toolbar_widgets.index(widget) for widget in (
-            w.project_type_combo, w.timeline_scale,
-            w.timeline_fit_button, w.output_size_control, w.downloads_button)]
+            w.project_type_combo, w.output_size_control, w.downloads_button)]
         self.assertEqual(positions, sorted(positions))
         self.assertEqual(w.output_size_control.accessibleName(), "Output resolution")
         self.assertEqual(w.timeline_scale.accessibleName(), "Timeline zoom")
         self.assertIsInstance(w.timeline_fit_button, QToolButton)
-        self.assertEqual(w.timeline_fit_button.text(), "↔")
+        self.assertEqual(w.timeline_fit_button.text(), "Fit timeline")
+        self.assertFalse(w.timeline_fit_button.icon().isNull())
+        self.assertGreaterEqual(w.timeline_fit_button.height(), 30)
         self.assertIn("Auto-fit", w.timeline_fit_button.toolTip())
         self.assertIs(w.ai_timeline_status.parent(), w.statusBar())
         self.assertTrue(w.director_intent_row.indexOf(w.magic_button) >= 0)

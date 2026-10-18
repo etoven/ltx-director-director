@@ -57,7 +57,7 @@ from .timing_limits import sequence_limit, fit_sequence
 from .workspace_editor import WorkspaceEditor
 from .shot_sequence import DEFAULTS as SHOT_DEFAULTS, settings as shot_settings, ensure_collection_sequences, shot_layout
 from .shot_sequence_widgets import ShotSequencePanel
-from .models import Segment, order_segments_by_ids, text_segment_from_ltx
+from .models import Segment, order_segments_by_ids, split_segment, text_segment_from_ltx
 from .project_data import ARCHIVE_COLOR, load_other_tags, load_project_tags, new_note, normalize_notes, normalize_project_labels
 from .spellcheck import install_spellcheck
 from .prompt_tags import prompt_content, consume_global_refinements, install_prompt_tags, render_prompt_notes
@@ -3546,8 +3546,7 @@ class MainWindow(QMainWindow):
         timeline_layout = QVBoxLayout(timeline_shell)
         timeline_layout.setContentsMargins(0, 0, 0, 0)
         timeline_layout.setSpacing(0)
-        # No dedicated timeline toolbar: all navigation and output-size
-        # controls live in the project toolbar, leaving the ruler at the top.
+        # Output size stays in the project toolbar; navigation sits by the ruler.
         self.output_size_control = QFrame()
         self.output_size_control.setToolTip("Output resolution (width × height, pixels)")
         self.output_size_control.setAccessibleName("Output resolution")
@@ -3587,12 +3586,12 @@ class MainWindow(QMainWindow):
         self.timeline_scale.valueChanged.connect(self.set_timeline_scale)
         self.timeline_fit_button = QToolButton()
         self.timeline_fit_button.setObjectName("timelineFitButton")
-        self.timeline_fit_button.setText("↔")
+        self.timeline_fit_button.setText("Fit timeline")
+        self.timeline_fit_button.setIcon(QIcon(str(files("ltx_prompt_director").joinpath("assets/timeline-fit.svg"))))
+        self.timeline_fit_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.timeline_fit_button.setAccessibleName("Fit timeline")
-        self.timeline_fit_button.setToolTip("Auto-fit the complete timeline")
+        self.timeline_fit_button.setToolTip("Auto-fit the complete timeline — show every segment without horizontal scrolling")
         self.timeline_fit_button.clicked.connect(self.autofit_timeline)
-        self.timeline_zoom_action = toolbar.insertWidget(downloads_toolbar_action, self.timeline_scale)
-        self.timeline_fit_action = toolbar.insertWidget(downloads_toolbar_action, self.timeline_fit_button)
         self.timeline_output_action = toolbar.insertWidget(downloads_toolbar_action, self.output_size_control)
         toolbar.insertSeparator(downloads_toolbar_action)
         self.ai_timeline_status = QLabel("")
@@ -3616,6 +3615,14 @@ class MainWindow(QMainWindow):
         self.ruler = TimelineRuler()
         ruler_row.addWidget(self.ruler_spacer)
         ruler_row.addWidget(self.ruler, 1)
+        self.timeline_navigation = QWidget()
+        navigation_layout = QHBoxLayout(self.timeline_navigation)
+        navigation_layout.setContentsMargins(8, 1, 0, 1)
+        navigation_layout.setSpacing(7)
+        navigation_layout.addWidget(QLabel("Zoom"))
+        navigation_layout.addWidget(self.timeline_scale)
+        navigation_layout.addWidget(self.timeline_fit_button)
+        ruler_row.addWidget(self.timeline_navigation)
         timeline_layout.addLayout(ruler_row)
         track_row = QHBoxLayout()
         track_row.setContentsMargins(0, 0, 0, 0)
@@ -3683,7 +3690,7 @@ class MainWindow(QMainWindow):
         self.conditioning_guide = QScrollArea()
         self.conditioning_guide.setObjectName("conditioningGuide")
         self.conditioning_guide.setWidgetResizable(True)
-        self.conditioning_guide.setFixedHeight(38)
+        self.conditioning_guide.setFixedHeight(48)
         self.conditioning_guide.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.conditioning_content = QWidget()
         self.conditioning_row = QHBoxLayout(self.conditioning_content)
@@ -4493,8 +4500,8 @@ class MainWindow(QMainWindow):
         # Compact controls: retain visible checked/hover states without
         # consuming another line of writing space for padded buttons.
         theme += """
-        #timelineFitButton{background:transparent;border:1px solid #3f6679;
-                           border-radius:4px;color:#b2def2;padding:0;
+        #timelineFitButton{background:#243b46;border:1px solid #6095ae;
+                           border-radius:5px;color:#e1f3fc;padding:0;
                            min-height:0;font-weight:bold}
         #timelineFitButton:hover{background:#243b46;border-color:#65a7c7;color:#fff}
         #voiceOptions{background:transparent;border:1px solid #455057;border-radius:4px;
@@ -4536,7 +4543,9 @@ class MainWindow(QMainWindow):
             theme = theme.replace(f"font-size:{size}px", f"font-size:{scaled(size)}px")
         self.setStyleSheet(theme)
         self.timeline_scale.setFixedWidth(metric(98))
-        self.timeline_fit_button.setFixedSize(metric(26), metric(25))
+        self.timeline_fit_button.setIconSize(QSize(metric(18), metric(18)))
+        self.timeline_fit_button.setFixedSize(
+            self.timeline_fit_button.fontMetrics().horizontalAdvance("Fit timeline") + metric(42), metric(32))
         self.output_width.setFixedWidth(metric(75))
         self.output_height.setFixedWidth(metric(75))
         self.ui_scale_spin.setFixedWidth(metric(82))
@@ -6222,6 +6231,26 @@ class MainWindow(QMainWindow):
         segment = self.current_segment()
         menu = QMenu(self)
         if segment:
+            rect = self.timeline.visualItemRect(item)
+            offset = segment.duration * (point.x() - rect.left()) / max(1, rect.width())
+            split_action = menu.addAction("Split segment here")
+            split_action.setToolTip("Divide this segment at the clicked position; keep its media and prompt on both sides.")
+            try:
+                split_segment(segment, offset, FPS)
+                can_split = True
+            except ValueError:
+                can_split = False
+            if getattr(self, "timeline_review_pending", set()):
+                can_split = False
+                split_action.setToolTip("Approve or deny pending timeline edits before splitting.")
+            if segment.artwork_status == "generating":
+                can_split = False
+                split_action.setToolTip("Wait for this segment's artwork to finish before splitting.")
+            split_action.setEnabled(can_split)
+            split_action.triggered.connect(
+                lambda checked=False, sid=segment.id, at=offset: self.split_timeline_segment(sid, at))
+            menu.addSeparator()
+        if segment:
             artwork_generate = menu.addAction("✦ Generate Artwork")
             artwork_generate.setToolTip(
                 "Create artwork from this segment's prompt using neighboring references; "
@@ -6254,7 +6283,22 @@ class MainWindow(QMainWindow):
             menu.addAction("Set as end frame", lambda: self.set_role("end"))
         menu.addSeparator()
         menu.addAction("Delete segment", self.delete_selected)
-        menu.exec(self.timeline.mapToGlobal(point))
+        menu.exec(self.timeline.viewport().mapToGlobal(point))
+
+    def split_timeline_segment(self, segment_id: str, offset: float) -> None:
+        if self.ai_busy or getattr(self, "timeline_review_pending", set()):
+            return
+        row = next((i for i, segment in enumerate(self.segments) if segment.id == segment_id), -1)
+        if row < 0 or self.segments[row].artwork_status == "generating":
+            return
+        try:
+            halves = split_segment(self.segments[row], offset, FPS)
+        except ValueError:
+            return
+        self.segments[row:row + 1] = halves
+        self.mark_dirty()
+        self.refresh_timeline(row + 1)
+        self.statusBar().showMessage("Segment split; media, prompts and total sequence duration preserved")
 
     def focus_segment_prompt(self) -> None:
         self.prompt_scope.setCurrentIndex(1)
