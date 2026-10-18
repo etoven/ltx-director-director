@@ -41,7 +41,7 @@ from .segment_plan import (supports_structured_edit, generate_combined, sync_tim
                            explicit_existing_image_edit)
 from .artwork_tools import IMAGE_MODEL_CHOICES, available_artwork_tools, render_artwork
 from .cache_maintenance import cover_path, mark_ready, needs_refresh, warm_metadata
-from .ai import AIResponseFormatError, GEMINI_MODELS, build_minimax_h3_prompt, build_minimax_h3_reference_prompt, build_prompts, minimax_h3_cache_key, provider_error_message, WORKSPACE_INSTRUCTIONS, refine_minimax_text_prompt, refine_minimax_h3_prompt, refine_minimax_h3_reference_prompt, refine_segment_prompt, generate_segment_prompt, refine_global_prompt, generate_global_direction, refine_timing, retryable_connection_error
+from .ai import AIResponseFormatError, GEMINI_MODELS, build_minimax_h3_prompt, build_minimax_h3_reference_prompt, build_prompts, minimax_h3_cache_key, provider_error_message, WORKSPACE_INSTRUCTIONS, refine_minimax_text_prompt, refine_minimax_h3_prompt, refine_minimax_h3_reference_prompt, refine_segment_prompt, generate_segment_prompt, refine_global_prompt, generate_global_direction, refine_sequence_prompts, refine_timing, retryable_connection_error
 from .media import APP_CACHE, TIMELINE_VIDEO_SUFFIXES, comfy_input_references, copy_media_for_export, data_url, extract_audio_for_export, prepare_media, safe_media_filename, thumbnail_for_image, unique_media_filename, video_source_dimensions, write_data_url
 from .project_archive import materialize_source, project_thumbnail_data, read_project, save_project_archive
 from .minimax_reference import WORKFLOW_NAMES, detect_workflow, reference_inventory, reference_slots
@@ -3792,12 +3792,12 @@ class MainWindow(QMainWindow):
         # The upper prompt editor has a dedicated, fixed pair of actions.
         self.magic_button = QPushButton("✦ Generate")
         self.magic_button.setObjectName("promptAction")
-        self.magic_button.setAccessibleName("Generate selected segment or global direction")
+        self.magic_button.setAccessibleName("Generate selected segment or entire sequence (Global)")
         self.magic_button.clicked.connect(self.generate_upper_prompt)
         self.prompt_generate_button = self.magic_button
         self.prompt_refine_button = QPushButton("✦ Refine")
         self.prompt_refine_button.setObjectName("promptAction")
-        self.prompt_refine_button.setAccessibleName("Refine selected segment or global direction")
+        self.prompt_refine_button.setAccessibleName("Refine selected segment or entire sequence (Global)")
         self.prompt_refine_button.clicked.connect(self.refine_upper_prompt)
         self.primary_ai_command = "generate"
         for button in (self.sfx, self.spoken_dialog, self.hdr, self.reduce_music):
@@ -6521,6 +6521,7 @@ class MainWindow(QMainWindow):
             "MiniMax Combined Sync" if operation is sync_combined_from_timeline else
             "Selected Segment Generate" if operation is generate_segment_prompt else
             "Global Direction Generate" if operation is generate_global_direction else
+            "Sequence-Wide Magic Build Refine" if operation is refine_sequence_prompts else
             "Refine Timing" if operation is refine_timing else
             "Refine Prompt"
         )
@@ -6564,7 +6565,7 @@ class MainWindow(QMainWindow):
         elif operation in {refine_segment_prompt, generate_segment_prompt, refine_generic_segment}:
             target = self.intent_segment_prompt if self.unified_workspace else self.segment_prompt
             kind = "segment"
-        elif operation in {refine_global_prompt, generate_global_direction}:
+        elif operation in {refine_global_prompt, generate_global_direction, refine_sequence_prompts}:
             target = self.intent if self.unified_workspace else self.segment_prompt
             kind = "global"
         elif operation in {build_prompts, build_generic_segments} and self.segments:
@@ -6797,7 +6798,7 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"Segment {index + 1} prompt refined")
         self.set_ai_controls_enabled(True)
         self.magic_overlay.hide_overlay()
-        # The upper Refine action must not regenerate the separate combined editor.
+        # Segment-only actions remain isolated; Global runs the cascade in magic_finished().
 
     def magic_build(self) -> None:
         if self.prompt_only_workspace:
@@ -6854,7 +6855,16 @@ class MainWindow(QMainWindow):
         self.set_ai_controls_enabled(True)
         self.magic_overlay.hide_overlay()
         self.animate_timeline_durations(target_durations)
-        self.statusBar().showMessage("Magic Build complete")
+        cascade = bool(getattr(self, "global_build_cascade_requested", False))
+        self.global_build_cascade_requested = False
+        self.statusBar().showMessage(
+            "Sequence updated; rebuilding combined prompt…" if cascade
+            else "Magic Build complete")
+        if cascade and self.unified_workspace:
+            # The top Global operation updates its entire child sequence first.
+            # Only then rebuild the lower combined production prompt. This is
+            # one downward cascade, never a second timeline-generation action.
+            self._generate_minimax_prompt(self.minimax_prompt_mode)
 
     def store_minimax_draft(self) -> None:
         self.minimax_drafts[self.workspace_draft_key] = {
@@ -7038,9 +7048,11 @@ class MainWindow(QMainWindow):
         self.output_size_control.setVisible(True)
         self.refine_timing_button.hide()
         self.magic_button.setToolTip(
-            "Generate only the selected segment prompt, or the global direction in Intent scope.")
+            "Segment: generate only the selected segment. Global: Magic Build the entire sequence "
+            "from Director's Intent, then rebuild the combined prompt.")
         self.prompt_refine_button.setToolTip(
-            "Refine only the selected segment prompt, or the global direction in Intent scope.")
+            "Segment: refine only the selected segment. Global: refine every segment "
+            "from Director's Intent, then rebuild the combined prompt.")
         self.comfy_export_action.setVisible(self.workspace_engine in {"minimax_frames","minimax_references","minimax_prompt"})
         self.workflow_export_action.setVisible(ltx)
         self.timeline_import_action.setVisible(not prompt_only)
@@ -7566,16 +7578,16 @@ class MainWindow(QMainWindow):
         self.update_sync_timeline_enabled()
 
     def generate_upper_prompt(self) -> None:
-        """Generate one selected segment, or global notes when scope is Intent."""
+        """Global runs Magic Build for all segments; Segment targets one tile."""
         if self.ai_busy or self.prompt_only_workspace or not self.segments:
             return
         if self.prompt_scope.currentData() == "global":
             self._generate_or_refine_upper_global(False)
-            return
-        self.generate_selected_segment()
+        else:
+            self.generate_selected_segment()
 
     def refine_upper_prompt(self) -> None:
-        """Refine only the upper editor's currently selected scope."""
+        """Global refines all segments; Segment refines only itself."""
         if self.ai_busy or self.prompt_only_workspace:
             return
         if self.prompt_scope.currentData() == "global":
@@ -7607,52 +7619,42 @@ class MainWindow(QMainWindow):
         )
 
     def _generate_or_refine_upper_global(self, refine: bool) -> None:
+        """Legacy Magic Build semantics: the Global box drives every segment.
+
+        Generation builds the full sequence from global instructions. Refinement
+        adjusts all existing segment prompts/timing from those instructions.
+        Only after the sequence finishes does the combined prompt rebuild.
+        """
         if self.ai_busy or not self.segments:
-            return
-        source = (self.intent if self.unified_workspace else self.global_prompt)
-        current = source.toPlainText()
-        if refine and not current.strip():
             return
         credentials = self.ai_credentials()
         if not credentials:
             return
         provider, model, key = credentials
-        self.upper_global_snapshot = (
-            current, tuple((s.id, s.duration, s.prompt) for s in self.segments))
         timeout = self.settings.value("api_timeout", 400, int)
+        notes = self.build_director_request()
+        operation = refine_sequence_prompts if refine else (
+            build_generic_segments if self.workspace_engine == "generic" else build_prompts)
+        args = (
+            copy.deepcopy(self.segments), provider, model, key,
+            notes, self.sfx.isChecked(), self.spoken_dialog.isChecked(),
+            self.hdr.isChecked(), self.reduce_music.isChecked(), timeout,
+        )
+        # The existing Magic Build worker accepts the same arguments except
+        # the refinement operation's additional current global production
+        # prompt, inserted after Director's Intent.
         if refine:
-            self.start_ai_worker(
-                refine_global_prompt,
-                (copy.deepcopy(self.segments), provider, model, key,
-                 self.build_refinement_request(), current, timeout),
-                "Refining upper global direction…",
-                self.upper_global_finished,
-            )
-        else:
-            self.start_ai_worker(
-                generate_global_direction,
-                (copy.deepcopy(self.segments), provider, model, key,
-                 current, timeout),
-                "Generating upper global direction…",
-                self.upper_global_finished,
-            )
-
-    def upper_global_finished(self, result: dict) -> None:
-        source = self.intent if self.unified_workspace else self.global_prompt
-        snapshot = (source.toPlainText(),
-                    tuple((s.id, s.duration, s.prompt) for s in self.segments))
-        if snapshot == getattr(self, "upper_global_snapshot", None):
-            source.setPlainText(consume_global_refinements(result["globalPrompt"]))
-            if "durations" in result:
-                self.animate_timeline_durations(result["durations"])
-            self.mark_dirty()
-            self.statusBar().showMessage(
-                "Upper global direction updated; combined prompt unchanged", 6000)
-        else:
-            self.statusBar().showMessage(
-                "Upper global direction changed during the request; result was not applied.")
-        self.set_ai_controls_enabled(True)
-        self.magic_overlay.hide_overlay()
+            operation = refine_sequence_prompts
+            args = args[:5] + (self.global_prompt.toPlainText(),) + args[5:]
+        elif self.workspace_engine == "generic":
+            args = args + (self.active_reference_images(),)
+        self.global_build_cascade_requested = bool(self.unified_workspace)
+        self.start_ai_worker(
+            operation, args,
+            "Refining ALL sequence segments from Global guidance…" if refine else
+            "Magic Build: generating ALL sequence segments from Global guidance…",
+            self.magic_finished,
+        )
 
     def generate_combined_prompt(self) -> None:
         if not self.ai_busy and self.unified_workspace and not self.prompt_only_workspace:
