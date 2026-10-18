@@ -7353,6 +7353,74 @@ class MainWindow(QMainWindow):
                 available and not self.ai_busy and bool(self.segments)
             )
 
+    def sync_combined_from_segments(self) -> None:
+        """Sync the combined prompt from ALL timeline segments in this project."""
+        if self.ai_busy or not self.unified_workspace or self.prompt_only_workspace:
+            return
+        self.paragraph_review.finish()
+        self.minimax_editor_changed()
+        if not self.segments:
+            self.minimax_panel.show_message(
+                "Add timeline sequences before synchronizing the combined prompt.",
+                "warning")
+            return
+        credentials = self.ai_credentials()
+        if not credentials:
+            return
+        provider, model, key = credentials
+        # This snapshot deliberately uses the entire project timeline, not
+        # currentRow(), selected tiles, or the active viewport.
+        self.sync_combined_source = self.minimax_prompt_text
+        self.sync_combined_segments = copy.deepcopy(self.segments)
+        self.sync_combined_signature = tuple(
+            (s.id, s.name, s.kind, s.role, s.duration, s.prompt,
+             s.image_prompt, s.media_path) for s in self.segments)
+        final_notes = (
+            self.build_director_request(include_requested_length=False)
+            + "\\n\\nFINAL REFINEMENT NOTES:\\n"
+            + self.minimax_refinement_instructions
+        )
+        self.start_ai_worker(
+            sync_combined_from_timeline,
+            (self.sync_combined_segments, provider, model, key,
+             self.sync_combined_source,
+             self.settings.value("api_timeout", 400, int),
+             self.active_reference_images(), self.workspace_engine,
+             self.minimax_prompt_mode, final_notes),
+            "Syncing combined prompt from ALL project timeline segments…",
+            self.sync_combined_finished,
+            show_main_overlay=False,
+        )
+
+    def sync_combined_finished(self, result: dict) -> None:
+        """Apply new combined prose; never update the original timeline data."""
+        signature = tuple(
+            (s.id, s.name, s.kind, s.role, s.duration, s.prompt,
+             s.image_prompt, s.media_path) for s in self.segments)
+        if (signature != getattr(self, "sync_combined_signature", None)
+                or self.minimax_prompt_text != self.sync_combined_source
+                or self.unified_prompt.toPlainText() != self.sync_combined_source):
+            self.set_ai_controls_enabled(True)
+            self.minimax_panel.show_message(
+                "The timeline or combined prompt changed during reverse sync; "
+                "nothing was replaced.", "warning")
+            return
+        new_prompt = str(result.get("prompt") or "").strip()
+        if not new_prompt:
+            self.set_ai_controls_enabled(True)
+            self.minimax_panel.show_message(
+                "Reverse sync returned an empty combined prompt.", "warning")
+            return
+        self.minimax_prompt_text = new_prompt
+        self.minimax_prompt_updated_at = datetime.now(timezone.utc).isoformat()
+        self.unified_prompt.setPlainText(new_prompt)
+        self.minimax_panel.set_cache_state("Combined prompt synchronized")
+        self.mark_dirty()
+        self.set_ai_controls_enabled(True)
+        self.statusBar().showMessage(
+            f"⇄ Combined prompt synchronized from ALL {len(self.segments)} "
+            "timeline segments; segment prompts and media unchanged", 9000)
+
     def sync_timeline_from_prompt(self) -> None:
         """Run an AI-backed one-way alignment, never a unified refinement."""
         if self.ai_busy or not self.unified_workspace or self.prompt_only_workspace:
