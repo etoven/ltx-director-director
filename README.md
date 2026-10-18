@@ -8,7 +8,7 @@ Build a visual plan for AI video, turn it into a detailed production prompt, and
 
 ![The Aurora workspace: a visual timeline, creative direction and one continuous MiniMax production brief](docs/images/ltx-director-director-overview.png)
 
-*Current release: Aurora 1.13.0a80 on `experimental`. Screenshots show the native app with an authored demonstration project.*
+*Current release: Aurora 1.13.0a81 on `experimental`. Screenshots show the native app with an authored demonstration project.*
 
 ## See the story before you generate
 
@@ -27,6 +27,10 @@ Replace a frame without rebuilding the beat. Copy an original image to the clipb
 | Combine opening and closing frames, source video and visual references | **MiniMax** | A brief shaped around the roles of your supplied assets |
 | Develop the movement of each timeline segment | **LTX Video** | Individual segment prompts and a shared global prompt, ready for Director JSON export |
 | Bring your own prompting style | **Generic workspace** | A unified or segmented editor with your own generation and refinement instructions |
+
+**Two dedicated button pairs, exactly where you write.** The upper editor has **Generate** (sparkle) and **Refine** (Möbius loop). Choose **Segment** to change only the selected segment, without disturbing its neighbors or rebuilding the combined prompt. Choose **Global** to use the Director's Intent as whole-sequence Magic Build guidance: Generate builds every beat; Refine updates all beats together. A completed Global operation automatically rebuilds the combined prompt below, without rewriting the newly completed segment plan.
+
+The lower combined-prompt editor has its own **Generate** and **Refine** controls to synthesize or revise the complete production brief from the timeline and final notes. Directional synchronization is separate: the **down arrow** syncs the combined prompt to the timeline; the **up arrow** syncs the **entire timeline**, not merely the selected beat, back into the combined prompt while preserving the original segment media and words. Both keep the source side unchanged.
 
 **Sync Timeline** reads the existing image checkpoints and segment JSON alongside your completed combined prompt. It retimes the original frames, updates each segment's action, and creates missing beats when needed—without rewriting the combined prompt. New visual checkpoints can use the existing artwork-generation flow. The familiar timeline resizing and review animations show exactly what changed.
 
