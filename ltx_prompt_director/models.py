@@ -84,6 +84,34 @@ def split_segment_parts(segment: Segment, count: int, fps: int = 24) -> list[Seg
     return parts + [remaining]
 
 
+def roll_segment_boundary(left: Segment, right: Segment, offset: float,
+                          fps: int = 24) -> tuple[Segment, Segment]:
+    """Transfer frame-aligned time across a boundary, preserving the pair's end."""
+    if not math.isfinite(offset) or fps <= 0:
+        raise ValueError("Choose a finite boundary offset.")
+    minimum = math.ceil(1 - left.duration * fps - 0.000001)
+    maximum = math.floor(right.duration * fps - 1 + 0.000001)
+    if left.kind == "video" and left.media_duration_frames is not None:
+        maximum = min(maximum, math.floor(left.media_duration_frames -
+                      (left.trim_start or 0) - left.duration * fps + 0.000001))
+    if right.kind == "video":
+        minimum = max(minimum, -(right.trim_start or 0))
+    if minimum > maximum:
+        raise ValueError("This boundary has no room to move within its source footage.")
+    frames = max(minimum, min(maximum, round(offset * fps)))
+    updated_left, updated_right = copy.deepcopy(left), copy.deepcopy(right)
+    if frames:
+        updated_left.duration = round(left.duration + frames / fps, 6)
+        updated_right.duration = round(left.duration + right.duration - updated_left.duration, 6)
+        if left.kind == "video":
+            updated_left.trim_start = left.trim_start or 0
+            updated_left.shot_trimmed = True
+        if right.kind == "video":
+            updated_right.trim_start = (right.trim_start or 0) + frames
+            updated_right.shot_trimmed = True
+    return updated_left, updated_right
+
+
 def text_segment_from_ltx(value: dict, index: int, fps: float) -> Segment:
     """Create an editable text-only segment from an LTX timeline record."""
     if value.get("type") != "text":

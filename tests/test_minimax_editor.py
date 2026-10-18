@@ -78,6 +78,7 @@ class UnifiedEditorTests(unittest.TestCase):
         from ltx_prompt_director.quick_fixes import save_presets, load_presets
         w = self.make_window('minimax_references')
         w._close_saves_queued = True
+        self.addCleanup(save_presets, w.settings, load_presets(w.settings))
         w.unified_prompt.setPlainText('Existing production draft')
         save_presets(w.settings, [
             dict(name='Pan', target='both', category='Camera', prompt='Pan right.'),

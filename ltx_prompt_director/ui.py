@@ -57,8 +57,9 @@ from .timing_limits import sequence_limit, fit_sequence, shot_limit, SHOT_COUNT_
 from .workspace_editor import WorkspaceEditor
 from .shot_sequence import DEFAULTS as SHOT_DEFAULTS, settings as shot_settings, ensure_collection_sequences, shot_layout
 from .shot_sequence_widgets import ShotSequencePanel
-from .models import Segment, order_segments_by_ids, split_segment, split_segment_parts, text_segment_from_ltx
+from .models import Segment, order_segments_by_ids, split_segment, split_segment_parts, roll_segment_boundary, text_segment_from_ltx
 from .segment_split import divide_segment_prompt
+from .timeline_timing import TIMING_FIELDS, plan_sequence_timing, retimed_segments
 from .project_data import ARCHIVE_COLOR, load_other_tags, load_project_tags, new_note, normalize_notes, normalize_project_labels
 from .spellcheck import install_spellcheck
 from .prompt_tags import prompt_content, consume_global_refinements, install_prompt_tags, render_prompt_notes, insert_note
@@ -1778,6 +1779,7 @@ class TimelineRuler(QWidget):
 
 class ResizeHandle(QFrame):
     preview = Signal(float)
+    started = Signal()
     finished = Signal()
 
     def __init__(self, duration: float, pixels_per_second: int):
@@ -1786,6 +1788,7 @@ class ResizeHandle(QFrame):
         self.start_duration = duration
         self.start_x: float | None = None
         self.pixels_per_second = pixels_per_second
+        self.start_scale = pixels_per_second
         self.setObjectName("resizeHandle")
         # Keep a comfortable hit target while drawing only a slim dotted grip.
         self.setFixedWidth(12)
@@ -1819,15 +1822,16 @@ class ResizeHandle(QFrame):
         if event.button() == Qt.MouseButton.LeftButton:
             self.start_x = event.globalPosition().x()
             self.start_duration = self.duration
+            self.start_scale = max(0.000001, self.pixels_per_second)
+            self.started.emit()
             self.grabMouse()
             self.update()
             event.accept()
 
     def mouseMoveEvent(self, event):
         if self.start_x is not None:
-            value = max(MIN_DURATION, round(self.start_duration + (event.globalPosition().x() - self.start_x) / self.pixels_per_second, 2))
+            value = max(MIN_DURATION, self.start_duration + (event.globalPosition().x() - self.start_x) / self.start_scale)
             if value != self.duration:
-                self.duration = value
                 self.preview.emit(value)
             event.accept()
 
@@ -1957,6 +1961,7 @@ class SegmentCard(QFrame):
     duration_changed = Signal(float)
     delete_requested = Signal()
     resize_finished = Signal()
+    resize_started = Signal()
     review_decision = Signal(str, bool)
 
     def __init__(self, segment: Segment, start_time: float, preview_height: int, pixels_per_second: int):
@@ -2102,6 +2107,7 @@ class SegmentCard(QFrame):
         self.outer_layout.addWidget(self.content, 1)
         self.resize_handle = ResizeHandle(segment.duration, pixels_per_second)
         self.resize_handle.preview.connect(self._preview_duration)
+        self.resize_handle.started.connect(self.resize_started)
         self.resize_handle.finished.connect(self.resize_finished)
         self.outer_layout.addWidget(self.resize_handle)
         self.update_layout(preview_height, pixels_per_second)
@@ -2246,6 +2252,10 @@ class SegmentCard(QFrame):
 
     def set_timeline_edges(self, first: bool, last: bool) -> None:
         self.outer_layout.setContentsMargins(0 if first else 1, 0, 0 if last else 1, 0)
+        self.resize_handle.setAccessibleName("Resize final segment" if last else "Move segment boundary")
+        self.resize_handle.setToolTip(
+            "Drag to resize the final segment and change total length." if last else
+            "Drag the divider to grow one segment and shrink the next; their total length stays fixed.")
 
     def set_role(self, role: str) -> None:
         """Update the visible role without recreating the timeline card."""
@@ -2293,7 +2303,6 @@ class SegmentCard(QFrame):
         self._position_rewrite_marquee()
 
     def _preview_duration(self, value: float) -> None:
-        self.duration_label.setText(f"{value:.2f}s")
         self.duration_changed.emit(value)
 
     def mousePressEvent(self, event):
@@ -3731,6 +3740,13 @@ class MainWindow(QMainWindow):
         self.add_text_tile.setToolTip("Add a text segment")
         self.add_text_tile.setAccessibleName("Add text")
         self.add_text_tile.clicked.connect(self.add_text_segment)
+        self.retime_all_button = QPushButton("")
+        self.retime_all_button.setObjectName("addTile")
+        self.retime_all_button.setAccessibleName("Re-time all segments")
+        self.retime_all_button.setToolTip(
+            "Re-time all segments to the sequence length box using dialogue, action, camera and shot pacing. "
+            "Only timing changes; review or revert the result. Set length to 0 to keep the current total.")
+        self.retime_all_button.clicked.connect(self.retime_all_segments)
         self.add_tile_wrap = QFrame()
         self.add_tile_wrap.setObjectName("addTileBox")
         self.add_tile_wrap.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
@@ -3740,6 +3756,7 @@ class MainWindow(QMainWindow):
         self.add_tile_layout.setSpacing(5)
         self.add_tile.setFixedSize(32, 32)
         self.add_text_tile.setFixedSize(32, 32)
+        self.retime_all_button.setFixedSize(32, 32)
         self.add_tile_layout.addWidget(self.add_tile, 0, Qt.AlignmentFlag.AlignHCenter)
         self.add_tile_layout.addWidget(self.add_text_tile, 0, Qt.AlignmentFlag.AlignHCenter)
         self.add_tile_layout.addStretch(1)
@@ -3906,7 +3923,8 @@ class MainWindow(QMainWindow):
         self.requested_length.setDecimals(2)
         self.requested_length.setSuffix(" s")
         self.requested_length.setSpecialValueText("Auto")
-        self.requested_length.setToolTip("Total sequence length in seconds; Auto lets the AI choose")
+        self.requested_length.setToolTip(
+            "Target sequence length in seconds. Re-time all fits this duration; Auto keeps the current total for retiming.")
         self.requested_length.setAccessibleName("Total sequence length")
         self.requested_length.valueChanged.connect(self.mark_dirty)
         language_label = QLabel("LANGUAGE")
@@ -4139,6 +4157,8 @@ class MainWindow(QMainWindow):
         self.minimax_panel.header.addWidget(self.combined_refine_button)
         self.add_tile_layout.insertWidget(
             2, self.sync_timeline_button, 0, Qt.AlignmentFlag.AlignHCenter)
+        self.add_tile_layout.insertWidget(
+            3, self.retime_all_button, 0, Qt.AlignmentFlag.AlignHCenter)
         self.minimax_panel.header.addWidget(self.sync_combined_button)
         self.minimax_panel.header.addWidget(self.minimax_panel.copy_button)
         unified_layout.addWidget(self.minimax_panel)
@@ -4694,6 +4714,9 @@ class MainWindow(QMainWindow):
         self.sync_timeline_button.setIcon(toolbar_icon("rewrite-timeline"))
         self.sync_timeline_button.setIconSize(QSize(metric(20), metric(20)))
         self.sync_timeline_button.setFixedSize(metric(32), metric(32))
+        self.retime_all_button.setIcon(toolbar_icon("retime"))
+        self.retime_all_button.setIconSize(QSize(metric(20), metric(20)))
+        self.retime_all_button.setFixedSize(metric(32), metric(32))
         self.add_tile_layout.setContentsMargins(metric(3), metric(4), metric(3), metric(4))
         self.segment_ai_marquee.setMinimumWidth(0)
         for button in (self.copy_segment,):
@@ -6090,11 +6113,13 @@ class MainWindow(QMainWindow):
                 item.setSizeHint(QSize(widths[index], card_height))
                 self.timeline.addItem(item)
                 card = SegmentCard(segment, start_time, preview_height, self.pixels_per_second)
-                card.duration_changed.connect(lambda value, sid=segment.id: self.change_duration(sid, value))
+                card.duration_changed.connect(lambda value, sid=segment.id: self.resize_timeline_edge(sid, value))
+                card.resize_started.connect(lambda sid=segment.id: self.begin_timeline_edge_drag(sid))
                 card.delete_requested.connect(lambda sid=segment.id: self.delete_by_id(sid))
                 card.resize_finished.connect(lambda sid=segment.id: self.finish_resize(sid))
                 card.review_decision.connect(self.resolve_segment_review)
                 card.set_timeline_edges(index == 0, index == len(self.segments) - 1)
+                card.resize_handle.setEnabled(self.timeline_boundary_available(index))
                 self.timeline.setItemWidget(item, card)
                 start_time += segment.duration
             self._loading = False
@@ -6131,6 +6156,7 @@ class MainWindow(QMainWindow):
                 card = self.timeline.itemWidget(item)
                 if isinstance(card, SegmentCard):
                     card.set_timeline_edges(row == 0, row == self.timeline.count() - 1)
+                    card.resize_handle.setEnabled(self.timeline_boundary_available(row))
                     card.set_start_time(start_time)
                     card.update_layout(preview_height, self.pixels_per_second)
                 start_time += segment.duration
@@ -6316,7 +6342,65 @@ class MainWindow(QMainWindow):
         self.sync_selected_duration_control()
 
     def finish_resize(self, segment_id: str) -> None:
+        self._timeline_edge_drag = None
         self.update_timeline_layout()
+        self.sync_selected_duration_control()
+        self.update_conditioning_guide()
+
+    def timeline_boundary_available(self, row: int) -> bool:
+        return (not self.ai_busy and not getattr(self, "timeline_review_pending", set())
+                and all(item.artwork_status != "generating" for item in self.segments[row:row + 2]))
+
+    def begin_timeline_edge_drag(self, segment_id: str) -> None:
+        self._timeline_edge_drag = None
+        row = next((i for i, item in enumerate(self.segments) if item.id == segment_id), -1)
+        if row < 0 or not self.timeline_boundary_available(row):
+            return
+        animation = getattr(self, "duration_animation", None)
+        if animation is not None:
+            animation.stop()
+            self.update_timeline_layout()
+        self._timeline_edge_drag = (
+            (self.workspace_revision, self.current_project_id, self.project_type),
+            copy.deepcopy(self.segments[row]),
+            copy.deepcopy(self.segments[row + 1]) if row + 1 < len(self.segments) else None)
+
+    def resize_timeline_edge(self, segment_id: str, value: float) -> None:
+        row = next((i for i, item in enumerate(self.segments) if item.id == segment_id), -1)
+        if row < 0 or not self.timeline_boundary_available(row):
+            return
+        snapshot = getattr(self, "_timeline_edge_drag", None)
+        if snapshot is None:
+            return
+        workspace, before_left, before_right = snapshot
+        if (workspace != (self.workspace_revision, self.current_project_id, self.project_type)
+                or segment_id != before_left.id):
+            return
+        if row == len(self.segments) - 1:
+            if before_right is None:
+                self.change_duration(segment_id, value)
+            return
+        left, right = self.segments[row:row + 2]
+        if before_right is None or right.id != before_right.id:
+            return
+        try:
+            updated = roll_segment_boundary(before_left, before_right, value - before_left.duration, FPS)
+        except ValueError:
+            return
+        changed = False
+        for segment, target in zip((left, right), updated):
+            for field in ("duration", "trim_start", "shot_trimmed"):
+                if getattr(segment, field) != getattr(target, field):
+                    setattr(segment, field, getattr(target, field))
+                    changed = True
+        if not changed:
+            return
+        self.mark_dirty()
+        self.update_timeline_layout()
+        self.sync_selected_duration_control()
+        boundary = sum(item.duration for item in self.segments[:row + 1])
+        self.statusBar().showMessage(
+            f"Boundary {boundary:.2f}s · {left.duration:.2f}s / {right.duration:.2f}s · total length preserved")
 
     def update_summary(self) -> None:
         if self.workspace_engine == "shot_sequence":
@@ -6867,7 +6951,7 @@ class MainWindow(QMainWindow):
         for row in range(self.timeline.count()):
             card = self.timeline.itemWidget(self.timeline.item(row))
             if isinstance(card, SegmentCard):
-                card.resize_handle.setEnabled(enabled)
+                card.resize_handle.setEnabled(enabled and self.timeline_boundary_available(row))
                 card.review_accept.setEnabled(enabled)
                 card.review_reject.setEnabled(enabled)
                 for button in card.findChildren(QPushButton, "tileDelete"):
@@ -6946,6 +7030,7 @@ class MainWindow(QMainWindow):
             "MiniMax Combined Sync" if operation is sync_combined_from_timeline else
             "Selected Segment Generate" if operation is generate_segment_prompt else
             "Segment Split" if operation is divide_segment_prompt else
+            "Timeline Timing" if operation is plan_sequence_timing else
             "Global Direction Generate" if operation is generate_global_direction else
             "Sequence-Wide Magic Build Refine" if operation is refine_sequence_prompts else
             "Refine Timing" if operation is refine_timing else
@@ -7105,6 +7190,68 @@ class MainWindow(QMainWindow):
             "Analyzing sequence context and refining selected timing…",
             self.refine_timing_finished,
         )
+
+    def retime_all_segments(self) -> None:
+        if (self.ai_busy or self.prompt_only_workspace or self.workspace_engine == "shot_sequence"
+                or len(self.segments) < 2 or getattr(self, "timeline_review_pending", set())
+                or any(item.artwork_status == "generating" for item in self.segments)):
+            return
+        self.finish_prompt_reviews()
+        self.inline_typing.finish()
+        target = self.requested_length.value() or self.total_duration()
+        maximum = self.maximum_sequence_duration
+        if maximum is not None and target > maximum + .000001:
+            self.statusBar().showMessage(
+                f"Requested {target:.2f}s exceeds this workspace's {maximum:.2f}s limit. Adjust sequence length or workspace settings.", 9000)
+            return
+        try:
+            retimed_segments(self.segments, [item.duration for item in self.segments], target)
+        except ValueError as error:
+            self.statusBar().showMessage(str(error), 9000)
+            return
+        credentials = self.ai_credentials()
+        if not credentials:
+            return
+        before = copy.deepcopy(self.segments)
+        references = copy.deepcopy(self.active_reference_images())
+        provider, model, key = credentials
+        self.ai_timeline_status.setText("◷ Analyzing all timing…")
+        self.ai_timeline_status.show()
+        self.start_ai_worker(
+            plan_sequence_timing,
+            (before, provider, model, key, target, self.build_refinement_request(),
+             self.minimax_prompt_text, references, self.settings.value("api_timeout", 400, int)),
+            f"Analyzing dialogue, action and shot pacing for {target:.2f}s; timing only…",
+            lambda result: self.finish_sequence_timing(before, references, target, result),
+            review_text=False,
+        )
+
+    def finish_sequence_timing(self, before: list[Segment], references: list, target: float, result: dict) -> None:
+        self.set_ai_controls_enabled(True)
+        self.ai_timeline_status.hide()
+        if ([item.to_dict() for item in self.segments] != [item.to_dict() for item in before]
+                or self.active_reference_images() != references):
+            self.statusBar().showMessage("Timing proposal discarded because the timeline or references changed. Try again.", 9000)
+            return
+        try:
+            updated = retimed_segments(before, result.get("durations") if isinstance(result, dict) else None, target)
+        except ValueError as error:
+            self.statusBar().showMessage(str(error), 9000)
+            return
+        changes = [{"kind": "resize", "id": old.id} for old, new in zip(before, updated)
+                   if any(getattr(old, field) != getattr(new, field) for field in TIMING_FIELDS)]
+        if not changes:
+            self.statusBar().showMessage("Timing already matches this proposal; prompt text preserved.", 7000)
+            return
+        for item, proposed in zip(self.segments, updated):
+            item.trim_start, item.shot_trimmed = proposed.trim_start, proposed.shot_trimmed
+        self.animate_timeline_durations([item.duration for item in updated])
+        self._start_segment_review(before, self.segments, changes)
+        self.timeline_timing_review_ids = {change["id"] for change in changes}
+        self._show_segment_review_controls()
+        self.update_conditioning_guide()
+        self.statusBar().showMessage(
+            f"Timing adjusted to {target:.2f}s. Review or revert the timing changes; all prompt text preserved.", 10000)
 
     def refine_selected_prompt(self) -> None:
         if self.ai_busy:
@@ -7802,6 +7949,12 @@ class MainWindow(QMainWindow):
         """One dedicated sync action in any unified+timeline workspace."""
         if not hasattr(self, "sync_timeline_button"):
             return
+        timing_available = not self.prompt_only_workspace and self.workspace_engine != "shot_sequence"
+        self.retime_all_button.setVisible(timing_available)
+        self.retime_all_button.setEnabled(
+            timing_available and not self.ai_busy and len(self.segments) > 1
+            and not getattr(self, "timeline_review_pending", set())
+            and not any(item.artwork_status == "generating" for item in self.segments))
         available = (
             self.unified_workspace and not self.prompt_only_workspace
             and self.workspace_engine != "shot_sequence"
@@ -8572,12 +8725,14 @@ class MainWindow(QMainWindow):
             card = self.timeline.itemWidget(self.timeline.item(row))
             if not isinstance(card, SegmentCard):
                 continue
+            card.resize_handle.setEnabled(self.timeline_boundary_available(row))
             if card.segment.id in pending:
                 card.set_review_pending(originals.get(card.segment.id))
                 grouped = card.segment.id in getattr(self, "timeline_split_review_ids", set())
+                timing = card.segment.id in getattr(self, "timeline_timing_review_ids", set())
                 for button, description in (
-                    (card.review_accept, "Approve entire split" if grouped else "Approve this segment change"),
-                    (card.review_reject, "Restore original segment" if grouped else "Deny this segment change"),
+                    (card.review_accept, "Approve all timing changes" if timing else "Approve entire split" if grouped else "Approve this segment change"),
+                    (card.review_reject, "Restore previous timing" if timing else "Restore original segment" if grouped else "Deny this segment change"),
                 ):
                     button.setToolTip(description)
                     button.setAccessibleName(description)
@@ -8586,6 +8741,7 @@ class MainWindow(QMainWindow):
         visible = bool(pending)
         self.timeline_approve_all.setVisible(visible)
         self.timeline_deny_all.setVisible(visible)
+        self.update_sync_timeline_enabled()
         if visible:
             self.timeline_approve_all.setToolTip(
                 f"Approve all {len(pending)} pending timeline changes")
@@ -8599,7 +8755,8 @@ class MainWindow(QMainWindow):
         pending = getattr(self, "timeline_review_pending", set())
         if segment_id not in pending:
             return
-        if segment_id in getattr(self, "timeline_split_review_ids", set()):
+        if segment_id in (getattr(self, "timeline_split_review_ids", set())
+                          | getattr(self, "timeline_timing_review_ids", set())):
             self.resolve_all_segment_reviews(approved)
             return
         pending.discard(segment_id)
@@ -8651,12 +8808,22 @@ class MainWindow(QMainWindow):
             self.timeline_deny_all.blockSignals(False)
             self._show_segment_review_controls()
             return
+        timing_ids = getattr(self, "timeline_timing_review_ids", set())
+        if timing_ids and getattr(self, "duration_animation", None):
+            self.duration_animation.stop()
+            self.update_timeline_layout()
         if not approved:
             self._artwork_cancelled_segments = getattr(
                 self, "_artwork_cancelled_segments", set())
             self._artwork_cancelled_segments.update(self.timeline_review_pending)
             split_ids = getattr(self, "timeline_split_review_ids", set())
-            if split_ids:
+            if timing_ids:
+                for item in self.segments:
+                    old = self.timeline_review_originals.get(item.id)
+                    if item.id in timing_ids and old is not None:
+                        for field in TIMING_FIELDS:
+                            setattr(item, field, getattr(old, field))
+            elif split_ids:
                 position = next((i for i, item in enumerate(self.segments) if item.id in split_ids), 0)
                 original = next(item for item in self.timeline_review_original_sequence if item.id in split_ids)
                 self.segments = [item for item in self.segments if item.id not in split_ids]
@@ -8666,6 +8833,7 @@ class MainWindow(QMainWindow):
                                  self.timeline_review_original_sequence]
         self.timeline_review_pending.clear()
         self.timeline_split_review_ids = set()
+        self.timeline_timing_review_ids = set()
         self.timeline_review_originals = {}
         self.timeline_review_positions = {}
         self.timeline_review_original_sequence = []
@@ -8677,13 +8845,23 @@ class MainWindow(QMainWindow):
         self.timeline_deny_all.blockSignals(False)
         self._finish_segment_text_review()
         if not approved:
-            self.refresh_timeline()
+            if timing_ids:
+                self.update_timeline_layout()
+                self.sync_selected_duration_control()
+                self._show_segment_review_controls()
+            else:
+                self.refresh_timeline()
             self.mark_dirty()
         else:
             self._show_segment_review_controls()
         self.statusBar().showMessage(
             "✓ Approved all timeline changes" if approved else
             "× Restored timeline before the AI changes", 6000)
+        if timing_ids:
+            self.update_conditioning_guide()
+            self.statusBar().showMessage(
+                "Timing approved; prompt text preserved." if approved else
+                "Previous timing restored; prompt text preserved.", 7000)
 
     def _finish_segment_text_review(self) -> None:
         """Timeline approval must also leave its segment's editor out of diff mode."""
@@ -8704,6 +8882,7 @@ class MainWindow(QMainWindow):
     def _start_segment_review(self, before: list[Segment], updated: list[Segment],
                               changes: list[dict]) -> None:
         self.timeline_split_review_ids = set()
+        self.timeline_timing_review_ids = set()
         originals = {seg.id: copy.deepcopy(seg) for seg in before}
         original_positions = {seg.id: i for i, seg in enumerate(before)}
         after_positions = {seg.id: i for i, seg in enumerate(updated)}

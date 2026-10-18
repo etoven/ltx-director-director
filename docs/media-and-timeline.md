@@ -20,7 +20,25 @@ Videos use a preview frame from the clip’s final second for the timeline and A
 
 ## Make timing tangible
 
-Drag a card to reorder the sequence. Drag its resize edge to change the length, or select it and enter a precise value in **Duration**. The sequence summary shows the total; each card shows its starting time. Image and video cards also show source resolution.
+Drag a card to reorder the sequence. Select it and enter a precise value in **Duration** to edit its length. The sequence summary shows the total; each card shows its starting time. Image and video cards also show source resolution.
+
+Drag the dotted divider **between two cards** to transfer time from one to the
+other: moving it right lengthens the left segment and shortens the right, and
+moving it left does the reverse. Their combined duration and every later start
+time stay fixed. The drag snaps to frames and stops at one frame per segment or
+the available video source limits. The final card's right grip changes the
+overall length; the Duration field still edits a single card.
+
+Use the **Re-time all** clock button beneath Rewrite Timeline in the right rail
+to distribute time using dialogue delivery, action, camera movement, frame roles
+and shot pacing. Set the sequence-length box below the timeline to the desired
+total first; **Auto** (0) keeps the current total. The proposal moves the tiles
+and offers approve/revert controls. Approving or rejecting any timing change
+resolves the complete timing pass. Segment prompts, visual directions, global
+guidance and the unified prompt remain unchanged. Video source limits and the
+workspace's duration limit still apply.
+
+![Timeline timing controls and timing-only review](images/timeline-timing.png)
 
 Right-click a card and open **Split segment**. **At clicked position** divides
 the card where you clicked. **2-way split** and **3-way split** create equal,
