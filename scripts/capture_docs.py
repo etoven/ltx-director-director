@@ -22,6 +22,7 @@ from ltx_prompt_director.workspace_editor import WorkspaceEditor
 from ltx_prompt_director.splash import StartupSplash
 from ltx_prompt_director.project_data import new_note
 from ltx_prompt_director.prompt_tags import insert_note
+from ltx_prompt_director.quick_fixes import QuickFixEditor
 import imageio_ffmpeg
 
 OUTPUT = ROOT / 'docs/images'
@@ -88,6 +89,11 @@ w.timeline.setCurrentRow(1)
 w.reload_clicked_segment(w.timeline.item(1))
 shot('shared-segment-editors', w.prompt_splitter)
 shot('conditioning-guide', w.conditioning_guide)
+shot('quick-fixes', w.intent_prompt_splitter)
+quick_fix_editor = QuickFixEditor(w.settings, w)
+quick_fix_editor.show()
+shot('quick-fix-presets', quick_fix_editor)
+quick_fix_editor.reject()
 # Inline direction is entered using the same native note component as the app.
 w.unified_prompt.moveCursor(QTextCursor.MoveOperation.End)
 w.unified_prompt.insertPlainText('\n\n')

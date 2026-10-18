@@ -47,6 +47,28 @@ and asks you to generate again from the updated sequence.
 
 ![A selected segment prompt with the full production draft below](images/shared-segment-editors.png)
 
+## Apply a saved Quick Fix
+
+Use **Quick Fix** immediately before Generate in either prompt header. Choose a
+saved preset to insert its instruction and start refinement automatically.
+**Segment** applies to the selected segment, **Unified** applies to the lower
+production prompt, and **Both** refines the selected segment first and then the
+unified prompt using that updated context. Instructions appear at the bottom of
+the segment prompt or the top of the unified prompt. Each result has its own
+inline approve/reject controls; neighboring segments are preserved.
+
+The included **Refine Camera** preset targets Both with “refine camera angle and
+shot descriptions.” **Format Prompt** targets Unified with “Format the spacing
+between shots to make it more human legable”. Choose **Edit Quick Fixes…** to add,
+rename, edit or remove presets and select their targets. Presets are saved in
+your app settings and shared by both dropdowns. Options requiring an unavailable
+or empty editor are disabled. If refinement fails, the remaining stage stops;
+your text and its instruction remain available to retry.
+
+![Quick Fix controls in both prompt headers](images/quick-fixes.png)
+
+![Editing the name, target and instruction of a Quick Fix preset](images/quick-fix-presets.png)
+
 ## Apply a production brief to the timeline
 
 The lower **Generate** and **Refine** buttons edit only the combined production text. To apply that text to your sequence, click **Rewrite timeline from combined prompt** in the timeline’s right-hand rail, below **＋** and **T＋**. It aligns segment wording and timing to the complete brief and presents the timeline changes for review. Your combined prompt stays unchanged.
@@ -72,7 +94,7 @@ retain their selected roles rather than becoming timeline endpoints.
 
 ## Check conditioning at a glance
 
-The strip under the MiniMax timeline shows large image previews, with start/end checkpoint times and MiniMaxCondFrame **value** settings together in a shaded bottom row. Video tiles show source trim ranges; untimed references show their roles. Drag the dotted handle below the strip to resize it, or double-click to hide and reopen it. The previews expand with the panel. The strip flags an opening that needs to move to zero or an ending that needs to reach the sequence total. It describes your setup; it does not move media automatically.
+The strip under the MiniMax timeline shows large image previews, with each shot’s timeline **Start** and **End** times together in a shaded bottom row. Video tiles show their timeline range too; source trim ranges and MiniMaxCondFrame values remain in tooltips. Untimed references show their roles. Drag the dotted handle below the strip to resize it, or double-click to hide and reopen it. The previews expand with the panel. The strip flags an opening that needs to move to zero or an ending that needs to reach the sequence total. It describes your setup; it does not move media automatically.
 
 ![Compact conditioning frame and timing guide](images/conditioning-guide.png)
 

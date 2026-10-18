@@ -30,6 +30,214 @@ class UnifiedEditorTests(unittest.TestCase):
         self.addCleanup(window.close)
         return window
 
+    def test_quick_fix_buttons_menu_and_preset_editor(self):
+        from ltx_prompt_director.quick_fixes import QuickFixEditor, STARTERS, load_presets, save_presets
+        w = self.make_window('minimax_references')
+        w._close_saves_queued = True
+        w.unified_prompt.setPlainText('Existing combined prompt')
+        self.assertLess(w.director_intent_row.indexOf(w.segment_quick_fix_button),
+                        w.director_intent_row.indexOf(w.magic_button))
+        self.assertLess(w.minimax_panel.header.indexOf(w.combined_quick_fix_button),
+                        w.minimax_panel.header.indexOf(w.combined_generate_button))
+        menu = w.combined_quick_fix_button.menu()
+        w.populate_quick_fix_menu(menu)
+        self.assertEqual([a.text() for a in menu.actions() if not a.isSeparator()],
+                         ['Refine Camera · Both', 'Format Prompt · Unified', 'Edit Quick Fixes…'])
+        editor = QuickFixEditor(w.settings, w)
+        editor.add_button.click()
+        editor.name.setText('My segment fix')
+        editor.target.setCurrentIndex(editor.target.findData('segment'))
+        editor.prompt.setPlainText('Keep the hands visible.')
+        editor.save()
+        self.assertEqual(load_presets(w.settings)[-1],
+                         {'name': 'My segment fix', 'target': 'segment', 'prompt': 'Keep the hands visible.'})
+        w.populate_quick_fix_menu(menu)
+        self.assertIn('My segment fix · Segment', [a.text() for a in menu.actions()])
+        cancelled = QuickFixEditor(w.settings, w)
+        cancelled.presets.setCurrentRow(0)
+        cancelled.name.setText('Discard this change')
+        cancelled.reject()
+        self.assertEqual(load_presets(w.settings)[0], STARTERS[0])
+        w.set_project_type('ltx')
+        self.assertFalse(w.segment_quick_fix_button.isHidden())
+        self.assertTrue(w.combined_quick_fix_button.isHidden())
+        self.assertLess(w.segment_header.indexOf(w.segment_quick_fix_button), w.segment_header.indexOf(w.magic_button))
+        save_presets(w.settings, STARTERS)
+
+    def test_quick_fix_segment_injects_at_bottom_and_never_uses_global_scope(self):
+        w = self.make_window('minimax_frames')
+        w._close_saves_queued = True
+        w.unified_prompt.setPlainText('Keep unified unchanged')
+        w.global_prompt.setPlainText('Keep global unchanged')
+        before_neighbor = w.segments[1].to_dict()
+        w.prompt_scope.setCurrentIndex(w.prompt_scope.findData('global'))
+        with patch.object(w, 'ai_credentials', return_value=('gemini', 'model', 'key')), patch.object(w.thread_pool, 'start') as pool:
+            w.apply_quick_fix({'name': 'Hands', 'target': 'segment', 'prompt': 'Keep hands visible.'})
+        worker = pool.call_args.args[0]
+        self.assertEqual(w.prompt_scope.currentData(), 'segment')
+        self.assertTrue(worker.args[0][0].prompt.startswith('First action'))
+        self.assertTrue(worker.args[0][0].prompt.rstrip().endswith('Keep hands visible.'))
+        self.assertIn('/refine-global', worker.args[0][0].prompt)
+        self.assertEqual(w.ai_request_editor, w.intent_segment_prompt)
+        worker.signals.finished.emit({'prompt': 'First action with hands visible.', 'duration': 2})
+        self.assertEqual(w.segments[0].prompt, 'First action with hands visible.')
+        self.assertEqual(w.segments[1].to_dict(), before_neighbor)
+        self.assertEqual(w.minimax_prompt_text, 'Keep unified unchanged')
+        self.assertEqual(w.global_prompt.toPlainText(), 'Keep global unchanged')
+        self.assertIsNone(w.quick_fix_run)
+
+    def test_quick_fix_unified_injects_at_top_and_automatically_refines(self):
+        from ltx_prompt_director.quick_fixes import STARTERS
+        w = self.make_window('minimax_references')
+        w._close_saves_queued = True
+        w.unified_prompt.setPlainText('Shot one.\nShot two.')
+        before = [s.to_dict() for s in w.segments]
+        menu = w.combined_quick_fix_button.menu()
+        w.populate_quick_fix_menu(menu)
+        with patch.object(w, 'ai_credentials', return_value=('gemini', 'model', 'key')), patch.object(w.thread_pool, 'start') as pool:
+            menu.actions()[1].trigger()
+        worker = pool.call_args.args[0]
+        current = worker.args[9]
+        self.assertTrue(current.startswith('/refine-global ' + STARTERS[1]['prompt']))
+        self.assertLess(current.index(STARTERS[1]['prompt']), current.index('Shot one.'))
+        self.assertEqual(w.ai_request_editor, w.unified_prompt)
+        worker.signals.finished.emit('Shot one.\n\nShot two.')
+        self.assertEqual(w.minimax_prompt_text, 'Shot one.\n\nShot two.')
+        self.assertEqual([s.to_dict() for s in w.segments], before)
+        self.assertIsNone(w.quick_fix_run)
+
+    def test_quick_fix_both_runs_in_order_and_keeps_two_independent_reviews(self):
+        import json
+        from ltx_prompt_director.quick_fixes import STARTERS
+        w = self.make_window('minimax_frames')
+        w._close_saves_queued = True
+        w.resize(1200, 920)
+        w.show()
+        self.app.processEvents()
+        w.unified_prompt.setPlainText('Original combined camera direction.')
+        neighbor = w.segments[1].to_dict()
+        with patch.object(w, 'ai_credentials', return_value=('gemini', 'model', 'key')), patch.object(w.thread_pool, 'start') as pool:
+            w.apply_quick_fix(STARTERS[0])
+            self.assertEqual(pool.call_count, 1)
+            first = pool.call_args.args[0]
+            w.apply_quick_fix(STARTERS[0])
+            self.assertEqual(pool.call_count, 1)
+            self.assertIn(STARTERS[0]['prompt'], first.args[0][0].prompt)
+            self.assertTrue(w.minimax_prompt_text.startswith('/refine-global ' + STARTERS[0]['prompt']))
+            with patch.object(ai, '_provider_raw', return_value=json.dumps({'prompt': 'First action with a steady tracking shot.', 'duration': 2.5})):
+                first.signals.finished.emit(first.operation(*first.args))
+            self.assertEqual(pool.call_count, 2)
+            second = pool.call_args.args[0]
+            self.assertEqual(second.args[0][0].prompt, 'First action with a steady tracking shot.')
+            self.assertEqual(second.args[0][0].duration, 2.5)
+            self.assertEqual(w.ai_request_editor, w.unified_prompt)
+            self.assertFalse(w.segment_quick_fix_button.isEnabled())
+            with patch.object(ai, '_provider_raw', return_value='{"prompt":"Unified steady tracking shot direction."}'):
+                second.signals.finished.emit(second.operation(*second.args))
+        self.assertIsNone(w.quick_fix_run)
+        self.assertEqual(w.segments[1].to_dict(), neighbor)
+        self.assertEqual(w.paragraph_review.editor, w.unified_prompt)
+        self.assertEqual(w.quick_fix_review.editor, w.intent_segment_prompt)
+        self.assertGreater(w.quick_fix_review.pending_count, 0)
+        self.assertGreater(w.paragraph_review.pending_count, 0)
+        w.quick_fix_review.resolve_all(False)
+        self.assertEqual(w.segments[0].prompt, 'First action')
+        self.assertEqual(w.minimax_prompt_text, 'Unified steady tracking shot direction.')
+        w.paragraph_review.resolve_all(True)
+        self.assertIsNone(w.paragraph_review.editor)
+        self.assertIsNone(w.quick_fix_review.editor)
+
+    def test_quick_fix_preserves_segment_review_if_unified_stage_fails(self):
+        from ltx_prompt_director.quick_fixes import STARTERS
+        w = self.make_window('minimax_frames')
+        w._close_saves_queued = True
+        w.show()
+        self.app.processEvents()
+        w.unified_prompt.setPlainText('Existing combined draft')
+        with patch.object(w, 'ai_credentials', return_value=('gemini', 'model', 'key')), patch.object(w.thread_pool, 'start') as pool:
+            w.apply_quick_fix(STARTERS[0])
+            pool.call_args.args[0].signals.finished.emit({'prompt': 'Updated camera direction', 'duration': 2})
+            second = pool.call_args.args[0]
+            with patch.object(w, 'magic_failed', side_effect=lambda _: w.set_ai_controls_enabled(True)):
+                second.signals.failed.emit('Provider failed')
+            self.assertEqual(pool.call_count, 2)
+        self.assertIsNone(w.quick_fix_run)
+        self.assertEqual(w.quick_fix_review.editor, w.intent_segment_prompt)
+        w.quick_fix_review.resolve_all(False)
+        self.assertEqual(w.segments[0].prompt, 'First action')
+        self.assertIn('Existing combined draft', w.minimax_prompt_text)
+
+    def test_quick_fix_unified_works_in_prompt_only_workspace(self):
+        w = self.make_window('minimax_prompt_refinement')
+        w._close_saves_queued = True
+        w.unified_prompt.setPlainText('Shot one. Shot two.')
+        menu = w.combined_quick_fix_button.menu()
+        w.populate_quick_fix_menu(menu)
+        self.assertFalse(menu.actions()[0].isEnabled())
+        self.assertTrue(menu.actions()[1].isEnabled())
+        self.assertTrue(w.segment_quick_fix_button.isHidden())
+        with patch.object(w, 'ai_credentials', return_value=('gemini', 'model', 'key')), patch.object(w.thread_pool, 'start') as pool:
+            menu.actions()[1].trigger()
+        worker = pool.call_args.args[0]
+        self.assertEqual(worker.args[0], 'gemini')
+        self.assertTrue(worker.args[3].startswith('/refine-global Format the spacing'))
+        worker.signals.finished.emit('Shot one.\n\nShot two.')
+        self.assertEqual(w.minimax_prompt_text, 'Shot one.\n\nShot two.')
+        self.assertIsNone(w.quick_fix_run)
+
+    def test_quick_fix_both_stops_on_failure_or_project_change(self):
+        from ltx_prompt_director.quick_fixes import STARTERS
+        for obsolete in (False, True):
+            with self.subTest(obsolete=obsolete):
+                w = self.make_window('minimax_frames')
+                w._close_saves_queued = True
+                w.unified_prompt.setPlainText('Combined draft')
+                with patch.object(w, 'ai_credentials', return_value=('gemini', 'model', 'key')), patch.object(w.thread_pool, 'start') as pool:
+                    w.apply_quick_fix(STARTERS[0])
+                    worker = pool.call_args.args[0]
+                    if obsolete:
+                        w.workspace_revision += 1
+                        worker.signals.finished.emit({'prompt': 'Discard this', 'duration': 2})
+                    else:
+                        with patch.object(w, 'magic_failed'):
+                            worker.signals.failed.emit('Provider failed')
+                    self.assertEqual(pool.call_count, 1)
+                    self.assertIsNone(w.quick_fix_run)
+                    self.assertNotEqual(w.segments[0].prompt, 'Discard this')
+
+    def test_refine_after_quick_fix_reviews_uses_clean_authoritative_text(self):
+        w = self.make_window('minimax_frames')
+        w._close_saves_queued = True
+        w.prompt_scope.setCurrentIndex(w.prompt_scope.findData('segment'))
+        w.unified_prompt.setPlainText('Current unified camera direction')
+        self.assertTrue(w.quick_fix_review.begin(w.intent_segment_prompt, 'Deleted segment direction', 'First action'))
+        self.assertTrue(w.paragraph_review.begin(w.unified_prompt, 'Deleted unified direction', w.minimax_prompt_text))
+        with patch.object(w, 'ai_credentials', return_value=('gemini', 'model', 'key')), patch.object(w.thread_pool, 'start') as pool:
+            w.refine_selected_prompt()
+            first = pool.call_args.args[0]
+            self.assertEqual(first.args[0][0].prompt, 'First action')
+            first.signals.finished.emit({'prompt': 'Refined first action', 'duration': 2})
+            w.finish_prompt_reviews()
+            self.assertTrue(w.paragraph_review.begin(w.unified_prompt, 'Deleted unified direction', w.minimax_prompt_text))
+            w.refine_minimax_prompt()
+            second = pool.call_args.args[0]
+            self.assertEqual(second.args[9], 'Current unified camera direction')
+            self.assertNotIn('Deleted', second.args[9])
+            second.signals.finished.emit('Current unified camera direction, refined')
+
+    def test_conditioning_footer_is_the_shot_range_for_start_end_and_video(self):
+        from PySide6.QtWidgets import QFrame, QLabel
+        w = self.make_window('minimax_frames')
+        w._close_saves_queued = True
+        w.segments = [Segment('Video', '', '', 'video', 'start', 'Opening', .5),
+                      Segment('Start', '', '', 'image', 'start', 'Depart', 2),
+                      Segment('End', '', '', 'image', 'end', 'Arrive', 3)]
+        w.refresh_timeline(0)
+        footers = [t.findChild(QFrame, 'conditioningFooter') for t in
+                   w.conditioning_content.findChildren(QFrame, 'conditioningTile')]
+        self.assertEqual([[l.text() for l in f.findChildren(QLabel)] for f in footers],
+                         [['Start 0.00s', 'End 0.50s'], ['Start 0.50s', 'End 2.50s'], ['Start 2.50s', 'End 5.50s']])
+
     def test_editor_specific_generate_and_refine_buttons_do_not_move(self):
         from PySide6.QtWidgets import QPushButton
         w = self.make_window("ltx")

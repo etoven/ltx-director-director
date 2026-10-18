@@ -38,9 +38,10 @@ def prompt_annotations(prompt: str) -> str:
     return '\n'.join(requests)
 
 
-def prompt_content(prompt: str) -> str:
+def prompt_content(prompt: str, *, preserve_spacing: bool = False) -> str:
     """Compare prose separately from annotation retention and whitespace."""
-    return ' '.join(ANNOTATION_LINES.sub('', prompt).split())
+    content = ANNOTATION_LINES.sub('', prompt)
+    return content.strip() if preserve_spacing else ' '.join(content.split())
 
 
 def consume_global_refinements(prompt: str) -> str:
