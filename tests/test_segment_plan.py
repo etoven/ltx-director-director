@@ -147,7 +147,9 @@ class SegmentPlanTests(unittest.TestCase):
                     {"prompt": "Improved introduction", "duration": 1.5},
                     {"prompt": "Improved final beat", "duration": 4.5},
                 ]})
-        with patch.object(ai, "_provider_raw", side_effect=reply):
+        with (patch.object(ai, "_segment_input", side_effect=lambda item: {
+                  "name": item.name, "kind": item.kind, "role": item.role}),
+              patch.object(ai, "_provider_raw", side_effect=reply)):
             result = ai.refine_sequence_prompts(
                 items, "gemini", "gemini-3.5-flash", "key",
                 "/refine-global Make progress gradual", "Old global text",
