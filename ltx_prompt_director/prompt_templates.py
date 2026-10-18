@@ -9,6 +9,20 @@ from string import Template
 
 WORKSPACE_PROMPTS = ContextVar("workspace_prompts", default=None)
 
+CONTENT_FIDELITY = (
+    "\n\nDETAIL FIDELITY TAKES PRIORITY OVER LENGTH GUIDANCE: Treat workspace "
+    "word counts, sentence counts, compactness advice and assumed prompt/context "
+    "budgets as soft guidance. Preserve every authored action, intermediate "
+    "change, visual qualifier, camera instruction, dialogue word and delivery, "
+    "sound cue, constraint and resulting state. Transfer content one for one, "
+    "retaining wording wherever possible while adapting the required output "
+    "structure, references, timing and dialogue notation. Never drop details "
+    "merely to meet a length target; expand the production text instead. "
+    "During refinement, preserve all content outside the explicitly requested "
+    "changes. An explicit user request to remove, replace or shorten content "
+    "authorizes that edit; template brevity advice does not."
+)
+
 
 @lru_cache(maxsize=12)
 def stock_prompt(engine: str, kind: str) -> str:
@@ -26,4 +40,4 @@ def render_workspace_prompt(engine: str, kind: str, values: dict) -> str:
     for key in ("director_intent", "authoritative_intent", "current_prompt", "refinement_instructions", "asset_map", "intervals", "reference_map", "ordered_plan"):
         if key in values and key not in present:
             result += f"\n\n{key.replace('_', ' ').upper()}:\n{values[key]}"
-    return result
+    return result + CONTENT_FIDELITY

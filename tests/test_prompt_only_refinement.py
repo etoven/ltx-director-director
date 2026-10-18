@@ -212,7 +212,9 @@ def test_real_worker_and_gemini_transport_apply_refinement(window):
     render_prompt_notes(window.unified_prompt)
     response = {'candidates':[{'content':{'parts':[{'text':json.dumps({'prompt':'A continuous tracking shot follows the traveler toward the lantern.\n/refine Make this a continuous shot'})}]}}]}
     with patch.object(window,'ai_credentials',return_value=('gemini','model','key')), patch.object(ai.requests,'post') as request:
-        request.return_value.json.return_value = response
+        request.return_value.status_code = 200
+        request.return_value.__enter__.return_value = request.return_value
+        request.return_value.iter_lines.return_value = ['data: ' + json.dumps(response)]
         window.refine_prompt_button.click()
         deadline = time.monotonic() + 5
         while window.ai_busy and time.monotonic() < deadline:

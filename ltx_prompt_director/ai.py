@@ -5,7 +5,7 @@ import math
 import json
 import re
 from functools import lru_cache
-from .prompt_templates import WORKSPACE_PROMPTS as WORKSPACE_INSTRUCTIONS, render_workspace_prompt
+from .prompt_templates import CONTENT_FIDELITY, WORKSPACE_PROMPTS as WORKSPACE_INSTRUCTIONS, render_workspace_prompt
 from pathlib import Path
 
 import requests
@@ -124,8 +124,29 @@ def combined_timeline_contract(segments: list[Segment]) -> str:
         "Images provide visual anchors; they must not replace authored motion "
         "or suppress new segment text. For video, only its sourceStart/sourceEnd "
         "interval belongs to that beat; other source footage must not replace "
-        "the subsequent timeline. Keep the workspace's production format. "
-        "Before returning, check the resulting prose against ALL records, "
+        "the subsequent timeline. ONE-FOR-ONE CONTENT TRANSFER: This is a "
+        "formatting and integration task, not a summary or creative rewrite. "
+        "Carry over ALL substantive segment text, retaining its wording wherever "
+        "possible. Change only the section placement, reference/speaker notation, "
+        "dialogue markup, timing notation and minimal connective phrasing needed "
+        "by the workspace's production format. Preserve every individual action "
+        "and intermediate physical change, order and simultaneity, body/object "
+        "detail, expression, reaction, camera instruction, lighting/material "
+        "qualifier, exact spoken words, language/accent/delivery, synchronized "
+        "sound, negative constraint and ending state. Shared context may be "
+        "consolidated only if its complete meaning and scope survive; distinct "
+        "actions or details must never be merged away. Preserve imagePrompt "
+        "appearance details as well as prompt action details, resolving changed "
+        "states by the current segment action. COMPLETENESS OVERRIDES LENGTH: "
+        "Ignore any earlier word-count target, including 350–500 words, sentence "
+        "quota, compactness or brevity instruction that would discard content. "
+        "Use as much output as the complete source requires; target video duration "
+        "does not impose a prose length limit. Never compress the timeline to fit "
+        "an assumed prompt or context budget. Keep all authored details and reduce "
+        "optional added commentary instead. Keep the workspace's production "
+        "sections and syntax, expanding their content as needed. Before returning, "
+        "compare EVERY source sentence/clause with the resulting production text "
+        "and restore any omitted detail. Check the resulting prose against ALL records, "
         "especially distinct beats sharing the same media. Return only the "
         "production-prompt response; never change the timeline.\n"
         + json.dumps(plan, ensure_ascii=False)
@@ -332,7 +353,7 @@ def generate_segment_prompt(segments: list[Segment], selected_index: int, provid
         "\\n" + _refinement_duration_instruction(requested_total)
     )
     raw = _provider_raw(_refinement_images(segments, selected_index),
-                        provider, model, api_key, rules, timeout)
+                        provider, model, api_key, rules + CONTENT_FIDELITY, timeout)
     result = _parse_json(raw)
     if not isinstance(result, dict):
         raise AIResponseFormatError("Segment generation returned invalid JSON; retrying.")
@@ -890,6 +911,7 @@ def _gemini_stream(parts: list[dict], key: str, model: str, timeout: int) -> str
                 if isinstance(feedback, dict) and feedback.get("blockReason"):
                     raise AIResponseFormatError("Gemini blocked this request: " + str(feedback["blockReason"]))
                 for candidate in data.get("candidates", []):
+                    _check_gemini_completion(candidate)
                     for part in candidate.get("content", {}).get("parts", []):
                         content = part.get("text", "")
                         if not content:
@@ -906,6 +928,14 @@ def _gemini_stream(parts: list[dict], key: str, model: str, timeout: int) -> str
     raise AIResponseFormatError("Gemini did not accept the streaming request.")
 
 
+def _check_gemini_completion(candidate: dict) -> None:
+    if candidate.get("finishReason") == "MAX_TOKENS":
+        raise AIResponseFormatError(
+            "Gemini reached its output limit before completing the prompt. "
+            "The incomplete result was not accepted. Retry with a model that "
+            "supports a longer response; preserve all segment details.")
+
+
 def _gemini_response_text(data: object) -> str:
     """Extract Gemini text without leaking response-shape KeyErrors into the UI."""
     if not isinstance(data, dict):
@@ -919,6 +949,7 @@ def _gemini_response_text(data: object) -> str:
     candidate = candidates[0]
     if not isinstance(candidate, dict):
         raise AIResponseFormatError("Gemini returned an invalid response candidate. Magic Build will retry.")
+    _check_gemini_completion(candidate)
     content = candidate.get("content")
     response_parts = content.get("parts") if isinstance(content, dict) else None
     if not isinstance(response_parts, list) or not response_parts:
@@ -988,6 +1019,10 @@ def _openai_raw(images: list[dict], key: str, rules: str, timeout: int, *,
     )
     response.raise_for_status()
     data = response.json()
+    if data.get("status") == "incomplete":
+        raise AIResponseFormatError(
+            "OpenAI returned an incomplete response. The partial prompt was not accepted. "
+            "Retry with a model that supports a longer response.")
     raw = data.get("output_text") or "".join(c.get("text", "") for item in data.get("output", []) for c in item.get("content", []) if c.get("type") == "output_text")
     if not str(raw).strip():
         raise AIResponseFormatError("OpenAI returned no generated text. The operation will retry.")

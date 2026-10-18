@@ -12,6 +12,53 @@ from ltx_prompt_director.models import Segment
 
 
 class MiniMaxH3PromptTests(unittest.TestCase):
+    def test_refiners_prioritize_current_details_over_saved_template_brevity(self):
+        from ltx_prompt_director.generic_ai import refine_generic_prompt
+        current = 'The traveler raises the copper compass, turns it twice, then says "Hold here."'
+        token = ai.WORKSPACE_INSTRUCTIONS.set({"generate": "Keep it brief.", "refine": "Keep it brief."})
+        try:
+            for refiner in (ai.refine_minimax_h3_prompt, ai.refine_minimax_h3_reference_prompt, refine_generic_prompt):
+                with self.subTest(refiner=refiner.__name__), patch.object(
+                        ai, "_provider_raw", return_value=json.dumps({"prompt": current})) as raw:
+                    result = refiner(self.segments(), "gemini", "model", "key", "", "", True,
+                                     True, True, current, "Improve notation only.")
+                    self.assertEqual(result, current)
+                    rules = raw.call_args.args[4]
+                    self.assertIn(current, rules)
+                    self.assertIn("DETAIL FIDELITY TAKES PRIORITY OVER LENGTH GUIDANCE", rules)
+                    self.assertIn("An explicit user request to remove, replace or shorten", rules)
+                    self.assertNotIn("CURRENT TIMELINE — AUTHORITATIVE GENERATION PLAN", rules)
+            with patch.object(ai, "_provider_raw", return_value=json.dumps({"prompt": current})) as raw:
+                self.assertEqual(ai.refine_minimax_text_prompt("gemini", "model", "key", current), current)
+                self.assertIn("DETAIL FIDELITY TAKES PRIORITY OVER LENGTH GUIDANCE", raw.call_args.args[4])
+        finally:
+            ai.WORKSPACE_INSTRUCTIONS.reset(token)
+
+    def test_combined_generation_preserves_long_detail_and_overrides_saved_brevity_rules(self):
+        from ltx_prompt_director.generic_ai import build_generic_prompt
+        segments = [Segment(f"Beat {i}", "", "", "text", "text",
+                            (f"At checkpoint {i}, the subject grips prop {i} with the left hand; "
+                             f"keep marker {i} illuminated, hold the camera stationary and "
+                             f"synchronize sound cue {i}. ") * 8, 2)
+                    for i in range(1, 5)]
+        production = "detailed_description:\n" + "\n\n".join(s.prompt for s in segments)
+        self.assertGreater(len(production.split()), 500)
+        token = ai.WORKSPACE_INSTRUCTIONS.set({"generate": "Keep the result under 500 words."})
+        try:
+            for builder in (ai.build_minimax_h3_prompt, ai.build_minimax_h3_reference_prompt, build_generic_prompt):
+                with self.subTest(builder=builder.__name__), patch.object(
+                        ai, "_provider_raw", return_value=json.dumps({"prompt": production})) as raw:
+                    result = builder(segments, "gemini", "model", "key", "", "", True, True, False)
+                    self.assertEqual(result, production.strip())
+                    rules = raw.call_args.args[4]
+                    self.assertLess(rules.index("under 500 words"), rules.index("COMPLETENESS OVERRIDES LENGTH"))
+                    self.assertIn("ONE-FOR-ONE CONTENT TRANSFER", rules)
+                    self.assertIn("EVERY source sentence/clause", rules)
+                    for segment in segments:
+                        self.assertIn(segment.prompt, rules)
+        finally:
+            ai.WORKSPACE_INSTRUCTIONS.reset(token)
+
     def test_all_combined_generators_end_with_the_current_complete_timeline(self):
         from ltx_prompt_director.generic_ai import build_generic_prompt
         segments = [Segment("Video", "", "", "video", "start", "Current opening", 1, trim_start=48),

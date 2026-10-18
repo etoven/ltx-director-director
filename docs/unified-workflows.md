@@ -32,6 +32,16 @@ The lower **Generate** button rebuilds the production brief from every current
 timeline segment, including newly split or inserted beats. Current segment
 actions, order and timing take precedence over conflicting older global notes;
 beats that share an image still retain their separate action progression.
+It transfers segment content one for one, retaining wording wherever possible
+while adapting section placement, references, dialogue markup and timing to the
+workspace format. Complete action, appearance, dialogue and sound details take
+priority over length targets. There is no 350–500-word compression target;
+the production description grows with the source material. A response that the
+provider marks as truncated is rejected rather than saved as complete.
+Across workspace Generate and Refine instructions, word and sentence targets
+are soft guidance: preserving details wins. Refinement keeps content outside
+your requested edits; an explicit request to shorten or remove content still
+authorizes that change.
 If the timeline changes while generation is running, the app keeps your draft
 and asks you to generate again from the updated sequence.
 
@@ -51,7 +61,7 @@ Select **Global** in the segment editor to edit shared direction. Add an instruc
 
 ## Check conditioning at a glance
 
-The compact strip under the MiniMax timeline shows image thumbnails, explicit MiniMaxCondFrame **value** settings in seconds, start/end checkpoint times, source-video trim ranges and untimed reference roles. It flags an opening that needs to move to zero or an ending that needs to reach the sequence total. It describes your setup; it does not move media automatically.
+The strip under the MiniMax timeline shows large image previews, with start/end checkpoint times and MiniMaxCondFrame **value** settings together in a shaded bottom row. Video tiles show source trim ranges; untimed references show their roles. Drag the dotted handle below the strip to resize it, or double-click to hide and reopen it. The previews expand with the panel. The strip flags an opening that needs to move to zero or an ending that needs to reach the sequence total. It describes your setup; it does not move media automatically.
 
 ![Compact conditioning frame and timing guide](images/conditioning-guide.png)
 

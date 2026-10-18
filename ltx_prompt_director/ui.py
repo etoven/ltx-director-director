@@ -1905,6 +1905,24 @@ class TimelineHeightHandle(QFrame):
             event.accept()
 
 
+class ConditioningPreview(QLabel):
+    """Fit the original preview into the space left by a tile's header/footer."""
+
+    def __init__(self, pixmap: QPixmap):
+        super().__init__()
+        self.source_pixmap = pixmap
+        self.setObjectName("conditioningPreview")
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setMinimumSize(1, 1)
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.setPixmap(self.source_pixmap.scaled(
+            self.size(), Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation))
+
+
 class ConditioningHeightHandle(TimelineHeightHandle):
     """Resize the conditioning tiles, including a fully collapsed state."""
 
@@ -4516,9 +4534,12 @@ class MainWindow(QMainWindow):
         #conditioningGuide{background:#141b1f;border:1px solid #354047;border-radius:4px}
         #conditioningGuide QWidget{background:transparent}
         #conditioningHeading{color:#8ebbd1;font-size:11px;font-weight:bold}
-        #conditioningTile{border:1px solid #354047;border-radius:4px}
-        #conditioningLabel{color:#d7e9f3;font-size:11px}
-        #conditioningTitle{color:#d7e9f3;font-size:12px;font-weight:bold}
+        #conditioningGuide #conditioningTile{background:#17191a;border:1px solid #354047;border-radius:4px}
+        #conditioningGuide #conditioningPreview{background:#17191a}
+        #conditioningGuide #conditioningFooter{background:#252728;border:0}
+        #conditioningLabel{color:#79b8d7;font-size:10px}
+        #conditioningValue{color:#a2a7a9;font-size:10px}
+        #conditioningGuide #conditioningTitle{background:#242627;color:#d7e9f3;font-size:11px;font-weight:bold;padding:3px 5px}
         #conditioningFix{color:#f2cd86;font-size:10px}
         #catalogLightbox{background:#0b1014} #catalogLightbox QLabel{background:transparent}
         #referenceImageSlot{background:#191d1f;border:1px solid #323638;border-radius:4px}
@@ -7318,13 +7339,11 @@ class MainWindow(QMainWindow):
             tile.setObjectName("conditioningTile")
             tile.setFixedWidth(176)
             row = QVBoxLayout(tile)
-            row.setContentsMargins(6, 4, 6, 4)
-            row.setSpacing(3)
+            row.setContentsMargins(1, 1, 1, 1)
+            row.setSpacing(0)
             title = QLabel(record['label'])
             title.setObjectName("conditioningTitle")
             row.addWidget(title)
-            thumbnail = QLabel()
-            thumbnail.setAlignment(Qt.AlignmentFlag.AlignCenter)
             if 'timeline_index' in record:
                 segment = self.segments[record['timeline_index']]
                 preview = QPixmap(segment.preview_path)
@@ -7333,8 +7352,9 @@ class MainWindow(QMainWindow):
                 preview = pixmap_from_data_url(reference['image']) if reference.get('image') else QPixmap()
             if preview.isNull():
                 preview = toolbar_icon('preview' if record['kind'] == 'video' else 'import').pixmap(64, 48)
+            thumbnail = ConditioningPreview(preview)
             self._conditioning_previews.append((thumbnail, preview))
-            row.addWidget(thumbnail)
+            row.addWidget(thumbnail, 1)
             fix = ''
             if 'checkpoint_time' in record:
                 time = record['checkpoint_time']
@@ -7348,11 +7368,25 @@ class MainWindow(QMainWindow):
                 detail = f"Source {record['source_start']:.2f}–{record['source_end']:.2f}s"
             else:
                 detail = f"{record['role'].title()} · untimed"
-            value_text = f"\nValue {record['checkpoint_time']:.2f}" if 'checkpoint_time' in record else ''
-            label = QLabel(detail + value_text + (f"\n⚠ {fix}" if fix else ""))
-            label.setWordWrap(True)
-            label.setObjectName("conditioningFix" if fix else "conditioningLabel")
-            row.addWidget(label)
+            footer = QFrame()
+            footer.setObjectName("conditioningFooter")
+            footer_row = QHBoxLayout(footer)
+            footer_row.setContentsMargins(5, 4, 5, 4)
+            footer_row.setSpacing(4)
+            label = QLabel(detail)
+            label.setObjectName("conditioningLabel")
+            footer_row.addWidget(label)
+            footer_row.addStretch()
+            if 'checkpoint_time' in record:
+                value = QLabel(f"Value {record['checkpoint_time']:.2f}")
+                value.setObjectName("conditioningValue")
+                footer_row.addWidget(value)
+            if fix:
+                warning = QLabel(f"⚠ {fix}")
+                warning.setObjectName("conditioningFix")
+                warning.setContentsMargins(5, 2, 5, 2)
+                row.addWidget(warning)
+            row.addWidget(footer)
             tile.setToolTip(f"{record['name']}\n{detail}" +
                             (f"\nMiniMaxCondFrame value: {record['checkpoint_time']:.2f} seconds" if 'checkpoint_time' in record else '') + (f"\n{fix}. Change the segment order or duration above." if fix else ''))
             self.conditioning_row.addWidget(tile)
@@ -7361,13 +7395,6 @@ class MainWindow(QMainWindow):
         if not inventory or not any(record['label'] for record in inventory):
             self.conditioning_row.addWidget(QLabel("Text only · no conditioning images" if self.segments else "Add a timeline segment to begin"))
         self.conditioning_row.addStretch()
-        self._resize_conditioning_previews()
-
-    def _resize_conditioning_previews(self):
-        for label, pixmap in getattr(self, "_conditioning_previews", []):
-            label.setFixedSize(162, max(16, min(164, self.conditioning_height - 90)))
-            label.setPixmap(pixmap.scaled(label.size(), Qt.AspectRatioMode.KeepAspectRatio,
-                                         Qt.TransformationMode.SmoothTransformation))
 
     def set_conditioning_height(self, height: int):
         self.conditioning_height = 0 if height < 48 else max(96, min(260, height))
@@ -7377,7 +7404,6 @@ class MainWindow(QMainWindow):
         self.conditioning_guide.setFixedHeight(self.conditioning_height)
         self.conditioning_guide.setVisible(
             self.conditioning_height > 0 and self.unified_workspace and not self.prompt_only_workspace)
-        self._resize_conditioning_previews()
 
     def finish_conditioning_height_resize(self):
         self.settings.setValue("conditioning_panel_height", self.conditioning_height)

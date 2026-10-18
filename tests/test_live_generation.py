@@ -34,6 +34,30 @@ class StreamResponse:
 
 
 class ProviderStreams(unittest.TestCase):
+    def test_gemini_never_accepts_a_token_limited_prompt_even_with_valid_json(self):
+        candidate = {"content": {"parts": [{"text": '{"prompt":"Only the opening beat"}'}]},
+                     "finishReason": "MAX_TOKENS"}
+        with self.assertRaisesRegex(ai.AIResponseFormatError, "incomplete result was not accepted"):
+            ai._gemini_response_text({"candidates": [candidate]})
+        token = STREAM_SINK.set(lambda kind, text: None)
+        try:
+            with patch.object(ai.requests, "post", return_value=StreamResponse([
+                    {"candidates": [{"content": {"parts": [{"text": '{"prompt":"Opening'}]}}]},
+                    {"candidates": [candidate]}])):
+                with self.assertRaisesRegex(ai.AIResponseFormatError, "incomplete result was not accepted"):
+                    ai._gemini_raw([], "demo", "gemini-demo", "Return JSON", 30)
+        finally:
+            STREAM_SINK.reset(token)
+
+    def test_openai_never_accepts_an_incomplete_nonstream_response(self):
+        from unittest.mock import Mock
+        response = Mock()
+        response.json.return_value = {"status": "incomplete", "output_text": '{"prompt":"Opening only"}',
+                                      "incomplete_details": {"reason": "max_output_tokens"}}
+        with patch.object(ai.requests, "post", return_value=response):
+            with self.assertRaisesRegex(ai.AIResponseFormatError, "partial prompt was not accepted"):
+                ai._openai_raw([], "demo", "Return JSON", 30)
+
     def test_gemini_sends_thought_summaries_and_text_in_separate_channels(self):
         messages = []
         response = StreamResponse([
