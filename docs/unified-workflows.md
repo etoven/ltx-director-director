@@ -64,6 +64,14 @@ with “Format the spacing between shots to make it more human legable”. Choos
 appear. Presets are saved in your app settings. An empty editor disables its
 menu options; content in the other editor is not required.
 
+Set **Category** in the preset editor to group related fixes. The menu shows
+category labels with separators between groups. Matching category names share
+one group, and only categories with actions available in that editor appear.
+Existing presets without a category use **General**. New installations include
+**Refine Camera** under **Camera** and **Format Prompt** under **Formatting**.
+
+![Quick Fix actions grouped by category](images/quick-fix-categories.png)
+
 ![Quick Fix controls in both prompt headers](images/quick-fixes.png)
 
 ![Editing the name, target and instruction of a Quick Fix preset](images/quick-fix-presets.png)

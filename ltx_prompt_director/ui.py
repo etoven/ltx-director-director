@@ -62,7 +62,7 @@ from .segment_split import divide_segment_prompt
 from .project_data import ARCHIVE_COLOR, load_other_tags, load_project_tags, new_note, normalize_notes, normalize_project_labels
 from .spellcheck import install_spellcheck
 from .prompt_tags import prompt_content, consume_global_refinements, install_prompt_tags, render_prompt_notes, insert_note
-from .quick_fixes import QuickFixEditor, load_presets
+from .quick_fixes import QuickFixEditor, load_presets, preset_groups
 from .inline_cues import PromptTextEdit
 
 FPS = 24
@@ -6802,14 +6802,18 @@ class MainWindow(QMainWindow):
 
     def populate_quick_fix_menu(self, menu: QMenu, editor: str) -> None:
         menu.clear()
-        for preset in load_presets(self.settings):
-            if preset["target"] not in (editor, "both"):
-                continue
-            action = menu.addAction(preset["name"])
-            action.setToolTip(preset["prompt"])
-            action.setEnabled(self.quick_fix_available(editor))
-            action.triggered.connect(lambda _=False, value=preset: self.apply_quick_fix(value, editor))
-        menu.addSeparator()
+        for index, (category, presets) in enumerate(preset_groups(load_presets(self.settings), editor)):
+            if index:
+                menu.addSeparator()
+            heading = menu.addAction(category)
+            heading.setEnabled(False)
+            for preset in presets:
+                action = menu.addAction(preset["name"])
+                action.setToolTip(preset["prompt"])
+                action.setEnabled(self.quick_fix_available(editor))
+                action.triggered.connect(lambda _=False, value=preset: self.apply_quick_fix(value, editor))
+        if menu.actions():
+            menu.addSeparator()
         menu.addAction("Edit Quick Fixes…", self.edit_quick_fixes)
         menu.setToolTipsVisible(True)
 

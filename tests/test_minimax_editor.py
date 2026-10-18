@@ -41,31 +41,71 @@ class UnifiedEditorTests(unittest.TestCase):
         upper, lower = w.segment_quick_fix_button.menu(), w.combined_quick_fix_button.menu()
         upper.aboutToShow.emit()
         lower.aboutToShow.emit()
-        self.assertEqual([a.text() for a in upper.actions() if not a.isSeparator()], ['Refine Camera', 'Edit Quick Fixes…'])
-        self.assertEqual([a.text() for a in lower.actions() if not a.isSeparator()], ['Refine Camera', 'Format Prompt', 'Edit Quick Fixes…'])
+        self.assertEqual([a.text() for a in upper.actions() if not a.isSeparator()], ['Camera', 'Refine Camera', 'Edit Quick Fixes…'])
+        self.assertEqual([a.text() for a in lower.actions() if not a.isSeparator()], ['Camera', 'Refine Camera', 'Formatting', 'Format Prompt', 'Edit Quick Fixes…'])
+        self.assertEqual([a.isSeparator() for a in lower.actions()], [False, False, True, False, False, True, False])
         editor = QuickFixEditor(w.settings, w)
         self.assertIn('Show in', [l.text() for l in editor.findChildren(QLabel)])
+        self.assertIn('Category', [l.text() for l in editor.findChildren(QLabel)])
         editor.add_button.click()
         editor.name.setText('My segment fix')
+        editor.category.setText('Framing')
         editor.target.setCurrentIndex(editor.target.findData('segment'))
         editor.prompt.setPlainText('Keep the hands visible.')
         editor.save()
-        self.assertEqual(load_presets(w.settings)[-1], {'name': 'My segment fix', 'target': 'segment', 'prompt': 'Keep the hands visible.'})
+        self.assertEqual(load_presets(w.settings)[-1], {'name': 'My segment fix', 'target': 'segment', 'prompt': 'Keep the hands visible.', 'category': 'Framing'})
         w.populate_quick_fix_menu(upper, 'segment')
         w.populate_quick_fix_menu(lower, 'unified')
         self.assertIn('My segment fix', [a.text() for a in upper.actions()])
+        self.assertIn('Framing', [a.text() for a in upper.actions()])
         self.assertNotIn('My segment fix', [a.text() for a in lower.actions()])
+        self.assertNotIn('Framing', [a.text() for a in lower.actions()])
         cancelled = QuickFixEditor(w.settings, w)
         cancelled.presets.setCurrentRow(0)
         cancelled.name.setText('Discard this change')
+        cancelled.category.setText('Discard this category')
         cancelled.reject()
         self.assertEqual(load_presets(w.settings)[0], STARTERS[0])
         w.set_project_type('ltx')
         w.populate_quick_fix_menu(upper, 'segment')
-        self.assertTrue(upper.actions()[0].isEnabled())
+        self.assertFalse(upper.actions()[0].isEnabled())
+        self.assertTrue(next(a for a in upper.actions() if a.text() == 'Refine Camera').isEnabled())
         self.assertFalse(w.segment_quick_fix_button.isHidden())
         self.assertTrue(w.combined_quick_fix_button.isHidden())
         save_presets(w.settings, STARTERS)
+
+    def test_quick_fix_categories_group_custom_actions_and_filter_empty_groups(self):
+        from ltx_prompt_director.quick_fixes import save_presets, load_presets
+        w = self.make_window('minimax_references')
+        w._close_saves_queued = True
+        w.unified_prompt.setPlainText('Existing production draft')
+        save_presets(w.settings, [
+            dict(name='Pan', target='both', category='Camera', prompt='Pan right.'),
+            dict(name='Space', target='unified', category='Formatting', prompt='Add spacing.'),
+            dict(name='Close-up', target='segment', category='camera', prompt='Close-up.'),
+            dict(name='Voice', target='segment', category='Audio', prompt='Preserve the accent.'),
+            dict(name='Legacy fix', target='both', prompt='Keep exact words.'),
+        ])
+        upper, lower = w.segment_quick_fix_button.menu(), w.combined_quick_fix_button.menu()
+        upper.aboutToShow.emit()
+        lower.aboutToShow.emit()
+        self.assertEqual([a.text() for a in upper.actions() if not a.isSeparator()],
+                         ['Camera', 'Pan', 'Close-up', 'Audio', 'Voice', 'General', 'Legacy fix', 'Edit Quick Fixes…'])
+        self.assertEqual([a.text() for a in lower.actions() if not a.isSeparator()],
+                         ['Camera', 'Pan', 'Formatting', 'Space', 'General', 'Legacy fix', 'Edit Quick Fixes…'])
+        self.assertEqual(sum(a.isSeparator() for a in upper.actions()), 3)
+        self.assertEqual(sum(a.isSeparator() for a in lower.actions()), 3)
+        with patch.object(w, 'apply_quick_fix') as refine:
+            upper.actions()[0].trigger()  # A category heading cannot start refinement.
+            refine.assert_not_called()
+            next(a for a in upper.actions() if a.text() == 'Close-up').trigger()
+            refine.assert_called_once_with(load_presets(w.settings)[2], 'segment')
+            refine.reset_mock()
+            next(a for a in lower.actions() if a.text() == 'Space').trigger()
+            refine.assert_called_once_with(load_presets(w.settings)[1], 'unified')
+        save_presets(w.settings, [])
+        upper.aboutToShow.emit()
+        self.assertEqual([a.text() for a in upper.actions()], ['Edit Quick Fixes…'])
 
     def test_quick_fix_segment_injects_at_bottom_and_never_uses_global_scope(self):
         w = self.make_window('minimax_frames')
@@ -97,7 +137,7 @@ class UnifiedEditorTests(unittest.TestCase):
         menu = w.combined_quick_fix_button.menu()
         w.populate_quick_fix_menu(menu, 'unified')
         with patch.object(w, 'ai_credentials', return_value=('gemini', 'model', 'key')), patch.object(w.thread_pool, 'start') as pool:
-            menu.actions()[1].trigger()
+            next(a for a in menu.actions() if a.text() == "Format Prompt").trigger()
             worker = pool.call_args.args[0]
             current = worker.args[9]
             self.assertTrue(current.startswith('/refine-global ' + STARTERS[1]['prompt']))
@@ -121,9 +161,9 @@ class UnifiedEditorTests(unittest.TestCase):
                 neighbor = w.segments[1].to_dict()
                 menu = w.segment_quick_fix_button.menu()
                 w.populate_quick_fix_menu(menu, 'segment')
-                self.assertTrue(menu.actions()[0].isEnabled())
+                self.assertTrue(next(a for a in menu.actions() if a.text() == "Refine Camera").isEnabled())
                 with patch.object(w, 'ai_credentials', return_value=('gemini', 'model', 'key')), patch.object(w.thread_pool, 'start') as pool:
-                    menu.actions()[0].trigger()
+                    next(a for a in menu.actions() if a.text() == "Refine Camera").trigger()
                     first = pool.call_args.args[0]
                     w.apply_quick_fix(STARTERS[0], 'segment')
                     self.assertEqual(pool.call_count, 1)
@@ -150,9 +190,9 @@ class UnifiedEditorTests(unittest.TestCase):
         before = [s.to_dict() for s in w.segments]
         menu = w.combined_quick_fix_button.menu()
         w.populate_quick_fix_menu(menu, 'unified')
-        self.assertTrue(menu.actions()[0].isEnabled())
+        self.assertTrue(next(a for a in menu.actions() if a.text() == "Refine Camera").isEnabled())
         with patch.object(w, 'ai_credentials', return_value=('gemini', 'model', 'key')), patch.object(w.thread_pool, 'start') as pool:
-            menu.actions()[0].trigger()
+            next(a for a in menu.actions() if a.text() == "Refine Camera").trigger()
             worker = pool.call_args.args[0]
             self.assertEqual(worker.args[0][0].prompt, before[0]['prompt'])
             self.assertTrue(worker.args[9].startswith('/refine-global ' + STARTERS[0]['prompt']))
@@ -167,11 +207,11 @@ class UnifiedEditorTests(unittest.TestCase):
         w.unified_prompt.setPlainText('Shot one. Shot two.')
         menu = w.combined_quick_fix_button.menu()
         w.populate_quick_fix_menu(menu, 'unified')
-        self.assertTrue(menu.actions()[0].isEnabled())
-        self.assertTrue(menu.actions()[1].isEnabled())
+        self.assertTrue(next(a for a in menu.actions() if a.text() == "Refine Camera").isEnabled())
+        self.assertTrue(next(a for a in menu.actions() if a.text() == "Format Prompt").isEnabled())
         self.assertTrue(w.segment_quick_fix_button.isHidden())
         with patch.object(w, 'ai_credentials', return_value=('gemini', 'model', 'key')), patch.object(w.thread_pool, 'start') as pool:
-            menu.actions()[0].trigger()
+            next(a for a in menu.actions() if a.text() == "Refine Camera").trigger()
             worker = pool.call_args.args[0]
             self.assertEqual(worker.args[0], 'gemini')
             self.assertTrue(worker.args[3].startswith('/refine-global refine camera'))
@@ -199,7 +239,7 @@ class UnifiedEditorTests(unittest.TestCase):
         menu = w.combined_quick_fix_button.menu()
         menu.aboutToShow.emit()
         with patch.object(w, 'ai_credentials', return_value=('gemini', 'model', 'key')), patch.object(w.thread_pool, 'start') as pool:
-            menu.actions()[1].trigger()
+            next(a for a in menu.actions() if a.text() == "Format Prompt").trigger()
             worker = pool.call_args.args[0]
             self.assertTrue(worker.args[3].startswith('/refine-global Format the spacing'))
             worker.signals.finished.emit('Shot one.\n\nShot two.')

@@ -11,9 +11,9 @@ from PySide6.QtWidgets import (QComboBox, QDialog, QDialogButtonBox, QFormLayout
 TARGETS = {"segment": "Segment", "unified": "Unified", "both": "Both"}
 SETTINGS_KEY = "quick_fix_presets"
 STARTERS = [
-    {"name": "Refine Camera", "target": "both",
+    {"name": "Refine Camera", "target": "both", "category": "Camera",
      "prompt": "refine camera angle and shot descriptions."},
-    {"name": "Format Prompt", "target": "unified",
+    {"name": "Format Prompt", "target": "unified", "category": "Formatting",
      "prompt": "Format the spacing between shots to make it more human legable"},
 ]
 
@@ -27,7 +27,8 @@ def load_presets(settings) -> list[dict]:
         entries = []
     if not isinstance(entries, list):
         return []
-    return [{"name": e["name"].strip(), "target": e["target"], "prompt": e["prompt"].strip()}
+    return [{"name": e["name"].strip(), "target": e["target"], "prompt": e["prompt"].strip(),
+             "category": (e.get("category", "").strip() if isinstance(e.get("category"), str) else "") or "General"}
             for e in entries if isinstance(e, dict) and isinstance(e.get("target"), str) and e["target"] in TARGETS
             and isinstance(e.get("name"), str) and e["name"].strip()
             and isinstance(e.get("prompt"), str) and e["prompt"].strip()]
@@ -35,6 +36,18 @@ def load_presets(settings) -> list[dict]:
 
 def save_presets(settings, entries: list[dict]) -> None:
     settings.setValue(SETTINGS_KEY, json.dumps(entries, ensure_ascii=False))
+
+
+def preset_groups(entries: list[dict], editor: str) -> list[tuple[str, list[dict]]]:
+    """Group only presets available here, preserving first-seen category order."""
+    groups = {}
+    for entry in entries:
+        if entry["target"] not in (editor, "both"):
+            continue
+        category = entry["category"]
+        group = groups.setdefault(category.casefold(), (category, []))
+        group[1].append(entry)
+    return list(groups.values())
 
 
 class QuickFixEditor(QDialog):
@@ -57,6 +70,9 @@ class QuickFixEditor(QDialog):
         layout.addLayout(controls)
         form = QFormLayout()
         self.name = QLineEdit()
+        self.category = QLineEdit()
+        self.category.setPlaceholderText("General")
+        self.category.setToolTip("Actions in the same category appear together, separated from other categories.")
         self.target = QComboBox()
         for value, label in TARGETS.items():
             self.target.addItem(label, value)
@@ -64,6 +80,7 @@ class QuickFixEditor(QDialog):
         self.prompt.setAcceptRichText(False)
         self.prompt.setPlaceholderText("Instruction to inject and refine automatically…")
         form.addRow("Name", self.name)
+        form.addRow("Category", self.category)
         form.addRow("Show in", self.target)
         form.addRow("Refine prompt", self.prompt)
         layout.addLayout(form)
@@ -73,6 +90,7 @@ class QuickFixEditor(QDialog):
         layout.addWidget(buttons)
         self.presets.currentRowChanged.connect(self.select)
         self.name.textChanged.connect(self.update_entry)
+        self.category.textChanged.connect(self.update_entry)
         self.target.currentIndexChanged.connect(self.update_entry)
         self.prompt.textChanged.connect(self.update_entry)
         self.add_button.clicked.connect(self.add)
@@ -89,13 +107,14 @@ class QuickFixEditor(QDialog):
 
     def select(self, row):
         entry = self.entries[row] if 0 <= row < len(self.entries) else None
-        for field in (self.name, self.target, self.prompt):
+        for field in (self.name, self.category, self.target, self.prompt):
             field.blockSignals(True)
             field.setEnabled(entry is not None)
         self.name.setText(entry["name"] if entry else "")
+        self.category.setText(entry["category"] if entry else "")
         self.target.setCurrentIndex(self.target.findData(entry["target"] if entry else "both"))
         self.prompt.setPlainText(entry["prompt"] if entry else "")
-        for field in (self.name, self.target, self.prompt):
+        for field in (self.name, self.category, self.target, self.prompt):
             field.blockSignals(False)
         self.remove_button.setEnabled(entry is not None)
 
@@ -103,11 +122,11 @@ class QuickFixEditor(QDialog):
         row = self.presets.currentRow()
         if 0 <= row < len(self.entries):
             self.entries[row] = {"name": self.name.text(), "target": self.target.currentData(),
-                                 "prompt": self.prompt.toPlainText()}
+                                 "prompt": self.prompt.toPlainText(), "category": self.category.text()}
             self.presets.item(row).setText(self.name.text() or "New Quick Fix")
 
     def add(self):
-        self.entries.append({"name": "New Quick Fix", "target": "both", "prompt": ""})
+        self.entries.append({"name": "New Quick Fix", "target": "both", "prompt": "", "category": "General"})
         self.reload(len(self.entries) - 1)
         self.name.selectAll()
         self.name.setFocus()
