@@ -48,7 +48,7 @@ with tempfile.TemporaryDirectory(prefix="director-timeline-docs-") as folder:
     window.autofit_timeline()
     app.processEvents()
     top = window.timeline_shell.mapTo(window, QPoint(0, 0))
-    bottom = window.conditioning_guide.mapTo(window, QPoint(window.conditioning_guide.width(), window.conditioning_guide.height()))
+    bottom = window.conditioning_height_handle.mapTo(window, QPoint(window.conditioning_height_handle.width(), window.conditioning_height_handle.height()))
     target = ROOT / "docs/images/timeline-navigation.png"
     assert window.grab(QRect(top, bottom)).save(str(target))
     print(target, flush=True)

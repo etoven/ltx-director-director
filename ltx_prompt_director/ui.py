@@ -42,7 +42,7 @@ from .segment_plan import (supports_structured_edit, generate_combined, sync_tim
 from .artwork_tools import IMAGE_MODEL_CHOICES, available_artwork_tools, render_artwork
 from .cache_maintenance import cover_path, mark_ready, needs_refresh, warm_metadata
 from .ai import AIResponseFormatError, GEMINI_MODELS, build_minimax_h3_prompt, build_minimax_h3_reference_prompt, build_prompts, minimax_h3_cache_key, provider_error_message, WORKSPACE_INSTRUCTIONS, refine_minimax_text_prompt, refine_minimax_h3_prompt, refine_minimax_h3_reference_prompt, refine_segment_prompt, generate_segment_prompt, refine_global_prompt, generate_global_direction, refine_sequence_prompts, refine_timing, retryable_connection_error
-from .media import APP_CACHE, TIMELINE_VIDEO_SUFFIXES, comfy_input_references, copy_media_for_export, data_url, extract_audio_for_export, prepare_media, safe_media_filename, thumbnail_for_image, unique_media_filename, video_source_dimensions, write_data_url
+from .media import APP_CACHE, MEDIA_SUFFIXES, TIMELINE_VIDEO_SUFFIXES, comfy_input_references, copy_media_for_export, data_url, extract_audio_for_export, media_mime_from_header, media_suffix, prepare_media, safe_media_filename, thumbnail_for_image, unique_media_filename, video_source_dimensions, write_data_url
 from .project_archive import clear_archived_source, materialize_source, project_thumbnail_data, read_project, save_project_archive
 from .minimax_reference import WORKFLOW_NAMES, detect_workflow, reference_inventory, reference_slots
 from .minimax_reference_widgets import MiniMaxReferenceSlot
@@ -141,7 +141,13 @@ def _export_segment_source(segment: Segment, target: Path):
 
 def segment_media_suffix(segment: Segment) -> str:
     """Preserve a segment's real container instead of renaming video bytes."""
-    return Path(segment.name).suffix or Path(segment.media_path).suffix or (".webm" if segment.kind == "video" else ".png")
+    source = Path(segment.media_path)
+    if source.is_file():
+        return media_suffix(source, ".webm" if segment.kind == "video" else ".png")
+    if getattr(segment, "_source_suffix", ""):
+        return segment._source_suffix
+    return next((suffix for suffix in (source.suffix.lower(), Path(segment.name).suffix.lower())
+                 if suffix in MEDIA_SUFFIXES.values()), ".webm" if segment.kind == "video" else ".png")
 
 
 def segment_kind_label(segment: Segment) -> str:
@@ -355,20 +361,25 @@ def _duplicate_library_project_files(source_meta: dict, root: Path, new_id: str)
             destination_dir = root / folder
             destination_dir.mkdir(parents=True, exist_ok=True)
             destination = destination_dir / (
-                f"{new_id}_{uuid4().hex[:8]}_{safe_media_filename(file_name, 'attachment')}"
+                f"{new_id}_{uuid4().hex[:8]}_{safe_media_filename(file_name, 'attachment', suffix=media_suffix(source, source.suffix))}"
             )
             created.append(destination)
             shutil.copy2(source, destination)
             return str(destination)
 
         if clone.get("previewVideoPath"):
+            source = Path(clone["previewVideoPath"])
+            clone["previewVideoName"] = safe_media_filename(
+                clone.get("previewVideoName") or source.name, "preview",
+                suffix=media_suffix(source, source.suffix) if source.is_file() else source.suffix)
             clone["previewVideoPath"] = copy_attachment(
                 clone["previewVideoPath"], "previews",
                 str(clone.get("previewVideoName") or "preview.webm")
             )
         attached = clone.get("projectFiles", clone.get("workflowFiles", []))
         clone["projectFiles"] = [
-            {**item, "path": duplicated}
+            {**item, "path": duplicated,
+             "name": safe_media_filename(item.get("name") or "project_file", suffix=Path(duplicated).suffix)}
             for item in attached if isinstance(item, dict)
             if (duplicated := copy_attachment(
                 item.get("path", ""), "project_files",
@@ -1890,6 +1901,34 @@ class TimelineHeightHandle(QFrame):
             self.start_y = None
             self.releaseMouse()
             self.update()
+            self.finished.emit()
+            event.accept()
+
+
+class ConditioningHeightHandle(TimelineHeightHandle):
+    """Resize the conditioning tiles, including a fully collapsed state."""
+
+    def __init__(self, current_height):
+        super().__init__(current_height)
+        self.setObjectName("conditioningHeightHandle")
+        self.setAccessibleName("Resize or hide conditioning tiles")
+        self.setToolTip("Drag down to enlarge conditioning tiles; drag up to hide. Double-click to hide or reopen.")
+        self.last_height = current_height or 144
+
+    def mouseMoveEvent(self, event):
+        if self.start_y is not None:
+            raw = int(self.start_height + event.globalPosition().y() - self.start_y)
+            value = 0 if raw < 48 else max(96, min(260, raw))
+            self.current_height = value
+            if value:
+                self.last_height = value
+            self.height_changed.emit(value)
+            event.accept()
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.current_height = 0 if self.current_height else self.last_height
+            self.height_changed.emit(self.current_height)
             self.finished.emit()
             event.accept()
 
@@ -3694,7 +3733,10 @@ class MainWindow(QMainWindow):
         self.conditioning_guide = QScrollArea()
         self.conditioning_guide.setObjectName("conditioningGuide")
         self.conditioning_guide.setWidgetResizable(True)
-        self.conditioning_guide.setFixedHeight(48)
+        self.conditioning_height = max(0, min(260, self.settings.value("conditioning_panel_height", 144, int)))
+        if self.conditioning_height:
+            self.conditioning_height = max(96, self.conditioning_height)
+        self.conditioning_guide.setFixedHeight(self.conditioning_height)
         self.conditioning_guide.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.conditioning_content = QWidget()
         self.conditioning_row = QHBoxLayout(self.conditioning_content)
@@ -3702,6 +3744,12 @@ class MainWindow(QMainWindow):
         self.conditioning_row.setSpacing(4)
         self.conditioning_guide.setWidget(self.conditioning_content)
         outer.addWidget(self.conditioning_guide)
+        self.conditioning_height_handle = ConditioningHeightHandle(self.conditioning_height)
+        self.conditioning_height_handle.last_height = self.conditioning_height or max(
+            96, min(260, self.settings.value("conditioning_panel_last_height", 144, int)))
+        self.conditioning_height_handle.height_changed.connect(self.set_conditioning_height)
+        self.conditioning_height_handle.finished.connect(self.finish_conditioning_height_resize)
+        outer.addWidget(self.conditioning_height_handle)
 
         self.sequence_bar = QLabel()
         self.sequence_bar.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
@@ -4467,9 +4515,10 @@ class MainWindow(QMainWindow):
         QListWidget{background:#0d0f10;border:0;padding:0} QListWidget::item{border:1px solid #696b6c;background:#252728;margin:0} QListWidget::item:selected{border:2px solid #f1f1f1;background:#293034}
         #conditioningGuide{background:#141b1f;border:1px solid #354047;border-radius:4px}
         #conditioningGuide QWidget{background:transparent}
-        #conditioningHeading{color:#8ebbd1;font-size:9px;font-weight:bold}
+        #conditioningHeading{color:#8ebbd1;font-size:11px;font-weight:bold}
         #conditioningTile{border:1px solid #354047;border-radius:4px}
-        #conditioningLabel{color:#d7e9f3;font-size:10px}
+        #conditioningLabel{color:#d7e9f3;font-size:11px}
+        #conditioningTitle{color:#d7e9f3;font-size:12px;font-weight:bold}
         #conditioningFix{color:#f2cd86;font-size:10px}
         #catalogLightbox{background:#0b1014} #catalogLightbox QLabel{background:transparent}
         #referenceImageSlot{background:#191d1f;border:1px solid #323638;border-radius:4px}
@@ -4485,7 +4534,8 @@ class MainWindow(QMainWindow):
         #segmentCard{background:transparent;border:1px solid transparent} #segmentCard[selected="true"]{background:#17262e;border:1px solid #73a9c4} #segmentCardBody{background:#252728;border:0} #mediaBadge{background:#e5e5e5;color:#262626;font-weight:bold;padding:2px} #roleBadge{background:#36393a;color:#eee;padding:2px}
         #tileDelete{padding:0;min-height:0;max-height:20px;background:#454849;color:#ddd;border:0} #tileDelete:hover{background:#a94444;color:#fff;border:1px solid #e07878} #tileTitle{background:#242627;padding:3px;font-size:9px} #tileStartTime{color:#79b8d7;font-size:8px;font-weight:bold} #tileDuration{color:#a2a7a9;font-size:8px}
         #resizeHandle{background:transparent;border:0} #resizeHandle:hover{background:rgba(88,118,134,35);border:0}
-        #timelineHeightHandle{background:transparent;border:0} #timelineHeightHandle:hover{background:rgba(88,118,134,35);border:0}
+        #timelineHeightHandle,#conditioningHeightHandle{background:transparent;border:0}
+        #timelineHeightHandle:hover,#conditioningHeightHandle:hover{background:rgba(88,118,134,35);border:0}
         #promptSplitter::handle{background:transparent;border:0} #promptSplitter::handle:hover{background:rgba(88,118,134,35);border:0}
         #segmentPreview{background:#17191a;border-top:1px solid #34383a}
         #addTileBox{border:0;border-left:1px solid #35424b;background:#141b20} #addTile,#addTextTile{min-height:0;border:1px solid #365366;border-radius:5px;background:#1a2b35;color:#c1e5f7;font-size:12px;font-weight:bold;text-align:center;padding:0} #addTile:hover,#addTextTile:hover{background:#254357;border-color:#71a7c4;color:#fff} #sequenceBar{background:#182935;border:0;border-radius:4px;padding:3px 7px;color:#bcd6e6;font-weight:bold}
@@ -4579,6 +4629,7 @@ class MainWindow(QMainWindow):
         self.prompt_scope.setFixedHeight(metric(23))
         self.ruler.setFixedHeight(metric(28))
         self.timeline_height_handle.set_scale(scale)
+        self.conditioning_height_handle.set_scale(scale)
         self.project_list.setSpacing(metric(4))
         for button in (self.provider_button, self.refine_timing_button,
                        self.refine_prompt_button, self.start_button, self.end_button):
@@ -5686,11 +5737,11 @@ class MainWindow(QMainWindow):
                 self.refresh_project_library(self.current_project_id)
 
     def new_project(self) -> None:
-        self.download_directory = ""
         self._open_serial += 1
         self.stage_current_workspace()
         if self.current_project_id:
             self.cache_current_workspace()
+        self.download_directory = ""
         self._loading = True
         self.segments = []
         self.current_project_id = None
@@ -5722,8 +5773,40 @@ class MainWindow(QMainWindow):
         self._loading = False
         self.project_dirty = False
         self.refresh_timeline()
+        self.initialize_empty_library_project()
         self.update_window_title()
         self.statusBar().showMessage("New project ready")
+
+    def initialize_empty_library_project(self):
+        """Give a new, empty workspace a durable library identity immediately."""
+        root = project_library_path()
+        project_id = uuid4().hex
+        names = {str(record.get("name", "")).casefold() for record in self.library_records()}
+        name, index = "Untitled project", 2
+        while name.casefold() in names:
+            name = f"Untitled project ({index})"
+            index += 1
+        meta = {"id": project_id, "name": name, "description": "",
+                "collection": self.current_collection or "", "projectType": self.project_type,
+                "projectPath": str(root / f"{project_id}.LTXD"),
+                "savedAt": datetime.now(timezone.utc).isoformat(),
+                "segmentCount": 0, "duration": 0, "thumbnailData": "",
+                "status": "", "tags": [], "archived": False, "notes": []}
+        payload = self.project_payload(include_media=False)
+        payload["library"] = dict(meta)
+        # This writes only an empty manifest and metadata, never media. Later
+        # content saves continue through the existing background save worker.
+        try:
+            _write_library_archive(meta["projectPath"], payload, [], root / f"{project_id}.meta.json", meta)
+        except OSError as error:
+            QMessageBox.critical(self, "New project failed", str(error))
+            return
+        self.current_project_id = project_id
+        self.current_project_name = name
+        self.cache_current_workspace()
+        self.refresh_project_library(project_id)
+        self.settings.setValue("last_project_id", project_id)
+        self.queue_settings_sync()
 
     def set_timeline_scale(self, value: int) -> None:
         if value == 0:
@@ -7192,7 +7275,9 @@ class MainWindow(QMainWindow):
     def update_conditioning_guide(self) -> None:
         if not hasattr(self, "conditioning_guide"):
             return
-        self.conditioning_guide.setVisible(self.unified_workspace and not self.prompt_only_workspace)
+        available = self.unified_workspace and not self.prompt_only_workspace
+        self.conditioning_guide.setVisible(available and self.conditioning_height > 0)
+        self.conditioning_height_handle.setVisible(available)
         if self.prompt_only_workspace:
             return
         signature = (self.unified_workspace, self.project_type,
@@ -7201,9 +7286,11 @@ class MainWindow(QMainWindow):
         if signature == getattr(self, '_conditioning_signature', None):
             return
         self._conditioning_signature = signature
+        self._conditioning_previews = []
         while self.conditioning_row.count():
             item = self.conditioning_row.takeAt(0)
             if item.widget():
+                item.widget().hide()
                 item.widget().deleteLater()
         if not self.unified_workspace:
             return
@@ -7218,7 +7305,9 @@ class MainWindow(QMainWindow):
                 else 'Keyframes')
         self.conditioning_records = inventory
         self.conditioning_fixes = []
-        heading = QLabel(f"{mode} · {total:.2f}s")
+        heading = QLabel(f"{mode}\n{total:.2f}s")
+        heading.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        heading.setMinimumWidth(68)
         heading.setToolTip("Conditioning setup: click the timeline to edit frames and roles")
         heading.setObjectName("conditioningHeading")
         self.conditioning_row.addWidget(heading)
@@ -7227,21 +7316,24 @@ class MainWindow(QMainWindow):
                 continue
             tile = QFrame()
             tile.setObjectName("conditioningTile")
-            row = QHBoxLayout(tile)
-            row.setContentsMargins(3, 1, 3, 1)
+            tile.setFixedWidth(176)
+            row = QVBoxLayout(tile)
+            row.setContentsMargins(6, 4, 6, 4)
             row.setSpacing(3)
+            title = QLabel(record['label'])
+            title.setObjectName("conditioningTitle")
+            row.addWidget(title)
             thumbnail = QLabel()
-            thumbnail.setFixedSize(27, 22)
+            thumbnail.setAlignment(Qt.AlignmentFlag.AlignCenter)
             if 'timeline_index' in record:
                 segment = self.segments[record['timeline_index']]
                 preview = QPixmap(segment.preview_path)
             else:
                 reference = reference_slots(self.minimax_reference_images)[record['reference_slot']]
                 preview = pixmap_from_data_url(reference['image']) if reference.get('image') else QPixmap()
-            if not preview.isNull():
-                thumbnail.setPixmap(preview.scaled(thumbnail.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
-            else:
-                thumbnail.setPixmap(toolbar_icon('preview' if record['kind'] == 'video' else 'import').pixmap(28, 28))
+            if preview.isNull():
+                preview = toolbar_icon('preview' if record['kind'] == 'video' else 'import').pixmap(64, 48)
+            self._conditioning_previews.append((thumbnail, preview))
             row.addWidget(thumbnail)
             fix = ''
             if 'checkpoint_time' in record:
@@ -7256,10 +7348,9 @@ class MainWindow(QMainWindow):
                 detail = f"Source {record['source_start']:.2f}–{record['source_end']:.2f}s"
             else:
                 detail = f"{record['role'].title()} · untimed"
-            value_text = f" · value {record['checkpoint_time']:.2f}" if 'checkpoint_time' in record else ''
-            label = QLabel(f"{record['label']}{value_text} · {detail}" +
-                           (f" ⚠ {fix}" if fix else ""))
-            label.setMaximumHeight(27)
+            value_text = f"\nValue {record['checkpoint_time']:.2f}" if 'checkpoint_time' in record else ''
+            label = QLabel(detail + value_text + (f"\n⚠ {fix}" if fix else ""))
+            label.setWordWrap(True)
             label.setObjectName("conditioningFix" if fix else "conditioningLabel")
             row.addWidget(label)
             tile.setToolTip(f"{record['name']}\n{detail}" +
@@ -7270,6 +7361,27 @@ class MainWindow(QMainWindow):
         if not inventory or not any(record['label'] for record in inventory):
             self.conditioning_row.addWidget(QLabel("Text only · no conditioning images" if self.segments else "Add a timeline segment to begin"))
         self.conditioning_row.addStretch()
+        self._resize_conditioning_previews()
+
+    def _resize_conditioning_previews(self):
+        for label, pixmap in getattr(self, "_conditioning_previews", []):
+            label.setFixedSize(162, max(16, min(164, self.conditioning_height - 90)))
+            label.setPixmap(pixmap.scaled(label.size(), Qt.AspectRatioMode.KeepAspectRatio,
+                                         Qt.TransformationMode.SmoothTransformation))
+
+    def set_conditioning_height(self, height: int):
+        self.conditioning_height = 0 if height < 48 else max(96, min(260, height))
+        self.conditioning_height_handle.current_height = self.conditioning_height
+        if self.conditioning_height:
+            self.conditioning_height_handle.last_height = self.conditioning_height
+        self.conditioning_guide.setFixedHeight(self.conditioning_height)
+        self.conditioning_guide.setVisible(
+            self.conditioning_height > 0 and self.unified_workspace and not self.prompt_only_workspace)
+        self._resize_conditioning_previews()
+
+    def finish_conditioning_height_resize(self):
+        self.settings.setValue("conditioning_panel_height", self.conditioning_height)
+        self.settings.setValue("conditioning_panel_last_height", self.conditioning_height_handle.last_height)
 
     def restore_director_intent_splitter(self) -> None:
         self.set_director_intent_expanded(self.settings.value("director_intent_expanded", True, bool), persist=False)
@@ -9061,21 +9173,25 @@ class MainWindow(QMainWindow):
                 media_path = "" if is_text else preview_path
             if not raw.get("_archivePath") and raw.get("sourceData"):
                 original_suffix = Path(raw.get("name", "")).suffix.lower()
-                suffix = (
-                    original_suffix if raw.get("kind") == "video" and original_suffix in TIMELINE_VIDEO_SUFFIXES else
-                    ".webm" if raw.get("kind") == "video" else
-                    original_suffix or ".png"
-                )
+                header = base64.b64decode(raw["sourceData"].split(",", 1)[1][:5464])
+                suffix = MEDIA_SUFFIXES.get(media_mime_from_header(header, original_suffix),
+                                            ".webm" if raw.get("kind") == "video" else ".png")
                 media_path = APP_CACHE / f"project-source-{cache_key}-{index}{suffix}"
                 write_data_url(raw["sourceData"], media_path)
             if not raw.get("_archivePath") and not is_text and preview_path.is_file():
                 preview_path = Path(thumbnail_for_image(str(preview_path)))
             raw.update({"preview_path": "" if is_text else str(preview_path), "media_path": str(media_path)})
+            if not is_text:
+                fallback = ".webm" if raw.get("kind") == "video" else ".png"
+                suffix = (raw.get("_archiveSourceSuffix", fallback) if raw.get("_archivePath") else
+                          media_suffix(media_path, fallback) if Path(media_path).is_file() else fallback)
+                raw["name"] = safe_media_filename(raw.get("name", ""), f"Segment_{index + 1:02d}", suffix=suffix)
             for key in ("previewData", "sourceData"):
                 raw.pop(key, None)
             segment = Segment.from_dict(raw)
             if raw.get("_archivePath"):
                 segment._archive_source = (raw["_archivePath"], raw["archiveSource"])
+                segment._source_suffix = raw.get("_archiveSourceSuffix", "")
                 segment._media_digest = raw.get("mediaDigest", "")
                 segment._source_size = raw.get("sourceSize")
             loaded.append(segment)
@@ -9134,7 +9250,7 @@ class MainWindow(QMainWindow):
     def next_export_path(self, filename: str) -> Path:
         directory = self.export_directory()
         directory.mkdir(parents=True, exist_ok=True)
-        target = directory / safe_export_name(Path(filename).name)
+        target = directory / safe_media_filename(filename, "Export")
         base, suffix = target.stem, target.suffix
         counter = 1
         while target.exists() or str(target) in self._reserved_exports:

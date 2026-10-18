@@ -10,7 +10,7 @@ from PIL import Image
 
 from ltx_prompt_director import ai, project_archive
 from ltx_prompt_director.ai_stream import STREAM_SINK
-from ltx_prompt_director.media import data_url, media_mime
+from ltx_prompt_director.media import data_url, media_mime, safe_media_filename
 from ltx_prompt_director.models import Segment
 
 
@@ -53,6 +53,9 @@ def test_generate_uses_mp4_mime_for_legacy_archive_and_resaves_correct_suffix(tm
         output.writestr('project.json', json.dumps({'frames': [frame]}))
     with patch.object(project_archive, 'APP_CACHE', tmp_path / 'cache'):
         loaded = project_archive.read_project(archive)['frames'][0]
+        assert loaded['name'] == 'Opening_breath.mp4'
+        assert loaded['_archiveMediaPath'].endswith('.mp4')
+        assert not __import__('pathlib').Path(loaded['_archiveMediaPath']).exists()
         segment.media_path = loaded['_archiveMediaPath']
         segment.preview_path = loaded['_archivePreviewPath']
         segment._archive_source = (str(archive), member)
@@ -75,3 +78,11 @@ def test_generate_uses_mp4_mime_for_legacy_archive_and_resaves_correct_suffix(tm
         assert source == 'media/0000.mp4'
         assert output.read(source) == raw
     assert video.read_bytes() == raw
+
+
+def test_media_names_are_safe_and_keep_the_actual_extension():
+    assert safe_media_filename('0.5625 — opening breath', suffix='.mp4') == '0.5625_opening_breath.mp4'
+    assert safe_media_filename('Wrong.png', suffix='.mp4') == 'Wrong.mp4'
+    assert safe_media_filename(r'C:\folder\NUL.png', suffix='.jpg') == '_NUL.jpg'
+    assert safe_media_filename('../bad:*?name.webm', suffix='.mp4') == 'bad_name.mp4'
+    assert len(safe_media_filename('🐾' * 300 + 'a' * 300, suffix='.mp4').encode()) < 180

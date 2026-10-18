@@ -83,6 +83,29 @@ class Mp4AndProjectDropTests(unittest.TestCase):
         self.assertEqual(ui.segment_kind_label(Segment("clip.mp4", "/tmp/clip.mp4", "", "video")), "MP4")
         self.assertEqual(ui.segment_kind_label(Segment("still.png", "/tmp/still.png", "", "image")), "IMAGE")
 
+    def test_export_uses_a_safe_mp4_filename_even_when_segment_and_cache_names_are_bad(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / 'cached.5625 — opening breath'
+            raw = b'\x00\x00\x00\x20ftypisom\x00\x00\x02\x00source media'
+            source.write_bytes(raw)
+            segment = Segment('0.5625 — opening breath', str(source), '', 'video')
+            with patch.object(ui.MainWindow, 'restore_startup_workspace'):
+                window = ui.MainWindow()
+            window._close_saves_queued = True
+            window.current_project_name = 'Lead-in: Marker (Copy)'
+            window.download_directory = str(root / 'exports')
+            with patch.object(window, 'start_disk_job') as job:
+                window.export_segment(segment, 1)
+            operation, (snapshot, destination) = job.call_args.args[:2]
+            self.assertEqual(destination.suffix, '.mp4')
+            self.assertNotIn(' ', destination.name)
+            self.assertNotIn(':', destination.name)
+            operation(snapshot, destination)
+            self.assertEqual(destination.read_bytes(), raw)
+            self.assertEqual(source.read_bytes(), raw)
+            window.close()
+
     def test_timeline_mp4_drop_uses_media_feedback_and_signal(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "clip.mp4"

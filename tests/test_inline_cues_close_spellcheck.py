@@ -125,7 +125,7 @@ class InlineCuesCloseSpellcheckTests(unittest.TestCase):
             window.new_project()
             window.segments = [Segment('Second', '', '', kind='text', prompt='Two')]
             window.mark_dirty()
-            self.assertEqual(list(Path(directory).glob('*.LTXD')), [])
+            self.assertEqual(len(list(Path(directory).glob('*.LTXD'))), 1)
             window.show()
             self.app.processEvents()
             window.close()

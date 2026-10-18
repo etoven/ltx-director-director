@@ -94,6 +94,20 @@ class ProjectDuplicateTests(unittest.TestCase):
         self.assertEqual(second["name"], "Moonlight (Copy 2)")
         self.assertNotEqual(first["projectPath"], second["projectPath"])
 
+    def test_duplicate_repairs_preview_filename_using_its_actual_container(self):
+        self.make_archive()
+        original = b'\x00\x00\x00\x20ftypisom\x00\x00\x02\x00mp4 source bytes'
+        self.preview.write_bytes(original)
+        self.metadata['previewVideoName'] = '0.5625 — opening breath and urgent appeal'
+        self.write_metadata()
+        copied = _duplicate_library_project_files(self.metadata, self.root, 'safe-copy')
+        destination = Path(copied['previewVideoPath'])
+        self.assertEqual(destination.suffix, '.mp4')
+        self.assertNotIn(' ', destination.name)
+        self.assertEqual(copied['previewVideoName'], '0.5625_opening_breath_and_urgent_appeal.mp4')
+        self.assertEqual(destination.read_bytes(), original)
+        self.assertEqual(self.preview.read_bytes(), original)
+
     def test_legacy_json_project_gets_updated_library_identity(self):
         self.archive.write_text(json.dumps({
             "app": "ltx-director-director",

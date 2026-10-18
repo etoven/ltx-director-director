@@ -11,7 +11,8 @@ import tempfile
 import zipfile
 from pathlib import Path
 
-from .media import APP_CACHE, video_source_dimensions
+from .media import (APP_CACHE, MEDIA_SUFFIXES, media_mime_from_header,
+                    safe_media_filename, video_source_dimensions)
 
 MANIFEST = "project.json"
 
@@ -45,7 +46,7 @@ def _source_stream(segment):
 
 def clear_archived_source(segment) -> None:
     """A replacement must never fall back to the previous image or its digest."""
-    for key in ("_archive_source", "_media_digest", "_source_size", "_materialized_stat"):
+    for key in ("_archive_source", "_media_digest", "_source_size", "_source_suffix", "_materialized_stat"):
         if hasattr(segment, key):
             delattr(segment, key)
 
@@ -100,12 +101,9 @@ def save_project_archive(path: str | Path, payload: dict, segments: list) -> Non
                 input_stream = original[1] if isinstance(original, tuple) else original
                 header = input_stream.read(4096)
                 input_stream.seek(0)
-                if segment.kind == "video" and header[4:8] == b"ftyp":
-                    member = f"media/{index:04d}.{'mov' if header[8:12] == b'qt  ' else 'mp4'}"
-                elif segment.kind == "video" and header.startswith(b"\x1aE\xdf\xa3"):
-                    member = f"media/{index:04d}.{'webm' if b'webm' in header else 'mkv'}"
-                elif segment.kind == "video" and header[:4] == b"RIFF" and header[8:12] == b"AVI ":
-                    member = f"media/{index:04d}.avi"
+                suffix = MEDIA_SUFFIXES.get(media_mime_from_header(header, suffix), suffix)
+                member = f"media/{index:04d}{suffix}"
+                frame["name"] = safe_media_filename(segment.name, f"Segment_{index + 1:02d}", suffix=suffix)
                 if isinstance(original, tuple):
                     input_archive, stream = original
                     try:
@@ -158,10 +156,20 @@ def save_project_archive(path: str | Path, payload: dict, segments: list) -> Non
         Path(temporary.name).unlink(missing_ok=True)
 
 
-def _cached_member(archive: zipfile.ZipFile, name: str, source_path: Path) -> Path:
+def _member_suffix(archive: zipfile.ZipFile, name: str) -> str:
+    with archive.open(name) as stream:
+        header = stream.read(4096)
+    return MEDIA_SUFFIXES.get(media_mime_from_header(header, Path(name).suffix), ".bin")
+
+
+def _member_cache_path(name: str, source_path: Path, suffix: str) -> Path:
     stat = source_path.stat()
     cache_key = hashlib.sha256(f"{source_path.resolve()}:{stat.st_size}:{stat.st_mtime_ns}:{name}".encode()).hexdigest()[:24]
-    path = APP_CACHE / "projects" / f"{cache_key}{Path(name).suffix}"
+    return APP_CACHE / "projects" / f"{cache_key}{suffix}"
+
+
+def _cached_member(archive: zipfile.ZipFile, name: str, source_path: Path) -> Path:
+    path = _member_cache_path(name, source_path, _member_suffix(archive, name))
     if not path.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_name(f"{path.name}.{os.getpid()}.tmp")
@@ -185,19 +193,24 @@ def load_project_archive(path: str | Path) -> dict:
             frame["_archivePreviewPath"] = str(_cached_member(archive, frame["archivePreview"], source))
             # Only the small preview is extracted at project-open time.
             info = archive.getinfo(frame["archiveSource"])
-            frame["_archiveMediaPath"] = str(APP_CACHE / "projects" / (
-                hashlib.sha256(f"{source.resolve()}:{source.stat().st_size}:{source.stat().st_mtime_ns}:{frame['archiveSource']}".encode()).hexdigest()[:24]
-                + Path(frame["archiveSource"]).suffix
-            ))
+            suffix = _member_suffix(archive, frame["archiveSource"])
+            frame["_archiveSourceSuffix"] = suffix
+            frame["name"] = safe_media_filename(frame.get("name", ""), "Segment", suffix=suffix)
+            frame["_archiveMediaPath"] = str(_member_cache_path(frame["archiveSource"], source, suffix))
             frame["_archiveSourceSize"] = info.file_size
         for ref in payload.get("minimaxH3", {}).get("referenceImages", []):
             if ref:
                 for key, archive_key in [('path','archiveMedia'),('audio_path','archiveAudio')]:
                     if ref.get(archive_key):
                         ref[key] = str(_cached_member(archive,ref[archive_key],source))
+                        if key == 'path':
+                            ref['name'] = safe_media_filename(ref.get('name', ''), 'Reference', suffix=Path(ref[key]).suffix)
             if ref and ref.get("archiveImage"):
                 raw = archive.read(ref["archiveImage"])
-                ref["image"] = f"data:{ref.get('imageMime', 'image/png')};base64," + base64.b64encode(raw).decode()
+                mime = media_mime_from_header(raw[:4096], Path(ref["archiveImage"]).suffix)
+                ref["imageMime"] = mime
+                ref["name"] = safe_media_filename(ref.get("name", ""), "Reference", suffix=MEDIA_SUFFIXES.get(mime, ".png"))
+                ref["image"] = f"data:{mime};base64," + base64.b64encode(raw).decode()
     return payload
 
 

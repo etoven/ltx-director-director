@@ -404,7 +404,7 @@ class UnifiedEditorTests(unittest.TestCase):
         self.app.processEvents()
         self.assertIs(w.options_row, w.sequence_controls)
         self.assertLessEqual(w.prompt_scope.width(), 100)
-        self.assertEqual(w.conditioning_guide.height(), 48)
+        self.assertGreaterEqual(w.conditioning_guide.height(), 96)
         self.assertEqual(w.start_button.text(), "Start")
         self.assertEqual(w.end_button.text(), "End")
         self.assertEqual(w.director_controls.count(), 3)
@@ -451,6 +451,7 @@ class UnifiedEditorTests(unittest.TestCase):
         self.assertFalse(w.timeline_fit_button.icon().isNull())
         self.assertGreaterEqual(w.timeline_fit_button.height(), 30)
         self.assertIn("Auto-fit", w.timeline_fit_button.toolTip())
+
         self.assertIs(w.ai_timeline_status.parent(), w.statusBar())
         self.assertTrue(w.director_intent_row.indexOf(w.magic_button) >= 0)
         self.assertEqual(w.magic_button.objectName(), "promptAction")
@@ -463,6 +464,74 @@ class UnifiedEditorTests(unittest.TestCase):
         self.assertGreaterEqual(w.minimax_panel.header.indexOf(w.combined_refine_button), 0)
         self.assertFalse(any(label.text() in {"TIMELINE", "OUTPUT", "SCALE"}
                              for label in w.timeline_shell.findChildren(QLabel)))
+
+    def test_conditioning_tiles_resize_collapse_and_restore(self):
+        from tempfile import TemporaryDirectory
+        from PIL import Image
+        from PySide6.QtCore import QPoint
+        from PySide6.QtTest import QTest
+        from PySide6.QtWidgets import QFrame, QLabel
+        with TemporaryDirectory() as folder:
+            image = Path(folder) / "frame.png"
+            Image.new("RGB", (160, 90), "blue").save(image)
+            w = self.make_window("minimax_frames")
+            w._close_saves_queued = True
+            w.segments = [Segment("Opening.png", str(image), str(image), "image", "start", "Open", 2),
+                          Segment("Ending.png", str(image), str(image), "image", "end", "Close", 3)]
+            w.refresh_timeline(0)
+            w.resize(1200, 920)
+            w.show()
+            self.app.processEvents()
+            tiles = w.conditioning_content.findChildren(QFrame, "conditioningTile")
+            self.assertEqual(len(tiles), 2)
+            self.assertGreaterEqual(tiles[0].width(), 160)
+            self.assertIn("Start", " ".join(label.text() for label in tiles[0].findChildren(QLabel)))
+            w.set_conditioning_height(220)
+            self.assertEqual(w.conditioning_guide.height(), 220)
+            self.assertGreater(w._conditioning_previews[0][0].height(), 80)
+            handle = w.conditioning_height_handle
+            QTest.mouseDClick(handle, Qt.MouseButton.LeftButton, pos=QPoint(20, 6))
+            self.app.processEvents()
+            self.assertTrue(w.conditioning_guide.isHidden())
+            self.assertFalse(handle.isHidden())
+            self.assertEqual(w.settings.value("conditioning_panel_height", -1, int), 0)
+            QTest.mouseDClick(handle, Qt.MouseButton.LeftButton, pos=QPoint(20, 6))
+            self.app.processEvents()
+            self.assertFalse(w.conditioning_guide.isHidden())
+            self.assertEqual(w.conditioning_guide.height(), 220)
+            start = w.conditioning_height
+            QTest.mousePress(handle, Qt.MouseButton.LeftButton, pos=QPoint(20, 6))
+            QTest.mouseMove(handle, QPoint(20, 36))
+            QTest.mouseRelease(handle, Qt.MouseButton.LeftButton, pos=QPoint(20, 6))
+            self.assertGreater(w.conditioning_height, start)
+
+    def test_new_project_is_in_library_immediately_and_keeps_unsaved_draft(self):
+        import json
+        import zipfile
+        from tempfile import TemporaryDirectory
+        from ltx_prompt_director import ui
+        w = self.make_window()
+        with TemporaryDirectory() as folder, patch.object(ui, "project_library_path", return_value=Path(folder)):
+            w.new_project()
+            first_id = w.current_project_id
+            self.assertTrue(first_id)
+            self.assertTrue((Path(folder) / f"{first_id}.meta.json").is_file())
+            archive = Path(folder) / f"{first_id}.LTXD"
+            with zipfile.ZipFile(archive) as project:
+                self.assertEqual(json.loads(project.read("project.json"))["frames"], [])
+            w.segments = [Segment("Draft", "", "", kind="text", prompt="Unsaved action")]
+            w.intent.setPlainText("Unsaved direction")
+            w.mark_dirty()
+            w.refresh_timeline(0)
+            w.new_project()
+            self.assertNotEqual(w.current_project_id, first_id)
+            self.assertEqual(len(w.library_records()), 2)
+            w.open_library_project(project_id=first_id)
+            self.assertEqual(w.current_project_id, first_id)
+            self.assertEqual(w.segments[0].prompt, "Unsaved action")
+            self.assertEqual(w.intent.toPlainText(), "Unsaved direction")
+            self.assertTrue(w.project_dirty)
+            w._close_saves_queued = True
 
     def test_dense_timeline_gutter_add_rail_and_refinement_styles(self):
         from ltx_prompt_director.ui import AIWorkingMarquee

@@ -8,7 +8,12 @@ Your project is more than a prompt. It includes the reference media, the timing,
 
 ## Save it with a name and a cover
 
-Choose **Save to Library**. Give a new project a name and a short description; later saves update that project. In project details, choose a segment frame as its cover or upload a custom thumbnail. A recognizable cover helps you find the right plan as the library grows.
+**New Project** immediately creates an empty **Untitled project** in the
+library. You can switch to another project and return to its working draft
+before saving manually. Rename it and add a description in **Properties**.
+Choose **Save to Library** to save its content; later saves update that same
+project. In project details, choose a segment frame as its cover or upload a
+custom thumbnail. A recognizable cover helps you find the right plan as the library grows.
 
 Open **Projects** from the toolbar. Select a saved project to return to it, or use its context menu to open it or edit the details. Search matches project names and descriptions. The **Icons** menu chooses small, medium or large cards.
 

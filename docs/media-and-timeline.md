@@ -33,10 +33,13 @@ Zoom all the way left also fits the sequence. Drag the dotted lower grip to
 make the visual previews taller. Smooth horizontal scrolling helps you move
 through longer plans.
 
-Use the reference strip beneath the timeline to inspect conditioning thumbnails
-and timing labels. Scroll horizontally to see additional references.
+The conditioning tiles beneath the timeline show larger previews, frame roles
+and timing values on separate lines. Scroll horizontally to see additional
+references. Drag the dotted handle beneath the tiles down to enlarge them, or
+up to hide the strip completely. Double-click that handle to hide or reopen
+the strip. Its size and collapsed state are remembered.
 
-![Zoom and Fit timeline beside the ruler, with a split text beat and roomier reference strip](images/timeline-navigation.png)
+![Timeline navigation and readable conditioning tiles with their own resize handle](images/timeline-navigation.png)
 
 There is no fixed segment-count or total-length cap in the editor. The renderer you use still determines which output lengths it can produce.
 
@@ -58,6 +61,11 @@ segment timing.
 Use **Replace media**, or hold **Ctrl** while dropping media onto a card, to retain its duration, prompt, role and identity while changing the source. This is useful when a revised pose or a cleaner frame is ready.
 
 An image card’s context menu includes **Copy image** and **Paste image to replace**, using the original-resolution source. For a text card, **Convert to image segment** lets you add an image while keeping the written beat. **Export image** and **Export video** place the original media in the project’s download folder.
+
+When opening older projects, Director checks the stored media type and
+normalizes media names and cache extensions. Duplicated attachments and media
+exports use safe filenames with the actual file extension, preserving the
+original source bytes.
 
 Delete a card with its close control, the toolbar’s **Delete selected** action or the context menu. Revisit the surrounding action after a large sequence change so the written transitions still describe the plan you intend.
 

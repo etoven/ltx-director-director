@@ -55,14 +55,21 @@ def thumbnail_for_image(path: str) -> str:
     return str(destination)
 
 
-def safe_media_filename(value: str, fallback_stem: str = "media") -> str:
+def safe_media_filename(value: str, fallback_stem: str = "media", *, suffix: str | None = None) -> str:
     """Return a filesystem-safe media name containing no whitespace."""
-    source = Path(value)
-    stem = re.sub(r"\s+", "_", source.stem.strip())
+    source = Path(str(value).replace("\\", "/"))
+    extension = source.suffix if re.fullmatch(r"\.[A-Za-z][A-Za-z0-9]{0,11}", source.suffix) else ""
+    stem = source.name[:-len(extension)] if extension else source.name
+    stem = re.sub(r"\s+", "_", stem.strip())
     stem = re.sub(r'[^\w.-]+', "_", stem, flags=re.UNICODE)
     stem = re.sub(r"_+", "_", stem).strip("._-") or fallback_stem
-    suffix = re.sub(r'[^A-Za-z0-9.]', "", source.suffix)
-    return f"{stem}{suffix}"
+    if stem.split(".", 1)[0].upper() in {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}:
+        stem = "_" + stem
+    stem = stem.encode("utf-8")[:150].decode("utf-8", errors="ignore").rstrip(" .")
+    actual_suffix = extension if suffix is None else suffix
+    if actual_suffix and not re.fullmatch(r"\.[A-Za-z][A-Za-z0-9]{0,11}", actual_suffix):
+        actual_suffix = ""
+    return f"{stem}{actual_suffix}"
 
 
 def unique_media_filename(filename: str, used_names: set[str]) -> str:
@@ -80,7 +87,8 @@ def unique_media_filename(filename: str, used_names: set[str]) -> str:
 def copy_media_for_export(source_path: str, display_name: str, destination: Path, used_names: set[str], fallback_stem: str) -> Path:
     """Copy media into ComfyUI with a safe, collision-free filename."""
     source = Path(source_path)
-    name = unique_media_filename(safe_media_filename(display_name or source.name, fallback_stem), used_names)
+    suffix = media_suffix(source, source.suffix)
+    name = unique_media_filename(safe_media_filename(display_name or source.name, fallback_stem, suffix=suffix), used_names)
     target = destination / name
     if source.resolve() != target.resolve():
         shutil.copy2(source, target)
@@ -94,14 +102,32 @@ def comfy_input_references(filename: str, subfolder: str = "whatdreamscost") -> 
     return relative, preview
 
 
+MEDIA_SUFFIXES = {"video/mp4": ".mp4", "video/webm": ".webm", "video/quicktime": ".mov",
+                  "video/x-matroska": ".mkv", "video/x-msvideo": ".avi",
+                  "image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp",
+                  "image/gif": ".gif", "image/bmp": ".bmp", "image/tiff": ".tiff",
+                  "image/heif": ".heif", "image/avif": ".avif", "audio/mp4": ".m4a",
+                  "audio/wav": ".wav", "audio/mpeg": ".mp3", "audio/flac": ".flac",
+                  "audio/ogg": ".ogg", "audio/aac": ".aac"}
+
+
+def media_suffix(path: str | Path, fallback: str = "") -> str:
+    return MEDIA_SUFFIXES.get(media_mime(path), fallback)
+
+
 def media_mime(path: str | Path) -> str:
     """Identify cached/archived media by its bytes, regardless of its filename."""
     source = Path(path)
     with source.open("rb") as stream:
         header = stream.read(4096)
+    return media_mime_from_header(header, source.suffix)
+
+
+def media_mime_from_header(header: bytes, suffix: str = "") -> str:
+    """Shared signature detection for real files and lazy archive members."""
     if header[4:8] == b"ftyp":
         brand = header[8:12]
-        if brand in {b"M4A ", b"M4B "} or source.suffix.lower() == ".m4a":
+        if brand in {b"M4A ", b"M4B "} or suffix.lower() == ".m4a":
             return "audio/mp4"
         if brand == b"qt  ":
             return "video/quicktime"
@@ -126,7 +152,8 @@ def media_mime(path: str | Path) -> str:
             ".mkv": "video/x-matroska", ".avi": "video/x-msvideo", ".m4v": "video/mp4",
             ".wav": "audio/wav", ".mp3": "audio/mpeg", ".flac": "audio/flac",
             ".ogg": "audio/ogg", ".m4a": "audio/mp4", ".aac": "audio/aac",
-            ".opus": "audio/ogg"}.get(source.suffix.lower(), _image_mime(source))
+            ".opus": "audio/ogg", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+            ".png": "image/png", ".webp": "image/webp", ".gif": "image/gif"}.get(suffix.lower(), "application/octet-stream")
 
 
 def data_url(path: str, max_edge: int | None = None, quality: int = 82) -> str:
