@@ -6069,8 +6069,13 @@ class MainWindow(QMainWindow):
         self.update_counts()
 
     def reload_clicked_segment(self, item: QListWidgetItem) -> None:
-        """Refresh prompt text when the clicked segment is already selected."""
-        self.refresh_segment_prompt_box(self.timeline.row(item))
+        """A timeline click targets the segment, even when already selected."""
+        row = self.timeline.row(item)
+        if self.ai_busy or not 0 <= row < len(self.segments):
+            return
+        if self.unified_workspace and not self.prompt_only_workspace:
+            self.prompt_scope.setCurrentIndex(self.prompt_scope.findData("segment"))
+        self.refresh_segment_prompt_box(row)
 
     def refresh_segment_prompt_box(self, row: int) -> None:
         """Update only the segment prompt box, preserving all other editor state."""

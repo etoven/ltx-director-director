@@ -112,6 +112,33 @@ class UnifiedEditorTests(unittest.TestCase):
         self.assertEqual(w.minimax_prompt_text, master)
         self.assertEqual(w.paragraph_review.pending_count, 0)
 
+    def test_timeline_click_switches_to_segment_scope_including_reselected_card(self):
+        from PySide6.QtTest import QTest
+        w = self.make_window("minimax_frames")
+        w.intent.setPlainText("Keep the whole-sequence direction")
+        w.global_prompt.setPlainText("Keep the global prompt")
+        w.unified_prompt.setPlainText("Keep the production draft")
+        before = [segment.to_dict() for segment in w.segments]
+        w.show()
+        self.app.processEvents()
+        for row in (1, 1, 0):
+            w.prompt_scope.setCurrentIndex(w.prompt_scope.findData("global"))
+            item = w.timeline.item(row)
+            w.timeline.scrollToItem(item)
+            self.app.processEvents()
+            QTest.mouseClick(w.timeline.viewport(), Qt.MouseButton.LeftButton,
+                            pos=w.timeline.visualItemRect(item).center())
+            self.assertEqual(w.prompt_scope.currentData(), "segment")
+            self.assertEqual(w.intent_segment_prompt.toPlainText(), w.segments[row].prompt)
+            self.assertEqual(w.director_intent_stack.currentIndex(), 1)
+        self.assertEqual([segment.to_dict() for segment in w.segments], before)
+        self.assertEqual(w.intent.toPlainText(), "Keep the whole-sequence direction")
+        self.assertEqual(w.global_prompt.toPlainText(), "Keep the global prompt")
+        self.assertEqual(w.unified_prompt.toPlainText(), "Keep the production draft")
+        w.prompt_scope.setCurrentIndex(w.prompt_scope.findData("global"))
+        w.refresh_timeline(1)
+        self.assertEqual(w.prompt_scope.currentData(), "global")
+
     def test_segment_context_menu_has_manual_generate_artwork(self):
         w = self.make_window("minimax_frames")
         w.resize(1150, 820)
