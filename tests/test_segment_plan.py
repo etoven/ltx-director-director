@@ -107,6 +107,58 @@ class SegmentPlanTests(unittest.TestCase):
         self.assertIn("AUTHORITATIVE COMBINED PROMPT", captured["rules"])
         self.assertIn("retime", captured["rules"].lower())
 
+    def test_reverse_sync_uses_every_segment_as_authoritative(self):
+        originals = seeded()
+        originals.insert(1, Segment("Action", "", "", "text", "text",
+                                    "Intermediate change", 2.5, id="middle"))
+        supplied = [
+            {"name": "First", "kind": "image", "role": "start",
+             "image": "data:image/png;base64,AAAA"},
+            {"name": "Second", "kind": "image", "role": "end",
+             "image": "data:image/png;base64,BBBB"},
+        ]
+        seen = {}
+        def reply(inputs, provider, model, key, rules, timeout):
+            seen["rules"] = rules
+            seen["inputs"] = inputs
+            return json.dumps({"prompt": "All three timeline beats in order"})
+        with (patch.object(segment_plan.ai, "_minimax_frames_inputs", return_value=supplied),
+              patch.object(segment_plan.ai, "_provider_raw", side_effect=reply)):
+            result = segment_plan.sync_combined_from_timeline(
+                originals, "gemini", "gemini-3.5-flash", "key", "Old combined",
+                40, [], "minimax_frames", "frames", "Final notes")
+        self.assertEqual(result["prompt"], "All three timeline beats in order")
+        for sid in ("seg-a", "middle", "seg-b"):
+            self.assertIn(sid, seen["rules"])
+        self.assertIn("Intermediate change", seen["rules"])
+        self.assertIn("Final notes", seen["rules"])
+        self.assertIn("ALL CURRENT TIMELINE SEGMENTS", seen["rules"])
+        self.assertNotIn("segments", result)
+
+    def test_global_magic_refinement_uses_all_existing_prompts_and_count(self):
+        from ltx_prompt_director import ai
+        items = seeded()
+        seen = {}
+        def reply(images, provider, model, key, rules, timeout):
+            seen["rules"] = rules
+            seen["images"] = images
+            return json.dumps({"globalPrompt": "Same subject across whole story",
+                "segments": [
+                    {"prompt": "Improved introduction", "duration": 1.5},
+                    {"prompt": "Improved final beat", "duration": 4.5},
+                ]})
+        with patch.object(ai, "_provider_raw", side_effect=reply):
+            result = ai.refine_sequence_prompts(
+                items, "gemini", "gemini-3.5-flash", "key",
+                "/refine-global Make progress gradual", "Old global text",
+                False, False, False, False, 40)
+        self.assertEqual(len(result["segments"]), 2)
+        self.assertEqual(result["segments"][0]["prompt"], "Improved introduction")
+        self.assertIn("Old A", seen["rules"])
+        self.assertIn("Old B", seen["rules"])
+        self.assertIn("Make progress gradual", seen["rules"])
+        self.assertIn("SEQUENCE-WIDE MAGIC BUILD REFINEMENT", seen["rules"])
+
     def test_gpt_six_gate(self):
         self.assertTrue(segment_plan.supports_structured_edit("chatgpt", "gpt-6"))
         self.assertTrue(segment_plan.supports_structured_edit("openai", "gpt-6.1-mini"))
