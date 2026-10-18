@@ -3898,11 +3898,12 @@ class MainWindow(QMainWindow):
         segment_label.setObjectName("sectionLabel")
         self.segment_header.addWidget(segment_label)
         self.prompt_scope = QComboBox()
-        self.prompt_scope.addItem("Intent", "global")
+        self.prompt_scope.addItem("Global", "global")
         self.prompt_scope.addItem("Segment", "segment")
         self.prompt_scope.setToolTip(
-            "Choose the text shown in the Director's Intent editor. "
-            "This does not change AI refinement scope."
+            "Global: generate/refine the entire timeline from Director's Intent "
+            "and rebuild the combined prompt. Segment: generate/refine only "
+            "the selected segment without changing its neighbors."
         )
         self.prompt_scope.setMinimumWidth(0)
         self.prompt_scope.setAccessibleName("Prompt editor scope")
