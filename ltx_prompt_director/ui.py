@@ -6861,10 +6861,9 @@ class MainWindow(QMainWindow):
             "Sequence updated; rebuilding combined prompt…" if cascade
             else "Magic Build complete")
         if cascade and self.unified_workspace:
-            # The top Global operation updates its entire child sequence first.
-            # Only then rebuild the lower combined production prompt. This is
-            # one downward cascade, never a second timeline-generation action.
-            self._generate_minimax_prompt(self.minimax_prompt_mode)
+            # A one-way rebuild preserves the sequence JUST produced by Magic
+            # Build. Never run another combined-plan rewrite over these edits.
+            self.sync_combined_from_segments()
 
     def store_minimax_draft(self) -> None:
         self.minimax_drafts[self.workspace_draft_key] = {
@@ -7565,10 +7564,11 @@ class MainWindow(QMainWindow):
         selected_text = global_text if global_scope else segment_text
         upper_has_target = bool(self.segments) and (global_scope or selected is not None)
         self.primary_ai_command = "refine" if self.minimax_prompt_text.strip() else "generate"
-        self.magic_button.setText("✦ Generate")
         self.magic_button.setEnabled(available and upper_has_target)
         self.prompt_refine_button.setEnabled(
-            available and upper_has_target and bool(selected_text.strip()))
+            available and upper_has_target
+            and (bool(selected_text.strip()) if not global_scope else bool(
+                selected_text.strip() or any(item.prompt.strip() for item in self.segments))))
         self.combined_generate_button.setEnabled(
             available and self.unified_workspace and not self.prompt_only_workspace
             and bool(self.segments))
@@ -8778,6 +8778,7 @@ class MainWindow(QMainWindow):
         animation.start()
 
     def magic_failed(self, message: str) -> None:
+        self.global_build_cascade_requested = False
         self.set_ai_controls_enabled(True)
         self.magic_overlay.hide_overlay()
         title = getattr(self, "ai_activity_title", "AI operation")
