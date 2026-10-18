@@ -124,6 +124,11 @@ def toolbar_icon(name: str) -> QIcon:
     return QIcon(str(files("ltx_prompt_director").joinpath(f"assets/toolbar-{name}.svg")))
 
 
+def prompt_action_icon(name: str) -> QIcon:
+    """Small, high-contrast SVG icons for prompt generation and synchronization."""
+    return QIcon(str(files("ltx_prompt_director").joinpath(f"assets/ai-{name}.svg")))
+
+
 def _export_segment_source(segment: Segment, target: Path):
     source = Path(materialize_source(segment))
     if not source.is_file():
@@ -3790,12 +3795,12 @@ class MainWindow(QMainWindow):
             toggle.setObjectName("directorOption")
             toggle.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         # The upper prompt editor has a dedicated, fixed pair of actions.
-        self.magic_button = QPushButton("✦ Generate")
+        self.magic_button = QPushButton("Generate")
         self.magic_button.setObjectName("promptAction")
         self.magic_button.setAccessibleName("Generate selected segment or entire sequence (Global)")
         self.magic_button.clicked.connect(self.generate_upper_prompt)
         self.prompt_generate_button = self.magic_button
-        self.prompt_refine_button = QPushButton("✦ Refine")
+        self.prompt_refine_button = QPushButton("Refine")
         self.prompt_refine_button.setObjectName("promptAction")
         self.prompt_refine_button.setAccessibleName("Refine selected segment or entire sequence (Global)")
         self.prompt_refine_button.clicked.connect(self.refine_upper_prompt)
@@ -4016,34 +4021,33 @@ class MainWindow(QMainWindow):
         self.unified_count.setObjectName("muted")
         # Heading, character count, cache state and copy share ONE title bar.
         self.minimax_panel.header.insertWidget(1, self.unified_count)
-        self.sync_timeline_button = QPushButton("⇄ Sync Timeline")
+        self.sync_timeline_button = QPushButton("")
         self.sync_timeline_button.setObjectName("refineButton")
         self.sync_timeline_button.setToolTip(
-            "Match timeline segment wording and timing to the combined prompt below. "
-            "The combined prompt is never regenerated or changed. "
-            "Existing frames and videos are preserved.")
+            "↓ Combined prompt → Timeline: match the complete sequence to the "
+            "combined prompt. Combined prose and real media stay unchanged.")
         self.sync_timeline_button.setAccessibleName("Sync timeline from combined prompt")
         self.sync_timeline_button.clicked.connect(self.sync_timeline_from_prompt)
         self.sync_timeline_button.setSizePolicy(
             QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        self.combined_generate_button = QPushButton("✦ Generate")
+        self.combined_generate_button = QPushButton("Generate")
         self.combined_generate_button.setObjectName("promptAction")
         self.combined_generate_button.setAccessibleName("Generate combined prompt")
         self.combined_generate_button.setToolTip(
             "Generate from all timeline segments and final prompt notes.")
         self.combined_generate_button.clicked.connect(self.generate_combined_prompt)
-        self.combined_refine_button = QPushButton("✦ Refine")
+        self.combined_refine_button = QPushButton("Refine")
         self.combined_refine_button.setObjectName("promptAction")
         self.combined_refine_button.setAccessibleName("Refine combined prompt")
         self.combined_refine_button.setToolTip(
             "Refine the combined prompt with the full sequence and final prompt notes.")
         self.combined_refine_button.clicked.connect(self.refine_combined_prompt)
-        self.sync_combined_button = QPushButton("⇄ Sync Combined")
+        self.sync_combined_button = QPushButton("")
         self.sync_combined_button.setObjectName("refineButton")
         self.sync_combined_button.setAccessibleName("Sync combined prompt from all timeline segments")
         self.sync_combined_button.setToolTip(
-            "Reverse sync: use ALL timeline segments and their media as authoritative; "
-            "update only the combined prompt, leaving every segment unchanged.")
+            "↑ ALL Timeline Segments → Combined Prompt: rebuild the combined "
+            "prose from the entire ordered sequence, leaving segments unchanged.")
         self.sync_combined_button.clicked.connect(self.sync_combined_from_segments)
         self.minimax_panel.header.addWidget(self.combined_generate_button)
         self.minimax_panel.header.addWidget(self.combined_refine_button)
@@ -4564,13 +4568,26 @@ class MainWindow(QMainWindow):
         for button in (self.provider_button, self.refine_timing_button,
                        self.refine_prompt_button, self.start_button, self.end_button):
             button.setMinimumWidth(button.fontMetrics().horizontalAdvance(button.text()) + metric(18))
-        for action in (self.magic_button, self.prompt_refine_button,
-                       self.combined_generate_button, self.combined_refine_button):
+        for action, image in (
+            (self.magic_button, "action-generate"),
+            (self.prompt_refine_button, "action-refine"),
+            (self.combined_generate_button, "action-generate"),
+            (self.combined_refine_button, "action-refine"),
+        ):
+            action.setIcon(prompt_action_icon(image))
+            action.setIconSize(QSize(metric(15), metric(15)))
             action.setFixedHeight(metric(23))
             action.setMinimumWidth(0)
-            action.setFixedWidth(
-                max(metric(75), action.fontMetrics().horizontalAdvance(action.text()) + metric(12))
-            )
+            action.setFixedWidth(max(
+                metric(71),
+                action.fontMetrics().horizontalAdvance(action.text()) + metric(26)))
+        for action, image in (
+            (self.sync_timeline_button, "sync-down"),
+            (self.sync_combined_button, "sync-up"),
+        ):
+            action.setIcon(prompt_action_icon(image))
+            action.setIconSize(QSize(metric(18), metric(18)))
+            action.setFixedSize(metric(27), metric(23))
         self.output_width.setMinimumWidth(metric(74))
         self.output_height.setMinimumWidth(metric(74))
         self.duration_spin.setFixedWidth(metric(68))
