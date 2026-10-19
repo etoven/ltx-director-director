@@ -24,9 +24,30 @@ Refinement uses only your current prompt and its inline annotations. It preserve
 
 ## Edit the beats, then develop the full prompt
 
-MiniMax adds an editable **Unified Prompt** below the segment editor. Write or paste the production draft directly. After segment changes, **Regenerate** in the change notice rebuilds it from the current segments, reference roles and creative direction using the selected template. The unified box keeps a clear writing space; segment refinement and timing remain in the upper controls.
+MiniMax adds an editable **Unified Prompt** below the segment editor. Write or paste the production draft directly. Use its **Generate** button to rebuild it from the current segments, reference roles and creative direction using the selected template. Segment refinement and timing remain in the upper controls.
 
-The two editors retain separate text. Pasting or editing the unified prompt does not change the timeline. Changing segments marks the production draft as needing an update; regenerate when you want to incorporate those changes. Your manual draft remains available until you choose to replace it.
+The two editors retain separate text. Pasting or editing the unified prompt does not change the timeline. Manual timing edits update recognized timecodes locally. Segment wording reaches the unified draft through the local review below or an explicit Generate/Refine action.
+
+MiniMax gives each recognized shot passage a soft highlight. Its boundary starts
+at the timecode (or the first shot's untimed text) and ends before the next
+`[Shot N]` label. Blank lines between shots and the sound/music sections stay
+outside the highlight.
+
+Generate and Refine include a timecode on the first shot, including when
+refining an older untimed draft. A first start frame uses `00:00.00`; a first
+end frame uses its segment end time, such as `00:03.00` for a three-second
+segment. Prompt-only refinement preserves an existing opening timecode.
+Older untimed first shots remain editable in saved projects.
+
+While you type in a selected segment's prompt box, the unified editor scrolls
+to that passage and previews its wording changes in red and green. **Approve**
+keeps the change in that passage only; **Reject** keeps the original unified
+text. Clicking away from the segment editor also rejects an unapproved
+preview. Your segment edit stays saved either way. The shot label, timecode,
+comma/space separators, other shots and their spacing stay intact. These edits
+run locally without an AI request.
+
+![A live red/green review confined to the selected MiniMax shot, with Approve and Reject controls](images/segment-prompt-live-review.png)
 
 The lower **Generate** button rebuilds the production brief from every current
 timeline segment, including newly split or inserted beats. Current segment

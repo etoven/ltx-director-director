@@ -65,7 +65,9 @@ from .spellcheck import install_spellcheck
 from .prompt_tags import prompt_content, consume_global_refinements, install_prompt_tags, render_prompt_notes, insert_note
 from .quick_fixes import QuickFixEditor, load_presets, preset_groups
 from .inline_cues import PromptTextEdit
-from .prompt_timecodes import document_cues, retime_prompt
+from .prompt_timecodes import retime_prompt
+from .prompt_sections import document_sections
+from .segment_prompt_review import SegmentPromptReview
 
 FPS = 24
 MIN_DURATION = 0.01
@@ -3449,6 +3451,7 @@ class MainWindow(QMainWindow):
         self.magic_overlay = MagicBuildOverlay(self)
         self.inline_typing = LiveTypingPreview(self)
         self.paragraph_review = ParagraphDiffReview(self)
+        self.segment_prompt_review = SegmentPromptReview(self)
         self.reasoning_dock = ReasoningActivityDock(self)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.reasoning_dock)
         geometry = self.settings.value("window/geometry")
@@ -5294,6 +5297,7 @@ class MainWindow(QMainWindow):
         }
 
     def restore_workspace_state(self, state: dict) -> None:
+        self.reject_segment_prompt_review()
         self.shot_sequence_settings = shot_settings(state.get("shotSequence"))
         self._loading = True
         self.workspace_revision += 1
@@ -5683,6 +5687,7 @@ class MainWindow(QMainWindow):
         QApplication.processEvents(QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents)
 
     def closeEvent(self, event) -> None:
+        self.reject_segment_prompt_review()
         if hasattr(self, "shot_sequence_panel"):
             self.shot_sequence_panel.deactivate()
         if not self._close_saves_queued:
@@ -5793,6 +5798,7 @@ class MainWindow(QMainWindow):
                 self.refresh_project_library(self.current_project_id)
 
     def new_project(self) -> None:
+        self.reject_segment_prompt_review()
         self._open_serial += 1
         self.stage_current_workspace()
         if self.current_project_id:
@@ -6183,6 +6189,7 @@ class MainWindow(QMainWindow):
     def sync_order(self) -> None:
         if self._loading:
             return
+        self.reject_segment_prompt_review()
         ordered_ids = [self.timeline.item(row).data(Qt.ItemDataRole.UserRole) for row in range(self.timeline.count())]
         self.segments = order_segments_by_ids(self.segments, ordered_ids)
         self.retime_unified_prompt()
@@ -6207,6 +6214,7 @@ class MainWindow(QMainWindow):
         return self.segments[row] if 0 <= row < len(self.segments) else None
 
     def load_editor(self, row: int) -> None:
+        self.reject_segment_prompt_review()
         self._loading = True
         segment = self.current_segment()
         self.duration_spin.setMaximum(self.available_segment_duration(segment))
@@ -6286,6 +6294,7 @@ class MainWindow(QMainWindow):
                     card.set_text_preview(self.current_segment().prompt)
             self.mark_dirty()
             self.update_counts()
+            self.preview_segment_in_unified(self.segment_prompt)
 
     def refresh_text_segment_previews(self) -> None:
         by_id = {segment.id: segment for segment in self.segments}
@@ -6941,6 +6950,8 @@ class MainWindow(QMainWindow):
             self.ai_review_baseline = baseline
 
     def set_ai_controls_enabled(self, enabled: bool) -> None:
+        if not enabled:
+            self.reject_segment_prompt_review()
         self.ai_busy = not enabled
         self.update_sync_timeline_enabled()
         # While streaming, every text source and timeline mutation control is
@@ -7524,6 +7535,7 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("Some workspace definitions could not be loaded. Review Settings → Workspaces.")
 
     def set_project_type(self, project_type: str) -> None:
+        self.reject_segment_prompt_review()
         if project_type not in self.workspace_definitions:
             project_type = {'minimax_frames': 'minimax_base_guide', 'minimax_references': 'minimax_full_reference_guide'}.get(project_type, project_type)
         if project_type not in self.workspace_definitions or project_type == self.project_type:
@@ -7830,6 +7842,7 @@ class MainWindow(QMainWindow):
         self.queue_settings_sync()
 
     def prompt_scope_changed(self, _index: int) -> None:
+        self.reject_segment_prompt_review()
         # This selects the displayed Director's Intent editor, NOT an AI action.
         self.refresh_director_scope_editor()
         self.refresh_primary_ai_action()
@@ -7854,6 +7867,7 @@ class MainWindow(QMainWindow):
         self.mark_dirty()
         self.refresh_primary_ai_action()
         self.update_counts()
+        self.preview_segment_in_unified(self.intent_segment_prompt)
 
     def refresh_director_scope_editor(self) -> None:
         if not hasattr(self, "director_intent_stack"):
@@ -7883,6 +7897,7 @@ class MainWindow(QMainWindow):
         self.refresh_primary_ai_action()
 
     def refresh_shared_editor(self) -> None:
+        self.reject_segment_prompt_review()
         if hasattr(self, "paragraph_review"):
             self.finish_prompt_reviews()
         # Workspace navigation and prompt-scope changes must never replace an
@@ -8336,6 +8351,7 @@ class MainWindow(QMainWindow):
         """Follow timeline edits locally without regenerating the production draft."""
         if self._loading or self.ai_busy or not self.unified_workspace or self.prompt_only_workspace:
             return
+        self.reject_segment_prompt_review()
         # A diff projection is display text. Never patch it as an authored draft.
         for review in (getattr(self, 'inline_typing', None), getattr(self, 'paragraph_review', None)):
             if review is not None and review.editor is self.unified_prompt:
@@ -8352,13 +8368,28 @@ class MainWindow(QMainWindow):
         if not self.unified_workspace or self.prompt_only_workspace:
             self.unified_prompt.setExtraSelections([])
             return
+        if getattr(self, 'segment_prompt_review', None) and self.segment_prompt_review.active:
+            return
         for review in (getattr(self, 'inline_typing', None), getattr(self, 'paragraph_review', None)):
             if review is not None and review.editor is self.unified_prompt:
                 return
         row = self.timeline.currentRow()
         selections = []
-        cue = next((cue for index, cue in enumerate(document_cues(self.unified_prompt))
-                    if index == row), ()) if row >= 0 else ()
+        sections = document_sections(self.unified_prompt)
+        selected = next((section for section in sections if section.index == row), None)
+        if self.workspace_engine.startswith('minimax_'):
+            for section in sections:
+                selection = QTextEdit.ExtraSelection()
+                selection.cursor = QTextCursor(self.unified_prompt.document())
+                selection.cursor.setPosition(section.start)
+                selection.cursor.setPosition(section.end, QTextCursor.MoveMode.KeepAnchor)
+                color = QColor('#6f9faf')
+                color.setAlpha(35 if section is selected else 18)
+                selection.format.setBackground(color)
+                selection.format.setProperty(int(QTextCharFormat.Property.UserProperty) + 32, True)
+                selections.append(selection)
+        code_selections = []
+        cue = selected.codes if selected is not None else ()
         for start, code in cue:
             selection = QTextEdit.ExtraSelection()
             selection.cursor = QTextCursor(self.unified_prompt.document())
@@ -8367,15 +8398,41 @@ class MainWindow(QMainWindow):
             selection.format.setBackground(QColor('#80612a'))
             selection.format.setForeground(QColor('#fff0bf'))
             selections.append(selection)
+            code_selections.append(selection)
         self.unified_prompt.setExtraSelections(selections)
-        if scroll and selections:
+        if scroll and selected is not None:
             segment = self.current_segment()
-            cursor = selections[-1 if segment and segment.role == 'end' else 0].cursor
-            cursor.setPosition(cursor.selectionEnd())
+            if code_selections:
+                cursor = code_selections[-1 if segment and segment.role == 'end' else 0].cursor
+                cursor.setPosition(cursor.selectionEnd())
+            else:
+                cursor = QTextCursor(self.unified_prompt.document())
+                cursor.setPosition(selected.body_start)
             self.unified_prompt.setTextCursor(cursor)
             self.unified_prompt.ensureCursorVisible()
 
+    def reject_segment_prompt_review(self) -> None:
+        review = getattr(self, 'segment_prompt_review', None)
+        if review is not None:
+            review.reject()
+
+    def preview_segment_in_unified(self, editor) -> None:
+        if (self._loading or self.ai_busy or not self.unified_workspace or self.prompt_only_workspace
+                or self.prompt_scope.currentData() != 'segment'
+                or not self.workspace_engine.startswith('minimax_') or not editor.hasFocus()):
+            return
+        self.finish_prompt_reviews()
+        self.segment_prompt_review.preview(editor, editor.toPlainText())
+
     def minimax_editor_changed(self) -> None:
+        review = getattr(self, 'segment_prompt_review', None)
+        if review is not None and review.active:
+            # An external result replaces the temporary projection. Restore the
+            # real document first so the result never becomes diff markup.
+            value = self.unified_prompt.toPlainText()
+            review.reject()
+            self.unified_prompt.setPlainText(value)
+            return
         if self._loading or not self.minimax_panel or not self.unified_workspace:
             return
         value = self.unified_prompt.toPlainText()
@@ -9674,6 +9731,7 @@ class MainWindow(QMainWindow):
         }
 
     def load_project_payload(self, payload: dict) -> None:
+        self.reject_segment_prompt_review()
         self.shot_sequence_settings = shot_settings(payload.get("shotSequence"))
         if payload.get("app") not in {"ltx-director-director", "ltx-prompt-director-python"}:
             raise ValueError("This is not an Prompt Director project file.")

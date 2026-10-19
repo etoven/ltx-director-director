@@ -137,7 +137,8 @@ def test_click_navigates_after_start_code_even_when_already_selected(window, app
     expected = list(document_cues(editor))[1][0][0] + 8
     assert editor.textCursor().position() == expected
     assert editor.verticalScrollBar().value() > 0
-    assert [s.cursor.selectedText() for s in editor.extraSelections()] == ['00:02.00', '00:05.00']
+    assert [s.cursor.selectedText() for s in editor.extraSelections()
+            if not s.format.property(int(s.format.Property.UserProperty) + 32)] == ['00:02.00', '00:05.00']
     cursor = editor.textCursor()
     cursor.setPosition(0)
     editor.setTextCursor(cursor)

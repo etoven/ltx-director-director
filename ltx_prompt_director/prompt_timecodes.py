@@ -91,13 +91,17 @@ def retime_prompt(editor, durations: list[float], roles: list[str] | None = None
     Broken codes are skipped; extra cues remain authored. Matching starts over
     on every timeline edit, so repairing a code reconnects it automatically.
     """
+    # Imported here because the section parser shares the timecode tokenizer.
+    from .prompt_sections import document_sections
+
     boundaries = [0.0]
     for duration in durations:
         boundaries.append(boundaries[-1] + duration)
     replacements = []
-    for cue_index, cue in enumerate(document_cues(editor)):
+    for section in document_sections(editor):
+        cue_index, cue = section.index, section.codes
         if cue_index >= len(durations):
-            break
+            continue
         for endpoint, (start, template) in enumerate(cue):
             if len(cue) == 1 and roles is not None and roles[cue_index] == 'end':
                 endpoint = 1

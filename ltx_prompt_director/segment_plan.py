@@ -14,6 +14,7 @@ from uuid import uuid4
 from . import ai
 from .models import Segment
 from .timing_limits import SHOT_COUNT_LIMIT
+from .prompt_templates import MINIMAX_SHOT_TIMING
 
 def supports_structured_edit(provider, model):
     name = str(model).lower()
@@ -574,8 +575,9 @@ def sync_combined_from_timeline(segments, provider, model, api_key,
         + "\n\nPREVIOUS COMBINED PROMPT (reuse only compatible details):\n"
         + (str(current_combined_prompt).strip() or "[No previous combined prompt]")
     )
+    timing = MINIMAX_SHOT_TIMING if workspace_engine.startswith('minimax_') else ''
     raw = ai._structured_raw(inputs, provider, model, api_key,
-                           rules + ai.CONTENT_FIDELITY + ai.FRAME_MOTION_GUIDANCE, timeout, schema=response_schemas.PROMPT)
+                           rules + ai.CONTENT_FIDELITY + ai.FRAME_MOTION_GUIDANCE + timing, timeout, schema=response_schemas.PROMPT)
     result = ai._parse_json(raw)
     if not isinstance(result, dict):
         raise ai.AIResponseFormatError("Reverse timeline sync returned no JSON prompt.")

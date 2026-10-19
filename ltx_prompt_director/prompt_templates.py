@@ -9,6 +9,44 @@ from string import Template
 
 WORKSPACE_PROMPTS = ContextVar("workspace_prompts", default=None)
 
+MINIMAX_FIRST_SHOT = "[Shot 1] At MM:SS.xx, ..."
+MINIMAX_SHOT_TIMING = (
+    "\n\nMINIMAX FIRST-SHOT TIMING — APPLICATION REQUIREMENT: Whenever the "
+    "production prompt uses [Shot N] markers, ALWAYS include an explicit "
+    "timecode on the first actual shot during generation AND refinement, "
+    "using `[Shot 1] At MM:SS.xx, ...`. Use the corresponding timeline segment's "
+    "role and cumulative boundary: START uses the segment's start time; END "
+    "uses the segment's end time. For example, a first START frame is "
+    "`[Shot 1] At 00:00.00, ...`, but a first END frame with a 3-second "
+    "segment is `[Shot 1] At 00:03.00, ...`. Never force an END frame's "
+    "timecode to zero. Text-only segments use their start boundary. Add the "
+    "missing timestamp to an older untimed first shot. When no timeline is "
+    "supplied, preserve an existing first-shot timecode; use zero only for an "
+    "untimed opening with no other timing evidence. This requirement overrides "
+    "older examples that omit timestamps or force all openings to zero. Keep "
+    "later timestamps at their actual role-aware timeline boundaries. Preserve "
+    "all other wording, reference alignment, shot count and timeline durations "
+    "unless the requested edit changes them. Do not invent shots or cuts for a "
+    "prompt without shot markers."
+)
+
+
+def minimax_timing_template(source: str) -> str:
+    """Resolve known old timing instructions without rewriting saved workspaces."""
+    source = source.replace(
+        "Do not add a timestamp to the first shot.",
+        f"Always time-code the first shot as `{MINIMAX_FIRST_SHOT}` using its frame role.")
+    source = source.replace(
+        "Use [Shot 1] for the actual opening shot, with no timestamp on that label.",
+        f"Use {MINIMAX_FIRST_SHOT} for the actual opening shot, using its frame role.")
+    source = source.replace(
+        "`[Shot 1]` marks the opening shot and has no timestamp.",
+        "`[Shot 1]` marks the opening shot and includes its role-aware timecode.")
+    if MINIMAX_SHOT_TIMING not in source:
+        source += MINIMAX_SHOT_TIMING
+    return source
+
+
 CONTENT_FIDELITY = (
     "\n\nDETAIL FIDELITY TAKES PRIORITY OVER LENGTH GUIDANCE: Treat workspace "
     "word counts, sentence counts, compactness advice and assumed prompt/context "
@@ -55,6 +93,8 @@ def stock_prompt(engine: str, kind: str) -> str:
 def render_workspace_prompt(engine: str, kind: str, values: dict) -> str:
     configured = WORKSPACE_PROMPTS.get()
     source = configured.get(kind, stock_prompt(engine, kind)) if isinstance(configured, dict) else stock_prompt(engine, kind)
+    if engine.startswith('minimax_'):
+        source = minimax_timing_template(source)
     template = Template(source)
     result = template.safe_substitute(values)
     # Input facts and edit targets remain available even in a completely custom template.
