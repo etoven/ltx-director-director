@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:werecreature-effects:1.2:audio",
+  "title": "Werecreature audio sample metadata",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": [
+      "id",
+      "title",
+      "kind",
+      "path",
+      "thumbnail",
+      "matched_effect_ids",
+      "description",
+      "origin",
+      "usage_note",
+      "duration_seconds",
+      "sample_rate",
+      "channels",
+      "encoding",
+      "peak_dbfs",
+      "rms_dbfs",
+      "source_clip_id",
+      "source_id",
+      "source_start_seconds",
+      "source_page_url"
+    ],
+    "properties": {
+      "id": {
+        "type": "string",
+        "pattern": "^SRC[0-9]{3}$"
+      },
+      "title": {
+        "type": "string"
+      },
+      "kind": {
+        "const": "source_soundtrack"
+      },
+      "path": {
+        "type": "string",
+        "pattern": "^audio_samples/source/CLIP[0-9]{3}\\.wav$"
+      },
+      "thumbnail": {
+        "type": "string"
+      },
+      "matched_effect_ids": {
+        "type": "array",
+        "uniqueItems": true,
+        "items": {
+          "type": "string",
+          "pattern": "^FX[0-9]{3}$"
+        }
+      },
+      "duration_seconds": {
+        "type": "number",
+        "exclusiveMinimum": 0
+      },
+      "sample_rate": {
+        "const": 48000
+      },
+      "channels": {
+        "const": 2
+      },
+      "encoding": {
+        "const": "PCM 16-bit WAV"
+      },
+      "description": {
+        "type": "string"
+      },
+      "origin": {
+        "type": "string"
+      },
+      "usage_note": {
+        "type": "string"
+      },
+      "peak_dbfs": {
+        "type": "number",
+        "maximum": 0
+      },
+      "rms_dbfs": {
+        "type": "number",
+        "maximum": 0
+      },
+      "source_clip_id": {
+        "type": "string",
+        "pattern": "^CLIP[0-9]{3}$"
+      },
+      "source_id": {
+        "type": "string"
+      }
+    },
+    "additionalProperties": true
+  }
+}

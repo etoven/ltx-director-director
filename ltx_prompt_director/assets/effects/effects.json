@@ -1,0 +1,3197 @@
+[
+  {
+    "id": "FX001",
+    "effect_name": "Onset tremor",
+    "category": "Body mechanics",
+    "anatomy": "hand or selected limb",
+    "stage": "onset",
+    "species": [
+      "any"
+    ],
+    "image_key": "A02",
+    "reference_ids": [
+      "R01",
+      "R08",
+      "R06"
+    ],
+    "reference_basis": "authored adaptation",
+    "reference_clip_ids": [
+      "CLIP012",
+      "CLIP017"
+    ],
+    "minimax_segment": "On <Subject 1>, let a fine localized tremor travel from the fingertips toward the wrist while the hand remains attached and keeps its original pose. End before the limb changes species. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Using the supplied shot as the edit base, change only the hand or selected limb: Let a fine localized tremor travel from the fingertips toward the wrist while the hand remains attached and keeps its original pose. End before the limb changes species. Preserve the source pose, composition, lighting and unrelated details. For a still, show the requested single intermediate state.",
+    "match_instruction": "Use a locked closeup; transfer micro-motion, not the reference actor.",
+    "sound_segment": "Low dry tremor and restrained breathing.",
+    "thumbnail": "thumbnails/FX001.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [
+      {
+        "clip_id": "CLIP012",
+        "evidence_kind": "trailer transformation glimpse",
+        "scope": "Local facial progression and performance reference; not a completed wolf-head endpoint."
+      },
+      {
+        "clip_id": "CLIP017",
+        "evidence_kind": "human performance only",
+        "scope": "Performance reference only. There is no verified limb or muzzle deformation in this excerpt."
+      }
+    ],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": [
+      "SRC012",
+      "SRC017"
+    ]
+  },
+  {
+    "id": "FX002",
+    "effect_name": "Tendon tightening under intact skin",
+    "category": "Body mechanics",
+    "anatomy": "hand and wrist",
+    "stage": "early",
+    "species": [
+      "any"
+    ],
+    "image_key": "A02",
+    "reference_ids": [
+      "R01",
+      "R03",
+      "R02",
+      "R07"
+    ],
+    "reference_basis": "authored adaptation",
+    "reference_clip_ids": [
+      "CLIP001",
+      "CLIP008"
+    ],
+    "minimax_segment": "On <Subject 1>, tighten the visible tendons across the back of the selected hand; the skin draws taut along those tendons and then relaxes slightly, with the wrist position retained. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Using the supplied shot as the edit base, change only the hand and wrist: Tighten the visible tendons across the back of the selected hand; the skin draws taut along those tendons and then relaxes slightly, with the wrist position retained. Preserve the source pose, composition, lighting and unrelated details. For a still, show the requested single intermediate state.",
+    "match_instruction": "Match tendon direction and skin tension; retain five connected digits.",
+    "sound_segment": "A short fibrous creak.",
+    "thumbnail": "thumbnails/FX002.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [
+      {
+        "clip_id": "CLIP001",
+        "evidence_kind": "continuous closeup",
+        "scope": "Transfer the hand/fingertip behavior only. Do not use this as proof of a specific feline digit map."
+      },
+      {
+        "clip_id": "CLIP008",
+        "evidence_kind": "trailer transformation glimpse",
+        "scope": "Use for limb tension and grounded contact; the trailer shot is short."
+      }
+    ],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": [
+      "SRC001",
+      "SRC008"
+    ]
+  },
+  {
+    "id": "FX003",
+    "effect_name": "Knuckle enlargement",
+    "category": "Body mechanics",
+    "anatomy": "knuckles",
+    "stage": "early",
+    "species": [
+      "any"
+    ],
+    "image_key": "A02",
+    "reference_ids": [
+      "R01",
+      "R03",
+      "R02"
+    ],
+    "reference_basis": "authored adaptation",
+    "reference_clip_ids": [
+      "CLIP001"
+    ],
+    "minimax_segment": "On <Subject 1>, enlarge the existing knuckles gradually beneath continuous skin, starting at the middle joints and settling into the selected animal-hand proportions. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Using the supplied shot as the edit base, change only the knuckles: Enlarge the existing knuckles gradually beneath continuous skin, starting at the middle joints and settling into the selected animal-hand proportions. Preserve the source pose, composition, lighting and unrelated details. For a still, show the requested single intermediate state.",
+    "match_instruction": "Track the original joint centers; do not add joints.",
+    "sound_segment": "Three small irregular joint pops.",
+    "thumbnail": "thumbnails/FX003.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [
+      {
+        "clip_id": "CLIP001",
+        "evidence_kind": "continuous closeup",
+        "scope": "Transfer the hand/fingertip behavior only. Do not use this as proof of a specific feline digit map."
+      }
+    ],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": [
+      "SRC001"
+    ]
+  },
+  {
+    "id": "FX004",
+    "effect_name": "Finger elongation",
+    "category": "Body mechanics",
+    "anatomy": "fingers",
+    "stage": "intermediate",
+    "species": [
+      "any"
+    ],
+    "image_key": "A02",
+    "reference_ids": [
+      "R03",
+      "R07",
+      "R02"
+    ],
+    "reference_basis": "authored adaptation",
+    "reference_clip_ids": [
+      "CLIP001"
+    ],
+    "minimax_segment": "On <Subject 1>, lengthen the existing fingers from their joints outward as the tendons pull taut; keep each fingertip connected and preserve the hand's grasp. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Using the supplied shot as the edit base, change only the fingers: Lengthen the existing fingers from their joints outward as the tendons pull taut; keep each fingertip connected and preserve the hand's grasp. Preserve the source pose, composition, lighting and unrelated details. For a still, show the requested single intermediate state.",
+    "match_instruction": "Transfer lengthening rhythm only; retain the selected digit topology.",
+    "sound_segment": "Layer a tendon creak beneath small joint clicks.",
+    "thumbnail": "thumbnails/FX004.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [
+      {
+        "clip_id": "CLIP001",
+        "evidence_kind": "continuous closeup",
+        "scope": "Transfer the hand/fingertip behavior only. Do not use this as proof of a specific feline digit map."
+      }
+    ],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": [
+      "SRC001"
+    ]
+  },
+  {
+    "id": "FX005",
+    "effect_name": "Human nails becoming claws",
+    "category": "Body mechanics",
+    "anatomy": "fingernails",
+    "stage": "early to intermediate",
+    "species": [
+      "any"
+    ],
+    "image_key": "A01",
+    "reference_ids": [
+      "R03",
+      "R06",
+      "R02"
+    ],
+    "reference_basis": "authored adaptation",
+    "reference_clip_ids": [
+      "CLIP001"
+    ],
+    "minimax_segment": "On <Subject 1>, thicken each existing fingernail from its nail bed into a curved keratin claw, extending continuously along the finger axis before stopping at the requested length. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Using the supplied shot as the edit base, change only the fingernails: Thicken each existing fingernail from its nail bed into a curved keratin claw, extending continuously along the finger axis before stopping at the requested length. Preserve the source pose, composition, lighting and unrelated details. For a still, show the requested single intermediate state.",
+    "match_instruction": "Match nail-bed origin; one claw per digit.",
+    "sound_segment": "A restrained keratin scrape.",
+    "thumbnail": "thumbnails/FX005.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [
+      {
+        "clip_id": "CLIP001",
+        "evidence_kind": "continuous closeup",
+        "scope": "Transfer the hand/fingertip behavior only. Do not use this as proof of a specific feline digit map."
+      }
+    ],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": [
+      "SRC001"
+    ]
+  },
+  {
+    "id": "FX006",
+    "effect_name": "Feline claw extension",
+    "category": "Body mechanics",
+    "anatomy": "feline fingertips",
+    "stage": "late",
+    "species": [
+      "cat",
+      "panther",
+      "lioness",
+      "tiger"
+    ],
+    "image_key": "A04",
+    "reference_ids": [],
+    "reference_basis": "authored adaptation",
+    "reference_clip_ids": [],
+    "minimax_segment": "On <Subject 1>, extend each claw from its existing retractile sheath as the final toe joint rotates into the selected feline paw pose; keep the main paw still. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Using the supplied shot as the edit base, change only the feline fingertips: Extend each claw from its existing retractile sheath as the final toe joint rotates into the selected feline paw pose; keep the main paw still. Preserve the source pose, composition, lighting and unrelated details. For a still, show the requested single intermediate state.",
+    "match_instruction": "Use this for cats and big cats, not bear claw anatomy.",
+    "sound_segment": "Small dry sheath clicks and one surface scratch.",
+    "thumbnail": "thumbnails/FX006.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX007",
+    "effect_name": "Palm and digit pad formation",
+    "category": "Body mechanics",
+    "anatomy": "palm and fingertips",
+    "stage": "intermediate",
+    "species": [
+      "any"
+    ],
+    "image_key": "A03",
+    "reference_ids": [],
+    "reference_basis": "authored adaptation",
+    "reference_clip_ids": [],
+    "minimax_segment": "On <Subject 1>, thicken the palm and fingertip contact surfaces into dark textured pads, with gradual pigment and surface-volume changes following the existing folds. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Using the supplied shot as the edit base, change only the palm and fingertips: Thicken the palm and fingertip contact surfaces into dark textured pads, with gradual pigment and surface-volume changes following the existing folds. Preserve the source pose, composition, lighting and unrelated details. For a still, show the requested single intermediate state.",
+    "match_instruction": "Match underside view and contact points; pad shapes must follow the selected animal.",
+    "sound_segment": "Soft skin compression and rubbery friction.",
+    "thumbnail": "thumbnails/FX007.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX008",
+    "effect_name": "Hand becoming a forepaw",
+    "category": "Body mechanics",
+    "anatomy": "hand",
+    "stage": "intermediate",
+    "species": [
+      "any"
+    ],
+    "image_key": "A04",
+    "reference_ids": [
+      "R07",
+      "R13"
+    ],
+    "reference_basis": "authored adaptation",
+    "reference_clip_ids": [
+      "CLIP008",
+      "CLIP014"
+    ],
+    "minimax_segment": "On <Subject 1>, shorten and thicken the selected forward digits, broaden the palm into a paw base, and retain a single continuous wrist connection; follow the chosen species' digit count. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Using the supplied shot as the edit base, change only the hand: Shorten and thicken the selected forward digits, broaden the palm into a paw base, and retain a single continuous wrist connection; follow the chosen species' digit count. Preserve the source pose, composition, lighting and unrelated details. For a still, show the requested single intermediate state.",
+    "match_instruction": "Choose a digit map before rendering. Do not apply a generic five-toed paw to every animal.",
+    "sound_segment": "Low tendon strain followed by a soft paw contact.",
+    "thumbnail": "thumbnails/FX008.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [
+      {
+        "clip_id": "CLIP008",
+        "evidence_kind": "trailer transformation glimpse",
+        "scope": "Use for limb tension and grounded contact; the trailer shot is short."
+      },
+      {
+        "clip_id": "CLIP014",
+        "evidence_kind": "formed anatomy endpoint",
+        "scope": "Endpoint contact and changed-hand shape only; no pad growth or finger migration is demonstrated."
+      }
+    ],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": [
+      "SRC008",
+      "SRC014"
+    ]
+  },
+  {
+    "id": "FX009",
+    "effect_name": "Thumb becoming the medial dewclaw",
+    "category": "Body mechanics",
+    "anatomy": "thumb and inner wrist",
+    "stage": "intermediate",
+    "species": [
+      "cat",
+      "lioness",
+      "tiger",
+      "panther"
+    ],
+    "image_key": "A04",
+    "reference_ids": [],
+    "reference_basis": "authored adaptation",
+    "reference_clip_ids": [],
+    "minimax_segment": "On <Subject 1>, draw the existing thumb proximally along the inner side of the forepaw into the dewclaw position while the other four toes settle forward. Retain one continuous thumb-to-dewclaw transition. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Using the supplied shot as the edit base, change only the thumb and inner wrist: Draw the existing thumb proximally along the inner side of the forepaw into the dewclaw position while the other four toes settle forward. Retain one continuous thumb-to-dewclaw transition. Preserve the source pose, composition, lighting and unrelated details. For a still, show the requested single intermediate state.",
+    "match_instruction": "For this felid endpoint, transform the thumb, not the pinky; do not sprout a sixth digit.",
+    "sound_segment": "One small joint click.",
+    "thumbnail": "thumbnails/FX009.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX010",
+    "effect_name": "Forearm lengthening",
+    "category": "Body mechanics",
+    "anatomy": "forearm",
+    "stage": "intermediate",
+    "species": [
+      "any"
+    ],
+    "image_key": "A05",
+    "reference_ids": [
+      "R07",
+      "R03"
+    ],
+    "reference_basis": "authored adaptation",
+    "reference_clip_ids": [
+      "CLIP008"
+    ],
+    "minimax_segment": "On <Subject 1>, lengthen the forearm between the existing elbow and wrist; the continuous skin and short coat stretch with the limb, then settle to the selected endpoint. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Using the supplied shot as the edit base, change only the forearm: Lengthen the forearm between the existing elbow and wrist; the continuous skin and short coat stretch with the limb, then settle to the selected endpoint. Preserve the source pose, composition, lighting and unrelated details. For a still, show the requested single intermediate state.",
+    "match_instruction": "Hold both joint endpoints in view if possible; preserve volume rather than making a rubber tube.",
+    "sound_segment": "A deep fibrous stretch.",
+    "thumbnail": "thumbnails/FX010.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [
+      {
+        "clip_id": "CLIP008",
+        "evidence_kind": "trailer transformation glimpse",
+        "scope": "Use for limb tension and grounded contact; the trailer shot is short."
+      }
+    ],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": [
+      "SRC008"
+    ]
+  },
+  {
+    "id": "FX011",
+    "effect_name": "Upper-arm proportion correction",
+    "category": "Body mechanics",
+    "anatomy": "upper arm",
+    "stage": "intermediate",
+    "species": [
+      "any"
+    ],
+    "image_key": "A05",
+    "reference_ids": [],
+    "reference_basis": "authored adaptation",
+    "reference_clip_ids": [],
+    "minimax_segment": "On <Subject 1>, adjust the upper-arm-to-forearm ratio toward the chosen animal while preserving the shoulder and elbow connections; move the existing joints along a continuous anatomical path. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Using the supplied shot as the edit base, change only the upper arm: Adjust the upper-arm-to-forearm ratio toward the chosen animal while preserving the shoulder and elbow connections; move the existing joints along a continuous anatomical path. Preserve the source pose, composition, lighting and unrelated details. For a still, show the requested single intermediate state.",
+    "match_instruction": "Use an endpoint reference for that species and pose. A lion forelimb is not a uniformly lengthened human arm.",
+    "sound_segment": "A low restrained creak.",
+    "thumbnail": "thumbnails/FX011.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX012",
+    "effect_name": "Elbow and wrist realignment",
+    "category": "Body mechanics",
+    "anatomy": "elbow and wrist",
+    "stage": "intermediate",
+    "species": [
+      "any"
+    ],
+    "image_key": "A05",
+    "reference_ids": [
+      "R07"
+    ],
+    "reference_basis": "authored adaptation",
+    "reference_clip_ids": [
+      "CLIP008"
+    ],
+    "minimax_segment": "On <Subject 1>, rotate the selected elbow and wrist gradually into the endpoint forelimb alignment, maintaining continuous tendons and the original reach direction. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Using the supplied shot as the edit base, change only the elbow and wrist: Rotate the selected elbow and wrist gradually into the endpoint forelimb alignment, maintaining continuous tendons and the original reach direction. Preserve the source pose, composition, lighting and unrelated details. For a still, show the requested single intermediate state.",
+    "match_instruction": "Keep one elbow and one wrist; avoid adding a false middle hinge.",
+    "sound_segment": "Two staggered joint-set clicks.",
+    "thumbnail": "thumbnails/FX012.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [
+      {
+        "clip_id": "CLIP008",
+        "evidence_kind": "trailer transformation glimpse",
+        "scope": "Use for limb tension and grounded contact; the trailer shot is short."
+      }
+    ],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": [
+      "SRC008"
+    ]
+  },
+  {
+    "id": "FX013",
+    "effect_name": "Scapula rising and sliding",
+    "category": "Body mechanics",
+    "anatomy": "upper back and shoulder blades",
+    "stage": "intermediate",
+    "species": [
+      "any"
+    ],
+    "image_key": "A06",
+    "reference_ids": [
+      "R07"
+    ],
+    "reference_basis": "authored adaptation",
+    "reference_clip_ids": [
+      "CLIP009",
+      "CLIP011"
+    ],
+    "minimax_segment": "On <Subject 1>, slide the existing shoulder blades into a more raised animal shoulder profile beneath continuous back skin and clothing, following the current arm movement. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Using the supplied shot as the edit base, change only the upper back and shoulder blades: Slide the existing shoulder blades into a more raised animal shoulder profile beneath continuous back skin and clothing, following the current arm movement. Preserve the source pose, composition, lighting and unrelated details. For a still, show the requested single intermediate state.",
+    "match_instruction": "Deform the shoulder-blade region; retain a closed chest and one pair of shoulders.",
+    "sound_segment": "Slow shoulder creaks and cloth tension.",
+    "thumbnail": "thumbnails/FX013.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [
+      {
+        "clip_id": "CLIP009",
+        "evidence_kind": "trailer transformation glimpse",
+        "scope": "Use the surface contour and shoulder rhythm, not a claim about exposed bones."
+      },
+      {
+        "clip_id": "CLIP011",
+        "evidence_kind": "trailer transformation glimpse",
+        "scope": "Match the regional shoulder/back behavior while retaining target clothing and set."
+      }
+    ],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": [
+      "SRC009",
+      "SRC011"
+    ]
+  },
+  {
+    "id": "FX014",
+    "effect_name": "Shoulder and neck mass increase",
+    "category": "Body mechanics",
+    "anatomy": "shoulders and neck",
+    "stage": "intermediate",
+    "species": [
+      "any"
+    ],
+    "image_key": "S03",
+    "reference_ids": [
+      "R06",
+      "R04",
+      "R07"
+    ],
+    "reference_basis": "authored adaptation",
+    "reference_clip_ids": [
+      "CLIP005",
+      "CLIP009",
+      "CLIP011",
+      "CLIP013"
+    ],
+    "minimax_segment": "On <Subject 1>, build shoulder and neck muscle volume gradually under the existing skin and clothing, with weight settling downward after each growth pulse. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Using the supplied shot as the edit base, change only the shoulders and neck: Build shoulder and neck muscle volume gradually under the existing skin and clothing, with weight settling downward after each growth pulse. Preserve the source pose, composition, lighting and unrelated details. For a still, show the requested single intermediate state.",
+    "match_instruction": "Match a bear or heavy-wolf endpoint; do not scale the head or camera.",
+    "sound_segment": "Low muscle strain and a deeper exhale.",
+    "thumbnail": "thumbnails/FX014.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [
+      {
+        "clip_id": "CLIP005",
+        "evidence_kind": "rapid transformation glimpse",
+        "scope": "A fast silhouette/coat reveal; it does not isolate gradual hair growth or one joint."
+      },
+      {
+        "clip_id": "CLIP009",
+        "evidence_kind": "trailer transformation glimpse",
+        "scope": "Use the surface contour and shoulder rhythm, not a claim about exposed bones."
+      },
+      {
+        "clip_id": "CLIP011",
+        "evidence_kind": "trailer transformation glimpse",
+        "scope": "Match the regional shoulder/back behavior while retaining target clothing and set."
+      },
+      {
+        "clip_id": "CLIP013",
+        "evidence_kind": "trailer transformation glimpse",
+        "scope": "Borrow the transformation rhythm only; omit the enclosure, lasers and unrelated objects."
+      }
+    ],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": [
+      "SRC005",
+      "SRC009",
+      "SRC011",
+      "SRC013"
+    ]
+  },
+  {
+    "id": "FX015",
+    "effect_name": "Torso lengthening",
+    "category": "Body mechanics",
+    "anatomy": "torso",
+    "stage": "intermediate",
+    "species": [
+      "any"
+    ],
+    "image_key": "A06",
+    "reference_ids": [
+      "R07"
+    ],
+    "reference_basis": "authored adaptation",
+    "reference_clip_ids": [
+      "CLIP010",
+      "CLIP011"
+    ],
+    "minimax_segment": "On <Subject 1>, increase the distance between the shoulder girdle and pelvis along the existing spine while maintaining a continuous torso silhouette and coherent cloth tension. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Using the supplied shot as the edit base, change only the torso: Increase the distance between the shoulder girdle and pelvis along the existing spine while maintaining a continuous torso silhouette and coherent cloth tension. Preserve the source pose, composition, lighting and unrelated details. For a still, show the requested single intermediate state.",
+    "match_instruction": "Retain a sealed torso surface; match length to the chosen animal and pose.",
+    "sound_segment": "A sustained low creak.",
+    "thumbnail": "thumbnails/FX015.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [
+      {
+        "clip_id": "CLIP010",
+        "evidence_kind": "formed anatomy endpoint",
+        "scope": "Coat/torso texture analogy only; no continuous fur growth or full torso-lengthening is demonstrated."
+      },
+      {
+        "clip_id": "CLIP011",
+        "evidence_kind": "trailer transformation glimpse",
+        "scope": "Match the regional shoulder/back behavior while retaining target clothing and set."
+      }
+    ],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": [
+      "SRC010",
+      "SRC011"
+    ]
+  },
+  {
+    "id": "FX016",
+    "effect_name": "Ribcage silhouette reshaping",
+    "category": "Body mechanics",
+    "anatomy": "ribcage",
+    "stage": "intermediate",
+    "species": [
+      "any"
+    ],
+    "image_key": "A06",
+    "reference_ids": [],
+    "reference_basis": "authored adaptation",
+    "reference_clip_ids": [],
+    "minimax_segment": "On <Subject 1>, reshape the ribcage beneath intact skin into the selected animal's chest depth and width; show the surface and breathing motion without opening the torso. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Using the supplied shot as the edit base, change only the ribcage: Reshape the ribcage beneath intact skin into the selected animal's chest depth and width; show the surface and breathing motion without opening the torso. Preserve the source pose, composition, lighting and unrelated details. For a still, show the requested single intermediate state.",
+    "match_instruction": "Change the outer silhouette, not an exposed internal chest.",
+    "sound_segment": "Breath pressure and a muted structural creak.",
+    "thumbnail": "thumbnails/FX016.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX017",
+    "effect_name": "Pelvis alignment for a quadruped",
+    "category": "Body mechanics",
+    "anatomy": "pelvis and hips",
+    "stage": "intermediate",
+    "species": [
+      "any"
+    ],
+    "image_key": "A07",
+    "reference_ids": [
+      "R07"
+    ],
+    "reference_basis": "authored adaptation",
+    "reference_clip_ids": [],
+    "minimax_segment": "On <Subject 1>, tilt and narrow the visible pelvic silhouette toward the quadruped endpoint as body weight moves through the original hips; retain existing limb attachments. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Using the supplied shot as the edit base, change only the pelvis and hips: Tilt and narrow the visible pelvic silhouette toward the quadruped endpoint as body weight moves through the original hips; retain existing limb attachments. Preserve the source pose, composition, lighting and unrelated details. For a still, show the requested single intermediate state.",
+    "match_instruction": "Use a covered side view with consistent spine-to-pelvis alignment.",
+    "sound_segment": "A low hip-set click and cloth friction.",
+    "thumbnail": "thumbnails/FX017.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX018",
+    "effect_name": "Tail bud at the coccyx",
+    "category": "Body mechanics",
+    "anatomy": "base of spine",
+    "stage": "early",
+    "species": [
+      "any"
+    ],
+    "image_key": "A15",
+    "reference_ids": [
+      "R15"
+    ],
+    "reference_basis": "authored adaptation",
+    "reference_clip_ids": [],
+    "minimax_segment": "On <Subject 1>, form one small tail bud at the coccyx, pushing the existing rear-waist silhouette outward before any substantial tail extension. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Using the supplied shot as the edit base, change only the base of spine: Form one small tail bud at the coccyx, pushing the existing rear-waist silhouette outward before any substantial tail extension. Preserve the source pose, composition, lighting and unrelated details. For a still, show the requested single intermediate state.",
+    "match_instruction": "One midline origin behind the pelvis; no duplicate tail or attachment to the thigh.",
+    "sound_segment": "Soft cloth pressure.",
+    "thumbnail": "thumbnails/FX018.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX019",
+    "effect_name": "Continuous tail extension",
+    "category": "Body mechanics",
+    "anatomy": "tail",
+    "stage": "intermediate",
+    "species": [
+      "any"
+    ],
+    "image_key": "A15",
+    "reference_ids": [
+      "R07",
+      "R15"
+    ],
+    "reference_basis": "authored adaptation",
+    "reference_clip_ids": [],
+    "minimax_segment": "On <Subject 1>, extend the existing tail bud outward from its base in a continuous taper, then let the new tail make a small weight-driven settling motion. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Using the supplied shot as the edit base, change only the tail: Extend the existing tail bud outward from its base in a continuous taper, then let the new tail make a small weight-driven settling motion. Preserve the source pose, composition, lighting and unrelated details. For a still, show the requested single intermediate state.",
+    "match_instruction": "Match tail type: furred canine, tufted lion, long feline, or hair-covered equine.",
+    "sound_segment": "A low stretch and faint coat rustle.",
+    "thumbnail": "thumbnails/FX019.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX020",
+    "effect_name": "Thigh and calf musculature growth",
+    "category": "Body mechanics",
+    "anatomy": "thigh and calf",
+    "stage": "intermediate",
+    "species": [
+      "any"
+    ],
+    "image_key": "A07",
+    "reference_ids": [
+      "R06",
+      "R04"
+    ],
+    "reference_basis": "authored adaptation",
+    "reference_clip_ids": [
+      "CLIP005"
+    ],
+    "minimax_segment": "On <Subject 1>, increase the selected thigh and calf muscle volume beneath intact skin, preserving the knee location and letting clothing stretch along its seams. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Using the supplied shot as the edit base, change only the thigh and calf: Increase the selected thigh and calf muscle volume beneath intact skin, preserving the knee location and letting clothing stretch along its seams. Preserve the source pose, composition, lighting and unrelated details. For a still, show the requested single intermediate state.",
+    "match_instruction": "Keep one leg; growth changes mass rather than inflating a spherical bulge.",
+    "sound_segment": "A deep muscular strain.",
+    "thumbnail": "thumbnails/FX020.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [
+      {
+        "clip_id": "CLIP005",
+        "evidence_kind": "rapid transformation glimpse",
+        "scope": "A fast silhouette/coat reveal; it does not isolate gradual hair growth or one joint."
+      }
+    ],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": [
+      "SRC005"
+    ]
+  },
+  {
+    "id": "FX021",
+    "effect_name": "Digitigrade hock formation",
+    "category": "Body mechanics",
+    "anatomy": "lower hindleg and foot",
+    "stage": "intermediate",
+    "species": [
+      "wolf",
+      "cheetah",
+      "panther",
+      "lioness",
+      "tiger",
+      "cat",
+      "fox",
+      "hyena"
+    ],
+    "image_key": "A08",
+    "reference_ids": [
+      "R07"
+    ],
+    "reference_basis": "authored adaptation",
+    "reference_clip_ids": [],
+    "minimax_segment": "On <Subject 1>, raise the heel as the metatarsal region lengthens and the foot transitions onto its toes, forming the rear-facing ankle hock while the knee continues to bend forward. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Using the supplied shot as the edit base, change only the lower hindleg and foot: Raise the heel as the metatarsal region lengthens and the foot transitions onto its toes, forming the rear-facing ankle hock while the knee continues to bend forward. Preserve the source pose, composition, lighting and unrelated details. For a still, show the requested single intermediate state.",
+    "match_instruction": "The hock is the ankle, not a backward knee. Keep the toe contact anchored.",
+    "sound_segment": "Ankle creaks followed by a light claw tap.",
+    "thumbnail": "thumbnails/FX021.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX022",
+    "effect_name": "Human foot becoming a feline hindpaw",
+    "category": "Body mechanics",
+    "anatomy": "hindfoot",
+    "stage": "intermediate",
+    "species": [
+      "cat",
+      "panther",
+      "cheetah",
+      "lioness",
+      "tiger"
+    ],
+    "image_key": "A09",
+    "reference_ids": [],
+    "reference_basis": "authored adaptation",
+    "reference_clip_ids": [],
+    "minimax_segment": "On <Subject 1>, broaden the selected forefoot into four main feline toes while the redundant fifth toe is smoothly absorbed into the changing foot; keep the heel-to-ankle transition continuous. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Using the supplied shot as the edit base, change only the hindfoot: Broaden the selected forefoot into four main feline toes while the redundant fifth toe is smoothly absorbed into the changing foot; keep the heel-to-ankle transition continuous. Preserve the source pose, composition, lighting and unrelated details. For a still, show the requested single intermediate state.",
+    "match_instruction": "A standard feline hindpaw has four toes; do not copy a forepaw dewclaw onto it.",
+    "sound_segment": "Soft pad compression and four light claw contacts.",
+    "thumbnail": "thumbnails/FX022.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX023",
+    "effect_name": "Bear foot remaining plantigrade",
+    "category": "Body mechanics",
+    "anatomy": "hindfoot and heel",
+    "stage": "intermediate",
+    "species": [
+      "bear"
+    ],
+    "image_key": "S03",
+    "reference_ids": [],
+    "reference_basis": "authored adaptation",
+    "reference_clip_ids": [],
+    "minimax_segment": "On <Subject 1>, broaden the selected foot into a five-toed bear hindfoot with a wide sole and long claws, keeping the heel grounded through the weight-bearing phase. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Using the supplied shot as the edit base, change only the hindfoot and heel: Broaden the selected foot into a five-toed bear hindfoot with a wide sole and long claws, keeping the heel grounded through the weight-bearing phase. Preserve the source pose, composition, lighting and unrelated details. For a still, show the requested single intermediate state.",
+    "match_instruction": "Do not apply a canine digitigrade hock to this bear endpoint.",
+    "sound_segment": "Heavy sole contact with five faint claw scrapes.",
+    "thumbnail": "thumbnails/FX023.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX024",
+    "effect_name": "Canine muzzle extension",
+    "category": "Body mechanics",
+    "anatomy": "nose and jaws",
+    "stage": "intermediate",
+    "species": [
+      "wolf",
+      "fox"
+    ],
+    "image_key": "A13",
+    "reference_ids": [
+      "R03",
+      "R07",
+      "R04"
+    ],
+    "reference_basis": "authored adaptation",
+    "reference_clip_ids": [
+      "CLIP004"
+    ],
+    "minimax_segment": "On <Subject 1>, extend the nose, upper jaw and lower jaw together into a continuous canine muzzle while the lips track the new bite and the original facial expression remains readable. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Using the supplied shot as the edit base, change only the nose and jaws: Extend the nose, upper jaw and lower jaw together into a continuous canine muzzle while the lips track the new bite and the original facial expression remains readable. Preserve the source pose, composition, lighting and unrelated details. For a still, show the requested single intermediate state.",
+    "match_instruction": "Match a profile or three-quarter source; keep nostrils and teeth aligned. Wolf Man 2025 is not the long-muzzle endpoint.",
+    "sound_segment": "Jaw creaks and a restrained nasal breath.",
+    "thumbnail": "thumbnails/FX024.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [
+      {
+        "clip_id": "CLIP004",
+        "evidence_kind": "rapid transformation glimpse",
+        "scope": "Match the fast onset rhythm, not the actor, set or lighting."
+      }
+    ],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": [
+      "SRC004"
+    ]
+  },
+  {
+    "id": "FX025",
+    "effect_name": "Short feline muzzle formation",
+    "category": "Body mechanics",
+    "anatomy": "midface",
+    "stage": "intermediate",
+    "species": [
+      "cat",
+      "panther",
+      "cheetah",
+      "lioness",
+      "tiger"
+    ],
+    "image_key": "S05",
+    "reference_ids": [],
+    "reference_basis": "authored adaptation",
+    "reference_clip_ids": [],
+    "minimax_segment": "On <Subject 1>, broaden the upper lip and whisker pads into a short feline muzzle as the nose advances modestly; the cheeks and lower jaw follow continuously. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Using the supplied shot as the edit base, change only the midface: Broaden the upper lip and whisker pads into a short feline muzzle as the nose advances modestly; the cheeks and lower jaw follow continuously. Preserve the source pose, composition, lighting and unrelated details. For a still, show the requested single intermediate state.",
+    "match_instruction": "Keep a compact felid profile; avoid a long canine snout.",
+    "sound_segment": "A short facial creak and nasal exhale.",
+    "thumbnail": "thumbnails/FX025.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX026",
+    "effect_name": "Animal nose texture and shape",
+    "category": "Body mechanics",
+    "anatomy": "nose",
+    "stage": "early to intermediate",
+    "species": [
+      "any"
+    ],
+    "image_key": "A13",
+    "reference_ids": [],
+    "reference_basis": "authored adaptation",
+    "reference_clip_ids": [],
+    "minimax_segment": "On <Subject 1>, reshape the existing nose into the selected animal's nasal surface, widening the nostrils and gradually changing the skin texture and pigment without detaching it from the face. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Using the supplied shot as the edit base, change only the nose: Reshape the existing nose into the selected animal's nasal surface, widening the nostrils and gradually changing the skin texture and pigment without detaching it from the face. Preserve the source pose, composition, lighting and unrelated details. For a still, show the requested single intermediate state.",
+    "match_instruction": "Choose canine nose, feline nose, bovine nasal pad or equine nostrils explicitly.",
+    "sound_segment": "A close nasal sniff.",
+    "thumbnail": "thumbnails/FX026.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX027",
+    "effect_name": "Canine teeth extending within the bite",
+    "category": "Body mechanics",
+    "anatomy": "mouth and canine teeth",
+    "stage": "intermediate",
+    "species": [
+      "any"
+    ],
+    "image_key": "A13",
+    "reference_ids": [
+      "R01",
+      "R02",
+      "R13"
+    ],
+    "reference_basis": "authored adaptation",
+    "reference_clip_ids": [
+      "CLIP002",
+      "CLIP016"
+    ],
+    "minimax_segment": "On <Subject 1>, lengthen the existing canine teeth from their roots while the lips and jaw accommodate the growing bite. Keep one ordered upper and lower dental arcade. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Using the supplied shot as the edit base, change only the mouth and canine teeth: Lengthen the existing canine teeth from their roots while the lips and jaw accommodate the growing bite. Keep one ordered upper and lower dental arcade. Preserve the source pose, composition, lighting and unrelated details. For a still, show the requested single intermediate state.",
+    "match_instruction": "Match visible gum line and mouth opening; no extra rows for mammal targets.",
+    "sound_segment": "Small dental clicks and a jaw creak.",
+    "thumbnail": "thumbnails/FX027.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [
+      {
+        "clip_id": "CLIP002",
+        "evidence_kind": "continuous closeup",
+        "scope": "A jaw-motion reference; not a long canine muzzle endpoint or an isolated tooth-growth study."
+      },
+      {
+        "clip_id": "CLIP016",
+        "evidence_kind": "formed anatomy endpoint",
+        "scope": "Dental endpoint only; not tooth-growth timing or a species-specific full dental map."
+      }
+    ],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": [
+      "SRC002",
+      "SRC016"
+    ]
+  },
+  {
+    "id": "FX028",
+    "effect_name": "Small feline incisors between large canines",
+    "category": "Body mechanics",
+    "anatomy": "front teeth",
+    "stage": "late",
+    "species": [
+      "cat",
+      "lioness",
+      "tiger",
+      "panther",
+      "cheetah"
+    ],
+    "image_key": "S05",
+    "reference_ids": [
+      "R13"
+    ],
+    "reference_basis": "authored adaptation",
+    "reference_clip_ids": [
+      "CLIP016"
+    ],
+    "minimax_segment": "On <Subject 1>, reshape the front incisors into a compact orderly feline row between the larger canine teeth; keep natural warm ivory tone and the existing bite alignment. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Using the supplied shot as the edit base, change only the front teeth: Reshape the front incisors into a compact orderly feline row between the larger canine teeth; keep natural warm ivory tone and the existing bite alignment. Preserve the source pose, composition, lighting and unrelated details. For a still, show the requested single intermediate state.",
+    "match_instruction": "Do not replace every front tooth with a fang or make all teeth uniformly large.",
+    "sound_segment": "A quiet bite-set click.",
+    "thumbnail": "thumbnails/FX028.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [
+      {
+        "clip_id": "CLIP016",
+        "evidence_kind": "formed anatomy endpoint",
+        "scope": "Dental endpoint only; not tooth-growth timing or a species-specific full dental map."
+      }
+    ],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": [
+      "SRC016"
+    ]
+  },
+  {
+    "id": "FX029",
+    "effect_name": "Ear migration and reshaping",
+    "category": "Body mechanics",
+    "anatomy": "ears and scalp",
+    "stage": "intermediate",
+    "species": [
+      "any"
+    ],
+    "image_key": "S01",
+    "reference_ids": [
+      "R03",
+      "R04"
+    ],
+    "reference_basis": "authored adaptation",
+    "reference_clip_ids": [
+      "CLIP004"
+    ],
+    "minimax_segment": "On <Subject 1>, move the existing ear bases continuously toward the selected animal position as cartilage reshapes, then grow the appropriate fur or skin texture over the same ears. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Using the supplied shot as the edit base, change only the ears and scalp: Move the existing ear bases continuously toward the selected animal position as cartilage reshapes, then grow the appropriate fur or skin texture over the same ears. Preserve the source pose, composition, lighting and unrelated details. For a still, show the requested single intermediate state.",
+    "match_instruction": "Retain one left and one right ear; remove the old human-ear outlines as the same ears migrate.",
+    "sound_segment": "Small cartilage creaks and coat rustle.",
+    "thumbnail": "thumbnails/FX029.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [
+      {
+        "clip_id": "CLIP004",
+        "evidence_kind": "rapid transformation glimpse",
+        "scope": "Match the fast onset rhythm, not the actor, set or lighting."
+      }
+    ],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": [
+      "SRC004"
+    ]
+  },
+  {
+    "id": "FX030",
+    "effect_name": "Golden eyes with round pupils",
+    "category": "Body mechanics",
+    "anatomy": "eyes",
+    "stage": "early",
+    "species": [
+      "wolf",
+      "cheetah",
+      "lioness",
+      "tiger"
+    ],
+    "image_key": "S05",
+    "reference_ids": [
+      "R11"
+    ],
+    "reference_basis": "authored adaptation",
+    "reference_clip_ids": [],
+    "minimax_segment": "On <Subject 1>, shift the iris toward natural amber-gold while keeping the pupils round, the corneal reflections fixed to the shot lighting and the eyelid anatomy intact. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Using the supplied shot as the edit base, change only the eyes: Shift the iris toward natural amber-gold while keeping the pupils round, the corneal reflections fixed to the shot lighting and the eyelid anatomy intact. Preserve the source pose, composition, lighting and unrelated details. For a still, show the requested single intermediate state.",
+    "match_instruction": "Use for wolf, cheetah, lion and tiger endpoints; iris color is not emitted light.",
+    "sound_segment": "Optional quiet breath only.",
+    "thumbnail": "thumbnails/FX030.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX031",
+    "effect_name": "Domestic-cat pupil narrowing",
+    "category": "Body mechanics",
+    "anatomy": "pupils",
+    "stage": "early",
+    "species": [
+      "cat"
+    ],
+    "image_key": "S20",
+    "reference_ids": [],
+    "reference_basis": "authored adaptation",
+    "reference_clip_ids": [],
+    "minimax_segment": "On <Subject 1>, narrow the pupils vertically in response to the shot's brighter illumination while preserving the iris, eye position and catchlights. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Using the supplied shot as the edit base, change only the pupils: Narrow the pupils vertically in response to the shot's brighter illumination while preserving the iris, eye position and catchlights. Preserve the source pose, composition, lighting and unrelated details. For a still, show the requested single intermediate state.",
+    "match_instruction": "Domestic-cat option; do not apply this automatically to lions, tigers or cheetahs.",
+    "sound_segment": "No added physical sound.",
+    "thumbnail": "thumbnails/FX031.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX032",
+    "effect_name": "Brow and cheekbone remodeling",
+    "category": "Body mechanics",
+    "anatomy": "brow and cheeks",
+    "stage": "intermediate",
+    "species": [
+      "any"
+    ],
+    "image_key": "S01",
+    "reference_ids": [
+      "R01",
+      "R02",
+      "R04",
+      "R06"
+    ],
+    "reference_basis": "authored adaptation",
+    "reference_clip_ids": [
+      "CLIP002",
+      "CLIP003",
+      "CLIP004",
+      "CLIP012"
+    ],
+    "minimax_segment": "On <Subject 1>, remodel the brow and cheek contours gradually under intact skin, maintaining eye spacing and allowing the existing expression to carry through the change. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Using the supplied shot as the edit base, change only the brow and cheeks: Remodel the brow and cheek contours gradually under intact skin, maintaining eye spacing and allowing the existing expression to carry through the change. Preserve the source pose, composition, lighting and unrelated details. For a still, show the requested single intermediate state.",
+    "match_instruction": "Transfer local volume progression rather than replacing the entire face identity.",
+    "sound_segment": "Low localized creaks.",
+    "thumbnail": "thumbnails/FX032.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [
+      {
+        "clip_id": "CLIP002",
+        "evidence_kind": "continuous closeup",
+        "scope": "A jaw-motion reference; not a long canine muzzle endpoint or an isolated tooth-growth study."
+      },
+      {
+        "clip_id": "CLIP003",
+        "evidence_kind": "continuous closeup",
+        "scope": "Transfer the localized surface progression, retaining the target face anchors."
+      },
+      {
+        "clip_id": "CLIP004",
+        "evidence_kind": "rapid transformation glimpse",
+        "scope": "Match the fast onset rhythm, not the actor, set or lighting."
+      },
+      {
+        "clip_id": "CLIP012",
+        "evidence_kind": "trailer transformation glimpse",
+        "scope": "Local facial progression and performance reference; not a completed wolf-head endpoint."
+      }
+    ],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": [
+      "SRC002",
+      "SRC003",
+      "SRC004",
+      "SRC012"
+    ]
+  },
+  {
+    "id": "FX033",
+    "effect_name": "Directional fur emergence",
+    "category": "Surface effects",
+    "anatomy": "skin and coat",
+    "stage": "early to intermediate",
+    "species": [
+      "any"
+    ],
+    "image_key": "A14",
+    "reference_ids": [
+      "R07",
+      "R04",
+      "R06"
+    ],
+    "reference_basis": "authored adaptation",
+    "reference_clip_ids": [
+      "CLIP005",
+      "CLIP010",
+      "CLIP013"
+    ],
+    "minimax_segment": "On <Subject 1>, grow fine hairs from the existing skin surface, thicken them into short fur and lay them along the limb's natural coat direction as the skin deforms beneath. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Using the supplied shot as the edit base, change only the skin and coat: Grow fine hairs from the existing skin surface, thicken them into short fur and lay them along the limb's natural coat direction as the skin deforms beneath. Preserve the source pose, composition, lighting and unrelated details. For a still, show the requested single intermediate state.",
+    "match_instruction": "No fur cloud, haze, floating coat shell or opaque painted dissolve.",
+    "sound_segment": "Fine dry coat rustle.",
+    "thumbnail": "thumbnails/FX033.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [
+      {
+        "clip_id": "CLIP005",
+        "evidence_kind": "rapid transformation glimpse",
+        "scope": "A fast silhouette/coat reveal; it does not isolate gradual hair growth or one joint."
+      },
+      {
+        "clip_id": "CLIP010",
+        "evidence_kind": "formed anatomy endpoint",
+        "scope": "Coat/torso texture analogy only; no continuous fur growth or full torso-lengthening is demonstrated."
+      },
+      {
+        "clip_id": "CLIP013",
+        "evidence_kind": "trailer transformation glimpse",
+        "scope": "Borrow the transformation rhythm only; omit the enclosure, lasers and unrelated objects."
+      }
+    ],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": [
+      "SRC005",
+      "SRC010",
+      "SRC013"
+    ]
+  },
+  {
+    "id": "FX034",
+    "effect_name": "Cheetah spots forming with the coat",
+    "category": "Surface effects",
+    "anatomy": "coat markings",
+    "stage": "intermediate",
+    "species": [
+      "cheetah"
+    ],
+    "image_key": "S02",
+    "reference_ids": [],
+    "reference_basis": "authored adaptation",
+    "reference_clip_ids": [],
+    "minimax_segment": "On <Subject 1>, develop distinct solid black spots within the growing tawny coat, anchored to the same skin coordinates as the limb changes shape; add facial tear tracks only on the face. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Using the supplied shot as the edit base, change only the coat markings: Develop distinct solid black spots within the growing tawny coat, anchored to the same skin coordinates as the limb changes shape; add facial tear tracks only on the face. Preserve the source pose, composition, lighting and unrelated details. For a still, show the requested single intermediate state.",
+    "match_instruction": "Spots move with anatomy; do not substitute leopard rosettes.",
+    "sound_segment": "Soft fur rustle.",
+    "thumbnail": "thumbnails/FX034.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX035",
+    "effect_name": "Tiger stripes following new anatomy",
+    "category": "Surface effects",
+    "anatomy": "coat markings",
+    "stage": "intermediate",
+    "species": [
+      "tiger"
+    ],
+    "image_key": "S06",
+    "reference_ids": [
+      "R14"
+    ],
+    "reference_basis": "authored adaptation",
+    "reference_clip_ids": [],
+    "minimax_segment": "On <Subject 1>, develop black tiger stripes within the growing orange coat, wrapping around the changing limb with consistent spacing and coherent continuity across nearby surfaces. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Using the supplied shot as the edit base, change only the coat markings: Develop black tiger stripes within the growing orange coat, wrapping around the changing limb with consistent spacing and coherent continuity across nearby surfaces. Preserve the source pose, composition, lighting and unrelated details. For a still, show the requested single intermediate state.",
+    "match_instruction": "Retain stripe identity through deformation; do not float markings over the fur.",
+    "sound_segment": "Soft fur rustle.",
+    "thumbnail": "thumbnails/FX035.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX036",
+    "effect_name": "Black-panther coat with faint rosettes",
+    "category": "Surface effects",
+    "anatomy": "coat",
+    "stage": "intermediate",
+    "species": [
+      "panther"
+    ],
+    "image_key": "S04",
+    "reference_ids": [],
+    "reference_basis": "authored adaptation",
+    "reference_clip_ids": [],
+    "minimax_segment": "On <Subject 1>, darken the emerging leopard coat toward black while leaving faint rosettes visible under reflected light; retain directional individual hairs and source highlights. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Using the supplied shot as the edit base, change only the coat: Darken the emerging leopard coat toward black while leaving faint rosettes visible under reflected light; retain directional individual hairs and source highlights. Preserve the source pose, composition, lighting and unrelated details. For a still, show the requested single intermediate state.",
+    "match_instruction": "Use a melanistic leopard endpoint here; do not crush all coat detail to featureless black.",
+    "sound_segment": "Soft close coat rustle.",
+    "thumbnail": "thumbnails/FX036.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX037",
+    "effect_name": "Subsurface structural ripple",
+    "category": "Surface effects",
+    "anatomy": "selected limb surface",
+    "stage": "intermediate",
+    "species": [
+      "any"
+    ],
+    "image_key": "A05",
+    "reference_ids": [
+      "R01",
+      "R07",
+      "R02"
+    ],
+    "reference_basis": "authored adaptation",
+    "reference_clip_ids": [
+      "CLIP003",
+      "CLIP009"
+    ],
+    "minimax_segment": "On <Subject 1>, send one localized structural ridge along the selected limb beneath continuous skin, then let it settle into the new contour without opening the surface. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Using the supplied shot as the edit base, change only the selected limb surface: Send one localized structural ridge along the selected limb beneath continuous skin, then let it settle into the new contour without opening the surface. Preserve the source pose, composition, lighting and unrelated details. For a still, show the requested single intermediate state.",
+    "match_instruction": "A restrained surface deformation, not exposed bones or a second limb under the skin.",
+    "sound_segment": "One rising creak that stops as the ridge settles.",
+    "thumbnail": "thumbnails/FX037.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [
+      {
+        "clip_id": "CLIP003",
+        "evidence_kind": "continuous closeup",
+        "scope": "Transfer the localized surface progression, retaining the target face anchors."
+      },
+      {
+        "clip_id": "CLIP009",
+        "evidence_kind": "trailer transformation glimpse",
+        "scope": "Use the surface contour and shoulder rhythm, not a claim about exposed bones."
+      }
+    ],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": [
+      "SRC003",
+      "SRC009"
+    ]
+  },
+  {
+    "id": "FX038",
+    "effect_name": "Surface splitting to reveal fur",
+    "category": "Surface effects",
+    "anatomy": "selected surface seam",
+    "stage": "intermediate",
+    "species": [
+      "any"
+    ],
+    "image_key": "A14",
+    "reference_ids": [
+      "R04",
+      "R05"
+    ],
+    "reference_basis": "authored adaptation",
+    "reference_clip_ids": [],
+    "minimax_segment": "On <Subject 1>, part one narrow outer skin-like surface seam along the growth direction and reveal dense attached creature fur immediately beneath; the opening closes around the larger formed surface. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Using the supplied shot as the edit base, change only the selected surface seam: Part one narrow outer skin-like surface seam along the growth direction and reveal dense attached creature fur immediately beneath; the opening closes around the larger formed surface. Preserve the source pose, composition, lighting and unrelated details. For a still, show the requested single intermediate state.",
+    "match_instruction": "Van Helsing-inspired authored variant: fur fills the opening. Do not create an empty body cavity, detached body part or whole-body peel unless requested.",
+    "sound_segment": "A short dry tear over a low growth creak.",
+    "thumbnail": "thumbnails/FX038.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX039",
+    "effect_name": "Clothing seam release under growth",
+    "category": "Surface effects",
+    "anatomy": "clothing over the selected region",
+    "stage": "intermediate",
+    "species": [
+      "any"
+    ],
+    "image_key": "A06",
+    "reference_ids": [
+      "R07"
+    ],
+    "reference_basis": "authored adaptation",
+    "reference_clip_ids": [],
+    "minimax_segment": "On <Subject 1>, stretch the existing garment over the expanding selected region until one stressed seam releases; retain connected fabric folds and the garment's original color and material. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Using the supplied shot as the edit base, change only the clothing over the selected region: Stretch the existing garment over the expanding selected region until one stressed seam releases; retain connected fabric folds and the garment's original color and material. Preserve the source pose, composition, lighting and unrelated details. For a still, show the requested single intermediate state.",
+    "match_instruction": "Tear clothing only where tension justifies it; do not replace the outfit or expose unrelated regions.",
+    "sound_segment": "A brief fabric strain followed by a stitch rip.",
+    "thumbnail": "thumbnails/FX039.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX040",
+    "effect_name": "Single equine hoof formation",
+    "category": "Body mechanics",
+    "anatomy": "hand or foot endpoint",
+    "stage": "intermediate",
+    "species": [
+      "horse"
+    ],
+    "image_key": "A10",
+    "reference_ids": [],
+    "reference_basis": "authored adaptation",
+    "reference_clip_ids": [],
+    "minimax_segment": "On <Subject 1>, consolidate the selected distal limb into one load-bearing equine digit and grow a single continuous keratin hoof wall around it, retaining a visible fetlock above. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Using the supplied shot as the edit base, change only the hand or foot endpoint: Consolidate the selected distal limb into one load-bearing equine digit and grow a single continuous keratin hoof wall around it, retaining a visible fetlock above. Preserve the source pose, composition, lighting and unrelated details. For a still, show the requested single intermediate state.",
+    "match_instruction": "One hoof per limb. No cloven seam, cow dewclaws or extra hooves. Choose a front- or hindlimb mapping before applying.",
+    "sound_segment": "A dry keratin creak and one hard hoof contact.",
+    "thumbnail": "thumbnails/FX040.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX041",
+    "effect_name": "Cloven hoof formation",
+    "category": "Body mechanics",
+    "anatomy": "hand or foot endpoint",
+    "stage": "intermediate",
+    "species": [
+      "cow",
+      "bull",
+      "goat",
+      "ram",
+      "deer",
+      "boar"
+    ],
+    "image_key": "A11",
+    "reference_ids": [],
+    "reference_basis": "authored adaptation",
+    "reference_clip_ids": [],
+    "minimax_segment": "On <Subject 1>, consolidate the selected distal limb into two principal weight-bearing digits, form a cloven hoof wall around each and retain smaller rear dewclaws according to the chosen species. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Using the supplied shot as the edit base, change only the hand or foot endpoint: Consolidate the selected distal limb into two principal weight-bearing digits, form a cloven hoof wall around each and retain smaller rear dewclaws according to the chosen species. Preserve the source pose, composition, lighting and unrelated details. For a still, show the requested single intermediate state.",
+    "match_instruction": "A bovine, caprine or cervid topology; do not leave five human fingertips inside the final hoof.",
+    "sound_segment": "Two close hard clicks followed by a weight-bearing clop.",
+    "thumbnail": "thumbnails/FX041.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX042",
+    "effect_name": "Paired bovine horn growth",
+    "category": "Body mechanics",
+    "anatomy": "forehead and horn bases",
+    "stage": "early to intermediate",
+    "species": [
+      "bull",
+      "bull_horns",
+      "cow"
+    ],
+    "image_key": "A12",
+    "reference_ids": [],
+    "reference_basis": "authored adaptation",
+    "reference_clip_ids": [],
+    "minimax_segment": "On <Subject 1>, raise one symmetric pair of horn buds from the frontal region behind the eye line and extend each as a tapering unbranched keratin horn; move surrounding skin and hair coherently. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Using the supplied shot as the edit base, change only the forehead and horn bases: Raise one symmetric pair of horn buds from the frontal region behind the eye line and extend each as a tapering unbranched keratin horn; move surrounding skin and hair coherently. Preserve the source pose, composition, lighting and unrelated details. For a still, show the requested single intermediate state.",
+    "match_instruction": "Match the chosen bull or cow phenotype. Horns curve without splitting into antler branches.",
+    "sound_segment": "A low pressure creak.",
+    "thumbnail": "thumbnails/FX042.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX043",
+    "effect_name": "Antler growth in velvet",
+    "category": "Body mechanics",
+    "anatomy": "antler bases",
+    "stage": "intermediate",
+    "species": [
+      "deer"
+    ],
+    "image_key": "S11",
+    "reference_ids": [],
+    "reference_basis": "authored adaptation",
+    "reference_clip_ids": [],
+    "minimax_segment": "On <Subject 1>, extend a matched pair of antler beams from the existing pedicles, developing the chosen branch pattern under a soft velvet surface while retaining head scale. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Using the supplied shot as the edit base, change only the antler bases: Extend a matched pair of antler beams from the existing pedicles, developing the chosen branch pattern under a soft velvet surface while retaining head scale. Preserve the source pose, composition, lighting and unrelated details. For a still, show the requested single intermediate state.",
+    "match_instruction": "This is a fantasy time-compressed growth segment. Do not mix velvet antlers with polished permanent bovine horns.",
+    "sound_segment": "Low growth creaks and fine velvet friction.",
+    "thumbnail": "thumbnails/FX043.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX044",
+    "effect_name": "Beak emerging from the midface",
+    "category": "Body mechanics",
+    "anatomy": "nose, lips and jaws",
+    "stage": "intermediate",
+    "species": [
+      "raven",
+      "eagle",
+      "owl"
+    ],
+    "image_key": "S21",
+    "reference_ids": [
+      "R13"
+    ],
+    "reference_basis": "authored adaptation",
+    "reference_clip_ids": [],
+    "minimax_segment": "On <Subject 1>, reshape the nose and lip-jaw contours into one aligned upper and lower beak, growing the keratin surface continuously while preserving the bite hinge. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Using the supplied shot as the edit base, change only the nose, lips and jaws: Reshape the nose and lip-jaw contours into one aligned upper and lower beak, growing the keratin surface continuously while preserving the bite hinge. Preserve the source pose, composition, lighting and unrelated details. For a still, show the requested single intermediate state.",
+    "match_instruction": "Choose raven-straight or raptor-hooked form; do not add a beak in front of an intact human mouth.",
+    "sound_segment": "Keratin ticks and a restrained breath.",
+    "thumbnail": "thumbnails/FX044.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX045",
+    "effect_name": "Arm-to-wing conversion",
+    "category": "Body mechanics",
+    "anatomy": "arm and hand",
+    "stage": "intermediate",
+    "species": [
+      "eagle",
+      "raven",
+      "owl"
+    ],
+    "image_key": "A16",
+    "reference_ids": [
+      "R13"
+    ],
+    "reference_basis": "authored adaptation",
+    "reference_clip_ids": [
+      "CLIP015"
+    ],
+    "minimax_segment": "On <Subject 1>, reshape the existing arm into the selected bird wing, reduce and integrate the hand into the distal wing structure and unfold the wing along the original shoulder connection. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Using the supplied shot as the edit base, change only the arm and hand: Reshape the existing arm into the selected bird wing, reduce and integrate the hand into the distal wing structure and unfold the wing along the original shoulder connection. Preserve the source pose, composition, lighting and unrelated details. For a still, show the requested single intermediate state.",
+    "match_instruction": "One arm becomes one wing. Do not retain a full hand and add another wing beside it.",
+    "sound_segment": "A feathered whoosh and shoulder creak.",
+    "thumbnail": "thumbnails/FX045.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [
+      {
+        "clip_id": "CLIP015",
+        "evidence_kind": "formed anatomy endpoint",
+        "scope": "Wing surface/motion reference only; not a continuous arm-to-wing conversion."
+      }
+    ],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": [
+      "SRC015"
+    ]
+  },
+  {
+    "id": "FX046",
+    "effect_name": "Feathers emerging and layering",
+    "category": "Surface effects",
+    "anatomy": "forearm or selected feather tract",
+    "stage": "intermediate",
+    "species": [
+      "eagle",
+      "raven",
+      "owl"
+    ],
+    "image_key": "A16",
+    "reference_ids": [
+      "R13"
+    ],
+    "reference_basis": "authored adaptation",
+    "reference_clip_ids": [
+      "CLIP015"
+    ],
+    "minimax_segment": "On <Subject 1>, raise short feather shafts along the selected tract, unfold vanes and lay the feathers in overlapping rows that follow the changing surface. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Using the supplied shot as the edit base, change only the forearm or selected feather tract: Raise short feather shafts along the selected tract, unfold vanes and lay the feathers in overlapping rows that follow the changing surface. Preserve the source pose, composition, lighting and unrelated details. For a still, show the requested single intermediate state.",
+    "match_instruction": "Distinguish contour feathers from long flight feathers; avoid a furry feather cloud.",
+    "sound_segment": "Fine quill ticks and a dry feather rustle.",
+    "thumbnail": "thumbnails/FX046.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [
+      {
+        "clip_id": "CLIP015",
+        "evidence_kind": "formed anatomy endpoint",
+        "scope": "Wing surface/motion reference only; not a continuous arm-to-wing conversion."
+      }
+    ],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": [
+      "SRC015"
+    ]
+  },
+  {
+    "id": "FX047",
+    "effect_name": "Bat wing membrane tensioning",
+    "category": "Body mechanics",
+    "anatomy": "arm, fingers and wing membrane",
+    "stage": "intermediate",
+    "species": [
+      "bat"
+    ],
+    "image_key": "S14",
+    "reference_ids": [
+      "R04"
+    ],
+    "reference_basis": "authored adaptation",
+    "reference_clip_ids": [],
+    "minimax_segment": "On <Subject 1>, lengthen fingers II through V and tension a thin continuous membrane between them while keeping the thumb free and the wing connected to the existing arm. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Using the supplied shot as the edit base, change only the arm, fingers and wing membrane: Lengthen fingers II through V and tension a thin continuous membrane between them while keeping the thumb free and the wing connected to the existing arm. Preserve the source pose, composition, lighting and unrelated details. For a still, show the requested single intermediate state.",
+    "match_instruction": "Use mammalian bat-wing fingers, not bird feathers or an extra shoulder pair.",
+    "sound_segment": "A light leathery flap and tendon creak.",
+    "thumbnail": "thumbnails/FX047.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX048",
+    "effect_name": "Reptile scales replacing skin texture",
+    "category": "Surface effects",
+    "anatomy": "skin surface",
+    "stage": "intermediate",
+    "species": [
+      "crocodile"
+    ],
+    "image_key": "S13",
+    "reference_ids": [
+      "R13"
+    ],
+    "reference_basis": "authored adaptation",
+    "reference_clip_ids": [],
+    "minimax_segment": "On <Subject 1>, raise a coherent pattern of small scales within the selected skin surface, deepen the seams between scales and let the pattern stretch with the new limb contour. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Using the supplied shot as the edit base, change only the skin surface: Raise a coherent pattern of small scales within the selected skin surface, deepen the seams between scales and let the pattern stretch with the new limb contour. Preserve the source pose, composition, lighting and unrelated details. For a still, show the requested single intermediate state.",
+    "match_instruction": "Scales remain attached to the same surface; no falling stone plates or metallic armor unless requested.",
+    "sound_segment": "A dry close skin rustle.",
+    "thumbnail": "thumbnails/FX048.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX049",
+    "effect_name": "Werewolf anatomy abstraction",
+    "category": "Species",
+    "anatomy": "selected visible region",
+    "stage": "choose onset / intermediate / late",
+    "species": [
+      "wolf"
+    ],
+    "image_key": "S01",
+    "reference_ids": [
+      "R03",
+      "R07",
+      "R08",
+      "R05"
+    ],
+    "reference_basis": "original anatomy abstraction; any cited footage is a technique or appearance analogy",
+    "reference_clip_ids": [
+      "CLIP007"
+    ],
+    "minimax_segment": "For the selected visible region of <Subject 1>, use this animal endpoint: A moderately long canine muzzle, pointed ears, round pupils, dense guard hair and a four-toed paw silhouette. Digitigrade canine hindlimbs; four main weight-bearing paw digits; forelimb dewclaw is medial. Show only the requested stage of the current change. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Edit only the selected region of the supplied shot toward this animal endpoint: A moderately long canine muzzle, pointed ears, round pupils, dense guard hair and a four-toed paw silhouette. Digitigrade canine hindlimbs; four main weight-bearing paw digits; forelimb dewclaw is medial. Keep the source pose and requested stage; preserve identity cues outside the edited region, camera and setting.",
+    "match_instruction": "Use one region per segment. This is a target anatomy preset, not a claim that the species appears in the cited movie.",
+    "sound_segment": "",
+    "thumbnail": "thumbnails/FX049.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [
+      {
+        "clip_id": "CLIP007",
+        "evidence_kind": "formed-creature performance",
+        "scope": "Endpoint and vocal timing reference; not an in-progress limb morph."
+      }
+    ],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": [
+      "SRC007"
+    ]
+  },
+  {
+    "id": "FX050",
+    "effect_name": "Werecheetah anatomy abstraction",
+    "category": "Species",
+    "anatomy": "selected visible region",
+    "stage": "choose onset / intermediate / late",
+    "species": [
+      "cheetah"
+    ],
+    "image_key": "S02",
+    "reference_ids": [],
+    "reference_basis": "original anatomy abstraction; any cited footage is a technique or appearance analogy",
+    "reference_clip_ids": [],
+    "minimax_segment": "For the selected visible region of <Subject 1>, use this animal endpoint: A slim short feline muzzle, solid black spots, black tear tracks, rounded ears and round pupils. Keep the body light and the tail long. Lean digitigrade limbs; four main paw toes; small, less fully retractile claws. Show only the requested stage of the current change. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Edit only the selected region of the supplied shot toward this animal endpoint: A slim short feline muzzle, solid black spots, black tear tracks, rounded ears and round pupils. Keep the body light and the tail long. Lean digitigrade limbs; four main paw toes; small, less fully retractile claws. Keep the source pose and requested stage; preserve identity cues outside the edited region, camera and setting.",
+    "match_instruction": "Use one region per segment. This is a target anatomy preset, not a claim that the species appears in the cited movie.",
+    "sound_segment": "",
+    "thumbnail": "thumbnails/FX050.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX051",
+    "effect_name": "Werebear anatomy abstraction",
+    "category": "Species",
+    "anatomy": "selected visible region",
+    "stage": "choose onset / intermediate / late",
+    "species": [
+      "bear"
+    ],
+    "image_key": "S03",
+    "reference_ids": [],
+    "reference_basis": "original anatomy abstraction; any cited footage is a technique or appearance analogy",
+    "reference_clip_ids": [],
+    "minimax_segment": "For the selected visible region of <Subject 1>, use this animal endpoint: A broad bear muzzle, rounded ears, heavy shoulder mass and dense coarse fur. Keep the heel on the ground during a planted stance. Plantigrade hindfeet; five toes with non-retractile claws. Show only the requested stage of the current change. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Edit only the selected region of the supplied shot toward this animal endpoint: A broad bear muzzle, rounded ears, heavy shoulder mass and dense coarse fur. Keep the heel on the ground during a planted stance. Plantigrade hindfeet; five toes with non-retractile claws. Keep the source pose and requested stage; preserve identity cues outside the edited region, camera and setting.",
+    "match_instruction": "Use one region per segment. This is a target anatomy preset, not a claim that the species appears in the cited movie.",
+    "sound_segment": "",
+    "thumbnail": "thumbnails/FX051.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX052",
+    "effect_name": "Werepanther anatomy abstraction",
+    "category": "Species",
+    "anatomy": "selected visible region",
+    "stage": "choose onset / intermediate / late",
+    "species": [
+      "panther"
+    ],
+    "image_key": "S04",
+    "reference_ids": [],
+    "reference_basis": "original anatomy abstraction; any cited footage is a technique or appearance analogy",
+    "reference_clip_ids": [],
+    "minimax_segment": "For the selected visible region of <Subject 1>, use this animal endpoint: A black leopard hybrid with a broad feline muzzle, rounded ears, round pupils, long tail and faint rosettes visible in reflected light. Specify black leopard or black jaguar; digitigrade felid limbs, retractile claws. Show only the requested stage of the current change. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Edit only the selected region of the supplied shot toward this animal endpoint: A black leopard hybrid with a broad feline muzzle, rounded ears, round pupils, long tail and faint rosettes visible in reflected light. Specify black leopard or black jaguar; digitigrade felid limbs, retractile claws. Keep the source pose and requested stage; preserve identity cues outside the edited region, camera and setting.",
+    "match_instruction": "Use one region per segment. This is a target anatomy preset, not a claim that the species appears in the cited movie.",
+    "sound_segment": "",
+    "thumbnail": "thumbnails/FX052.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX053",
+    "effect_name": "Werelioness anatomy abstraction",
+    "category": "Species",
+    "anatomy": "selected visible region",
+    "stage": "choose onset / intermediate / late",
+    "species": [
+      "lioness"
+    ],
+    "image_key": "S05",
+    "reference_ids": [],
+    "reference_basis": "original anatomy abstraction; any cited footage is a technique or appearance analogy",
+    "reference_clip_ids": [],
+    "minimax_segment": "For the selected visible region of <Subject 1>, use this animal endpoint: A tawny lioness muzzle, broad nose, rounded ears, round pupils, four main paw toes and a tufted tail. Digitigrade felid limbs; four hind toes, medial forelimb dewclaw; no mane. Show only the requested stage of the current change. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Edit only the selected region of the supplied shot toward this animal endpoint: A tawny lioness muzzle, broad nose, rounded ears, round pupils, four main paw toes and a tufted tail. Digitigrade felid limbs; four hind toes, medial forelimb dewclaw; no mane. Keep the source pose and requested stage; preserve identity cues outside the edited region, camera and setting.",
+    "match_instruction": "Use one region per segment. This is a target anatomy preset, not a claim that the species appears in the cited movie.",
+    "sound_segment": "",
+    "thumbnail": "thumbnails/FX053.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX054",
+    "effect_name": "Weretiger anatomy abstraction",
+    "category": "Species",
+    "anatomy": "selected visible region",
+    "stage": "choose onset / intermediate / late",
+    "species": [
+      "tiger"
+    ],
+    "image_key": "S06",
+    "reference_ids": [
+      "R14"
+    ],
+    "reference_basis": "original anatomy abstraction; any cited footage is a technique or appearance analogy",
+    "reference_clip_ids": [],
+    "minimax_segment": "For the selected visible region of <Subject 1>, use this animal endpoint: A broad tiger muzzle, rounded ears and orange coat with black stripes that follow the growing anatomy. Digitigrade felid limbs; retractile claws; round pupils. Show only the requested stage of the current change. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Edit only the selected region of the supplied shot toward this animal endpoint: A broad tiger muzzle, rounded ears and orange coat with black stripes that follow the growing anatomy. Digitigrade felid limbs; retractile claws; round pupils. Keep the source pose and requested stage; preserve identity cues outside the edited region, camera and setting.",
+    "match_instruction": "Use one region per segment. This is a target anatomy preset, not a claim that the species appears in the cited movie.",
+    "sound_segment": "",
+    "thumbnail": "thumbnails/FX054.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX055",
+    "effect_name": "Werehyena anatomy abstraction",
+    "category": "Species",
+    "anatomy": "selected visible region",
+    "stage": "choose onset / intermediate / late",
+    "species": [
+      "hyena"
+    ],
+    "image_key": "S07",
+    "reference_ids": [],
+    "reference_basis": "original anatomy abstraction; any cited footage is a technique or appearance analogy",
+    "reference_clip_ids": [],
+    "minimax_segment": "For the selected visible region of <Subject 1>, use this animal endpoint: A deep muzzle, rounded ears, heavy neck, spotted coarse coat and a sloping shoulder-to-hip silhouette. Digitigrade; spotted-hyena variant has four toes per foot. Show only the requested stage of the current change. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Edit only the selected region of the supplied shot toward this animal endpoint: A deep muzzle, rounded ears, heavy neck, spotted coarse coat and a sloping shoulder-to-hip silhouette. Digitigrade; spotted-hyena variant has four toes per foot. Keep the source pose and requested stage; preserve identity cues outside the edited region, camera and setting.",
+    "match_instruction": "Use one region per segment. This is a target anatomy preset, not a claim that the species appears in the cited movie.",
+    "sound_segment": "",
+    "thumbnail": "thumbnails/FX055.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX056",
+    "effect_name": "Werefox anatomy abstraction",
+    "category": "Species",
+    "anatomy": "selected visible region",
+    "stage": "choose onset / intermediate / late",
+    "species": [
+      "fox"
+    ],
+    "image_key": "S08",
+    "reference_ids": [],
+    "reference_basis": "original anatomy abstraction; any cited footage is a technique or appearance analogy",
+    "reference_clip_ids": [],
+    "minimax_segment": "For the selected visible region of <Subject 1>, use this animal endpoint: A narrow orange fox muzzle, large pointed ears, dark lower legs and a full brush tail. Digitigrade canine plan; main paws have four forward digits. Show only the requested stage of the current change. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Edit only the selected region of the supplied shot toward this animal endpoint: A narrow orange fox muzzle, large pointed ears, dark lower legs and a full brush tail. Digitigrade canine plan; main paws have four forward digits. Keep the source pose and requested stage; preserve identity cues outside the edited region, camera and setting.",
+    "match_instruction": "Use one region per segment. This is a target anatomy preset, not a claim that the species appears in the cited movie.",
+    "sound_segment": "",
+    "thumbnail": "thumbnails/FX056.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX057",
+    "effect_name": "Wereboar anatomy abstraction",
+    "category": "Species",
+    "anatomy": "selected visible region",
+    "stage": "choose onset / intermediate / late",
+    "species": [
+      "boar"
+    ],
+    "image_key": "S09",
+    "reference_ids": [],
+    "reference_basis": "original anatomy abstraction; any cited footage is a technique or appearance analogy",
+    "reference_clip_ids": [],
+    "minimax_segment": "For the selected visible region of <Subject 1>, use this animal endpoint: A broad mobile snout disc, coarse bristles, compact triangular ears and paired curved tusks. Even-toed ungulate; two main hooves and smaller side digits. Show only the requested stage of the current change. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Edit only the selected region of the supplied shot toward this animal endpoint: A broad mobile snout disc, coarse bristles, compact triangular ears and paired curved tusks. Even-toed ungulate; two main hooves and smaller side digits. Keep the source pose and requested stage; preserve identity cues outside the edited region, camera and setting.",
+    "match_instruction": "Use one region per segment. This is a target anatomy preset, not a claim that the species appears in the cited movie.",
+    "sound_segment": "",
+    "thumbnail": "thumbnails/FX057.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX058",
+    "effect_name": "Werebull anatomy abstraction",
+    "category": "Species",
+    "anatomy": "selected visible region",
+    "stage": "choose onset / intermediate / late",
+    "species": [
+      "bull"
+    ],
+    "image_key": "S10",
+    "reference_ids": [],
+    "reference_basis": "original anatomy abstraction; any cited footage is a technique or appearance analogy",
+    "reference_clip_ids": [],
+    "minimax_segment": "For the selected visible region of <Subject 1>, use this animal endpoint: A heavy bovine muzzle, lateral ears, massive neck and a matched pair of unbranched horns growing from the frontal bone. Cloven hooves; two principal digits and rear dewclaws; paired keratin horns. Show only the requested stage of the current change. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Edit only the selected region of the supplied shot toward this animal endpoint: A heavy bovine muzzle, lateral ears, massive neck and a matched pair of unbranched horns growing from the frontal bone. Cloven hooves; two principal digits and rear dewclaws; paired keratin horns. Keep the source pose and requested stage; preserve identity cues outside the edited region, camera and setting.",
+    "match_instruction": "Use one region per segment. This is a target anatomy preset, not a claim that the species appears in the cited movie.",
+    "sound_segment": "",
+    "thumbnail": "thumbnails/FX058.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX059",
+    "effect_name": "Weredeer anatomy abstraction",
+    "category": "Species",
+    "anatomy": "selected visible region",
+    "stage": "choose onset / intermediate / late",
+    "species": [
+      "deer"
+    ],
+    "image_key": "S11",
+    "reference_ids": [],
+    "reference_basis": "original anatomy abstraction; any cited footage is a technique or appearance analogy",
+    "reference_clip_ids": [],
+    "minimax_segment": "For the selected visible region of <Subject 1>, use this animal endpoint: A slender cervid muzzle, broad mobile ears, a soft coat and a paired antler rack if the selected deer phenotype has antlers. Cloven hooves; antlers differ from permanent keratin horns. Show only the requested stage of the current change. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Edit only the selected region of the supplied shot toward this animal endpoint: A slender cervid muzzle, broad mobile ears, a soft coat and a paired antler rack if the selected deer phenotype has antlers. Cloven hooves; antlers differ from permanent keratin horns. Keep the source pose and requested stage; preserve identity cues outside the edited region, camera and setting.",
+    "match_instruction": "Use one region per segment. This is a target anatomy preset, not a claim that the species appears in the cited movie.",
+    "sound_segment": "",
+    "thumbnail": "thumbnails/FX059.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX060",
+    "effect_name": "Wererat anatomy abstraction",
+    "category": "Species",
+    "anatomy": "selected visible region",
+    "stage": "choose onset / intermediate / late",
+    "species": [
+      "rat"
+    ],
+    "image_key": "S12",
+    "reference_ids": [],
+    "reference_basis": "original anatomy abstraction; any cited footage is a technique or appearance analogy",
+    "reference_clip_ids": [],
+    "minimax_segment": "For the selected visible region of <Subject 1>, use this animal endpoint: A narrow rodent muzzle, rounded bare ears, long whiskers, prominent incisors and a thin scaled tail. Five hind toes; smaller four main front digits plus reduced thumb. Show only the requested stage of the current change. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Edit only the selected region of the supplied shot toward this animal endpoint: A narrow rodent muzzle, rounded bare ears, long whiskers, prominent incisors and a thin scaled tail. Five hind toes; smaller four main front digits plus reduced thumb. Keep the source pose and requested stage; preserve identity cues outside the edited region, camera and setting.",
+    "match_instruction": "Use one region per segment. This is a target anatomy preset, not a claim that the species appears in the cited movie.",
+    "sound_segment": "",
+    "thumbnail": "thumbnails/FX060.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX061",
+    "effect_name": "Werecrocodile anatomy abstraction",
+    "category": "Species",
+    "anatomy": "selected visible region",
+    "stage": "choose onset / intermediate / late",
+    "species": [
+      "crocodile"
+    ],
+    "image_key": "S13",
+    "reference_ids": [],
+    "reference_basis": "original anatomy abstraction; any cited footage is a technique or appearance analogy",
+    "reference_clip_ids": [],
+    "minimax_segment": "For the selected visible region of <Subject 1>, use this animal endpoint: A broad crocodilian muzzle, nostrils near its tip, scaly skin and a muscular laterally flattened tail. Reptilian limbs; five fore digits and four hind digits for the crocodile endpoint. Show only the requested stage of the current change. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Edit only the selected region of the supplied shot toward this animal endpoint: A broad crocodilian muzzle, nostrils near its tip, scaly skin and a muscular laterally flattened tail. Reptilian limbs; five fore digits and four hind digits for the crocodile endpoint. Keep the source pose and requested stage; preserve identity cues outside the edited region, camera and setting.",
+    "match_instruction": "Use one region per segment. This is a target anatomy preset, not a claim that the species appears in the cited movie.",
+    "sound_segment": "",
+    "thumbnail": "thumbnails/FX061.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX062",
+    "effect_name": "Werebat anatomy abstraction",
+    "category": "Species",
+    "anatomy": "selected visible region",
+    "stage": "choose onset / intermediate / late",
+    "species": [
+      "bat"
+    ],
+    "image_key": "S14",
+    "reference_ids": [
+      "R04"
+    ],
+    "reference_basis": "original anatomy abstraction; any cited footage is a technique or appearance analogy",
+    "reference_clip_ids": [],
+    "minimax_segment": "For the selected visible region of <Subject 1>, use this animal endpoint: A short bat muzzle, large species-appropriate ears and membranes tensioned between elongated fingers. A bat is a mammal, with fur rather than feathers. Choose an arm-to-wing conversion; elongate fingers II-V; leave the thumb free. Show only the requested stage of the current change. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Edit only the selected region of the supplied shot toward this animal endpoint: A short bat muzzle, large species-appropriate ears and membranes tensioned between elongated fingers. A bat is a mammal, with fur rather than feathers. Choose an arm-to-wing conversion; elongate fingers II-V; leave the thumb free. Keep the source pose and requested stage; preserve identity cues outside the edited region, camera and setting.",
+    "match_instruction": "Use one region per segment. This is a target anatomy preset, not a claim that the species appears in the cited movie.",
+    "sound_segment": "",
+    "thumbnail": "thumbnails/FX062.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX063",
+    "effect_name": "Wereeagle anatomy abstraction",
+    "category": "Species",
+    "anatomy": "selected visible region",
+    "stage": "choose onset / intermediate / late",
+    "species": [
+      "eagle"
+    ],
+    "image_key": "S15",
+    "reference_ids": [
+      "R13"
+    ],
+    "reference_basis": "original anatomy abstraction; any cited footage is a technique or appearance analogy",
+    "reference_clip_ids": [
+      "CLIP015"
+    ],
+    "minimax_segment": "For the selected visible region of <Subject 1>, use this animal endpoint: A hooked eagle beak, layered flight feathers and a predatory avian head; wings attach at the existing shoulders. Avian wing replaces the arm; raptor hindfeet have three forward toes and a rear hallux. Show only the requested stage of the current change. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Edit only the selected region of the supplied shot toward this animal endpoint: A hooked eagle beak, layered flight feathers and a predatory avian head; wings attach at the existing shoulders. Avian wing replaces the arm; raptor hindfeet have three forward toes and a rear hallux. Keep the source pose and requested stage; preserve identity cues outside the edited region, camera and setting.",
+    "match_instruction": "Use one region per segment. This is a target anatomy preset, not a claim that the species appears in the cited movie.",
+    "sound_segment": "",
+    "thumbnail": "thumbnails/FX063.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [
+      {
+        "clip_id": "CLIP015",
+        "evidence_kind": "formed anatomy endpoint",
+        "scope": "Wing surface/motion reference only; not a continuous arm-to-wing conversion."
+      }
+    ],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": [
+      "SRC015"
+    ]
+  },
+  {
+    "id": "FX064",
+    "effect_name": "Wereshark anatomy abstraction",
+    "category": "Species",
+    "anatomy": "selected visible region",
+    "stage": "choose onset / intermediate / late",
+    "species": [
+      "shark"
+    ],
+    "image_key": "S16",
+    "reference_ids": [],
+    "reference_basis": "original anatomy abstraction; any cited footage is a technique or appearance analogy",
+    "reference_clip_ids": [],
+    "minimax_segment": "For the selected visible region of <Subject 1>, use this animal endpoint: Smooth grey shark skin, paired side gill slits, a broad shark head and ordered rows of triangular teeth. Choose a fantasy hybrid topology explicitly; fins are not jointed mammal paws. Show only the requested stage of the current change. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Edit only the selected region of the supplied shot toward this animal endpoint: Smooth grey shark skin, paired side gill slits, a broad shark head and ordered rows of triangular teeth. Choose a fantasy hybrid topology explicitly; fins are not jointed mammal paws. Keep the source pose and requested stage; preserve identity cues outside the edited region, camera and setting.",
+    "match_instruction": "Use one region per segment. This is a target anatomy preset, not a claim that the species appears in the cited movie.",
+    "sound_segment": "",
+    "thumbnail": "thumbnails/FX064.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX065",
+    "effect_name": "Werehorse anatomy abstraction",
+    "category": "Species",
+    "anatomy": "selected visible region",
+    "stage": "choose onset / intermediate / late",
+    "species": [
+      "horse"
+    ],
+    "image_key": "S17",
+    "reference_ids": [],
+    "reference_basis": "original anatomy abstraction; any cited footage is a technique or appearance analogy",
+    "reference_clip_ids": [],
+    "minimax_segment": "For the selected visible region of <Subject 1>, use this animal endpoint: An equine muzzle, upright mobile ears, a mane, single hooves and a long hair-covered tail. Unguligrade; one principal hoof per limb, no cloven split or bovine dewclaws. Show only the requested stage of the current change. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Edit only the selected region of the supplied shot toward this animal endpoint: An equine muzzle, upright mobile ears, a mane, single hooves and a long hair-covered tail. Unguligrade; one principal hoof per limb, no cloven split or bovine dewclaws. Keep the source pose and requested stage; preserve identity cues outside the edited region, camera and setting.",
+    "match_instruction": "Use one region per segment. This is a target anatomy preset, not a claim that the species appears in the cited movie.",
+    "sound_segment": "",
+    "thumbnail": "thumbnails/FX065.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX066",
+    "effect_name": "Werecow anatomy abstraction",
+    "category": "Species",
+    "anatomy": "selected visible region",
+    "stage": "choose onset / intermediate / late",
+    "species": [
+      "cow"
+    ],
+    "image_key": "S18",
+    "reference_ids": [],
+    "reference_basis": "original anatomy abstraction; any cited footage is a technique or appearance analogy",
+    "reference_clip_ids": [],
+    "minimax_segment": "For the selected visible region of <Subject 1>, use this animal endpoint: A broad moist bovine nose, lateral ears and a black-and-white short coat; use the chosen hornless individual consistently. Bovine cloven hoof anatomy; horned or hornless depends on the selected phenotype. Show only the requested stage of the current change. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Edit only the selected region of the supplied shot toward this animal endpoint: A broad moist bovine nose, lateral ears and a black-and-white short coat; use the chosen hornless individual consistently. Bovine cloven hoof anatomy; horned or hornless depends on the selected phenotype. Keep the source pose and requested stage; preserve identity cues outside the edited region, camera and setting.",
+    "match_instruction": "Use one region per segment. This is a target anatomy preset, not a claim that the species appears in the cited movie.",
+    "sound_segment": "",
+    "thumbnail": "thumbnails/FX066.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX067",
+    "effect_name": "Bull horns / minotaur anatomy abstraction",
+    "category": "Species",
+    "anatomy": "selected visible region",
+    "stage": "choose onset / intermediate / late",
+    "species": [
+      "bull_horns"
+    ],
+    "image_key": "S19",
+    "reference_ids": [],
+    "reference_basis": "original anatomy abstraction; any cited footage is a technique or appearance analogy",
+    "reference_clip_ids": [],
+    "minimax_segment": "For the selected visible region of <Subject 1>, use this animal endpoint: A heavy bovine face and neck, with horns growing sideways from behind the eye line before curving upward. A paired, unbranched horn set; no deer-like branching. Show only the requested stage of the current change. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Edit only the selected region of the supplied shot toward this animal endpoint: A heavy bovine face and neck, with horns growing sideways from behind the eye line before curving upward. A paired, unbranched horn set; no deer-like branching. Keep the source pose and requested stage; preserve identity cues outside the edited region, camera and setting.",
+    "match_instruction": "Use one region per segment. This is a target anatomy preset, not a claim that the species appears in the cited movie.",
+    "sound_segment": "",
+    "thumbnail": "thumbnails/FX067.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX068",
+    "effect_name": "Domestic werecat anatomy abstraction",
+    "category": "Species",
+    "anatomy": "selected visible region",
+    "stage": "choose onset / intermediate / late",
+    "species": [
+      "cat"
+    ],
+    "image_key": "S20",
+    "reference_ids": [],
+    "reference_basis": "original anatomy abstraction; any cited footage is a technique or appearance analogy",
+    "reference_clip_ids": [],
+    "minimax_segment": "For the selected visible region of <Subject 1>, use this animal endpoint: A short domestic-cat muzzle, upright triangular ears, tabby markings and pupils that narrow vertically under brighter light. Digitigrade cat legs; retractile claws; four hind toes and a medial forelimb dewclaw. Show only the requested stage of the current change. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Edit only the selected region of the supplied shot toward this animal endpoint: A short domestic-cat muzzle, upright triangular ears, tabby markings and pupils that narrow vertically under brighter light. Digitigrade cat legs; retractile claws; four hind toes and a medial forelimb dewclaw. Keep the source pose and requested stage; preserve identity cues outside the edited region, camera and setting.",
+    "match_instruction": "Use one region per segment. This is a target anatomy preset, not a claim that the species appears in the cited movie.",
+    "sound_segment": "",
+    "thumbnail": "thumbnails/FX068.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX069",
+    "effect_name": "Wereraven anatomy abstraction",
+    "category": "Species",
+    "anatomy": "selected visible region",
+    "stage": "choose onset / intermediate / late",
+    "species": [
+      "raven"
+    ],
+    "image_key": "S21",
+    "reference_ids": [
+      "R13"
+    ],
+    "reference_basis": "original anatomy abstraction; any cited footage is a technique or appearance analogy",
+    "reference_clip_ids": [
+      "CLIP015"
+    ],
+    "minimax_segment": "For the selected visible region of <Subject 1>, use this animal endpoint: A straight black raven beak, black contour feathers, layered wing feathers and small round dark eyes. Avian arm-to-wing plan; one head; no mammal ear pinnae at endpoint. Show only the requested stage of the current change. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Edit only the selected region of the supplied shot toward this animal endpoint: A straight black raven beak, black contour feathers, layered wing feathers and small round dark eyes. Avian arm-to-wing plan; one head; no mammal ear pinnae at endpoint. Keep the source pose and requested stage; preserve identity cues outside the edited region, camera and setting.",
+    "match_instruction": "Use one region per segment. This is a target anatomy preset, not a claim that the species appears in the cited movie.",
+    "sound_segment": "",
+    "thumbnail": "thumbnails/FX069.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [
+      {
+        "clip_id": "CLIP015",
+        "evidence_kind": "formed anatomy endpoint",
+        "scope": "Wing surface/motion reference only; not a continuous arm-to-wing conversion."
+      }
+    ],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": [
+      "SRC015"
+    ]
+  },
+  {
+    "id": "FX070",
+    "effect_name": "Wereowl anatomy abstraction",
+    "category": "Species",
+    "anatomy": "selected visible region",
+    "stage": "choose onset / intermediate / late",
+    "species": [
+      "owl"
+    ],
+    "image_key": "S22",
+    "reference_ids": [
+      "R13"
+    ],
+    "reference_basis": "original anatomy abstraction; any cited footage is a technique or appearance analogy",
+    "reference_clip_ids": [
+      "CLIP015"
+    ],
+    "minimax_segment": "For the selected visible region of <Subject 1>, use this animal endpoint: A short hooked beak, a feather facial disc and large forward-facing eyes; rotate the head within plausible limits. Avian arm-to-wing plan; zygodactyl grip can be chosen for perched feet. Show only the requested stage of the current change. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Edit only the selected region of the supplied shot toward this animal endpoint: A short hooked beak, a feather facial disc and large forward-facing eyes; rotate the head within plausible limits. Avian arm-to-wing plan; zygodactyl grip can be chosen for perched feet. Keep the source pose and requested stage; preserve identity cues outside the edited region, camera and setting.",
+    "match_instruction": "Use one region per segment. This is a target anatomy preset, not a claim that the species appears in the cited movie.",
+    "sound_segment": "",
+    "thumbnail": "thumbnails/FX070.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [
+      {
+        "clip_id": "CLIP015",
+        "evidence_kind": "formed anatomy endpoint",
+        "scope": "Wing surface/motion reference only; not a continuous arm-to-wing conversion."
+      }
+    ],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": [
+      "SRC015"
+    ]
+  },
+  {
+    "id": "FX071",
+    "effect_name": "Wereram anatomy abstraction",
+    "category": "Species",
+    "anatomy": "selected visible region",
+    "stage": "choose onset / intermediate / late",
+    "species": [
+      "ram"
+    ],
+    "image_key": "S23",
+    "reference_ids": [],
+    "reference_basis": "original anatomy abstraction; any cited footage is a technique or appearance analogy",
+    "reference_clip_ids": [],
+    "minimax_segment": "For the selected visible region of <Subject 1>, use this animal endpoint: A sheep muzzle, dense wool and a matched pair of curling ridged horns that remain clear of the ears. Cloven hooves; paired ridged spiral horns; wool rather than a fur mane. Show only the requested stage of the current change. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Edit only the selected region of the supplied shot toward this animal endpoint: A sheep muzzle, dense wool and a matched pair of curling ridged horns that remain clear of the ears. Cloven hooves; paired ridged spiral horns; wool rather than a fur mane. Keep the source pose and requested stage; preserve identity cues outside the edited region, camera and setting.",
+    "match_instruction": "Use one region per segment. This is a target anatomy preset, not a claim that the species appears in the cited movie.",
+    "sound_segment": "",
+    "thumbnail": "thumbnails/FX071.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX072",
+    "effect_name": "Weregoat anatomy abstraction",
+    "category": "Species",
+    "anatomy": "selected visible region",
+    "stage": "choose onset / intermediate / late",
+    "species": [
+      "goat"
+    ],
+    "image_key": "S24",
+    "reference_ids": [],
+    "reference_basis": "original anatomy abstraction; any cited footage is a technique or appearance analogy",
+    "reference_clip_ids": [],
+    "minimax_segment": "For the selected visible region of <Subject 1>, use this animal endpoint: A narrow caprine muzzle, short beard, horizontal pupils and tapered horns sweeping backward. Cloven hooves; paired backward-curving horns; horizontal pupils. Show only the requested stage of the current change. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Edit only the selected region of the supplied shot toward this animal endpoint: A narrow caprine muzzle, short beard, horizontal pupils and tapered horns sweeping backward. Cloven hooves; paired backward-curving horns; horizontal pupils. Keep the source pose and requested stage; preserve identity cues outside the edited region, camera and setting.",
+    "match_instruction": "Use one region per segment. This is a target anatomy preset, not a claim that the species appears in the cited movie.",
+    "sound_segment": "",
+    "thumbnail": "thumbnails/FX072.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX073",
+    "effect_name": "Deep structural creak",
+    "category": "Sound",
+    "anatomy": "sound",
+    "stage": "sync to visible event",
+    "species": [
+      "any"
+    ],
+    "image_key": "A05",
+    "reference_ids": [],
+    "reference_basis": "original sound-design recipe",
+    "reference_clip_ids": [],
+    "minimax_segment": "A low, short wooden-fibrous creak rises with the visible limb extension and stops as the limb settles. Avoid explosive impacts. Keep the source ambience and any retained dialogue audible; synchronize the cue to the visible event.",
+    "gemini_quick_fix": "Generate or describe only this original sound layer for the supplied segment: A low, short wooden-fibrous creak rises with the visible limb extension and stops as the limb settles. Avoid explosive impacts. Match the visible timing; do not replace the complete soundtrack.",
+    "match_instruction": "growth stress",
+    "sound_segment": "",
+    "thumbnail": "thumbnails/FX073.jpg",
+    "thumbnail_kind": "synthetic sound-recipe graphic",
+    "thumbnail_note": "Conceptual graphic, not a measured waveform and not a supplied audio sample.",
+    "reference_matches": [],
+    "insertion_target": "audio layer for the current segment",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX074",
+    "effect_name": "Irregular joint-set pops",
+    "category": "Sound",
+    "anatomy": "sound",
+    "stage": "sync to visible event",
+    "species": [
+      "any"
+    ],
+    "image_key": "A02",
+    "reference_ids": [],
+    "reference_basis": "original sound-design recipe",
+    "reference_clip_ids": [],
+    "minimax_segment": "Two or three small dry joint pops occur at the visible joint movements, with uneven spacing and no repeated machine-gun cracking. Keep the source ambience and any retained dialogue audible; synchronize the cue to the visible event.",
+    "gemini_quick_fix": "Generate or describe only this original sound layer for the supplied segment: Two or three small dry joint pops occur at the visible joint movements, with uneven spacing and no repeated machine-gun cracking. Match the visible timing; do not replace the complete soundtrack.",
+    "match_instruction": "joint realignment",
+    "sound_segment": "",
+    "thumbnail": "thumbnails/FX074.jpg",
+    "thumbnail_kind": "synthetic sound-recipe graphic",
+    "thumbnail_note": "Conceptual graphic, not a measured waveform and not a supplied audio sample.",
+    "reference_matches": [],
+    "insertion_target": "audio layer for the current segment",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX075",
+    "effect_name": "Tendon stretch",
+    "category": "Sound",
+    "anatomy": "sound",
+    "stage": "sync to visible event",
+    "species": [
+      "any"
+    ],
+    "image_key": "A02",
+    "reference_ids": [],
+    "reference_basis": "original sound-design recipe",
+    "reference_clip_ids": [],
+    "minimax_segment": "A restrained elastic-fiber strain rises during the tendon tightening and releases immediately after the motion. Keep the source ambience and any retained dialogue audible; synchronize the cue to the visible event.",
+    "gemini_quick_fix": "Generate or describe only this original sound layer for the supplied segment: A restrained elastic-fiber strain rises during the tendon tightening and releases immediately after the motion. Match the visible timing; do not replace the complete soundtrack.",
+    "match_instruction": "tendon tension",
+    "sound_segment": "",
+    "thumbnail": "thumbnails/FX075.jpg",
+    "thumbnail_kind": "synthetic sound-recipe graphic",
+    "thumbnail_note": "Conceptual graphic, not a measured waveform and not a supplied audio sample.",
+    "reference_matches": [],
+    "insertion_target": "audio layer for the current segment",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX076",
+    "effect_name": "Skin tension and friction",
+    "category": "Sound",
+    "anatomy": "sound",
+    "stage": "sync to visible event",
+    "species": [
+      "any"
+    ],
+    "image_key": "A14",
+    "reference_ids": [],
+    "reference_basis": "original sound-design recipe",
+    "reference_clip_ids": [],
+    "minimax_segment": "Add close dry skin friction and a low pressure swell beneath the surface movement; keep it subtle enough to retain breathing. Keep the source ambience and any retained dialogue audible; synchronize the cue to the visible event.",
+    "gemini_quick_fix": "Generate or describe only this original sound layer for the supplied segment: Add close dry skin friction and a low pressure swell beneath the surface movement; keep it subtle enough to retain breathing. Match the visible timing; do not replace the complete soundtrack.",
+    "match_instruction": "surface tension",
+    "sound_segment": "",
+    "thumbnail": "thumbnails/FX076.jpg",
+    "thumbnail_kind": "synthetic sound-recipe graphic",
+    "thumbnail_note": "Conceptual graphic, not a measured waveform and not a supplied audio sample.",
+    "reference_matches": [],
+    "insertion_target": "audio layer for the current segment",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX077",
+    "effect_name": "Fur emergence rustle",
+    "category": "Sound",
+    "anatomy": "sound",
+    "stage": "sync to visible event",
+    "species": [
+      "any"
+    ],
+    "image_key": "A14",
+    "reference_ids": [],
+    "reference_basis": "original sound-design recipe",
+    "reference_clip_ids": [],
+    "minimax_segment": "A very fine dry brushing rustle grows with the visible hairs and dies away as the coat settles. Keep the source ambience and any retained dialogue audible; synchronize the cue to the visible event.",
+    "gemini_quick_fix": "Generate or describe only this original sound layer for the supplied segment: A very fine dry brushing rustle grows with the visible hairs and dies away as the coat settles. Match the visible timing; do not replace the complete soundtrack.",
+    "match_instruction": "coat emergence",
+    "sound_segment": "",
+    "thumbnail": "thumbnails/FX077.jpg",
+    "thumbnail_kind": "synthetic sound-recipe graphic",
+    "thumbnail_note": "Conceptual graphic, not a measured waveform and not a supplied audio sample.",
+    "reference_matches": [],
+    "insertion_target": "audio layer for the current segment",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX078",
+    "effect_name": "Garment stitch tearing",
+    "category": "Sound",
+    "anatomy": "sound",
+    "stage": "sync to visible event",
+    "species": [
+      "any"
+    ],
+    "image_key": "A06",
+    "reference_ids": [],
+    "reference_basis": "original sound-design recipe",
+    "reference_clip_ids": [],
+    "minimax_segment": "A rising cloth strain resolves into one short stitch rip exactly when the existing seam releases. Keep the source ambience and any retained dialogue audible; synchronize the cue to the visible event.",
+    "gemini_quick_fix": "Generate or describe only this original sound layer for the supplied segment: A rising cloth strain resolves into one short stitch rip exactly when the existing seam releases. Match the visible timing; do not replace the complete soundtrack.",
+    "match_instruction": "clothing tension",
+    "sound_segment": "",
+    "thumbnail": "thumbnails/FX078.jpg",
+    "thumbnail_kind": "synthetic sound-recipe graphic",
+    "thumbnail_note": "Conceptual graphic, not a measured waveform and not a supplied audio sample.",
+    "reference_matches": [],
+    "insertion_target": "audio layer for the current segment",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX079",
+    "effect_name": "Claws touching a hard floor",
+    "category": "Sound",
+    "anatomy": "sound",
+    "stage": "sync to visible event",
+    "species": [
+      "any"
+    ],
+    "image_key": "A01",
+    "reference_ids": [],
+    "reference_basis": "original sound-design recipe",
+    "reference_clip_ids": [],
+    "minimax_segment": "Place separate light keratin taps at the visible claw contacts, then one short scrape as the paw shifts. Match the floor material. Keep the source ambience and any retained dialogue audible; synchronize the cue to the visible event.",
+    "gemini_quick_fix": "Generate or describe only this original sound layer for the supplied segment: Place separate light keratin taps at the visible claw contacts, then one short scrape as the paw shifts. Match the floor material. Match the visible timing; do not replace the complete soundtrack.",
+    "match_instruction": "claw contact",
+    "sound_segment": "",
+    "thumbnail": "thumbnails/FX079.jpg",
+    "thumbnail_kind": "synthetic sound-recipe graphic",
+    "thumbnail_note": "Conceptual graphic, not a measured waveform and not a supplied audio sample.",
+    "reference_matches": [],
+    "insertion_target": "audio layer for the current segment",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX080",
+    "effect_name": "Paw pads taking weight",
+    "category": "Sound",
+    "anatomy": "sound",
+    "stage": "sync to visible event",
+    "species": [
+      "any"
+    ],
+    "image_key": "A03",
+    "reference_ids": [],
+    "reference_basis": "original sound-design recipe",
+    "reference_clip_ids": [],
+    "minimax_segment": "Use a soft dense thump with faint surface friction as the pads compress under the visible weight shift. Keep the source ambience and any retained dialogue audible; synchronize the cue to the visible event.",
+    "gemini_quick_fix": "Generate or describe only this original sound layer for the supplied segment: Use a soft dense thump with faint surface friction as the pads compress under the visible weight shift. Match the visible timing; do not replace the complete soundtrack.",
+    "match_instruction": "paw contact",
+    "sound_segment": "",
+    "thumbnail": "thumbnails/FX080.jpg",
+    "thumbnail_kind": "synthetic sound-recipe graphic",
+    "thumbnail_note": "Conceptual graphic, not a measured waveform and not a supplied audio sample.",
+    "reference_matches": [],
+    "insertion_target": "audio layer for the current segment",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX081",
+    "effect_name": "Hoof forming and first clop",
+    "category": "Sound",
+    "anatomy": "sound",
+    "stage": "sync to visible event",
+    "species": [
+      "any"
+    ],
+    "image_key": "A10",
+    "reference_ids": [],
+    "reference_basis": "original sound-design recipe",
+    "reference_clip_ids": [],
+    "minimax_segment": "Follow the keratin growth with a restrained dry creak, then one hard resonant clop at the first visible hoof landing. Match the floor resonance. Keep the source ambience and any retained dialogue audible; synchronize the cue to the visible event.",
+    "gemini_quick_fix": "Generate or describe only this original sound layer for the supplied segment: Follow the keratin growth with a restrained dry creak, then one hard resonant clop at the first visible hoof landing. Match the floor resonance. Match the visible timing; do not replace the complete soundtrack.",
+    "match_instruction": "hoof contact",
+    "sound_segment": "",
+    "thumbnail": "thumbnails/FX081.jpg",
+    "thumbnail_kind": "synthetic sound-recipe graphic",
+    "thumbnail_note": "Conceptual graphic, not a measured waveform and not a supplied audio sample.",
+    "reference_matches": [],
+    "insertion_target": "audio layer for the current segment",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX082",
+    "effect_name": "Feather and wing movement",
+    "category": "Sound",
+    "anatomy": "sound",
+    "stage": "sync to visible event",
+    "species": [
+      "any"
+    ],
+    "image_key": "A16",
+    "reference_ids": [],
+    "reference_basis": "original sound-design recipe",
+    "reference_clip_ids": [],
+    "minimax_segment": "Layer fine feather rustle with a brief air displacement whoosh synchronized to the visible wing unfold. Keep the source ambience and any retained dialogue audible; synchronize the cue to the visible event.",
+    "gemini_quick_fix": "Generate or describe only this original sound layer for the supplied segment: Layer fine feather rustle with a brief air displacement whoosh synchronized to the visible wing unfold. Match the visible timing; do not replace the complete soundtrack.",
+    "match_instruction": "wing unfolding",
+    "sound_segment": "",
+    "thumbnail": "thumbnails/FX082.jpg",
+    "thumbnail_kind": "synthetic sound-recipe graphic",
+    "thumbnail_note": "Conceptual graphic, not a measured waveform and not a supplied audio sample.",
+    "reference_matches": [],
+    "insertion_target": "audio layer for the current segment",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX083",
+    "effect_name": "Breath becoming animal panting",
+    "category": "Sound",
+    "anatomy": "sound",
+    "stage": "sync to visible event",
+    "species": [
+      "any"
+    ],
+    "image_key": "S01",
+    "reference_ids": [],
+    "reference_basis": "original sound-design recipe",
+    "reference_clip_ids": [],
+    "minimax_segment": "Transition the subject's existing breath gradually into deeper animal panting while keeping the same exhalation rhythm and visible chest movement. Keep the source ambience and any retained dialogue audible; synchronize the cue to the visible event.",
+    "gemini_quick_fix": "Generate or describe only this original sound layer for the supplied segment: Transition the subject's existing breath gradually into deeper animal panting while keeping the same exhalation rhythm and visible chest movement. Match the visible timing; do not replace the complete soundtrack.",
+    "match_instruction": "respiratory change",
+    "sound_segment": "",
+    "thumbnail": "thumbnails/FX083.jpg",
+    "thumbnail_kind": "synthetic sound-recipe graphic",
+    "thumbnail_note": "Conceptual graphic, not a measured waveform and not a supplied audio sample.",
+    "reference_matches": [],
+    "insertion_target": "audio layer for the current segment",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX084",
+    "effect_name": "Human vocal strain becoming growl",
+    "category": "Sound",
+    "anatomy": "sound",
+    "stage": "sync to visible event",
+    "species": [
+      "any"
+    ],
+    "image_key": "S03",
+    "reference_ids": [
+      "R05"
+    ],
+    "reference_basis": "original sound-design recipe",
+    "reference_clip_ids": [
+      "CLIP007"
+    ],
+    "minimax_segment": "Blend an original strained exhale into a low chest-resonant growl as the throat and mouth change. Preserve breath continuity rather than switching voices abruptly. Keep the source ambience and any retained dialogue audible; synchronize the cue to the visible event.",
+    "gemini_quick_fix": "Generate or describe only this original sound layer for the supplied segment: Blend an original strained exhale into a low chest-resonant growl as the throat and mouth change. Preserve breath continuity rather than switching voices abruptly. Match the visible timing; do not replace the complete soundtrack.",
+    "match_instruction": "laryngeal change",
+    "sound_segment": "",
+    "thumbnail": "thumbnails/FX084.jpg",
+    "thumbnail_kind": "synthetic sound-recipe graphic",
+    "thumbnail_note": "Conceptual graphic, not a measured waveform and not a supplied audio sample.",
+    "reference_matches": [
+      {
+        "clip_id": "CLIP007",
+        "evidence_kind": "formed-creature performance",
+        "scope": "Endpoint and vocal timing reference; not an in-progress limb morph."
+      }
+    ],
+    "insertion_target": "audio layer for the current segment",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": [
+      "SRC007"
+    ]
+  },
+  {
+    "id": "FX085",
+    "effect_name": "Single wolf howl after the change",
+    "category": "Sound",
+    "anatomy": "sound",
+    "stage": "sync to visible event",
+    "species": [
+      "any"
+    ],
+    "image_key": "S01",
+    "reference_ids": [
+      "R05"
+    ],
+    "reference_basis": "original sound-design recipe",
+    "reference_clip_ids": [
+      "CLIP007"
+    ],
+    "minimax_segment": "Add one breath-led wolf howl only after the muzzle and throat settle, with a natural attack, sustained vowel-like tone and trailing breath. Keep the source ambience and any retained dialogue audible; synchronize the cue to the visible event.",
+    "gemini_quick_fix": "Generate or describe only this original sound layer for the supplied segment: Add one breath-led wolf howl only after the muzzle and throat settle, with a natural attack, sustained vowel-like tone and trailing breath. Match the visible timing; do not replace the complete soundtrack.",
+    "match_instruction": "completed canine vocalization",
+    "sound_segment": "",
+    "thumbnail": "thumbnails/FX085.jpg",
+    "thumbnail_kind": "synthetic sound-recipe graphic",
+    "thumbnail_note": "Conceptual graphic, not a measured waveform and not a supplied audio sample.",
+    "reference_matches": [
+      {
+        "clip_id": "CLIP007",
+        "evidence_kind": "formed-creature performance",
+        "scope": "Endpoint and vocal timing reference; not an in-progress limb morph."
+      }
+    ],
+    "insertion_target": "audio layer for the current segment",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": [
+      "SRC007"
+    ]
+  },
+  {
+    "id": "FX086",
+    "effect_name": "Body-pressure heartbeat pulse",
+    "category": "Sound",
+    "anatomy": "sound",
+    "stage": "sync to visible event",
+    "species": [
+      "any"
+    ],
+    "image_key": "A07",
+    "reference_ids": [],
+    "reference_basis": "original sound-design recipe",
+    "reference_clip_ids": [],
+    "minimax_segment": "Add two restrained low heartbeat-like pulses under the visible growth surges, keeping the source room tone audible. Keep the source ambience and any retained dialogue audible; synchronize the cue to the visible event.",
+    "gemini_quick_fix": "Generate or describe only this original sound layer for the supplied segment: Add two restrained low heartbeat-like pulses under the visible growth surges, keeping the source room tone audible. Match the visible timing; do not replace the complete soundtrack.",
+    "match_instruction": "subjective onset",
+    "sound_segment": "",
+    "thumbnail": "thumbnails/FX086.jpg",
+    "thumbnail_kind": "synthetic sound-recipe graphic",
+    "thumbnail_note": "Conceptual graphic, not a measured waveform and not a supplied audio sample.",
+    "reference_matches": [],
+    "insertion_target": "audio layer for the current segment",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX087",
+    "effect_name": "Heightened hearing perspective",
+    "category": "Sound",
+    "anatomy": "sound",
+    "stage": "sync to visible event",
+    "species": [
+      "any"
+    ],
+    "image_key": "S01",
+    "reference_ids": [],
+    "reference_basis": "original sound-design recipe",
+    "reference_clip_ids": [],
+    "minimax_segment": "Raise close environmental details and slightly soften distant speech clarity during the visible sensory-change beat; retain the original room acoustics and avoid inventing dialogue. Keep the source ambience and any retained dialogue audible; synchronize the cue to the visible event.",
+    "gemini_quick_fix": "Generate or describe only this original sound layer for the supplied segment: Raise close environmental details and slightly soften distant speech clarity during the visible sensory-change beat; retain the original room acoustics and avoid inventing dialogue. Match the visible timing; do not replace the complete soundtrack.",
+    "match_instruction": "sensory perspective",
+    "sound_segment": "",
+    "thumbnail": "thumbnails/FX087.jpg",
+    "thumbnail_kind": "synthetic sound-recipe graphic",
+    "thumbnail_note": "Conceptual graphic, not a measured waveform and not a supplied audio sample.",
+    "reference_matches": [],
+    "insertion_target": "audio layer for the current segment",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX088",
+    "effect_name": "Controlled silence before reveal",
+    "category": "Sound",
+    "anatomy": "sound",
+    "stage": "sync to visible event",
+    "species": [
+      "any"
+    ],
+    "image_key": "S01",
+    "reference_ids": [],
+    "reference_basis": "original sound-design recipe",
+    "reference_clip_ids": [],
+    "minimax_segment": "Briefly reduce only the added dramatic layers before the visible reveal, retaining source ambience, then return the physical breath and contact sounds at the reveal. Keep the source ambience and any retained dialogue audible; synchronize the cue to the visible event.",
+    "gemini_quick_fix": "Generate or describe only this original sound layer for the supplied segment: Briefly reduce only the added dramatic layers before the visible reveal, retaining source ambience, then return the physical breath and contact sounds at the reveal. Match the visible timing; do not replace the complete soundtrack.",
+    "match_instruction": "reveal dynamics",
+    "sound_segment": "",
+    "thumbnail": "thumbnails/FX088.jpg",
+    "thumbnail_kind": "synthetic sound-recipe graphic",
+    "thumbnail_note": "Conceptual graphic, not a measured waveform and not a supplied audio sample.",
+    "reference_matches": [],
+    "insertion_target": "audio layer for the current segment",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX089",
+    "effect_name": "Moonlight-triggered onset",
+    "category": "Genre and repair",
+    "anatomy": "selected body region",
+    "stage": "onset",
+    "species": [
+      "any"
+    ],
+    "image_key": "S01",
+    "reference_ids": [
+      "R06",
+      "R08"
+    ],
+    "reference_basis": "original segment-control instruction",
+    "reference_clip_ids": [
+      "CLIP017"
+    ],
+    "minimax_segment": "On <Subject 1>, begin the selected local change only when the existing moonlit edge reaches that region; match the shot's light direction and keep the rest of the action continuous. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Using the supplied shot as the edit base, change only the selected body region: Begin the selected local change only when the existing moonlit edge reaches that region; match the shot's light direction and keep the rest of the action continuous. Preserve the source pose, composition, lighting and unrelated details. For a still, show the requested single intermediate state.",
+    "match_instruction": "This is a fictional trigger. Do not add a moon, new room or a global blue lighting change.",
+    "sound_segment": "",
+    "thumbnail": "thumbnails/FX089.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [
+      {
+        "clip_id": "CLIP017",
+        "evidence_kind": "human performance only",
+        "scope": "Performance reference only. There is no verified limb or muzzle deformation in this excerpt."
+      }
+    ],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": [
+      "SRC017"
+    ]
+  },
+  {
+    "id": "FX090",
+    "effect_name": "Silver interruption",
+    "category": "Genre and repair",
+    "anatomy": "selected transforming region",
+    "stage": "interrupted",
+    "species": [
+      "any"
+    ],
+    "image_key": "A05",
+    "reference_ids": [],
+    "reference_basis": "original segment-control instruction",
+    "reference_clip_ids": [],
+    "minimax_segment": "On <Subject 1>, stop the selected morph at its current intermediate shape at the visible contact cue, hold the structural tension briefly and retain that partial state. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Using the supplied shot as the edit base, change only the selected transforming region: Stop the selected morph at its current intermediate shape at the visible contact cue, hold the structural tension briefly and retain that partial state. Preserve the source pose, composition, lighting and unrelated details. For a still, show the requested single intermediate state.",
+    "match_instruction": "Use only when a silver-contact cue is already established in the larger scene; do not invent a prop or injury.",
+    "sound_segment": "",
+    "thumbnail": "thumbnails/FX090.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX091",
+    "effect_name": "Asymmetric incomplete transformation",
+    "category": "Genre and repair",
+    "anatomy": "selected side or limb",
+    "stage": "intermediate hold",
+    "species": [
+      "any"
+    ],
+    "image_key": "A05",
+    "reference_ids": [
+      "R01"
+    ],
+    "reference_basis": "original segment-control instruction",
+    "reference_clip_ids": [],
+    "minimax_segment": "On <Subject 1>, advance only the selected side or limb into the requested animal shape while keeping the opposite side at its current stage; sustain the asymmetry through the segment. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Using the supplied shot as the edit base, change only the selected side or limb: Advance only the selected side or limb into the requested animal shape while keeping the opposite side at its current stage; sustain the asymmetry through the segment. Preserve the source pose, composition, lighting and unrelated details. For a still, show the requested single intermediate state.",
+    "match_instruction": "Name left/right from the subject's perspective. Avoid accidentally mirroring the selected side.",
+    "sound_segment": "",
+    "thumbnail": "thumbnails/FX091.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX092",
+    "effect_name": "Reverse local transformation",
+    "category": "Genre and repair",
+    "anatomy": "selected changed region",
+    "stage": "reverse",
+    "species": [
+      "any"
+    ],
+    "image_key": "A13",
+    "reference_ids": [
+      "R04"
+    ],
+    "reference_basis": "original segment-control instruction",
+    "reference_clip_ids": [
+      "CLIP006"
+    ],
+    "minimax_segment": "On <Subject 1>, reverse the selected local change continuously: shorten the muzzle or limb toward its prior shape, retract the coat and settle the original surface without a dissolve. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Using the supplied shot as the edit base, change only the selected changed region: Reverse the selected local change continuously: shorten the muzzle or limb toward its prior shape, retract the coat and settle the original surface without a dissolve. Preserve the source pose, composition, lighting and unrelated details. For a still, show the requested single intermediate state.",
+    "match_instruction": "Choose one mechanic to reverse. Preserve the prior endpoint as the destination, not a new human identity.",
+    "sound_segment": "",
+    "thumbnail": "thumbnails/FX092.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [
+      {
+        "clip_id": "CLIP006",
+        "evidence_kind": "reverse transformation",
+        "scope": "Borrow the local reverse deformation only; do not copy the carried person or action."
+      }
+    ],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": [
+      "SRC006"
+    ]
+  },
+  {
+    "id": "FX093",
+    "effect_name": "Shadow-led transformation reveal",
+    "category": "Genre and repair",
+    "anatomy": "existing silhouette",
+    "stage": "reveal",
+    "species": [
+      "any"
+    ],
+    "image_key": "S01",
+    "reference_ids": [
+      "R17"
+    ],
+    "reference_basis": "original segment-control instruction",
+    "reference_clip_ids": [],
+    "minimax_segment": "On <Subject 1>, show the selected shape change first in the subject's existing cast shadow, then bring the matching local body change into view without adding a cut. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Using the supplied shot as the edit base, change only the existing silhouette: Show the selected shape change first in the subject's existing cast shadow, then bring the matching local body change into view without adding a cut. Preserve the source pose, composition, lighting and unrelated details. For a still, show the requested single intermediate state.",
+    "match_instruction": "Preserve the original light source and shadow contact. Do not turn this into a different monochrome scene.",
+    "sound_segment": "",
+    "thumbnail": "thumbnails/FX093.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX094",
+    "effect_name": "Remove unwanted eye glow",
+    "category": "Genre and repair",
+    "anatomy": "eyes",
+    "stage": "any",
+    "species": [
+      "any"
+    ],
+    "image_key": "S05",
+    "reference_ids": [],
+    "reference_basis": "original segment-control instruction",
+    "reference_clip_ids": [],
+    "minimax_segment": "On <Subject 1>, replace emitted eye glow with naturally pigmented irises and shot-matched corneal highlights, keeping the current pupil shape and eye position. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Using the supplied shot as the edit base, change only the eyes: Replace emitted eye glow with naturally pigmented irises and shot-matched corneal highlights, keeping the current pupil shape and eye position. Preserve the source pose, composition, lighting and unrelated details. For a still, show the requested single intermediate state.",
+    "match_instruction": "Keep the selected iris color; remove halos and light spill only.",
+    "sound_segment": "",
+    "thumbnail": "thumbnails/FX094.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX095",
+    "effect_name": "Preserve identity through a local morph",
+    "category": "Genre and repair",
+    "anatomy": "selected region",
+    "stage": "any",
+    "species": [
+      "any"
+    ],
+    "image_key": "A13",
+    "reference_ids": [
+      "R02"
+    ],
+    "reference_basis": "original segment-control instruction",
+    "reference_clip_ids": [
+      "CLIP003"
+    ],
+    "minimax_segment": "On <Subject 1>, apply the requested deformation only inside the selected region and retain distinctive scars, pigment, hairline and expression outside it as stable identity anchors. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Using the supplied shot as the edit base, change only the selected region: Apply the requested deformation only inside the selected region and retain distinctive scars, pigment, hairline and expression outside it as stable identity anchors. Preserve the source pose, composition, lighting and unrelated details. For a still, show the requested single intermediate state.",
+    "match_instruction": "This repairs identity drift. Do not force original human proportions inside the region that must actually transform.",
+    "sound_segment": "",
+    "thumbnail": "thumbnails/FX095.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [
+      {
+        "clip_id": "CLIP003",
+        "evidence_kind": "continuous closeup",
+        "scope": "Transfer the localized surface progression, retaining the target face anchors."
+      }
+    ],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": [
+      "SRC003"
+    ]
+  },
+  {
+    "id": "FX096",
+    "effect_name": "Repair duplicated digits and limbs",
+    "category": "Genre and repair",
+    "anatomy": "hand, paw or limb",
+    "stage": "any",
+    "species": [
+      "any"
+    ],
+    "image_key": "A04",
+    "reference_ids": [
+      "R13"
+    ],
+    "reference_basis": "original segment-control instruction",
+    "reference_clip_ids": [
+      "CLIP014"
+    ],
+    "minimax_segment": "On <Subject 1>, resolve duplicated anatomy into the chosen species' topology, maintaining continuous connections from the existing limb and a single claw or hoof per selected digit. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Using the supplied shot as the edit base, change only the hand, paw or limb: Resolve duplicated anatomy into the chosen species' topology, maintaining continuous connections from the existing limb and a single claw or hoof per selected digit. Preserve the source pose, composition, lighting and unrelated details. For a still, show the requested single intermediate state.",
+    "match_instruction": "Set the endpoint digit map first. Delete duplicates rather than hiding them with fur or motion blur.",
+    "sound_segment": "",
+    "thumbnail": "thumbnails/FX096.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [
+      {
+        "clip_id": "CLIP014",
+        "evidence_kind": "formed anatomy endpoint",
+        "scope": "Endpoint contact and changed-hand shape only; no pad growth or finger migration is demonstrated."
+      }
+    ],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": [
+      "SRC014"
+    ]
+  },
+  {
+    "id": "FX097",
+    "effect_name": "Restore both ears",
+    "category": "Genre and repair",
+    "anatomy": "ears",
+    "stage": "any",
+    "species": [
+      "any"
+    ],
+    "image_key": "S05",
+    "reference_ids": [],
+    "reference_basis": "original segment-control instruction",
+    "reference_clip_ids": [],
+    "minimax_segment": "On <Subject 1>, restore the missing ear as the anatomically matching partner of the visible ear, aligned in perspective and attached at the proper stage-dependent position. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Using the supplied shot as the edit base, change only the ears: Restore the missing ear as the anatomically matching partner of the visible ear, aligned in perspective and attached at the proper stage-dependent position. Preserve the source pose, composition, lighting and unrelated details. For a still, show the requested single intermediate state.",
+    "match_instruction": "Keep one left and one right ear; match occlusion rather than forcing both fully visible in every view.",
+    "sound_segment": "",
+    "thumbnail": "thumbnails/FX097.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX098",
+    "effect_name": "Prevent reference background contamination",
+    "category": "Genre and repair",
+    "anatomy": "effect region boundary",
+    "stage": "any",
+    "species": [
+      "any"
+    ],
+    "image_key": "A05",
+    "reference_ids": [
+      "R06"
+    ],
+    "reference_basis": "original segment-control instruction",
+    "reference_clip_ids": [
+      "CLIP013"
+    ],
+    "minimax_segment": "On <Subject 1>, transfer only the selected deformation mechanics from the attached reference onto the target anatomy, retaining the target's room, floor, props, outfit, viewpoint and light sources. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Using the supplied shot as the edit base, change only the effect region boundary: Transfer only the selected deformation mechanics from the attached reference onto the target anatomy, retaining the target's room, floor, props, outfit, viewpoint and light sources. Preserve the source pose, composition, lighting and unrelated details. For a still, show the requested single intermediate state.",
+    "match_instruction": "The reference contributes motion and surface behavior only. Its actor, set and camera are not edit targets.",
+    "sound_segment": "",
+    "thumbnail": "thumbnails/FX098.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [
+      {
+        "clip_id": "CLIP013",
+        "evidence_kind": "trailer transformation glimpse",
+        "scope": "Borrow the transformation rhythm only; omit the enclosure, lasers and unrelated objects."
+      }
+    ],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": [
+      "SRC013"
+    ]
+  },
+  {
+    "id": "FX099",
+    "effect_name": "Keep the chest closed during growth",
+    "category": "Genre and repair",
+    "anatomy": "chest and torso surface",
+    "stage": "intermediate",
+    "species": [
+      "any"
+    ],
+    "image_key": "A06",
+    "reference_ids": [],
+    "reference_basis": "original segment-control instruction",
+    "reference_clip_ids": [],
+    "minimax_segment": "On <Subject 1>, maintain a continuous outer chest surface while reshaping the shoulders, ribcage and shirt; let growth show through contour, muscle motion and fabric tension. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Using the supplied shot as the edit base, change only the chest and torso surface: Maintain a continuous outer chest surface while reshaping the shoulders, ribcage and shirt; let growth show through contour, muscle motion and fabric tension. Preserve the source pose, composition, lighting and unrelated details. For a still, show the requested single intermediate state.",
+    "match_instruction": "Replace any accidental cavity with the subject's continuous external surface. No new opening, hollow torso or visible internal anatomy.",
+    "sound_segment": "",
+    "thumbnail": "thumbnails/FX099.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  },
+  {
+    "id": "FX100",
+    "effect_name": "Freeze the requested intermediate stage",
+    "category": "Genre and repair",
+    "anatomy": "selected transforming region",
+    "stage": "intermediate hold",
+    "species": [
+      "any"
+    ],
+    "image_key": "A05",
+    "reference_ids": [],
+    "reference_basis": "original segment-control instruction",
+    "reference_clip_ids": [],
+    "minimax_segment": "On <Subject 1>, advance the selected local change only to the requested intermediate state, then hold its anatomy stable while breathing and the source performance continue. Retain the source shot's identity, framing, lighting, background and existing motion outside the selected region.",
+    "gemini_quick_fix": "Using the supplied shot as the edit base, change only the selected transforming region: Advance the selected local change only to the requested intermediate state, then hold its anatomy stable while breathing and the source performance continue. Preserve the source pose, composition, lighting and unrelated details. For a still, show the requested single intermediate state.",
+    "match_instruction": "State the visible endpoint in words. A percentage is a creative guide, not a calibrated model parameter.",
+    "sound_segment": "",
+    "thumbnail": "thumbnails/FX100.jpg",
+    "thumbnail_kind": "generated concept crop",
+    "thumbnail_note": "Illustrates the region or animal endpoint; not a film still or a verified intermediate anatomy diagram.",
+    "reference_matches": [],
+    "insertion_target": "current shot description; fragment only",
+    "tested_in_model": false,
+    "audio_sample_ids": [],
+    "source_audio_ids": []
+  }
+]

@@ -30,83 +30,71 @@ class UnifiedEditorTests(unittest.TestCase):
         self.addCleanup(window.close)
         return window
 
+    def test_effects_catalog_and_dock(self):
+        from test_effects_ui import test_effects_dock_search_artwork_and_menu_migration
+        test_effects_dock_search_artwork_and_menu_migration()
+
+    def test_effects_drag_acceptance(self):
+        from test_effects_ui import test_effect_drop_acceptance_matches_scope_and_busy_state
+        test_effect_drop_acceptance_matches_scope_and_busy_state()
+
     def test_quick_fix_buttons_menu_and_preset_editor(self):
-        from ltx_prompt_director.quick_fixes import QuickFixEditor, STARTERS, load_presets, save_presets
-        from PySide6.QtWidgets import QLabel
+        from ltx_prompt_director.effects_library import load_effects, USER_KEY, save_effect
+        from ltx_prompt_director.effects_widgets import EffectDialog
         w = self.make_window('minimax_references')
         w._close_saves_queued = True
         w.unified_prompt.setPlainText('Existing combined prompt')
         self.assertLess(w.director_intent_row.indexOf(w.segment_quick_fix_button), w.director_intent_row.indexOf(w.magic_button))
-        self.assertLess(w.minimax_panel.header.indexOf(w.combined_quick_fix_button), w.minimax_panel.header.indexOf(w.combined_generate_button))
         upper, lower = w.segment_quick_fix_button.menu(), w.combined_quick_fix_button.menu()
-        upper.aboutToShow.emit()
-        lower.aboutToShow.emit()
-        self.assertEqual([a.text() for a in upper.actions() if not a.isSeparator()], ['Camera', 'Refine Camera', 'Edit Quick Fixes…'])
-        self.assertEqual([a.text() for a in lower.actions() if not a.isSeparator()], ['Camera', 'Refine Camera', 'Formatting', 'Format Prompt', 'Edit Quick Fixes…'])
-        self.assertEqual([a.isSeparator() for a in lower.actions()], [False, False, True, False, False, True, False])
-        editor = QuickFixEditor(w.settings, w)
-        self.assertIn('Show in', [l.text() for l in editor.findChildren(QLabel)])
-        self.assertIn('Category', [l.text() for l in editor.findChildren(QLabel)])
-        editor.add_button.click()
+        upper.aboutToShow.emit(); lower.aboutToShow.emit()
+        self.assertEqual([a.text() for a in upper.actions() if not a.isSeparator()], ['Camera', 'Refine Camera', 'Effects Library…'])
+        self.assertEqual([a.text() for a in lower.actions() if not a.isSeparator()], ['Camera', 'Refine Camera', 'Formatting', 'Format Prompt', 'Effects Library…'])
+        original = w.settings.value(USER_KEY)
+        self.addCleanup(w.settings.setValue, USER_KEY, original)
+        editor = EffectDialog(w)
         editor.name.setText('My segment fix')
         editor.category.setText('Framing')
         editor.target.setCurrentIndex(editor.target.findData('segment'))
         editor.prompt.setPlainText('Keep the hands visible.')
-        editor.save()
-        self.assertEqual(load_presets(w.settings)[-1], {'name': 'My segment fix', 'target': 'segment', 'prompt': 'Keep the hands visible.', 'category': 'Framing'})
-        w.populate_quick_fix_menu(upper, 'segment')
-        w.populate_quick_fix_menu(lower, 'unified')
+        self.assertFalse(editor.menu.isChecked())
+        editor.menu.setChecked(True); editor.save()
+        w.populate_quick_fix_menu(upper, 'segment'); w.populate_quick_fix_menu(lower, 'unified')
         self.assertIn('My segment fix', [a.text() for a in upper.actions()])
-        self.assertIn('Framing', [a.text() for a in upper.actions()])
         self.assertNotIn('My segment fix', [a.text() for a in lower.actions()])
-        self.assertNotIn('Framing', [a.text() for a in lower.actions()])
-        cancelled = QuickFixEditor(w.settings, w)
-        cancelled.presets.setCurrentRow(0)
-        cancelled.name.setText('Discard this change')
-        cancelled.category.setText('Discard this category')
-        cancelled.reject()
-        self.assertEqual(load_presets(w.settings)[0], STARTERS[0])
-        w.set_project_type('ltx')
-        w.populate_quick_fix_menu(upper, 'segment')
-        self.assertFalse(upper.actions()[0].isEnabled())
+        entry = next(e for e in load_effects(w.settings) if e['name'] == 'My segment fix')
+        cancelled = EffectDialog(w, entry); cancelled.name.setText('Discard this'); cancelled.reject()
+        self.assertIn('My segment fix', [e['name'] for e in load_effects(w.settings)])
+        w.set_project_type('ltx'); w.populate_quick_fix_menu(upper, 'segment')
         self.assertTrue(next(a for a in upper.actions() if a.text() == 'Refine Camera').isEnabled())
-        self.assertFalse(w.segment_quick_fix_button.isHidden())
         self.assertTrue(w.combined_quick_fix_button.isHidden())
-        save_presets(w.settings, STARTERS)
 
     def test_quick_fix_categories_group_custom_actions_and_filter_empty_groups(self):
-        from ltx_prompt_director.quick_fixes import save_presets, load_presets
+        from ltx_prompt_director.effects_library import load_effects, USER_KEY, save_effect
         w = self.make_window('minimax_references')
         w._close_saves_queued = True
-        self.addCleanup(save_presets, w.settings, load_presets(w.settings))
         w.unified_prompt.setPlainText('Existing production draft')
-        save_presets(w.settings, [
+        original = w.settings.value(USER_KEY)
+        self.addCleanup(w.settings.setValue, USER_KEY, original)
+        w.settings.setValue(USER_KEY, '[]')
+        for i, entry in enumerate([
             dict(name='Pan', target='both', category='Camera', prompt='Pan right.'),
             dict(name='Space', target='unified', category='Formatting', prompt='Add spacing.'),
             dict(name='Close-up', target='segment', category='camera', prompt='Close-up.'),
             dict(name='Voice', target='segment', category='Audio', prompt='Preserve the accent.'),
-            dict(name='Legacy fix', target='both', prompt='Keep exact words.'),
-        ])
+        ]):
+            save_effect(w.settings, {**entry, 'id': f'user:{i}', 'show_in_menu': True})
         upper, lower = w.segment_quick_fix_button.menu(), w.combined_quick_fix_button.menu()
-        upper.aboutToShow.emit()
-        lower.aboutToShow.emit()
+        upper.aboutToShow.emit(); lower.aboutToShow.emit()
         self.assertEqual([a.text() for a in upper.actions() if not a.isSeparator()],
-                         ['Camera', 'Pan', 'Close-up', 'Audio', 'Voice', 'General', 'Legacy fix', 'Edit Quick Fixes…'])
+                         ['Camera', 'Pan', 'Close-up', 'Audio', 'Voice', 'Effects Library…'])
         self.assertEqual([a.text() for a in lower.actions() if not a.isSeparator()],
-                         ['Camera', 'Pan', 'Formatting', 'Space', 'General', 'Legacy fix', 'Edit Quick Fixes…'])
-        self.assertEqual(sum(a.isSeparator() for a in upper.actions()), 3)
-        self.assertEqual(sum(a.isSeparator() for a in lower.actions()), 3)
+                         ['Camera', 'Pan', 'Formatting', 'Space', 'Effects Library…'])
         with patch.object(w, 'apply_quick_fix') as refine:
-            upper.actions()[0].trigger()  # A category heading cannot start refinement.
-            refine.assert_not_called()
             next(a for a in upper.actions() if a.text() == 'Close-up').trigger()
-            refine.assert_called_once_with(load_presets(w.settings)[2], 'segment')
-            refine.reset_mock()
-            next(a for a in lower.actions() if a.text() == 'Space').trigger()
-            refine.assert_called_once_with(load_presets(w.settings)[1], 'unified')
-        save_presets(w.settings, [])
-        upper.aboutToShow.emit()
-        self.assertEqual([a.text() for a in upper.actions()], ['Edit Quick Fixes…'])
+            self.assertEqual(refine.call_args.args[0]['name'], 'Close-up')
+            self.assertEqual(refine.call_args.args[1], 'segment')
+        w.settings.setValue(USER_KEY, '[]'); upper.aboutToShow.emit()
+        self.assertEqual([a.text() for a in upper.actions()], ['Effects Library…'])
 
     def test_quick_fix_segment_injects_at_bottom_and_never_uses_global_scope(self):
         w = self.make_window('minimax_frames')

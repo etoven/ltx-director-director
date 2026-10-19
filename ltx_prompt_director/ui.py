@@ -64,6 +64,8 @@ from .project_data import ARCHIVE_COLOR, load_other_tags, load_project_tags, new
 from .spellcheck import install_spellcheck
 from .prompt_tags import prompt_content, consume_global_refinements, install_prompt_tags, render_prompt_notes, insert_note
 from .quick_fixes import QuickFixEditor, load_presets, preset_groups
+from .effects_library import MIME as EFFECT_MIME, load_effects, refinement
+from .effects_widgets import EffectsPanel
 from .inline_cues import PromptTextEdit
 from .prompt_timecodes import retime_prompt
 from .prompt_sections import document_sections
@@ -3438,6 +3440,14 @@ class MainWindow(QMainWindow):
             splash.set_status('Creating timeline and project panels…')
             QApplication.processEvents()
         self._build_ui()
+        self._effect_drop_targets = {
+            self.timeline.viewport(): "timeline",
+            self.segment_prompt.viewport(): "segment",
+            self.intent_segment_prompt.viewport(): "segment",
+            self.unified_prompt.viewport(): "unified",
+        }
+        for viewport in self._effect_drop_targets:
+            viewport.installEventFilter(self)
         self._loading = False
         self.project_dirty = False
         for editor in self.findChildren(QTextEdit):
@@ -3479,6 +3489,7 @@ class MainWindow(QMainWindow):
         self._build_project_preview_dock()
         self._build_project_files_dock()
         self._build_project_properties_dock()
+        self._build_effects_dock()
         self.catalog_dock = QDockWidget("Media Catalog", self)
         self.catalog_dock.setObjectName("mediaCatalogDock")
         self.media_catalog = MediaCatalog(self)
@@ -3500,6 +3511,7 @@ class MainWindow(QMainWindow):
         preview_action.setText("Preview")
         preview_action.setIcon(toolbar_icon("preview"))
         toolbar.addAction(preview_action)
+        toolbar.addAction(self.effects_dock.toggleViewAction())
         files_action = self.project_files_dock.toggleViewAction()
         files_action.setText("Project Files")
         files_action.setIcon(toolbar_icon("project-files"))
@@ -4204,6 +4216,54 @@ class MainWindow(QMainWindow):
         self.statusBar().addPermanentWidget(self.ai_timeline_status)
         self.apply_project_type_ui()
         self.update_summary()
+
+    def _build_effects_dock(self):
+        self.effects_dock = QDockWidget("Effects Library", self)
+        self.effects_dock.setObjectName("effectsLibraryDock")
+        self.effects_dock.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
+        self.effects_panel = EffectsPanel(self)
+        self.effects_panel.apply_requested.connect(self.apply_library_effect)
+        self.project_preview_panel.player.playbackStateChanged.connect(
+            lambda state: self.effects_panel.stop_preview()
+            if state == QMediaPlayer.PlaybackState.PlayingState else None)
+        self.effects_dock.setWidget(self.effects_panel)
+        self.effects_dock.setMinimumSize(280, 220)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.effects_dock)
+        self.effects_dock.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.effects_dock.customContextMenuRequested.connect(self.effects_dock_menu)
+        self.effects_dock.dockLocationChanged.connect(lambda *_: self.save_window_panel_state())
+        self.effects_dock.topLevelChanged.connect(lambda *_: self.save_window_panel_state())
+        self.effects_dock.visibilityChanged.connect(lambda *_: self.save_window_panel_state())
+        self.effects_dock.hide()
+
+    def effects_dock_menu(self, point):
+        menu = QMenu(self.effects_dock)
+        for label, area in (("Dock left", Qt.DockWidgetArea.LeftDockWidgetArea),
+                            ("Dock right", Qt.DockWidgetArea.RightDockWidgetArea),
+                            ("Dock bottom", Qt.DockWidgetArea.BottomDockWidgetArea)):
+            menu.addAction(label, lambda a=area: self.dock_effects(a))
+        menu.addAction("Float panel", lambda: self.effects_dock.setFloating(True))
+        menu.addSeparator()
+        for label, orientation, value in (("Width", Qt.Orientation.Horizontal, self.effects_dock.width()),
+                                           ("Height", Qt.Orientation.Vertical, self.effects_dock.height())):
+            action = QWidgetAction(menu)
+            row = QWidget(); layout = QHBoxLayout(row); layout.addWidget(QLabel(label))
+            spin = QSpinBox(); spin.setRange(220, 2400); spin.setValue(value)
+            spin.valueChanged.connect(lambda size, o=orientation: self.size_effects_panel(size, o))
+            layout.addWidget(spin); action.setDefaultWidget(row); menu.addAction(action)
+        menu.exec(self.effects_dock.mapToGlobal(point))
+
+    def dock_effects(self, area):
+        self.effects_dock.setFloating(False)
+        self.addDockWidget(area, self.effects_dock)
+
+    def size_effects_panel(self, size, orientation):
+        if self.effects_dock.isFloating():
+            self.effects_dock.resize(size if orientation == Qt.Orientation.Horizontal else self.effects_dock.width(),
+                                     size if orientation == Qt.Orientation.Vertical else self.effects_dock.height())
+        else:
+            self.resizeDocks([self.effects_dock], [size], orientation)
+        self.save_window_panel_state()
 
     def _build_project_preview_dock(self) -> None:
         self.project_preview_dock = QDockWidget("PROJECT VIDEO PREVIEW", self)
@@ -5707,6 +5767,8 @@ class MainWindow(QMainWindow):
             self._closing_progress.close()
             self._closing_progress = None
             self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        if hasattr(self, "effects_panel"):
+            self.effects_panel.stop_preview()
         if hasattr(self, "project_preview_panel"):
             self.project_preview_panel.player.stop()
             if self.project_preview_panel.fullscreen_window.isVisible():
@@ -5756,6 +5818,37 @@ class MainWindow(QMainWindow):
         if x!=frame.left() or y!=frame.top():self.move(self.pos()+QPoint(x-frame.left(),y-frame.top()))
 
     def eventFilter(self,watched,event):
+        targets = getattr(self, "_effect_drop_targets", {})
+        if watched in targets:
+            kind = event.type()
+            if kind == QEvent.Type.DragLeave:
+                watched.setStyleSheet("")
+            elif kind in (QEvent.Type.DragEnter, QEvent.Type.DragMove, QEvent.Type.Drop) and event.mimeData().hasFormat(EFFECT_MIME):
+                try:
+                    eid = bytes(event.mimeData().data(EFFECT_MIME)).decode("utf-8")
+                except UnicodeDecodeError:
+                    eid = ""
+                entry = next((e for e in load_effects(self.settings) if e["id"] == eid), None)
+                editor = targets[watched]
+                row = self.timeline.row(self.timeline.itemAt(event.position().toPoint())) if editor == "timeline" else -1
+                if editor == "timeline":
+                    allowed = (not self.ai_busy and not self.prompt_only_workspace
+                               and self.workspace_engine != "shot_sequence" and 0 <= row < len(self.segments)
+                               and bool(self.segments[row].prompt.strip()))
+                    editor = "segment"
+                else:
+                    allowed = self.quick_fix_available(editor)
+                allowed = bool(allowed and entry and entry.get("prompt") and entry.get("target") in (editor, "both"))
+                if kind == QEvent.Type.Drop:
+                    watched.setStyleSheet("")
+                    if allowed:
+                        if row >= 0: self.timeline.setCurrentRow(row)
+                        self.apply_library_effect(entry, editor)
+                else:
+                    watched.setStyleSheet("border:2px solid " + ("#56cda3" if allowed else "#d47777") + ";")
+                if allowed: event.acceptProposedAction()
+                else: event.ignore()
+                return True
         if watched is getattr(self,'editor_root',None) and event.type()==QEvent.Type.LayoutRequest:
             self._viewport_timer.start()
         return super().eventFilter(watched,event)
@@ -6904,7 +6997,7 @@ class MainWindow(QMainWindow):
 
     def populate_quick_fix_menu(self, menu: QMenu, editor: str) -> None:
         menu.clear()
-        for index, (category, presets) in enumerate(preset_groups(load_presets(self.settings), editor)):
+        for index, (category, presets) in enumerate(preset_groups([e for e in load_effects(self.settings) if e.get("show_in_menu") and e.get("prompt")], editor)):
             if index:
                 menu.addSeparator()
             heading = menu.addAction(category)
@@ -6916,12 +7009,19 @@ class MainWindow(QMainWindow):
                 action.triggered.connect(lambda _=False, value=preset: self.apply_quick_fix(value, editor))
         if menu.actions():
             menu.addSeparator()
-        menu.addAction("Edit Quick Fixes…", self.edit_quick_fixes)
+        menu.addAction("Effects Library…", lambda: self.open_effects_library(editor))
         menu.setToolTipsVisible(True)
 
     def edit_quick_fixes(self) -> None:
-        if not self.ai_busy:
-            QuickFixEditor(self.settings, self).exec()
+        self.open_effects_library("segment")
+
+    def apply_library_effect(self, entry, editor):
+        self.apply_quick_fix({**entry, "prompt": refinement(entry)}, editor)
+
+    def open_effects_library(self, editor="segment"):
+        self.effects_panel.scope.setCurrentIndex(self.effects_panel.scope.findData(editor))
+        self.effects_dock.show()
+        self.effects_dock.raise_()
 
     def apply_quick_fix(self, preset: dict, editor: str) -> None:
         instruction = str(preset.get("prompt") or "").strip()

@@ -1,0 +1,57 @@
+[
+  {
+    "title": "MiniMax H3 full-reference prompt guide",
+    "url": "https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/main/docs/VIDEO_PROMPT_WRITING_GUIDE_ref_en.md",
+    "use": "Reference roles, English rewrite fields, effects as subjects, audio transfer and reuse. This package supplies fragments, not the complete six-section output."
+  },
+  {
+    "title": "Gemini video understanding",
+    "url": "https://ai.google.dev/gemini-api/docs/video-understanding",
+    "use": "Video analysis and supplied-reference workflows. Select an actual generation/editing-capable model for rendering rather than assuming video understanding edits video."
+  },
+  {
+    "title": "MPC: Bhediya",
+    "url": "https://www.mpcvfx.com/en/filmography/bhediya/",
+    "use": "Production evidence for the human-to-wolf, skin, hair and cloth effects."
+  },
+  {
+    "title": "Van Helsing filmmaker retrospective",
+    "url": "https://www.syfy.com/syfy-wire/van-helsing-stephen-sommers-retrospective-interview",
+    "use": "The filmmakers discuss creature work and the skin-shedding reveal."
+  },
+  {
+    "title": "ILM creature matchmove for Van Helsing",
+    "url": "https://history.siggraph.org/wp-content/uploads/2022/12/2004-Talks-Monks_Posing-as-a-Werewolf-The-Creature-Matchmove-Tool-Used-for-Van-Helsing.pdf",
+    "use": "Primary production reference; transformation and creature deformation work."
+  },
+  {
+    "title": "San Diego Zoo: cheetah",
+    "url": "https://animals.sandiegozoo.org/animals/cheetah",
+    "use": "Coat, face markings and the distinctive partially retractile claw arrangement."
+  },
+  {
+    "title": "Animal Diversity Web: Acinonyx jubatus",
+    "url": "https://animaldiversity.org/accounts/Acinonyx_jubatus/",
+    "use": "Round pupils and four main paw toes plus forepaw dewclaw."
+  },
+  {
+    "title": "North American Bear Center: tracks",
+    "url": "https://bear.org/bear-facts/bear-tracks-and-trails/",
+    "use": "Five toes per bear foot."
+  },
+  {
+    "title": "Grizzly bear locomotion study",
+    "url": "https://journals.biologists.com/jeb/article/218/19/3102/14189/Grizzly-bear-Ursus-arctos-horribilis-locomotion",
+    "use": "Plantigrade bear foot posture."
+  },
+  {
+    "title": "Merck Veterinary Manual: bovine distal limb",
+    "url": "https://www.merckvetmanual.com/musculoskeletal-system/lameness-in-cattle/anatomy-of-the-distal-limb-of-a-cow",
+    "use": "Two main digits and accessory dewclaws."
+  },
+  {
+    "title": "Equid single-hoof study",
+    "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC10282582/",
+    "use": "Single principal equine digit versus ruminant cloven hooves."
+  }
+]

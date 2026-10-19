@@ -1,0 +1,262 @@
+[
+  {
+    "id": "R01",
+    "film": "Wolf Man",
+    "year": "2025",
+    "kind": "feature / official promotional transformation clip",
+    "publisher": "Universal Pictures",
+    "url": "https://www.youtube.com/watch?v=xJAjGEPYGlA",
+    "alternate": "https://www.rottentomatoes.com/m/wolf_man_2025/videos/8R73Lg_crKLB",
+    "evidence": "Official clip title and public promotional video; extracted excerpts are separately logged.",
+    "use": "Humanlike disease progression, hand tension, jaw and facial deformation. Do not infer a long wolf snout or dense fur from this design.",
+    "local_clip_ids": [],
+    "availability": "source link only",
+    "checked_date": "2026-10-19"
+  },
+  {
+    "id": "R02",
+    "film": "Wolf Man",
+    "year": "2025",
+    "kind": "feature / official licensed scene",
+    "publisher": "Rotten Tomatoes / Movieclips",
+    "url": "https://www.rottentomatoes.com/m/wolf_man_2025/videos/sohp7z1Y_E9Q",
+    "evidence": "Page lists Jaw-Breaking Werewolf Transformation, duration 1:37. The packaged short excerpts were visually inspected; see clips.json for the exact observed scope.",
+    "use": "Jaw movement and face progression; audio is a mixed movie soundtrack, not an isolated effects stem.",
+    "local_clip_ids": [
+      "CLIP001",
+      "CLIP002",
+      "CLIP003"
+    ],
+    "availability": "packaged short excerpts plus source link",
+    "checked_date": "2026-10-19"
+  },
+  {
+    "id": "R03",
+    "film": "Underworld",
+    "year": "2003",
+    "kind": "requested legacy exception / licensed scene",
+    "publisher": "Creature Features / Sony Pictures",
+    "url": "https://www.youtube.com/watch?v=lZiapFoTgok",
+    "alternate": "https://kinocheck.com/trailer/g9fe/transforming-into-a-lycan-scene-underworld-2003",
+    "evidence": "Transforming Into A Lycan clip identifies Michael and the approaching full moon. Linked footage; local download unavailable.",
+    "use": "Lycan transformation reference. Specific finger, hock, or shoulder motions below are authored adaptations unless a local excerpt is explicitly attached.",
+    "local_clip_ids": [],
+    "availability": "source link only",
+    "checked_date": "2026-10-19"
+  },
+  {
+    "id": "R04",
+    "film": "Van Helsing",
+    "year": "2004",
+    "kind": "requested legacy exception / official scene",
+    "publisher": "Universal Pictures",
+    "url": "https://www.youtube.com/watch?v=HH6tnTQUJD4",
+    "alternate": "https://www.youtube.com/watch?v=yqrwG6DuNTA",
+    "evidence": "Official Final Battle with Dracula scene. Film techniques discussed by its filmmakers and ILM practitioners. The packaged short excerpts were visually inspected; see clips.json for the exact observed scope.",
+    "use": "Large humanoid werewolf, wolf/vampire contrast, transformation reveal and physical settling. Do not import the castle, actors, or combat.",
+    "local_clip_ids": [
+      "CLIP004",
+      "CLIP005",
+      "CLIP006"
+    ],
+    "availability": "packaged short excerpts plus source link",
+    "checked_date": "2026-10-19"
+  },
+  {
+    "id": "R05",
+    "film": "Van Helsing",
+    "year": "2004",
+    "kind": "requested legacy exception / official licensed scene",
+    "publisher": "Rotten Tomatoes / Movieclips",
+    "url": "https://www.rottentomatoes.com/m/van_helsing/videos/o_1qLQkTilnU",
+    "evidence": "Page lists Werewolf on the Loose, duration 2:11; selected local excerpts have their own verified source-relative times. The packaged short excerpts were visually inspected; see clips.json for the exact observed scope.",
+    "use": "Surface-shedding creature reveal and werewolf body motion. Exact local evidence is specified per excerpt.",
+    "local_clip_ids": [
+      "CLIP007"
+    ],
+    "availability": "packaged short excerpts plus source link",
+    "checked_date": "2026-10-19"
+  },
+  {
+    "id": "R06",
+    "film": "Werewolves",
+    "year": "2024",
+    "kind": "feature / official trailer",
+    "publisher": "Briarcliff Entertainment",
+    "url": "https://www.youtube.com/watch?v=AzdnfFLNP0o",
+    "alternate": "https://www.briarcliffentertainment.com/",
+    "evidence": "Distributor website embeds this video under WEREWOLVES: OFFICIAL TRAILER. The packaged short excerpts were visually inspected; see clips.json for the exact observed scope.",
+    "use": "Practical creature texture, mass, silhouette and transformation tone. Trailer source; no frame-accurate extraction claimed.",
+    "local_clip_ids": [
+      "CLIP012",
+      "CLIP013"
+    ],
+    "availability": "packaged short excerpts plus source link",
+    "checked_date": "2026-10-19"
+  },
+  {
+    "id": "R07",
+    "film": "Bhediya",
+    "year": "2022",
+    "kind": "feature / official trailer and vendor case study",
+    "publisher": "Jio Studios / Maddock Films / MPC",
+    "url": "https://www.youtube.com/watch?v=mfl--nI-Bhs",
+    "alternate": "https://www.mpcvfx.com/en/filmography/bhediya/",
+    "evidence": "MPC confirms human-to-full-wolf transformation work, wolves, hair, skin and cloth simulations. The packaged short excerpts were visually inspected; see clips.json for the exact observed scope.",
+    "use": "Wolf conversion, body proportion changes and physically grounded skin/coat interactions; linked source, not a verified shot-by-shot atlas.",
+    "local_clip_ids": [
+      "CLIP008",
+      "CLIP009",
+      "CLIP010",
+      "CLIP011"
+    ],
+    "availability": "packaged short excerpts plus source link",
+    "checked_date": "2026-10-19"
+  },
+  {
+    "id": "R08",
+    "film": "Viking Wolf",
+    "year": "2022; Netflix release 2023",
+    "kind": "feature / official trailer",
+    "publisher": "Netflix Nordic",
+    "url": "https://www.youtube.com/watch?v=6sxnOLRGkhw",
+    "alternate": "https://www.netflix.com/title/81338873",
+    "evidence": "Netflix lists the film as 2022 and published its trailer in January 2023. Public trailer downloaded and inspected. The packaged short excerpts were visually inspected; see clips.json for the exact observed scope.",
+    "use": "Early symptoms, predatory behavior and partial transformation glimpses. Trailer montage is not a continuous limb-morph reference.",
+    "local_clip_ids": [
+      "CLIP017"
+    ],
+    "availability": "packaged short excerpts plus source link",
+    "checked_date": "2026-10-19"
+  },
+  {
+    "id": "R09",
+    "film": "The Cursed / Eight for Silver",
+    "year": "2021 festival; theatrical 2022",
+    "kind": "feature / official trailer",
+    "publisher": "LD Entertainment",
+    "url": "https://www.youtube.com/watch?v=-zT0jhfm1og",
+    "evidence": "Official LD Entertainment trailer for February 18, 2022 theatrical release.",
+    "use": "Gothic body-horror atmosphere and creature texture. Generic author-created anatomy prompts are not claims that a specific limb change appears in this trailer.",
+    "local_clip_ids": [],
+    "availability": "source link only",
+    "checked_date": "2026-10-19"
+  },
+  {
+    "id": "R10",
+    "film": "The Beast Within",
+    "year": "2024",
+    "kind": "feature / official trailer",
+    "publisher": "Well Go USA",
+    "url": "https://www.youtube.com/watch?v=ctcLCGbeVZA",
+    "alternate": "https://wellgousa.com/films/beast-within",
+    "evidence": "Distributor page and official trailer identify July 26, 2024 release.",
+    "use": "Restrained human-to-creature progression and silhouette tone; no unverified timestamps.",
+    "local_clip_ids": [],
+    "availability": "source link only",
+    "checked_date": "2026-10-19"
+  },
+  {
+    "id": "R11",
+    "film": "My Animal",
+    "year": "2023",
+    "kind": "feature / official trailer",
+    "publisher": "Paramount Movies",
+    "url": "https://www.youtube.com/watch?v=fBelb-efRgA",
+    "alternate": "https://www.paramount.com/movies/my-animal",
+    "evidence": "Official Paramount trailer and film page.",
+    "use": "Subtle partial change, restrained supernatural mood and character continuity; no asserted closeup mechanics without supplied footage.",
+    "local_clip_ids": [],
+    "availability": "source link only",
+    "checked_date": "2026-10-19"
+  },
+  {
+    "id": "R12",
+    "film": "Werewolves Within",
+    "year": "2021",
+    "kind": "feature / official trailer page",
+    "publisher": "Independent Film Company / Ubisoft",
+    "url": "https://www.independentfilmco.com/films/werewolves-within",
+    "alternate": "https://news.ubisoft.com/en-us/article/525neC6KmiBgGjAcNMxM55/new-werewolves-within-trailer-sets-up-clues-for-its-murder-mystery",
+    "evidence": "Distributor identifies June 25, 2021 release and hosts a trailer.",
+    "use": "Practical creature silhouette and horror-comedy pacing; not a substitute for closeup anatomical reference.",
+    "local_clip_ids": [],
+    "availability": "source link only",
+    "checked_date": "2026-10-19"
+  },
+  {
+    "id": "R13",
+    "film": "The Animal Kingdom / Le Regne animal",
+    "year": "2023; US release 2024",
+    "kind": "feature / VFX breakdown and official trailer",
+    "publisher": "MPC / Magnolia / Magnet",
+    "url": "https://www.youtube.com/watch?v=K1pfR_IC7pU",
+    "alternate": "https://www.mpcvfx.com/en/filmography/animal-kingdom/",
+    "trailer": "https://www.youtube.com/watch?v=nWAJXTcEEOU",
+    "evidence": "MPC project page embeds its own breakdown; Magnet film site supplies the trailer identifier. The packaged short excerpts were visually inspected; see clips.json for the exact observed scope.",
+    "use": "Multiple animal-human hybrid designs and creature integration. Species/bodypart recipes in this package remain adaptations unless independently verified.",
+    "local_clip_ids": [
+      "CLIP014",
+      "CLIP015",
+      "CLIP016"
+    ],
+    "availability": "packaged short excerpts plus source link",
+    "checked_date": "2026-10-19"
+  },
+  {
+    "id": "R14",
+    "film": "Tiger Stripes",
+    "year": "2023",
+    "kind": "feature / official sales trailer",
+    "publisher": "Films Boutique; AFI FEST film listing",
+    "url": "https://www.youtube.com/watch?v=Q7lu0KoD5so",
+    "alternate": "https://fest.afi.com/2023/discovery-2023/tiger-stripes/",
+    "evidence": "AFI identifies the 2023 film and embeds the Films Boutique trailer.",
+    "use": "Feline transformation genre reference. All generated examples and target subjects in this package are adults; no source actor is carried into the target shot.",
+    "local_clip_ids": [],
+    "availability": "source link only",
+    "checked_date": "2026-10-19"
+  },
+  {
+    "id": "R15",
+    "film": "Nightbitch",
+    "year": "2024",
+    "kind": "feature / official trailer",
+    "publisher": "Searchlight Pictures",
+    "url": "https://www.youtube.com/watch?v=918prRymA-U",
+    "alternate": "https://www.searchlightpictures.com/nightbitch",
+    "evidence": "Searchlight film and press pages link its official trailer.",
+    "use": "Canine-body transformation tone and everyday-world integration; no invented timeline markers.",
+    "local_clip_ids": [],
+    "availability": "source link only",
+    "checked_date": "2026-10-19"
+  },
+  {
+    "id": "R16",
+    "film": "Teen Wolf: The Movie",
+    "year": "2023",
+    "kind": "streaming feature / official trailer page",
+    "publisher": "Paramount+",
+    "url": "https://www.paramountplus.com/shows/paramount-plus/news/1010427/teen-wolf-the-movie-gets-official-teaser-trailer/",
+    "alternate": "https://paramountglobalcontent.com/title/teen-wolf-the-movie",
+    "evidence": "Paramount gives January 26, 2023 premiere and supplies an official teaser.",
+    "use": "Humanlike wolf styling and supernatural eye-effect design; glow is a deliberate fantasy option, not default animal anatomy.",
+    "local_clip_ids": [],
+    "availability": "source link only",
+    "checked_date": "2026-10-19"
+  },
+  {
+    "id": "R17",
+    "film": "Werewolf by Night",
+    "year": "2022",
+    "kind": "optional television special; not a theatrical feature",
+    "publisher": "Marvel Studios",
+    "url": "https://www.youtube.com/watch?v=bLEFqhS5WmI",
+    "alternate": "https://www.disneyplus.com/browse/entity-ad2fd4e8-062b-45b9-b2c5-8b8779873e48",
+    "evidence": "Official Marvel Studios trailer announces the October 7 Disney+ special.",
+    "use": "Shadow-led reveal, lighting and tactile monster styling. Clearly separated from the feature-film source set.",
+    "local_clip_ids": [],
+    "availability": "source link only",
+    "checked_date": "2026-10-19"
+  }
+]

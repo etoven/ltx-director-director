@@ -1,0 +1,31 @@
+{
+  "library_id": "werecreature-effects",
+  "version": "1.2.0",
+  "created_date": "2026-10-19",
+  "entrypoint": "index.html",
+  "agent_instructions": "agent.md",
+  "effects": "effects.json",
+  "effects_jsonl": "effects.jsonl",
+  "schema": "effects.schema.json",
+  "species": "species.json",
+  "footage_sources": "sources/footage.json",
+  "clips": "sources/clips.json",
+  "audio": "sources/audio.json",
+  "audio_index": "sources/audio_index.md",
+  "counts": {
+    "effects": 100,
+    "thumbnails": 100,
+    "species": 24,
+    "clips": 17,
+    "sources": 17,
+    "audio_samples": 17,
+    "source_audio_samples": 17
+  },
+  "source_year_policy": "2021+; user-requested legacy Underworld and Van Helsing exceptions; Werewolf by Night is an optional television special.",
+  "clip_policy": "Short excerpts from public promotional sources. Full films and full trailers omitted. Underworld remains linked-only.",
+  "prompt_type": "authored segment fragments, not an official provider import schema",
+  "model_testing": "Not rendered or benchmarked in Gemini or MiniMax.",
+  "thumbnail_provenance": "Generated concept crops for visual effects; synthetic sound-recipe graphics. Clip posters are actual source frames.",
+  "audio_policy": "17 decoded movie soundtrack excerpts. No isolated movie foley. All PCM 16-bit stereo WAV at 48 kHz.",
+  "checksums": "checksums.sha256"
+}

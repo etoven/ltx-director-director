@@ -1,0 +1,232 @@
+[
+  {
+    "id": "wolf",
+    "name": "Werewolf",
+    "image_key": "S01",
+    "image": "illustrations/S01.jpg",
+    "anatomy": "Digitigrade canine hindlimbs; four main weight-bearing paw digits; forelimb dewclaw is medial.",
+    "appearance": "A moderately long canine muzzle, pointed ears, round pupils, dense guard hair and a four-toed paw silhouette.",
+    "reference_ids": [
+      "R03",
+      "R07",
+      "R08"
+    ]
+  },
+  {
+    "id": "cheetah",
+    "name": "Werecheetah",
+    "image_key": "S02",
+    "image": "illustrations/S02.jpg",
+    "anatomy": "Lean digitigrade limbs; four main paw toes; small, less fully retractile claws.",
+    "appearance": "A slim short feline muzzle, solid black spots, black tear tracks, rounded ears and round pupils. Keep the body light and the tail long.",
+    "reference_ids": []
+  },
+  {
+    "id": "bear",
+    "name": "Werebear",
+    "image_key": "S03",
+    "image": "illustrations/S03.jpg",
+    "anatomy": "Plantigrade hindfeet; five toes with non-retractile claws.",
+    "appearance": "A broad bear muzzle, rounded ears, heavy shoulder mass and dense coarse fur. Keep the heel on the ground during a planted stance.",
+    "reference_ids": []
+  },
+  {
+    "id": "panther",
+    "name": "Werepanther",
+    "image_key": "S04",
+    "image": "illustrations/S04.jpg",
+    "anatomy": "Specify black leopard or black jaguar; digitigrade felid limbs, retractile claws.",
+    "appearance": "A black leopard hybrid with a broad feline muzzle, rounded ears, round pupils, long tail and faint rosettes visible in reflected light.",
+    "reference_ids": []
+  },
+  {
+    "id": "lioness",
+    "name": "Werelioness",
+    "image_key": "S05",
+    "image": "illustrations/S05.jpg",
+    "anatomy": "Digitigrade felid limbs; four hind toes, medial forelimb dewclaw; no mane.",
+    "appearance": "A tawny lioness muzzle, broad nose, rounded ears, round pupils, four main paw toes and a tufted tail.",
+    "reference_ids": []
+  },
+  {
+    "id": "tiger",
+    "name": "Weretiger",
+    "image_key": "S06",
+    "image": "illustrations/S06.jpg",
+    "anatomy": "Digitigrade felid limbs; retractile claws; round pupils.",
+    "appearance": "A broad tiger muzzle, rounded ears and orange coat with black stripes that follow the growing anatomy.",
+    "reference_ids": [
+      "R14"
+    ]
+  },
+  {
+    "id": "hyena",
+    "name": "Werehyena",
+    "image_key": "S07",
+    "image": "illustrations/S07.jpg",
+    "anatomy": "Digitigrade; spotted-hyena variant has four toes per foot.",
+    "appearance": "A deep muzzle, rounded ears, heavy neck, spotted coarse coat and a sloping shoulder-to-hip silhouette.",
+    "reference_ids": []
+  },
+  {
+    "id": "fox",
+    "name": "Werefox",
+    "image_key": "S08",
+    "image": "illustrations/S08.jpg",
+    "anatomy": "Digitigrade canine plan; main paws have four forward digits.",
+    "appearance": "A narrow orange fox muzzle, large pointed ears, dark lower legs and a full brush tail.",
+    "reference_ids": []
+  },
+  {
+    "id": "boar",
+    "name": "Wereboar",
+    "image_key": "S09",
+    "image": "illustrations/S09.jpg",
+    "anatomy": "Even-toed ungulate; two main hooves and smaller side digits.",
+    "appearance": "A broad mobile snout disc, coarse bristles, compact triangular ears and paired curved tusks.",
+    "reference_ids": []
+  },
+  {
+    "id": "bull",
+    "name": "Werebull",
+    "image_key": "S10",
+    "image": "illustrations/S10.jpg",
+    "anatomy": "Cloven hooves; two principal digits and rear dewclaws; paired keratin horns.",
+    "appearance": "A heavy bovine muzzle, lateral ears, massive neck and a matched pair of unbranched horns growing from the frontal bone.",
+    "reference_ids": []
+  },
+  {
+    "id": "deer",
+    "name": "Weredeer",
+    "image_key": "S11",
+    "image": "illustrations/S11.jpg",
+    "anatomy": "Cloven hooves; antlers differ from permanent keratin horns.",
+    "appearance": "A slender cervid muzzle, broad mobile ears, a soft coat and a paired antler rack if the selected deer phenotype has antlers.",
+    "reference_ids": []
+  },
+  {
+    "id": "rat",
+    "name": "Wererat",
+    "image_key": "S12",
+    "image": "illustrations/S12.jpg",
+    "anatomy": "Five hind toes; smaller four main front digits plus reduced thumb.",
+    "appearance": "A narrow rodent muzzle, rounded bare ears, long whiskers, prominent incisors and a thin scaled tail.",
+    "reference_ids": []
+  },
+  {
+    "id": "crocodile",
+    "name": "Werecrocodile",
+    "image_key": "S13",
+    "image": "illustrations/S13.jpg",
+    "anatomy": "Reptilian limbs; five fore digits and four hind digits for the crocodile endpoint.",
+    "appearance": "A broad crocodilian muzzle, nostrils near its tip, scaly skin and a muscular laterally flattened tail.",
+    "reference_ids": []
+  },
+  {
+    "id": "bat",
+    "name": "Werebat",
+    "image_key": "S14",
+    "image": "illustrations/S14.jpg",
+    "anatomy": "Choose an arm-to-wing conversion; elongate fingers II-V; leave the thumb free.",
+    "appearance": "A short bat muzzle, large species-appropriate ears and membranes tensioned between elongated fingers. A bat is a mammal, with fur rather than feathers.",
+    "reference_ids": [
+      "R04"
+    ]
+  },
+  {
+    "id": "eagle",
+    "name": "Wereeagle",
+    "image_key": "S15",
+    "image": "illustrations/S15.jpg",
+    "anatomy": "Avian wing replaces the arm; raptor hindfeet have three forward toes and a rear hallux.",
+    "appearance": "A hooked eagle beak, layered flight feathers and a predatory avian head; wings attach at the existing shoulders.",
+    "reference_ids": [
+      "R13"
+    ]
+  },
+  {
+    "id": "shark",
+    "name": "Wereshark",
+    "image_key": "S16",
+    "image": "illustrations/S16.jpg",
+    "anatomy": "Choose a fantasy hybrid topology explicitly; fins are not jointed mammal paws.",
+    "appearance": "Smooth grey shark skin, paired side gill slits, a broad shark head and ordered rows of triangular teeth.",
+    "reference_ids": []
+  },
+  {
+    "id": "horse",
+    "name": "Werehorse",
+    "image_key": "S17",
+    "image": "illustrations/S17.jpg",
+    "anatomy": "Unguligrade; one principal hoof per limb, no cloven split or bovine dewclaws.",
+    "appearance": "An equine muzzle, upright mobile ears, a mane, single hooves and a long hair-covered tail.",
+    "reference_ids": []
+  },
+  {
+    "id": "cow",
+    "name": "Werecow",
+    "image_key": "S18",
+    "image": "illustrations/S18.jpg",
+    "anatomy": "Bovine cloven hoof anatomy; horned or hornless depends on the selected phenotype.",
+    "appearance": "A broad moist bovine nose, lateral ears and a black-and-white short coat; use the chosen hornless individual consistently.",
+    "reference_ids": []
+  },
+  {
+    "id": "bull_horns",
+    "name": "Bull horns / minotaur",
+    "image_key": "S19",
+    "image": "illustrations/S19.jpg",
+    "anatomy": "A paired, unbranched horn set; no deer-like branching.",
+    "appearance": "A heavy bovine face and neck, with horns growing sideways from behind the eye line before curving upward.",
+    "reference_ids": []
+  },
+  {
+    "id": "cat",
+    "name": "Domestic werecat",
+    "image_key": "S20",
+    "image": "illustrations/S20.jpg",
+    "anatomy": "Digitigrade cat legs; retractile claws; four hind toes and a medial forelimb dewclaw.",
+    "appearance": "A short domestic-cat muzzle, upright triangular ears, tabby markings and pupils that narrow vertically under brighter light.",
+    "reference_ids": []
+  },
+  {
+    "id": "raven",
+    "name": "Wereraven",
+    "image_key": "S21",
+    "image": "illustrations/S21.jpg",
+    "anatomy": "Avian arm-to-wing plan; one head; no mammal ear pinnae at endpoint.",
+    "appearance": "A straight black raven beak, black contour feathers, layered wing feathers and small round dark eyes.",
+    "reference_ids": [
+      "R13"
+    ]
+  },
+  {
+    "id": "owl",
+    "name": "Wereowl",
+    "image_key": "S22",
+    "image": "illustrations/S22.jpg",
+    "anatomy": "Avian arm-to-wing plan; zygodactyl grip can be chosen for perched feet.",
+    "appearance": "A short hooked beak, a feather facial disc and large forward-facing eyes; rotate the head within plausible limits.",
+    "reference_ids": [
+      "R13"
+    ]
+  },
+  {
+    "id": "ram",
+    "name": "Wereram",
+    "image_key": "S23",
+    "image": "illustrations/S23.jpg",
+    "anatomy": "Cloven hooves; paired ridged spiral horns; wool rather than a fur mane.",
+    "appearance": "A sheep muzzle, dense wool and a matched pair of curling ridged horns that remain clear of the ears.",
+    "reference_ids": []
+  },
+  {
+    "id": "goat",
+    "name": "Weregoat",
+    "image_key": "S24",
+    "image": "illustrations/S24.jpg",
+    "anatomy": "Cloven hooves; paired backward-curving horns; horizontal pupils.",
+    "appearance": "A narrow caprine muzzle, short beard, horizontal pupils and tapered horns sweeping backward.",
+    "reference_ids": []
+  }
+]

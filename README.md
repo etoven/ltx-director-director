@@ -124,3 +124,7 @@ ltx-director-director
 **[Installation and desktop setup →](install.md)** · **[Complete feature and usage guide →](usage.md)**
 
 Timeline editing, project storage and media preparation run locally. AI generation and refinement use your configured provider and API key. Director prepares the plan and prompts; your video workflow renders the final video. MIT licensed.
+
+### Effects Library
+
+Browse, preview and apply the bundled Werecreature catalog, migrate Quick Fixes, or add your own effects. [Open the illustrated Effects Library guide](docs/effects-library.md).

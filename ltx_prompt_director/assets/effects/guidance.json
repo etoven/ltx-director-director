@@ -1,0 +1,11 @@
+{
+  "target_slot": "<Subject 1> means the existing target character; remap it to an already-defined subject ID before inserting a fragment.",
+  "effect_slot": "If actual effect footage is attached, define an unused <Subject N> as only the selected effect or motion extracted from that asset. Do not redefine existing IDs.",
+  "source_video_slot": "<Video 1> may identify the source edit video when already defined. A bare URL is not an attached multimodal reference.",
+  "reference_transfer": "Use reference footage only for selected deformation, timing and surface behavior; target identity, scene and photography stay from the source shot.",
+  "stage": "Choose onset, intermediate, late, hold or reverse. Describe the visible starting and ending states. Percentage stages are artistic suggestions, not official model controls.",
+  "audio": "Sound instructions are optional. source_audio_ids map to actual mixed movie soundtrack excerpts, not isolated foley. audio_sample_ids is empty in this edition. Only introduce <Audio N> for a file actually attached/enabled through the host. Preserve dialogue and music decisions; playing a preview never attaches media. Use recorded source material for samples; do not replace missing recordings with procedural or keyboard-like synthesized cues.",
+  "model_scope": "These are author-created prompt fragments informed by the official H3 guide, not a MiniMax-defined import format or an empirically benchmarked optimization.",
+  "image_scope": "Illustrations are generated concept examples. They are not film frames, anatomical diagrams or proof of a particular intermediate shape.",
+  "priority": "Source shot constraints > explicitly requested local change > chosen species topology > selected reference effect > decorative styling."
+}

@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:werecreature-effects:1.2:effects",
+  "title": "Werecreature effect records",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": [
+      "id",
+      "effect_name",
+      "category",
+      "anatomy",
+      "stage",
+      "species",
+      "thumbnail",
+      "minimax_segment",
+      "gemini_quick_fix",
+      "reference_ids",
+      "reference_clip_ids",
+      "audio_sample_ids",
+      "source_audio_ids"
+    ],
+    "properties": {
+      "id": {
+        "type": "string",
+        "pattern": "^FX[0-9]{3}$"
+      },
+      "effect_name": {
+        "type": "string"
+      },
+      "category": {
+        "enum": [
+          "Body mechanics",
+          "Surface effects",
+          "Species",
+          "Sound",
+          "Genre and repair"
+        ]
+      },
+      "anatomy": {
+        "type": "string"
+      },
+      "stage": {
+        "type": "string"
+      },
+      "species": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "thumbnail": {
+        "type": "string"
+      },
+      "minimax_segment": {
+        "type": "string"
+      },
+      "gemini_quick_fix": {
+        "type": "string"
+      },
+      "reference_ids": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "reference_clip_ids": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "audio_sample_ids": {
+        "type": "array",
+        "maxItems": 0,
+        "description": "Retained for import compatibility; no standalone demo recordings are supplied."
+      },
+      "source_audio_ids": {
+        "type": "array",
+        "uniqueItems": true,
+        "items": {
+          "type": "string",
+          "pattern": "^SRC[0-9]{3}$"
+        }
+      }
+    },
+    "additionalProperties": true
+  }
+}
