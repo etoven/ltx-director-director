@@ -30,6 +30,26 @@ class UnifiedEditorTests(unittest.TestCase):
         self.addCleanup(window.close)
         return window
 
+    def test_local_setup_and_credential_scope(self):
+        from test_local_generation_ui import test_wizard_cancel_preserves_credentials_and_finish_separates_sources
+        test_wizard_cancel_preserves_credentials_and_finish_separates_sources()
+
+    def test_local_stale_progress_and_settings(self):
+        from test_local_generation_ui import test_local_progress_is_ignored_after_a_project_switch_and_no_paid_prompt
+        test_local_progress_is_ignored_after_a_project_switch_and_no_paid_prompt()
+
+    def test_local_render_media_preservation_and_export(self):
+        from test_local_generation_ui import (test_generated_video_attachment_preserves_previous_render_and_discards_stale_metadata,
+                                               test_unsaved_local_video_can_be_exported)
+        test_generated_video_attachment_preserves_previous_render_and_discards_stale_metadata()
+        test_unsaved_local_video_can_be_exported()
+
+    def test_local_generation_transport_and_media_contracts(self):
+        import subprocess, sys, os
+        code = "import os,sys,pytest; rc=pytest.main(['-q','tests/test_local_generation.py']); sys.stdout.flush(); sys.stderr.flush(); os._exit(rc)"
+        env = dict(os.environ, PYTEST_DISABLE_PLUGIN_AUTOLOAD='1', QT_QPA_PLATFORM='offscreen')
+        subprocess.run([sys.executable, '-c', code], env=env, check=True, timeout=20)
+
     def test_effects_catalog_and_dock(self):
         from test_effects_ui import test_effects_dock_search_artwork_and_menu_migration
         test_effects_dock_search_artwork_and_menu_migration()

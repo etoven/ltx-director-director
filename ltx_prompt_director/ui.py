@@ -66,6 +66,8 @@ from .prompt_tags import prompt_content, consume_global_refinements, install_pro
 from .quick_fixes import QuickFixEditor, load_presets, preset_groups
 from .effects_library import MIME as EFFECT_MIME, load_effects, refinement
 from .effects_widgets import EffectsPanel
+from .local_generation import LOCAL_PROGRESS, LOCAL_CANCEL, load_profile, save_profile, run_request, validate_profile
+from .local_widgets import LocalModelsPanel, ImageGenerationPanel, ProgressPill, VideoGenerationDialog
 from .inline_cues import PromptTextEdit
 from .prompt_timecodes import retime_prompt
 from .prompt_sections import document_sections
@@ -231,6 +233,7 @@ class WorkerSignals(QObject):
     failed = Signal(str)
     progress = Signal(int, int, str)
     stream = Signal(str, str)
+    local_event = Signal(object)
 
 
 class MagicWorker(QRunnable):
@@ -269,13 +272,16 @@ class MagicWorker(QRunnable):
 class BackgroundWorker(QRunnable):
     """Run disk work off the GUI thread; deliver results via Qt queued signals."""
 
-    def __init__(self, operation, args: tuple):
+    def __init__(self, operation, args: tuple, cancel=None):
         super().__init__()
         self.operation = operation
         self.args = args
+        self.cancel = cancel
         self.signals = WorkerSignals()
 
     def run(self) -> None:
+        cancel_token = LOCAL_CANCEL.set(self.cancel)
+        token = LOCAL_PROGRESS.set(self.signals.local_event.emit)
         try:
             result = self.operation(*self.args)
         except Exception as error:
@@ -284,6 +290,9 @@ class BackgroundWorker(QRunnable):
             except RuntimeError:
                 pass  # The window closed while its queued disk job was finishing.
             return
+        finally:
+            LOCAL_PROGRESS.reset(token)
+            LOCAL_CANCEL.reset(cancel_token)
         try:
             self.signals.finished.emit(result)
         except RuntimeError:
@@ -291,11 +300,16 @@ class BackgroundWorker(QRunnable):
 
 
 class BackgroundCallbacks(QObject):
-    def __init__(self, owner, finished, failed):
+    def __init__(self, owner, finished, failed, progress=None):
         super().__init__(owner)
         self.owner = owner
         self.finished = finished
         self.failed = failed
+        self.progress = progress
+
+    @Slot(object)
+    def on_local_event(self, event):
+        if self.progress: self.progress(event)
 
     @Slot(object)
     def on_finished(self, result):
@@ -2397,6 +2411,9 @@ class SettingsDialog(QDialog):
         general = QWidget()
         form = QFormLayout(general)
         tabs.addTab(general, "Application")
+        self.local_models = LocalModelsPanel(parent)
+        local_scroll = QScrollArea(); local_scroll.setWidgetResizable(True); local_scroll.setWidget(self.local_models)
+        tabs.addTab(local_scroll, "Local models")
         tabs.addTab(ChatGPTSettingsPanel(parent.chatgpt_auth, settings, tabs), "ChatGPT plan")
         tabs.addTab(WorkspaceEditor(parent.workspace_store, parent, tabs), "Workspaces")
         from .storage_widgets import StorageSettingsPanel
@@ -2404,7 +2421,7 @@ class SettingsDialog(QDialog):
         tabs.addTab(self.storage_panel,"Storage and backups")
         self.resize(850, 760)
         self.provider = QComboBox()
-        self.provider.addItems(["gemini", "openai", "chatgpt"])
+        self.provider.addItems(["gemini", "openai", "chatgpt", "local"])
         self.provider.setCurrentText(settings.value("provider", "gemini"))
         self.model = QComboBox()
         self.model.addItems(GEMINI_MODELS)
@@ -2431,7 +2448,8 @@ class SettingsDialog(QDialog):
         self.image_gen_model.setToolTip(
             "Default model for timeline artwork requested by segment JSON. "
             "Automatic retains the previous provider preference. Specific "
-            "models require that provider's API key; ChatGPT plan OAuth "
+            "cloud models require that provider's API key. Local Flux uses the files "
+            "configured in Local models. ChatGPT plan OAuth "
             "cannot generate image files. Image API usage is billed separately."
         )
         self.remember = QCheckBox("Store API keys persistently on this computer")
@@ -2525,6 +2543,7 @@ class SettingsDialog(QDialog):
         except ValueError as error:
             QMessageBox.warning(self, "Invalid project tags", str(error))
             return
+        save_profile(self.settings, self.local_models.value())
         self.settings.setValue("provider", self.provider.currentText())
         self.settings.setValue("gemini_model", self.model.currentText())
         self.settings.setValue("openai_model", self.openai_model.currentText())
@@ -2548,6 +2567,10 @@ class SettingsDialog(QDialog):
             self.settings.remove("openai_key")
         self.parent().session_keys = {"gemini": self.gemini.text().strip(), "openai": self.openai.text().strip()}
         super().accept()
+
+    def done(self, result):
+        self.local_models.dispose()
+        super().done(result)
 
     def choose_segment_save_directory(self) -> None:
         selected = choose_directory(self, "Choose default download folder", self.segment_save_dir.text().strip() or str(Path.home()))
@@ -3490,6 +3513,7 @@ class MainWindow(QMainWindow):
         self._build_project_files_dock()
         self._build_project_properties_dock()
         self._build_effects_dock()
+        self._build_local_generation_ui()
         self.catalog_dock = QDockWidget("Media Catalog", self)
         self.catalog_dock.setObjectName("mediaCatalogDock")
         self.media_catalog = MediaCatalog(self)
@@ -3622,6 +3646,16 @@ class MainWindow(QMainWindow):
         settings_action = QAction(toolbar_icon("settings"), "Settings", self)
         settings_action.triggered.connect(self.open_settings)
         toolbar.addAction(settings_action)
+        help_button = QToolButton(toolbar)
+        help_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DialogHelpButton))
+        help_button.setToolTip("Help and setup")
+        help_button.setAccessibleName("Help and setup")
+        help_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        help_menu = QMenu(help_button)
+        help_menu.addAction("Interactive illustrated manual", self.open_interactive_help)
+        help_menu.addAction("Setup wizard…", self.show_onboarding)
+        help_menu.addAction("Image generation panel", lambda: self.image_generation_dock.show())
+        help_button.setMenu(help_menu); toolbar.addWidget(help_button)
 
         root = QWidget()
         outer = QVBoxLayout(root)
@@ -4217,6 +4251,109 @@ class MainWindow(QMainWindow):
         self.apply_project_type_ui()
         self.update_summary()
 
+    def _build_local_generation_ui(self):
+        import threading
+        self._local_video_cancel = threading.Event()
+        self._local_video_busy = False
+        self.image_generation_dock = QDockWidget("IMAGE GENERATION", self)
+        self.image_generation_dock.setObjectName("imageGenerationDock")
+        self.image_generation_panel = ImageGenerationPanel()
+        self._local_artwork_cancel = {}
+        self.image_generation_panel.cancel_requested.connect(self.cancel_local_artwork)
+        self.image_generation_dock.setWidget(self.image_generation_panel)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.image_generation_dock)
+        self.image_generation_dock.hide()
+        panel = self.project_preview_panel
+        row = QHBoxLayout()
+        self.local_video_generate = QPushButton("✦ Generate locally…")
+        self.local_video_generate.clicked.connect(self.generate_local_video)
+        self.local_video_cancel_button = QPushButton("Cancel generation")
+        self.local_video_cancel_button.clicked.connect(self._local_video_cancel.set)
+        self.local_video_cancel_button.hide()
+        row.addWidget(self.local_video_generate); row.addWidget(self.local_video_cancel_button)
+        panel.layout().insertLayout(1, row)
+        self.local_video_pill = ProgressPill(panel, bottom_margin=96)
+
+    def generate_local_video(self):
+        if self._local_video_busy: return
+        profile = load_profile(self.settings)
+        try: validate_profile(profile, "video")
+        except ValueError as error:
+            QMessageBox.information(self, "Local video setup", str(error))
+            self.open_settings(); return
+        dialog = VideoGenerationDialog(self)
+        if not dialog.exec(): return
+        selected = {dialog.references.item(i).data(Qt.ItemDataRole.UserRole)
+                    for i in range(dialog.references.count())
+                    if dialog.references.item(i).checkState() == Qt.CheckState.Checked}
+        snapshots = copy.deepcopy([s for s in self.segments if s.id in selected])
+        extra_references = copy.deepcopy([r for index, r in enumerate(reference_slots(self.minimax_reference_images))
+                                         if r and f"refslot:{index}" in selected])
+        request = dict(kind="video", profile=profile, prompt=dialog.prompt.toPlainText(),
+            duration=dialog.duration.value(), width=dialog.width.value(), height=dialog.height.value(), steps=dialog.steps.value())
+        workspace = (self.workspace_revision, self.current_project_id, self.project_type)
+        previous_preview = getattr(self.project_preview_panel, "pending_preview_path", "")
+        self._local_video_busy = True; self._local_video_cancel.clear()
+        self.local_video_generate.setEnabled(False); self.local_video_cancel_button.show()
+        self.project_preview_dock.show()
+        self.statusBar().showMessage("Local video generation started")
+        def current(): return workspace == (self.workspace_revision, self.current_project_id, self.project_type)
+        def event(value):
+            if not current(): return
+            if value.get("kind") == "progress": self.local_video_pill.update_event(value)
+            elif value.get("kind") == "preview":
+                panel = self.project_preview_panel
+                panel.release_memory_video()
+                panel._memory_preview = False
+                panel._source_generation += 1
+                panel.pending_preview_path = value["path"]
+                panel._initial_media_pending = True
+                panel.title.setText("Local video · draft sample")
+                panel.empty.hide(); panel.video.show()
+                panel.export.setEnabled(False)
+                panel.player.setSource(QUrl.fromLocalFile(value["path"]))
+                panel.player.setLoops(QMediaPlayer.Loops.Infinite)
+                panel.player.play()
+        def operation():
+            references = []
+            for segment in snapshots:
+                path = str(materialize_source(segment))
+                references.append({"path": path, "kind": segment.kind, "name": segment.name,
+                    "role": segment.role, "start": max(0, segment.trim_start or 0) / FPS,
+                    "duration": min(15, segment.duration)})
+            for reference in extra_references:
+                if reference.get("audio_only"):
+                    reference["kind"] = "audio"
+                    reference["path"] = reference.get("audio_path") or reference.get("path")
+                references.append(reference)
+            return run_request({**request, "references": references}, cancel=self._local_video_cancel)
+        def finish():
+            self._local_video_busy = False; self.local_video_generate.setEnabled(True)
+            self.local_video_cancel_button.hide(); self.local_video_pill.hide()
+            if current(): self.project_preview_panel.player.setLoops(QMediaPlayer.Loops.Once)
+        def ready(result):
+            finish()
+            if not current():
+                self.statusBar().showMessage("Local video retained in the generation folder; the active project changed.", 8000); return
+            self.project_preview_panel.set_project(self.current_project_name or "Generated video", result["path"])
+            self._local_result_video = {"scope": workspace, "path": result["path"]}
+            if self.current_project_id: self.attach_local_generated_video(result["path"], workspace)
+            self.statusBar().showMessage("Local video ready · " + result["path"], 12000)
+        def failed(message):
+            finish()
+            if current():
+                self.project_preview_panel.set_project(self.current_project_name or "Video Preview", previous_preview)
+                self.statusBar().showMessage(str(message), 15000)
+        self.start_disk_job(operation, (), ready, failed, progress=event)
+
+    def cancel_local_artwork(self):
+        for event in self._local_artwork_cancel.values(): event.set()
+
+    def local_image_progress(self, event, workspace):
+        if workspace != (self.workspace_revision, self.current_project_id, self.project_type): return
+        self.image_generation_dock.show()
+        self.image_generation_panel.receive_event(event)
+
     def _build_effects_dock(self):
         self.effects_dock = QDockWidget("Effects Library", self)
         self.effects_dock.setObjectName("effectsLibraryDock")
@@ -4550,6 +4687,7 @@ class MainWindow(QMainWindow):
             splash.finish(self)
             QApplication.instance()._director_splash = None
         QTimer.singleShot(0, self.restore_last_project)
+        QTimer.singleShot(600, self.maybe_show_onboarding)
 
     def finish_layout_restore(self) -> None:
         self._restoring_layout = False
@@ -5082,7 +5220,28 @@ class MainWindow(QMainWindow):
         if path:
             self.attach_project_video(path)
 
+    def attach_local_generated_video(self, source_path, workspace):
+        meta = self.current_library_metadata()
+        if not meta: return
+        source = Path(source_path)
+        destination = project_library_path() / "previews" / f"{meta['id']}_{uuid4().hex}_generated.mp4"
+        def copy_render():
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, destination)
+            return str(destination)
+        def ready(path):
+            if workspace != (self.workspace_revision, self.current_project_id, self.project_type): return
+            latest = self.current_library_metadata()
+            if not latest: return
+            latest["previewVideoPath"] = path
+            latest["previewVideoName"] = "Generated video.mp4"
+            self.persist_library_metadata(latest)
+            self.project_preview_panel.set_project(str(latest.get("name") or "Generated video"), path)
+        self.start_disk_job(copy_render, (), ready,
+            lambda message: self.statusBar().showMessage("Video remains in the generation folder: " + str(message), 12000), serialized=True)
+
     def attach_project_video(self, source_path: str) -> None:
+        self._local_result_video = None
         meta = self.current_library_metadata()
         source = Path(source_path)
         if not meta:
@@ -5113,11 +5272,16 @@ class MainWindow(QMainWindow):
 
     def export_project_video(self) -> None:
         meta = self.current_library_metadata()
-        source = Path(str(meta.get("previewVideoPath", ""))) if meta else Path()
-        if not meta or not source.is_file():
+        generated = getattr(self, "_local_result_video", None)
+        scope = (self.workspace_revision, self.current_project_id, self.project_type)
+        if generated and generated["scope"] == scope: source = Path(generated["path"])
+        elif meta: source = Path(str(meta.get("previewVideoPath", "")))
+        else: source = Path()
+        if not source.is_file():
             QMessageBox.information(self, "No project video", "Add a rendered video to this project first.")
             return
-        original = str(meta.get("previewVideoName") or source.name)
+        original = ("Generated video.mp4" if generated and generated["scope"] == scope
+                    else str(meta.get("previewVideoName") or source.name) if meta else source.name)
         target = self.next_export_path(original)
         self.start_disk_job(shutil.copy2, (source, target), lambda _result: self.record_export(target),
                             lambda message: self.export_failed(target, message), serialized=True)
@@ -5757,6 +5921,8 @@ class MainWindow(QMainWindow):
             self.queue_closing_projects()
             self._closing_total = self._pending_disk_jobs
             self.update_closing_progress()
+        if getattr(self, "_local_video_busy", False): self._local_video_cancel.set()
+        if hasattr(self, "_local_artwork_cancel"): self.cancel_local_artwork()
         if self._pending_disk_jobs:
             self._close_after_jobs = True
             self.statusBar().showMessage("Finishing background project saves before closing…")
@@ -6549,7 +6715,8 @@ class MainWindow(QMainWindow):
         provider = self.settings.value("provider", "gemini")
         label = (
             self.settings.value("gemini_model", GEMINI_MODELS[0]) if provider == "gemini" else
-            self.settings.value("chatgpt_model", "ChatGPT") if provider == "chatgpt" else "OpenAI"
+            self.settings.value("chatgpt_model", "ChatGPT") if provider == "chatgpt" else
+            "Local writing model" if provider == "local" else "OpenAI"
         )
         self.provider_button.setText(f"✦ {label.replace('gemini-', 'Gemini ').replace('-', ' ').title() if provider == 'gemini' else label}")
 
@@ -6867,6 +7034,22 @@ class MainWindow(QMainWindow):
             self.mark_dirty()
             self.refresh_timeline(max(0, row - 1))
 
+    def open_interactive_help(self):
+        from .onboarding import open_manual
+        open_manual()
+
+    def show_onboarding(self):
+        from .onboarding import OnboardingWizard
+        wizard = getattr(self, "onboarding_wizard", None)
+        if wizard and wizard.isVisible(): wizard.raise_(); return
+        self.onboarding_wizard = OnboardingWizard(self)
+        self.onboarding_wizard.show()
+
+    def maybe_show_onboarding(self):
+        if (not self.settings.value("onboarding/seen", False, bool)
+                and not self.settings.contains("provider") and not self.settings.contains("last_project_id")):
+            self.show_onboarding()
+
     def open_settings(self) -> None:
         if SettingsDialog(self.settings, self).exec():
             value = self.settings.value("ui_text_scale", 100, int)
@@ -6948,6 +7131,15 @@ class MainWindow(QMainWindow):
 
     def ai_credentials(self) -> tuple[str, str, object] | None:
         provider = self.settings.value("provider", "gemini")
+        if provider == "local":
+            profile = load_profile(self.settings)
+            try: validate_profile(profile, "text")
+            except ValueError:
+                self.open_settings()
+                profile = load_profile(self.settings)
+                try: validate_profile(profile, "text")
+                except ValueError: return None
+            return "local", profile["llm_model"], profile
         if provider == "chatgpt":
             profile = self.chatgpt_auth.active_profile()
             model = str(self.settings.value("chatgpt_model", ""))
@@ -7195,13 +7387,14 @@ class MainWindow(QMainWindow):
         worker.signals.failed.connect(self.ai_failure_received)
         self.thread_pool.start(worker)
 
-    def start_disk_job(self, operation, args: tuple, finished, failed, *, serialized: bool = False) -> None:
+    def start_disk_job(self, operation, args: tuple, finished, failed, *, serialized: bool = False, progress=None, cancel=None) -> None:
         """Execute filesystem work without touching widgets outside the GUI thread."""
-        worker = BackgroundWorker(operation, args)
+        worker = BackgroundWorker(operation, args, cancel)
         self._pending_disk_jobs += 1
-        callbacks = BackgroundCallbacks(self, finished, failed)
+        callbacks = BackgroundCallbacks(self, finished, failed, progress)
         worker.signals.finished.connect(callbacks.on_finished)
         worker.signals.failed.connect(callbacks.on_failed)
+        worker.signals.local_event.connect(callbacks.on_local_event)
         (self.disk_pool if serialized else self.media_pool).start(worker)
 
     def ai_request_is_current(self) -> bool:
@@ -8788,6 +8981,7 @@ class MainWindow(QMainWindow):
             )
             for provider in ("gemini", "openai")
         }
+        keys["local"] = load_profile(self.settings)
         return available_artwork_tools(
             keys,
             preferred=str(self.settings.value("provider", "gemini")),
@@ -8795,7 +8989,8 @@ class MainWindow(QMainWindow):
         )
 
     def _approve_artwork_cost(self, tool, *, manual=False):
-        """Ask once per provider; remember both approval and rejection."""
+        """Ask once per billed provider; remember both approval and rejection."""
+        if tool.provider == "local": return True
         setting = f"artwork/cost_decision/{tool.provider}"
         decision = str(self.settings.value(setting, ""))
         if decision == "allow":
@@ -9274,9 +9469,12 @@ class MainWindow(QMainWindow):
         return references[:7]
 
     def _start_segment_artwork(self, segment_id, record, tool):
+        import threading
+        cancel = threading.Event() if tool is not None and tool.provider == "local" else None
         item = next((item for item in self.segments if item.id == segment_id), None)
         if not item or tool is None or not item.artwork_prompt:
             return
+        if cancel is not None: self._local_artwork_cancel[segment_id] = cancel
         self._artwork_jobs = getattr(self, "_artwork_jobs", 0) + 1
         self.minimax_panel.ai_marquee.begin("✦ Rendering image…")
         item.artwork_status = "generating"
@@ -9298,6 +9496,8 @@ class MainWindow(QMainWindow):
             request["sourceImage"] = materialize_source(item)
 
         def ready(images):
+            if self._local_artwork_cancel.get(segment_id) is cancel:
+                self._local_artwork_cancel.pop(segment_id, None)
             self._artwork_jobs = max(0, getattr(self, "_artwork_jobs", 1) - 1)
             if not self._artwork_jobs and not self.ai_busy:
                 self.minimax_panel.ai_marquee.finish()
@@ -9336,6 +9536,10 @@ class MainWindow(QMainWindow):
 
         def failed(message):
             ready({})
+            if workspace != (self.workspace_revision, self.current_project_id, self.project_type): return
+            if tool.provider == "local":
+                self.image_generation_panel.pill.hide()
+                self.image_generation_panel.cancel.setEnabled(False)
             detail = str(message).strip()
             self.statusBar().showMessage(
                 f"Image failed ({tool.model}); details in prompt panel", 15000
@@ -9351,6 +9555,7 @@ class MainWindow(QMainWindow):
         self.start_disk_job(
             render_artwork, ([request], tool),
             ready, failed,
+            **({"progress": lambda event: self.local_image_progress(event, workspace), "cancel": cancel} if tool.provider == "local" else {}),
         )
 
     def retry_selected_artwork(self):

@@ -833,6 +833,9 @@ def _gemini(images: list[dict], key: str, model: str, rules: str, timeout: int, 
 
 
 def _provider_raw(images: list[dict], provider: str, model: str, key: str, rules: str, timeout: int) -> str:
+    if provider == "local":
+        from .local_generation import generate_text
+        return _checked_response(generate_text(images, rules, key, response_schemas.current(), timeout))
     if provider == "openai":
         return _openai_raw(images, key, rules, timeout, model=model)
     if provider == "chatgpt":

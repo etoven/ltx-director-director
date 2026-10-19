@@ -54,11 +54,15 @@ class EffectDialog(QDialog):
         self.generate = QPushButton('✦ Generate thumbnail with default image model')
         self.generate.clicked.connect(self.generate_thumbnail)
         layout.addWidget(self.generate)
+        self.thumbnail_preview = QLabel(); self.thumbnail_preview.setMaximumHeight(140)
+        self.thumbnail_preview.setAlignment(Qt.AlignmentFlag.AlignCenter); layout.addWidget(self.thumbnail_preview)
         self.status = QLabel('Choose the default image model in Settings.'); self.status.setWordWrap(True)
         layout.addWidget(self.status)
         self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
         self.buttons.accepted.connect(self.save); self.buttons.rejected.connect(self.reject)
         layout.addWidget(self.buttons)
+        import threading
+        self.cancel_generation = threading.Event()
         self.job_serial = 0
 
     def choose(self, field, filt):
@@ -72,6 +76,7 @@ class EffectDialog(QDialog):
         if not tools:
             self.status.setText('Configure an image source in Settings first.'); return
         from .artwork_tools import render_artwork
+        self.cancel_generation.clear()
         self.job_serial += 1
         serial = self.job_serial
         self.generate.setEnabled(False)
@@ -85,11 +90,19 @@ class EffectDialog(QDialog):
         def failed(message):
             if serial == self.job_serial:
                 self.generate.setEnabled(True); self.status.setText(str(message)[:700])
+        def progress(event):
+            if serial != self.job_serial: return
+            if event.get('kind') == 'preview' and event.get('media') == 'image':
+                self.thumbnail_preview.setPixmap(QPixmap(event['path']).scaled(380, 140, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+            elif event.get('kind') == 'progress':
+                from .local_widgets import progress_text
+                self.status.setText(progress_text(event))
         self.owner.start_disk_job(render_artwork, ([{
             'id': 'effect-thumbnail', 'artworkPrompt': 'Create an expressive effect library thumbnail: '
-            + self.name.text() + '. ' + self.prompt.toPlainText()}], tools[0]), ready, failed)
+            + self.name.text() + '. ' + self.prompt.toPlainText()}], tools[0]), ready, failed, progress=progress, cancel=self.cancel_generation)
 
     def done(self, result):
+        self.cancel_generation.set()
         self.job_serial += 1
         super().done(result)
 
@@ -156,10 +169,12 @@ class EffectsPanel(QWidget):
         self.apply = QPushButton('Apply and refine'); self.apply.clicked.connect(self.apply_current); row.addWidget(self.apply)
         layout.addLayout(row)
         row = QHBoxLayout()
-        for label, fn in [('Add your own…', lambda: self.edit(None)), ('Edit…', self.edit_current),
-                          ('Remove / hide', self.remove_current), ('Source catalog', self.open_catalog)]:
-            button = QPushButton(label); button.clicked.connect(fn); row.addWidget(button)
-        layout.addLayout(row)
+        for pair in [[('Add your own…', lambda: self.edit(None)), ('Edit…', self.edit_current)],
+                     [('Remove / hide', self.remove_current), ('Source catalog', self.open_catalog)]]:
+            row = QHBoxLayout()
+            for label, fn in pair:
+                button = QPushButton(label); button.clicked.connect(fn); row.addWidget(button)
+            layout.addLayout(row)
         self.player = QMediaPlayer(self); self.audio = QAudioOutput(self)
         self.player.setAudioOutput(self.audio)
         self.sink = QVideoSink(self); self.player.setVideoSink(self.sink)
@@ -194,7 +209,7 @@ class EffectsPanel(QWidget):
             if query and query not in json.dumps(searchable, ensure_ascii=False).casefold(): continue
             label = ('▶ ' if e.get('audio') else '') + e['name']
             icon = QIcon(media_path(e.get('thumbnail')))
-            if e.get('audio') or e.get('category') == 'Sound':
+            if e.get('audio') or e.get('source_audio_ids') and e.get('category') == 'Sound':
                 pix = icon.pixmap(192, 120)
                 if not pix.isNull():
                     painter = QPainter(pix); center = pix.rect().center()
@@ -225,6 +240,8 @@ class EffectsPanel(QWidget):
         if not e:
             self.details.setText('No matching effects.'); self.media.blockSignals(False); self.update_available(); return
         details = [e['name'], e.get('origin', ''), e.get('thumbnail_note', ''), e.get('usage_note', '')]
+        if e.get('category') == 'Sound' and not e.get('source_audio_ids'):
+            details.append('Written sound recipe · no recording supplied for this entry.')
         self.media.addItem('Still thumbnail', '')
         clips = {c['id']: c for c in catalog()['clips']}
         for cid in e.get('reference_clip_ids', []):

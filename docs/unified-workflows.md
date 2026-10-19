@@ -81,8 +81,7 @@ The result uses that editor's normal inline approve/reject controls.
 The included **Refine Camera** preset is available in Both menus with “refine
 camera angle and shot descriptions.” **Format Prompt** is available in Unified
 with “Format the spacing between shots to make it more human legable”. Choose
-**Edit Quick Fixes…** to add, rename, edit or remove presets and select where they
-appear. Presets are saved in your app settings. An empty editor disables its
+**Effects Library…** to browse catalog artwork, add your own effects and edit presets. Set **Apply to** for Segment, Unified or Both, and enable **Show in menu** for the actions you want in Quick Fix. Imported effects keep this option off until you enable it. Presets are saved in your app settings. An empty editor disables its
 menu options; content in the other editor is not required.
 
 Set **Category** in the preset editor to group related fixes. The menu shows

@@ -128,3 +128,7 @@ Timeline editing, project storage and media preparation run locally. AI generati
 ### Effects Library
 
 Browse, preview and apply the bundled Werecreature catalog, migrate Quick Fixes, or add your own effects. [Open the illustrated Effects Library guide](docs/effects-library.md).
+
+### Local generation, guided setup and help
+
+Choose independent writing and image sources, prepare local H3 and Flux model files, and watch draft previews with progress and ETA. Open **Help → Setup wizard** or **Interactive illustrated manual**. [Read the illustrated setup and generation guide](docs/local-generation-and-setup.md).

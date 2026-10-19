@@ -1,0 +1,29 @@
+{
+  "tool": "built-in ImageGen",
+  "assets": [
+    {
+      "path": "ltx_prompt_director/assets/onboarding/welcome.png",
+      "prompt": "Use case: illustration-story. Create a polished wide header illustration for a native desktop filmmaking app onboarding wizard. Scene: a tiny director's chair, a film camera on a tripod, and three storyboard frames joined by a flowing aurora ribbon. Style: elegant thin luminous cyan and pale ivory line art with restrained teal accents on a uniform deep navy background #14232d, spacious, friendly, sophisticated editorial illustration, subtle dot constellations. Wide horizontal composition approximately 3:1 with generous empty margins, all objects centered and fully inside frame. No text, letters, logos, watermark, photographs, or interface mockup. Intended as the welcome header in a coordinated six-image series."
+    },
+    {
+      "path": "ltx_prompt_director/assets/onboarding/language.png",
+      "prompt": "Use case: illustration-story. Asset type: wide onboarding wizard header for a native desktop filmmaking app. Elegant thin luminous cyan and pale ivory line art, restrained teal aurora ribbons and tiny constellations on a uniform deep navy #14232d background. Sophisticated, friendly editorial illustration, all objects centered fully inside frame, generous margins, wide 3:1 composition. No text, letters, logos, watermarks, photographs or interface mockup. A fountain pen traces a flowing story ribbon that joins a small cloud, a neatly drawn key, and a conversation bubble. Show choosing an AI writing companion; quiet and inventive."
+    },
+    {
+      "path": "ltx_prompt_director/assets/onboarding/local.png",
+      "prompt": "Use case: illustration-story. Asset type: wide onboarding wizard header for a native desktop filmmaking app. Elegant thin luminous cyan and pale ivory line art, restrained teal aurora ribbons and tiny constellations on a uniform deep navy #14232d background. Sophisticated, friendly editorial illustration, all objects centered fully inside frame, generous margins, wide 3:1 composition. No text, letters, logos, watermarks, photographs or interface mockup. An elegant desktop workstation and a detailed graphics card microchip, connected by a luminous ribbon to a small film frame; show creative computation on your own computer."
+    },
+    {
+      "path": "ltx_prompt_director/assets/onboarding/images.png",
+      "prompt": "Use case: illustration-story. Asset type: wide onboarding wizard header for a native desktop filmmaking app. Elegant thin luminous cyan and pale ivory line art, restrained teal aurora ribbons and tiny constellations on a uniform deep navy #14232d background. Sophisticated, friendly editorial illustration, all objects centered fully inside frame, generous margins, wide 3:1 composition. No text, letters, logos, watermarks, photographs or interface mockup. A paintbrush transforms a simple landscape outline into three luminous storyboard image cards floating on an aurora ribbon; show making images and effect thumbnails."
+    },
+    {
+      "path": "ltx_prompt_director/assets/onboarding/getting-started.png",
+      "prompt": "Use case: illustration-story. Asset type: wide onboarding wizard header for a native desktop filmmaking app. Elegant thin luminous cyan and pale ivory line art, restrained teal aurora ribbons and tiny constellations on a uniform deep navy #14232d background. Sophisticated, friendly editorial illustration, all objects centered fully inside frame, generous margins, wide 3:1 composition. No text, letters, logos, watermarks, photographs or interface mockup. Three storyboard cards flow along a compact cinematic timeline toward a film camera and a tiny play symbol; show a director's creative journey from scene plan to finished preview."
+    },
+    {
+      "path": "ltx_prompt_director/assets/onboarding/thanks.png",
+      "prompt": "Use case: illustration-story. Asset type: wide onboarding wizard header for a native desktop filmmaking app. Elegant thin luminous cyan and pale ivory line art, restrained teal aurora ribbons and tiny constellations on a uniform deep navy #14232d background. Sophisticated, friendly editorial illustration, all objects centered fully inside frame, generous margins, wide 3:1 composition. No text, letters, logos, watermarks, photographs or interface mockup. A director's chair beside an open film clapperboard, a small glowing heart and a distant star; celebratory completion, gratitude for a creative community, calm optimistic atmosphere."
+    }
+  ]
+}

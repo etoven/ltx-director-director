@@ -29,9 +29,19 @@ app = QApplication([])
 with patch.object(MainWindow, 'restore_startup_workspace'):
     w = MainWindow()
 assert w.effects_panel.tiles.count() == 119
+if (Path(ltx_prompt_director.__file__).parent / 'onboarding.py').is_file():
+    from ltx_prompt_director.onboarding import OnboardingWizard
+    wizard = OnboardingWizard(w)
+    assert wizard.pages.count() == 6 and not wizard.header_source.isNull()
+    wizard.reject()
+    root = Path(ltx_prompt_director.__file__).parent / 'assets'
+    assert len(list((root / 'onboarding').glob('*.png'))) == 6
+    assert (root / 'help/index.html').is_file()
+    assert (root / 'help/manual.js').is_file()
+    assert (root / 'help/images/setup-wizard.png').is_file()
 w._close_saves_queued = True
 w.close()
 print('Installed wheel verified:', ltx_prompt_director.__version__, flush=True)
 sys.stderr.flush(); os._exit(0)
 '''
-    subprocess.run([sys.executable, '-c', code], cwd=folder, env=env, check=True, timeout=120)
+    subprocess.run([sys.executable, '-c', code], cwd=folder, env=env, check=True, timeout=int(os.environ.get("DIRECTOR_WHEEL_TIMEOUT", "120")))

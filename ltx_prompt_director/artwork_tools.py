@@ -22,6 +22,7 @@ from PIL import Image, UnidentifiedImageError
 # Explicit selections never silently switch to a different billed model.
 IMAGE_MODEL_CHOICES = (
     ("Automatic (use configured image API)", "auto"),
+    ("Local · Flux 2 Klein", "local:flux2"),
     ("Gemini · Flash Lite Image (fast)", "gemini:gemini-3.1-flash-lite-image"),
     ("Gemini · Flash Image", "gemini:gemini-3.1-flash-image"),
     ("Gemini · Pro Image", "gemini:gemini-3-pro-image"),
@@ -43,15 +44,16 @@ class ArtworkTool:
     provider: str
     model: str
     api_key: str
+    config: dict | None = None
 
     @property
     def label(self) -> str:
-        return ("Google Gemini / Nano Banana" if self.provider == "gemini"
-                else "OpenAI API / GPT Image")
+        return {"gemini": "Google Gemini / Nano Banana", "openai": "OpenAI API / GPT Image",
+                "local": "Local Flux 2 Klein"}.get(self.provider, self.provider)
 
 
 def available_artwork_tools(
-    keys: dict[str, str], preferred: str = "", selected: str = "auto"
+    keys: dict[str, object], preferred: str = "", selected: str = "auto"
 ) -> list[ArtworkTool]:
     """Resolve configured image-capable API tools, never ChatGPT plan OAuth.
 
@@ -63,6 +65,9 @@ def available_artwork_tools(
         if selected not in IMAGE_MODEL_IDS:
             return []
         provider, model = selected.split(":", 1)
+        if provider == "local":
+            config = keys.get("local")
+            return [ArtworkTool("local", model, "", config)] if isinstance(config, dict) else []
         key = str(keys.get(provider) or "").strip()
         return [ArtworkTool(provider, model, key)] if key else []
 
@@ -289,8 +294,12 @@ def render_artwork(records: list[dict], tool: ArtworkTool) -> dict[str, str]:
             prompt = ("Edit the provided SOURCE IMAGE. Preserve the original "
                       "scene, composition, characters, camera viewpoint and "
                       "lighting except for the following requested changes: " + prompt)
-        data = (_gemini_image(prompt, tool, source_path, references) if tool.provider == "gemini"
-                else _openai_image(prompt, tool, source_path, references))
+        if tool.provider == "local":
+            from .local_generation import generate_image
+            data = generate_image(prompt, tool.config or {}, source_path, references)
+        else:
+            data = (_gemini_image(prompt, tool, source_path, references) if tool.provider == "gemini"
+                    else _openai_image(prompt, tool, source_path, references))
         path = root / (uuid4().hex + ".png")
         path.write_bytes(data)
         output[entry["id"]] = str(path)

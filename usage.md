@@ -6,7 +6,7 @@ Start with an image, a video clip or a written beat. Arrange the sequence, descr
 
 ![A complete MiniMax plan in the Aurora workspace](docs/images/ltx-director-director-overview.png)
 
-*The examples throughout this guide use the current 1.13.0a50 native interface with a locally authored Aurora demonstration project.*
+*The examples use locally authored demonstration projects. Open Help for the searchable offline manual and guided setup.*
 
 ## Refine an existing MiniMax prompt
 
@@ -20,11 +20,11 @@ Add up to four mixed references through **Reference media**. Video samples offer
 
 ## Your first sequence
 
-1. Open **Settings**, choose Gemini or OpenAI and enter that provider’s API key. You can edit and organize projects before configuring AI.
+1. Open **Help → Setup wizard** to choose Gemini, ChatGPT, OpenAI API or a local writing model. You can edit and organize projects before configuring AI.
 2. Choose **LTX Video**, **MiniMax Standard / Keyframes** or **MiniMax Full Reference** from **Project type**.
 3. Use **Add media** or drop supported images, MP4 or WebM clips onto the timeline. Use **Add text** for a beat described in words.
 4. Arrange the segments and set their durations. Expand **Director’s Intent**, describe the sequence, and choose a total length or Auto.
-5. Select **Magic Build** to develop segment prompts. In MiniMax, edit the unified draft below the shared segment editor. Use **Regenerate** in the segment-change notice when you want to rebuild an existing production draft.
+5. Select **Magic Build** to develop segment prompts. In MiniMax, edit the unified draft below the shared segment editor. Use the lower editor’s **Generate** control when you want to rebuild the combined production draft from the full timeline.
 6. Use **Save to Library** to name and retain the project. Copy the MiniMax brief or use **Export** for LTX timeline JSON.
 
 AI generation is an explicit action. Switching workspaces and adding media let you prepare the plan before submitting a request.
@@ -53,8 +53,8 @@ AI generation is an explicit action. Switching workspaces and adding media let y
 | Reduce Music | Favor scene-specific ambience | Enable Reduce Music for ambient-sound direction |
 | Magic Build | Develop the entire LTX plan | Generate segment prompts and global direction from the ordered timeline |
 | LTX global prompt | Establish shared continuity | Select Global from the prompt-scope control |
-| Refine Prompt | Improve wording and pacing | Refine a segment or Global direction; MiniMax then generates the unified prompt from the updated sequence |
-| Refine Timing | Adjust a beat’s duration | Select the segment and choose Refine Timing; MiniMax then generates the unified prompt |
+| Refine Prompt | Improve wording and pacing | Segment changes only the selected beat; Global acts on the sequence and rebuilds the combined prompt |
+| Refine Timing | Adjust a beat’s duration | Select the segment and choose Refine Timing; inspect its updated duration |
 | Inline notes | Keep edit requests near their subject | Type `/`, choose a note and press Tab |
 | Spelling suggestions | Polish prose as you work | Right-click an underlined word when a system dictionary is available |
 | Shared segment editor | Edit and retime individual beats | Select a card in LTX or MiniMax; the unified draft stays independent |
@@ -127,7 +127,7 @@ Recent exports show small image and video previews. Use the broom button to clea
 
 ![Catalog video viewer with playback and frame tools](docs/images/catalog-video-viewer.png)
 
-Global timing instructions such as `/refine-global Resize the segments proportionally to 15 seconds` work through **Global → Refine Prompt** in LTX and MiniMax. Segment refinement can resize the selected card. In MiniMax, both **Refine Prompt** and **Refine Timing** generate the unified production prompt after applying the refinement, including Global timing requests. Ordinary manual segment edits keep the existing unified draft until generation is requested. The compact MiniMax conditioning strip shows frame times, source trims and setup fixes; unified text edits never retime the timeline.
+Global timing instructions such as `/refine-global Resize the segments proportionally to 15 seconds` work through **Global → Refine Prompt** in LTX and MiniMax. Segment refinement can resize the selected card. Segment refinement stays on that beat. Global refinement acts on the full sequence and rebuilds the unified production prompt. Ordinary manual segment edits keep the existing unified draft until generation is requested. The compact MiniMax conditioning strip shows frame times, source trims and setup fixes; unified text edits never retime the timeline.
 
 ## Workspace sequence limits
 
@@ -148,3 +148,7 @@ Open **Settings → Storage and backups** to see cache disk usage and remaining 
 **Reset settings** asks for confirmation before preparing a reset for the next launch. It restores application preferences and workspace definitions to defaults, removes stored API keys, and retains projects, collections and managed media.
 
 ![Cache disk usage and full setup backup controls](docs/images/storage-settings.png)
+
+## Setup, local generation and interactive help
+
+Use **Help → Setup wizard** to choose writing and image sources, configure local H3 and Flux models, and learn the core workflow. **Help → Interactive illustrated manual** opens the complete offline guide with search, chapter navigation and a guided tour. [Read the illustrated local generation guide](docs/local-generation-and-setup.md).

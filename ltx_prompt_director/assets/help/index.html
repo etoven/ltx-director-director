@@ -1,0 +1,1129 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Director · Interactive illustrated manual</title><link rel="stylesheet" href="manual.css"></head><body>
+<aside id="sidebar"><a class="brand" href="#start">DIRECTOR<span>Interactive illustrated manual</span></a><label class="search-label" for="search">Find a feature</label><input id="search" type="search" placeholder="Search the guide…"><nav aria-label="Chapters"><a href="#start">Start here</a><a href="#setup">Setup and local generation</a><a href="#timeline">Media and timeline</a><a href="#prompts">Prompt workflows</a><a href="#refinement">Refinement and audio</a><a href="#references">MiniMax references</a><a href="#effects">Effects Library</a><a href="#projects">Projects and properties</a><a href="#review">Video and project files</a><a href="#shots">Finished shot sequences</a><a href="#workspaces">Workspaces and exports</a><a href="#comfy">ComfyUI handoff</a><a href="#install">Installation</a></nav><p id="search-status" aria-live="polite"></p><button id="tour-start">Take the quick tour</button><p class="small">Available offline · Aurora 1.13.0a101<br>External provider and source links need internet.</p></aside>
+<main><header class="hero"><div><span class="eyebrow">YOUR CREATIVE WORKSPACE</span><h1>From first idea<br>to a directed sequence.</h1><p>A practical guide to planning, refinement, effects, local generation and production handoff.</p></div><img src="../onboarding/welcome.png" alt="Line-art director’s chair, camera and storyboard frames"></header><aside class="scope-note"><strong>Current editor scope:</strong> Segment Generate/Refine changes the selected beat only. Global acts on the full ordered sequence and rebuilds the combined prompt. The unified editor has independent Generate/Refine controls. Synchronization preserves the source side; timeline-to-combined synchronization uses the whole ordered timeline.</aside>
+<div id="sandbox"><h2>Try the scope controls</h2><p>This guide-only example shows which authored beats a refinement targets.</p><div class="beats"><button class="beat selected" data-beat="0">Opening</button><button class="beat" data-beat="1">Action</button><button class="beat" data-beat="2">Hold</button></div><label>Refine scope <select id="scope"><option value="segment">Selected segment</option><option value="global">Global sequence</option><option value="unified">Unified prompt</option></select></label><p id="scope-result" aria-live="polite"></p></div>
+<section id="start" class="chapter" data-title="Start here"><span class="eyebrow">DIRECTOR GUIDE</span><h1 id="your-complete-guide-to-director">Your complete guide to Director</h1>
+<h2 id="from-visual-idea-to-production-ready-plan">From visual idea to production-ready plan</h2>
+<p>Start with an image, a video clip or a written beat. Arrange the sequence, describe the motion you want, and turn the plan into a prompt you can shape. Director keeps the timing, media and words together as your idea develops.</p>
+<p><img alt="A complete MiniMax plan in the Aurora workspace" loading="lazy" decoding="async" width="1560" height="1060" src="images/ltx-director-director-overview.png" /></p>
+<p><em>The examples use locally authored demonstration projects. Open Help for the searchable offline manual and guided setup.</em></p>
+<h2 id="refine-an-existing-minimax-prompt">Refine an existing MiniMax prompt</h2>
+<p>Choose <strong>MiniMax · Prompt Refinement · Annotations Only</strong> for a prompt-only workspace. Paste your text, use <code>/</code> to insert editable refinement and constraint notes, and choose <strong>Refine Prompt</strong>. The model receives only that text and its annotations. You can save the draft as a project and copy the result without creating timeline segments or importing media.</p>
+<p><img alt="A full-size annotated MiniMax prompt editor" loading="lazy" decoding="async" width="1330" height="840" src="images/minimax-prompt-refinement.png" /></p>
+<h2 id="take-your-minimax-plan-into-comfyui">Take your MiniMax plan into ComfyUI</h2>
+<p>Add up to four mixed references through <strong>Reference media</strong>. Video samples offer <strong>Use ref audio only</strong>, and standalone audio files are supported. Choose the branded <strong>Export ComfyUI</strong> action to create the graph from the supplied base workflow and copy its full-resolution media to the configured ComfyUI input folder. Opening media and later conditioning frames are connected using the timeline’s cumulative checkpoint values.</p>
+<h2 id="your-first-sequence">Your first sequence</h2>
+<ol>
+<li>Open <strong>Help → Setup wizard</strong> to choose Gemini, ChatGPT, OpenAI API or a local writing model. You can edit and organize projects before configuring AI.</li>
+<li>Choose <strong>LTX Video</strong>, <strong>MiniMax Standard / Keyframes</strong> or <strong>MiniMax Full Reference</strong> from <strong>Project type</strong>.</li>
+<li>Use <strong>Add media</strong> or drop supported images, MP4 or WebM clips onto the timeline. Use <strong>Add text</strong> for a beat described in words.</li>
+<li>Arrange the segments and set their durations. Expand <strong>Director’s Intent</strong>, describe the sequence, and choose a total length or Auto.</li>
+<li>Select <strong>Magic Build</strong> to develop segment prompts. In MiniMax, edit the unified draft below the shared segment editor. Use the lower editor’s <strong>Generate</strong> control when you want to rebuild the combined production draft from the full timeline.</li>
+<li>Use <strong>Save to Library</strong> to name and retain the project. Copy the MiniMax brief or use <strong>Export</strong> for LTX timeline JSON.</li>
+</ol>
+<p>AI generation is an explicit action. Switching workspaces and adding media let you prepare the plan before submitting a request.</p>
+<h2 id="every-creative-tool-at-a-glance">Every creative tool, at a glance</h2>
+<table>
+<thead>
+<tr>
+<th>Tool</th>
+<th>What it helps you do</th>
+<th>How to use it</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Image segments</td>
+<td>Establish visual checkpoints</td>
+<td>Add or drop PNG, JPEG, WebP or GIF media</td>
+</tr>
+<tr>
+<td>Video segments</td>
+<td>Bring source motion into the plan</td>
+<td>Add or drop MP4 or WebM clips</td>
+</tr>
+<tr>
+<td>Text segments</td>
+<td>Plan action before a reference exists</td>
+<td>Click Add text, then write the beat in the editor</td>
+</tr>
+<tr>
+<td>Drag reordering</td>
+<td>Change the sequence’s progression</td>
+<td>Drag a timeline card to its new position</td>
+</tr>
+<tr>
+<td>Segment duration</td>
+<td>Give each action the time it needs</td>
+<td>Drag the resize edge or edit the Duration control</td>
+</tr>
+<tr>
+<td>Frame roles</td>
+<td>Identify where an image anchors a beat</td>
+<td>Select Start frame or End frame where the workspace supports it</td>
+</tr>
+<tr>
+<td>Timeline scale</td>
+<td>Inspect details or the whole sequence</td>
+<td>Use Scale or Auto fit; the far-left scale setting fits the sequence</td>
+</tr>
+<tr>
+<td>Preview height</td>
+<td>Make references easier to see</td>
+<td>Drag the dotted grip below the timeline</td>
+</tr>
+<tr>
+<td>Start-time and resolution labels</td>
+<td>Check placement and source size</td>
+<td>Read the labels on image and video cards</td>
+</tr>
+<tr>
+<td>Media replacement</td>
+<td>Update a reference while retaining its beat</td>
+<td>Use Replace media or Ctrl+drop onto a card</td>
+</tr>
+<tr>
+<td>Image clipboard tools</td>
+<td>Reuse or swap original images</td>
+<td>Right-click an image: Copy image or Paste image to replace</td>
+</tr>
+<tr>
+<td>Text-to-image conversion</td>
+<td>Turn a written beat into a visual one</td>
+<td>Right-click a text card and choose Convert to image segment</td>
+</tr>
+<tr>
+<td>Director’s Intent</td>
+<td>Set the creative throughline</td>
+<td>Describe action, camera, continuity and mood in the shared panel</td>
+</tr>
+<tr>
+<td>Total length</td>
+<td>Guide sequence pacing</td>
+<td>Enter a target duration or choose Auto</td>
+</tr>
+<tr>
+<td>SFX</td>
+<td>Request environmental and action sounds</td>
+<td>Enable SFX before generation or refinement</td>
+</tr>
+<tr>
+<td>Spoken Dialog</td>
+<td>Guide a speaking performance</td>
+<td>Enable Spoken Dialog and set language and accent</td>
+</tr>
+<tr>
+<td>HDR</td>
+<td>Add quality direction</td>
+<td>Enable HDR; it adds prompt guidance, rather than changing the source media</td>
+</tr>
+<tr>
+<td>Reduce Music</td>
+<td>Favor scene-specific ambience</td>
+<td>Enable Reduce Music for ambient-sound direction</td>
+</tr>
+<tr>
+<td>Magic Build</td>
+<td>Develop the entire LTX plan</td>
+<td>Generate segment prompts and global direction from the ordered timeline</td>
+</tr>
+<tr>
+<td>LTX global prompt</td>
+<td>Establish shared continuity</td>
+<td>Select Global from the prompt-scope control</td>
+</tr>
+<tr>
+<td>Refine Prompt</td>
+<td>Improve wording and pacing</td>
+<td>Segment changes only the selected beat; Global acts on the sequence and rebuilds the combined prompt</td>
+</tr>
+<tr>
+<td>Refine Timing</td>
+<td>Adjust a beat’s duration</td>
+<td>Select the segment and choose Refine Timing; inspect its updated duration</td>
+</tr>
+<tr>
+<td>Inline notes</td>
+<td>Keep edit requests near their subject</td>
+<td>Type <code>/</code>, choose a note and press Tab</td>
+</tr>
+<tr>
+<td>Spelling suggestions</td>
+<td>Polish prose as you work</td>
+<td>Right-click an underlined word when a system dictionary is available</td>
+</tr>
+<tr>
+<td>Shared segment editor</td>
+<td>Edit and retime individual beats</td>
+<td>Select a card in LTX or MiniMax; the unified draft stays independent</td>
+</tr>
+<tr>
+<td>Timed prompt paste</td>
+<td>Reshape the timeline from a written plan</td>
+<td>Paste contiguous 24 fps SMPTE ranges into the unified editor</td>
+</tr>
+<tr>
+<td>Two reference slots</td>
+<td>Guide untimed visual attributes</td>
+<td>Drop, browse or paste images; choose roles and enter notes</td>
+</tr>
+<tr>
+<td>Independent drafts</td>
+<td>Explore different prompting approaches</td>
+<td>Switch between LTX and MiniMax; each workspace retains its own prompt draft</td>
+</tr>
+<tr>
+<td>Prompt copy</td>
+<td>Send the visible text into your workflow</td>
+<td>Use the editor’s Copy button</td>
+</tr>
+<tr>
+<td>Project library</td>
+<td>Keep an accessible portfolio of plans</td>
+<td>Save to Library, then open Projects</td>
+</tr>
+<tr>
+<td>Collections</td>
+<td>Group related creative work</td>
+<td>Set a collection in project details or Properties</td>
+</tr>
+<tr>
+<td>Search and sorting</td>
+<td>Find or arrange saved projects</td>
+<td>Search names/descriptions; sort A–Z, Z–A or Custom</td>
+</tr>
+<tr>
+<td>Status, tags and archive</td>
+<td>Track progress visually</td>
+<td>Set one status, add multiple tags and archive finished work</td>
+</tr>
+<tr>
+<td>Tasks and dated notes</td>
+<td>Keep next steps with the project</td>
+<td>Add, edit, complete or delete notes in Properties</td>
+</tr>
+<tr>
+<td>Custom project covers</td>
+<td>Recognize work at a glance</td>
+<td>Choose a segment thumbnail or upload a cover in project details</td>
+</tr>
+<tr>
+<td>Multiple open projects</td>
+<td>Move between active ideas</td>
+<td>Switch saved projects while retaining in-memory edits</td>
+</tr>
+<tr>
+<td>Portable project archive</td>
+<td>Carry the editable plan and media</td>
+<td>Choose Export Project for a .LTXD file</td>
+</tr>
+<tr>
+<td>Project video preview</td>
+<td>Review the rendered result</td>
+<td>Open Preview and add or drop a rendered video</td>
+</tr>
+<tr>
+<td>Playback and fullscreen</td>
+<td>Inspect pacing and detail</td>
+<td>Play/pause, click the seek bar or choose Fullscreen</td>
+</tr>
+<tr>
+<td>Frame capture</td>
+<td>Reuse a moment from the render</td>
+<td>Right-click the video to export or copy the current frame</td>
+</tr>
+<tr>
+<td>Project Files</td>
+<td>Retain the rendering setup</td>
+<td>Add or drop workflow JSON, then export or remove attachments as needed</td>
+</tr>
+<tr>
+<td>LTX timeline JSON</td>
+<td>Hand off the planned sequence</td>
+<td>Choose Export in the LTX workspace</td>
+</tr>
+<tr>
+<td>Download folders</td>
+<td>Keep each project’s output together</td>
+<td>Set a project folder in Properties or an application default in Settings</td>
+</tr>
+<tr>
+<td>Recent exports</td>
+<td>Find and move finished files</td>
+<td>Click the download button, open a file or drag it to another app</td>
+</tr>
+<tr>
+<td>Custom workspaces</td>
+<td>Fit the editor to your process</td>
+<td>Open Settings → Workspaces and edit or create a definition</td>
+</tr>
+<tr>
+<td>Generic engine</td>
+<td>Use your own prompting instructions</td>
+<td>Choose Generic and a unified or segmented layout</td>
+</tr>
+<tr>
+<td>Workspace import/export</td>
+<td>Reuse a preferred setup</td>
+<td>Import or export a workspace definition</td>
+</tr>
+<tr>
+<td>Dockable panels</td>
+<td>Arrange your working space</td>
+<td>Move, resize, hide or float supported docks</td>
+</tr>
+<tr>
+<td>Text scaling</td>
+<td>Make the interface comfortable</td>
+<td>Set toolbar text scale from 75% to 200%</td>
+</tr>
+<tr>
+<td>Request controls</td>
+<td>Manage provider delays</td>
+<td>Configure timeout, retries and cooldown in Settings</td>
+</tr>
+</tbody>
+</table>
+<h2 id="learn-each-workflow">Learn each workflow</h2>
+<p>Follow the illustrated guides for practical examples:</p>
+<ul>
+<li><strong><a href="#timeline">Timeline and media</a>:</strong> build, rearrange, resize and update every beat.</li>
+<li><strong><a href="#prompts">Prompt workflows</a>:</strong> choose MiniMax, LTX or a custom editor and develop the sequence.</li>
+<li><strong><a href="#refinement">Refinement and audio direction</a>:</strong> edit with intent, preserve key details and guide sound or dialogue.</li>
+<li><strong><a href="#references">MiniMax references</a>:</strong> assign visual roles and combine text, frames and source video.</li>
+<li><strong><a href="#projects">Projects and organization</a>:</strong> manage your gallery, collections, labels, notes and portable projects.</li>
+<li><strong><a href="#review">Video review and project files</a>:</strong> inspect renders, capture frames and retain workflows.</li>
+<li><strong><a href="#workspaces">Exports and custom workspaces</a>:</strong> hand off your plan and personalize the editor.</li>
+<li><strong><a href="#install">Installation and setup</a>:</strong> install the current build, configure providers and create a desktop launcher.</li>
+</ul>
+<h2 id="a-working-rhythm-you-can-make-your-own">A working rhythm you can make your own</h2>
+<p>Build the visual order first, then describe what changes between the checkpoints. Generate a draft, read it alongside the timeline and refine the moments that need attention. Bring the rendered video back to the project, capture a useful frame and use it to plan the next pass. Save the project before finishing the session; use a portable export when you want to carry the work elsewhere.</p>
+<h2 id="global-media-catalog">Global media catalog</h2>
+<p><img alt="Global media catalog" loading="lazy" decoding="async" width="820" height="580" src="images/media-catalog.png" /></p>
+<p>Open <strong>Media Catalog</strong> from the top toolbar. Dock it beside the timeline or float it on another display. Your image and video collection is available across every project.</p>
+<p>Import files or drop files and folders from your file manager. Browse large preview tiles, select several with Ctrl/Shift, and search names, tags, or descriptions. Right-click a selection to edit its tags and short description, move it into a catalog folder, or add it to the timeline. Create folders with <strong>New folder</strong>; select a folder first to create a subfolder. Drag tiles onto a folder to organize them, onto the timeline to insert them, or into a file manager using native file URLs.</p>
+<p>Imports copy full-resolution images and videos into Prompt Director’s working folder. Catalog tiles and timeline drags use these managed copies, so moving or deleting the original source does not break your imported media. Same-named files remain separate. Removing a catalog entry or folder keeps the media on disk.</p>
+<p>The app ships with <strong>LTX Video</strong>, <strong>MiniMax Standard / Keyframes</strong> and <strong>MiniMax Full Reference</strong>. The guide-based MiniMax templates replace the old MiniMax default. Two additional <strong>Official Skill</strong> workflows provide Standard / Keyframes and Full Reference versions adapted from the supplied prompt-writing skill files. LTX generation and refinement return video prompts and timing without requiring a separate still-image prompt. Drag the splitter below <strong>Director’s Intent</strong> to resize it or collapse it upward. Drag it downward to reopen. Its height and collapsed state persist across workspaces and restarts. The segment and unified prompt divider also resizes both editors and remembers their proportions. Controls wrap within the available width, and panels shrink within the window without an outer editor scrollbar.</p>
+<p>Media tags appear as pills on each thumbnail, matching the project cards. Press <strong>F2</strong> to rename a selected tile directly below its image; Enter saves and Escape cancels. Press <strong>Delete</strong> to remove selected catalog entries after confirmation. The managed media files remain available on disk.</p>
+<p>The reference-image panel remembers whether you opened or closed it across workspaces and restarts. Reopen it with <strong>Reference images</strong>. The project library retains its chosen dock size when changing workspaces or dock tabs. Media Catalog and video preview use the same blue border as the timeline while accepting a drop.</p>
+<p>Double-click a catalog tile, or choose <strong>View media</strong> from its context menu, to open the lightbox. Browse the current folder and search results with <strong>Previous</strong>, <strong>Next</strong>, or the arrow keys; press <strong>Esc</strong> to close. Images fit the viewer while retaining their original resolution for clipboard copy and export. Right-click an image for those actions. Videos use the project preview controls: play/pause, click-to-seek, fullscreen, video export, and right-click frame export or copy. Closing the viewer stops playback.</p>
+<p>Reference images have <strong>Export Image</strong> and <strong>Clear</strong> in their context menu. Drag an image out to the filesystem or timeline, and drop a still image into a slot to replace it. Reference images, project tiles, and catalog tiles highlight on hover.</p>
+<p>Recent exports show small image and video previews. Use the broom button to clear the history while keeping your exported files. The panel stays open when you switch to another application, making file drags easier; clicking elsewhere in Prompt Director closes it.</p>
+<p><img alt="Full-resolution image lightbox" loading="lazy" decoding="async" width="1000" height="720" src="images/catalog-image-viewer.png" /></p>
+<p><img alt="Catalog video viewer with playback and frame tools" loading="lazy" decoding="async" width="1000" height="720" src="images/catalog-video-viewer.png" /></p>
+<p>Global timing instructions such as <code>/refine-global Resize the segments proportionally to 15 seconds</code> work through <strong>Global → Refine Prompt</strong> in LTX and MiniMax. Segment refinement can resize the selected card. Segment refinement stays on that beat. Global refinement acts on the full sequence and rebuilds the unified production prompt. Ordinary manual segment edits keep the existing unified draft until generation is requested. The compact MiniMax conditioning strip shows frame times, source trims and setup fixes; unified text edits never retime the timeline.</p>
+<h2 id="workspace-sequence-limits">Workspace sequence limits</h2>
+<p>In <strong>Settings → Workspaces</strong>, set <strong>Maximum sequence length</strong> or select <strong>No limit</strong>. The limit covers the whole timeline: LTX defaults to 20 seconds and MiniMax to 15 seconds. Dragging or editing a duration stops at the remaining sequence budget. After refinement or Magic Build, Director shortens the final segment first; if that cannot fit the plan, all durations scale proportionally. Media and segment order remain intact. Imported plans and workspace changes use the same budget.</p>
+<p>The ComfyUI export puts the production prompt in a tall group along the left edge, with the remaining groups packed beside it.</p>
+<h2 id="completed-shot-sequences">Completed shot sequences</h2>
+<p>Each collection includes a <strong>Shot Sequence</strong> tile. Drop finished movies onto its thumbnail NLA timeline at the blue insertion marker and reorder them. Select a shot to set its blend, overlap and overlap side using the existing top controls. New shots copy a neighbor’s settings; each shot then keeps its own settings independently. Drag either edge of a video or audio strip to trim both together. <strong>Split at playhead</strong> creates two adjoining pieces; their source media stays intact. Its context menu also offers shot status, export and Delete. Segment export uses the trimmed interval and copies the original video/audio codecs; stream-copy cuts can follow source keyframes. Use <strong>Left/Right</strong> on the timeline or player to step back/forward one frame. The assembled preview updates automatically in background workers, with source audio and a scrubhead linked to the player. Green regions are cached; red regions are rebuilding. Workfiles persist in the per-user cache so unchanged clips and joins can be reused. The default join is a 1-second source-side perceptual crossfade. <strong>Bake WebM</strong> writes the full-resolution sequence with audio and configurable CRF (default 15). <a href="#shots">Read the illustrated guide</a>.</p>
+<h2 id="storage-backups-and-reset">Storage, backups and reset</h2>
+<p>Open <strong>Settings → Storage and backups</strong> to see cache disk usage and remaining free disk space. <strong>Clear unused cache</strong> removes disposable workfiles while retaining media used by open projects. Preview workfiles rebuild when needed.</p>
+<p><strong>Export complete setup</strong> saves open projects and ZIPs the full configuration and project-data folders, including preferences, stored API keys, custom workspaces, collections, projects, catalog entries and managed media. Cache files are excluded. <strong>Import complete setup</strong> validates the ZIP and prepares it for the next launch. Close and reopen Prompt Director to apply it. Managed paths are updated for the destination computer; files outside the configuration and project-data folders remain external.</p>
+<p><strong>Reset settings</strong> asks for confirmation before preparing a reset for the next launch. It restores application preferences and workspace definitions to defaults, removes stored API keys, and retains projects, collections and managed media.</p>
+<p><img alt="Cache disk usage and full setup backup controls" loading="lazy" decoding="async" width="920" height="639" src="images/storage-settings.png" /></p>
+<h2 id="setup-local-generation-and-interactive-help">Setup, local generation and interactive help</h2>
+<p>Use <strong>Help → Setup wizard</strong> to choose writing and image sources, configure local H3 and Flux models, and learn the core workflow. <strong>Help → Interactive illustrated manual</strong> opens the complete offline guide with search, chapter navigation and a guided tour. <a href="#setup">Read the illustrated local generation guide</a>.</p></section><section id="setup" class="chapter" data-title="Setup and local generation"><span class="eyebrow">DIRECTOR GUIDE</span><h1 id="make-images-and-video-locally">Make images and video locally</h1>
+<p><img alt="The Director setup guide" loading="lazy" decoding="async" width="1080" height="800" src="images/setup-wizard.png" /></p>
+<p>Open <strong>Help → Setup wizard</strong> for a guided start, or <strong>Settings → Local models</strong> to change an existing setup. A new installation opens the guide automatically. Writing, images and video have separate sources: you can use Gemini to refine prompts while Flux makes artwork and H3 renders video on your computer.</p>
+<h2 id="choose-a-writing-companion">Choose a writing companion</h2>
+<p><strong>Gemini</strong> is the recommended starting point when its free text tier suits your account and region. Open <a href="https://aistudio.google.com/api-keys">Google AI Studio</a>, sign in, choose or create a project and create an API key. Paste it into the wizard, choose an available text model and review <a href="https://ai.google.dev/gemini-api/docs/pricing">current model limits and pricing</a>.</p>
+<p><strong>ChatGPT account</strong> uses the existing browser sign-in controls. Continue with ChatGPT, grant eligible plan usage and select an available model. An account must be eligible for this integration, and its plan limits apply. See the <a href="https://developers.openai.com/siwc/quickstart">official sign-in guide</a>.</p>
+<p><strong>OpenAI API</strong> uses a key from your <a href="https://platform.openai.com/api-keys">OpenAI project</a>. Configure API billing and choose a model your account can access. API usage is separate from ChatGPT subscription usage. It is a useful option for detailed reasoning and structured edits; compare actual results on your own prompts.</p>
+<p><strong>Local instruction model</strong> uses a complete Transformers model folder with configuration, tokenizer and safetensors weights. Choose a folder you already have or download a Qwen instruction model. The file scan suggests a model size from detected VRAM; you can choose a different size or repository. Local writing has no API token charges, and its speed, memory requirements, context window and license depend on the selected model. The local writer uses authored prompt and timeline text; it does not analyze video or pretend to see images. Image-model Qwen encoders are kept separate from the writing-model chooser.</p>
+<p>Use <strong>Remember API keys on this device</strong> only when you want keys stored in the app settings. With this option off, API keys last for the current session. Do not paste keys into prompts or projects. ChatGPT account credentials use the existing account connection controls.</p>
+<h2 id="choose-an-image-source">Choose an image source</h2>
+<p>The wizard defaults to <strong>Gemini Flash Lite Image</strong>. This is an image-generation model, separate from Gemini's similarly named text model. Gemini image API output requires a paid tier; a free text allowance does not supply free image output. Choose another image model or <strong>Local · Flux 2 Klein</strong> if that fits your workflow.</p>
+<p>The default image source is used for segment artwork, image edits and <strong>Add your own effect → Generate thumbnail</strong>. The supplied Effects Library keeps its original catalog illustrations. Selecting a specific source never silently switches to a different billed provider.</p>
+<h2 id="prepare-local-models">Prepare local models</h2>
+<ol>
+<li>Choose <strong>Prepare local engine</strong>. Director creates a private inference environment under its application data folder. The first installation downloads several GB of Python libraries and CUDA PyTorch. It does not alter your running ComfyUI instance or require a ComfyUI server.</li>
+<li>Use <strong>Find my model files</strong> to scan your chosen model folder. The initial folder suggestion is <code>~/Programs/ComfyUI/models</code>, but any folder is allowed. Scanning reads filenames in a background worker and leaves model files in place.</li>
+<li>For images, choose <strong>Klein Base 4B</strong> or <strong>9B</strong>. The scan suggests 4B on smaller GPUs and 9B when at least 20 GB VRAM is detected. This is a starting recommendation, rather than a guarantee: system RAM, canvas size and other running apps matter too. Pair 4B with its Qwen 4B encoder, or 9B with its Qwen 8B encoder, and select the Flux 2 VAE.</li>
+<li>For video, select a <strong>pruned H3</strong> checkpoint, a supported H3 text encoder, video VAE and audio VAE. Choose Ref2VA for reference media, or FL2VA for text and first/last frames. The native backend supports the INT8 ConvRot encoder. If an existing NVFP4/AWQ encoder is discovered, setup explains that it needs an INT8 replacement for this engine. No Lightning or Turbo LoRA is loaded.</li>
+<li>Select <strong>Image models</strong> or <strong>Video models</strong>, then <strong>Get configuration files</strong>. This downloads tokenizer, processor and model configuration files needed alongside your weights. It does not download the model weights.</li>
+<li>If weights are missing, choose <strong>Download model set</strong>. Review the approximate size before downloading. Matching files already selected in the dialog are reused. Gated repositories may require accepting the model's terms on Hugging Face and entering a token in the dialog; that token is kept only for that dialog.</li>
+<li>Save Settings or finish the wizard. Its final page lists incomplete setup so you can return later. You can also choose <strong>Set up later</strong> and keep using the editor.</li>
+</ol>
+<p>FP8 image checkpoints are expanded into a derived BF16 compatibility cache one tensor at a time. Sequential offload limits GPU residency during image inference. Original model files are untouched. This cache needs extra disk space and can make the first run longer. The local video engine uses disk offload to limit host memory pressure. Other apps keep their processes and models; free GPU memory before requesting a local render. Quantized native H3 uses an NVIDIA GPU; CPU mode is available for images and writing.</p>
+<h2 id="generate-a-video">Generate a video</h2>
+<p><img alt="Local controls in Video Preview" loading="lazy" decoding="async" width="740" height="500" src="images/local-video-controls.png" /></p>
+<p>Open <strong>Video Preview → Generate locally</strong>. Review the prompt, duration, canvas and sampling steps. Check the timeline references you want to attach; video references are silent. H3 aligns duration to its frame grid. Small canvases reduce memory and render time.</p>
+<p>During rendering, the player shows draft samples decoded from the current video latents. The pill at the bottom right shows sampling percentage and an estimated remaining time once measured steps are available. Loading and preparation show a stage message until an estimate is meaningful. Draft samples can be noisy and show only the opening chunk; the finished video contains the full generated duration and audio.</p>
+<p><strong>Cancel generation</strong> stops that Director worker. A completed video appears in the preview and is attached to the current saved project. For an unsaved project, the generated file remains in the local generation folder and can be exported through the player. Switching projects while a job runs prevents its result from replacing the new project's preview; its output remains available in the generation folder.</p>
+<h2 id="generate-artwork-and-effect-thumbnails">Generate artwork and effect thumbnails</h2>
+<p>Choose <strong>Local · Flux 2 Klein</strong> as the default image source. Use a segment's <strong>Generate Artwork</strong> or <strong>Render requested artwork</strong> action. The <strong>Image generation</strong> panel shows draft images, sampling percentage and estimated time. Final artwork follows the existing segment review workflow; source media is retained.</p>
+<p>In <strong>Effects Library → Add your own</strong>, write the effect instruction and choose <strong>Generate thumbnail</strong>. The dialog uses the same image source and shows local draft previews and progress. Save to keep the custom effect. Cancel leaves the effect entry unchanged.</p>
+<h2 id="get-help-as-you-work">Get help as you work</h2>
+<p><strong>Help → Interactive illustrated manual</strong> opens the complete offline guide in your browser. Search the manual, jump between chapters or take the short guided tour. The wizard's Getting started page has three core slides, followed by a thank-you page and a placeholder for the future donation link.</p></section><section id="timeline" class="chapter" data-title="Media and timeline"><span class="eyebrow">DIRECTOR GUIDE</span><h1 id="see-every-beat-shape-every-transition">See every beat. Shape every transition.</h1>
+<h2 id="build-the-sequence-in-pictures-and-words">Build the sequence in pictures and words</h2>
+<p>Director’s timeline gives your prompt a visual structure. Each card has a duration, a place in the story and a prompt you can edit. Mix reference images, source clips and text to describe the sequence at the level of detail you have today.</p>
+<p><img alt="A visual opening, a written walking beat and a finishing image on the timeline" loading="lazy" decoding="async" width="1540" height="268" src="images/timeline-and-magic-build.png" /></p>
+<h2 id="bring-in-the-right-material">Bring in the right material</h2>
+<table>
+<thead>
+<tr>
+<th>Segment</th>
+<th>Use it for</th>
+<th>Add it with</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Image</td>
+<td>Identity, composition, an opening state or a target pose</td>
+<td>Add media or timeline drag-and-drop; PNG, JPEG, WebP and GIF</td>
+</tr>
+<tr>
+<td>Video</td>
+<td>Source footage or movement context</td>
+<td>Add media or timeline drag-and-drop; MP4 and WebM</td>
+</tr>
+<tr>
+<td>Text</td>
+<td>An action, pause or transition without its own reference image</td>
+<td>Add text</td>
+</tr>
+</tbody>
+</table>
+<p>Drop media near the position where you want it inserted. The timeline shows when it is accepting a drop. Project archives and Director JSON dropped into supported project or timeline areas open or import their workspaces.</p>
+<p>Videos use a preview frame from the clip’s final second for the timeline and AI image context. The complete source clip remains available for project storage and export. A GIF is handled as image media; use MP4 or WebM for a video segment.</p>
+<h2 id="make-timing-tangible">Make timing tangible</h2>
+<p>Drag a card to reorder the sequence. Select it and enter a precise value in <strong>Duration</strong> to edit its length. The sequence summary shows the total; each card shows its starting time. Image and video cards also show source resolution.</p>
+<p>Drag the dotted divider <strong>between two cards</strong> to transfer time from one to the
+other: moving it right lengthens the left segment and shortens the right, and
+moving it left does the reverse. Their combined duration and every later start
+time stay fixed. The drag snaps to frames and stops at one frame per segment or
+the available video source limits. The final card's right grip changes the
+overall length; the Duration field still edits a single card.</p>
+<p>Recognized timecodes in the <strong>unified prompt</strong> follow manual timeline edits
+immediately, using local pattern matching without an AI request. Director
+counts through the segments in order and highlights <code>MM:SS.xx</code>, <code>HH:MM:SS</code>
+and 24 fps SMPTE codes. A range uses both segment boundaries; a lone code uses
+the segment's <strong>Start</strong> or <strong>End</strong> frame mode. Reordering cards, dragging a
+divider, editing Duration or changing that frame mode updates the codes while
+preserving your prose. Resizing keeps the text cursor and selection in place.</p>
+<p>Click a card to emphasize its matching timecode and scroll the unified prompt
+to it. The cursor lands just after the start code, or the end code in End mode.
+Typing refreshes the highlights without changing the timeline or rewriting
+your text. Broken codes are skipped, later valid codes continue matching in
+order, and extra cues stay as written. Repair a code to reconnect it on the
+next timing edit.</p>
+<p><img alt="Moving the first divider updates both ranges; the selected second segment's timecodes are emphasized" loading="lazy" decoding="async" width="796" height="796" src="images/unified-prompt-timecodes.png" /></p>
+<p>Use the <strong>Re-time all</strong> clock button beneath Rewrite Timeline in the right rail
+to distribute time using dialogue delivery, action, camera movement, frame roles
+and shot pacing. Set the sequence-length box below the timeline to the desired
+total first; <strong>Auto</strong> (0) keeps the current total. The proposal moves the tiles
+and offers approve/revert controls. Approving or rejecting any timing change
+resolves the complete timing pass. Segment prompts, visual directions, global
+guidance and the unified prompt remain unchanged. Video source limits and the
+workspace's duration limit still apply.</p>
+<p><img alt="Timeline timing controls and timing-only review" loading="lazy" decoding="async" width="796" height="565" src="images/timeline-timing.png" /></p>
+<p>Right-click a card and open <strong>Split segment</strong>. <strong>At clicked position</strong> divides
+the card where you clicked. <strong>2-way split</strong> and <strong>3-way split</strong> create equal,
+frame-aligned parts with these choices:</p>
+<table>
+<thead>
+<tr>
+<th>Choice</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Keep prompt</td>
+<td>Each part keeps the original prompt</td>
+</tr>
+<tr>
+<td>Divide prompt with AI</td>
+<td>The model distributes the prompt's action beats chronologically across the parts</td>
+</tr>
+<tr>
+<td>Hard cuts + close-ups with AI</td>
+<td>The model divides the action into shots, establishing it first and cutting to close-ups in later parts</td>
+</tr>
+</tbody>
+</table>
+<p>Every split preserves total duration and original media. Video parts use
+consecutive source intervals. AI splits use the configured prompt provider and
+offer one review for the entire split: approve any part to keep all parts, or
+deny any part to restore the original segment. Other segments and the combined
+prompt stay as authored. Each part needs at least one frame. Pending timeline
+reviews and the workspace's <strong>Maximum shots</strong> setting control availability.</p>
+<p><img alt="The segment split menu with two-way and three-way options" loading="lazy" decoding="async" width="138" height="88" src="images/segment-split-menu.png" /></p>
+<p><img alt="Prompt-preserving, AI division and hard-cut options" loading="lazy" decoding="async" width="192" height="88" src="images/segment-split-options.png" /></p>
+<p>Use <strong>Zoom</strong> beside the timeline ruler to inspect a passage. The
+<strong>Fit timeline</strong> icon at the right edge brings the whole sequence into view; moving
+Zoom all the way left also fits the sequence. Drag the dotted lower grip to
+make the visual previews taller. Smooth horizontal scrolling helps you move
+through longer plans.</p>
+<p>The conditioning tiles beneath the timeline show larger previews, frame roles
+and timing values on separate lines. Scroll horizontally to see additional
+references. Drag the dotted handle beneath the tiles down to enlarge them, or
+up to hide the strip completely. Double-click that handle to hide or reopen
+the strip. Its size and collapsed state are remembered.</p>
+<p><img alt="Timeline navigation and readable conditioning tiles with their own resize handle" loading="lazy" decoding="async" width="777" height="409" src="images/timeline-navigation.png" /></p>
+<p>There is no fixed segment-count or total-length cap in the editor. The renderer you use still determines which output lengths it can produce.</p>
+<h2 id="anchor-the-opening-and-the-destination">Anchor the opening and the destination</h2>
+<p><strong>Start frame</strong> tells a compatible workflow to begin a segment from its supplied image. <strong>End frame</strong> describes the image it should reach by that segment’s end. These controls are available in LTX and MiniMax.</p>
+<p>Click a card to edit its segment prompt. In MiniMax, this automatically switches
+the upper editor to <strong>Segment</strong>, including when you click the selected card
+again. Choose <strong>Global</strong> to return to whole-sequence direction. MiniMax keeps an
+independently editable unified production prompt below it. Refining a segment
+can update its duration and the timeline; typing in the unified box preserves
+segment timing.</p>
+<p><img alt="Shared segment editing with the full production prompt below" loading="lazy" decoding="async" width="1540" height="377" src="images/shared-segment-editors.png" /></p>
+<h2 id="update-the-image-without-rebuilding-the-beat">Update the image without rebuilding the beat</h2>
+<p>Use <strong>Replace media</strong>, or hold <strong>Ctrl</strong> while dropping media onto a card, to retain its duration, prompt, role and identity while changing the source. This is useful when a revised pose or a cleaner frame is ready.</p>
+<p>An image card’s context menu includes <strong>Copy image</strong> and <strong>Paste image to replace</strong>, using the original-resolution source. For a text card, <strong>Convert to image segment</strong> lets you add an image while keeping the written beat. <strong>Export image</strong> and <strong>Export video</strong> place the original media in the project’s download folder.</p>
+<p>Choose <strong>Convert to text segment</strong> on an image or video card to keep its prompt,
+visual direction and duration as a text beat. Its original file remains intact;
+the text segment carries no media or source trims.</p>
+<p>When opening older projects, Director checks the stored media type and
+normalizes media names and cache extensions. Duplicated attachments and media
+exports use safe filenames with the actual file extension, preserving the
+original source bytes.</p>
+<p>Delete a card with its close control, the toolbar’s <strong>Delete selected</strong> action or the context menu. Revisit the surrounding action after a large sequence change so the written transitions still describe the plan you intend.</p>
+<h2 id="build-the-plan-from-a-timed-brief">Build the plan from a timed brief</h2>
+<p>In a unified workspace, paste a brief whose timed-action lines use 24 fps SMPTE ranges:</p>
+<pre><code class="language-text">00:00:00:00 - 00:00:03:00: Establish the traveler beneath the aurora.
+00:00:03:00 - 00:00:08:00: Follow the traveler toward the overlook.
+00:00:08:00 - 00:00:12:00: Settle into a quiet horizon hold.
+</code></pre>
+<p>Director matches the actions to existing segments in order, preserves their media, resizes their durations and creates text segments for extra valid actions at the end. A whole-brief paste replaces the brief; a timed-action-only paste retains the surrounding sections.</p>
+<p>Start at zero and keep ranges continuous, ascending and nonempty. The final two digits are frames from 00 to 23. If a range is missing or invalid, unmatched cards turn gray while their media remains intact. Correct the timed block or refine the prompt to reconnect the plan.</p>
+<p><strong>Continue:</strong> <a href="#prompts">Prompt workflows</a> · <a href="#workspaces">Exports</a> · <a href="#start">Complete feature guide</a></p></section><section id="prompts" class="chapter" data-title="Prompt workflows"><span class="eyebrow">DIRECTOR GUIDE</span><h1 id="direct-every-segment-keep-the-full-prompt-in-view">Direct every segment. Keep the full prompt in view.</h1>
+<p>All timeline workspaces use the same segment editor. The Prompt Refinement workspace provides a standalone annotated text editor. Select a timeline card to edit its prompt, change its frame role or refine its wording and duration. <strong>Magic Build</strong> develops the segment prompts and shared global direction.</p>
+<p><img alt="The shared segment editor above an independently editable MiniMax production prompt" loading="lazy" decoding="async" width="1560" height="1060" src="images/ltx-director-director-overview.png" /></p>
+<table>
+<thead>
+<tr>
+<th>Workspace</th>
+<th>Production format</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>LTX Video</td>
+<td>Segment prompts and shared global direction for LTX timeline export</td>
+</tr>
+<tr>
+<td>MiniMax · Standard Guide</td>
+<td>Guide-based integrated description, soundscape and music sections</td>
+</tr>
+<tr>
+<td>MiniMax · Full Guide</td>
+<td>Guide-based subject definitions, summary, retention analysis, detailed description, soundscape and music</td>
+</tr>
+<tr>
+<td>MiniMax · Standard</td>
+<td>Supplied skill conventions for T2VA, I2VA, FL2VA and L2VA, with project variables</td>
+</tr>
+<tr>
+<td>MiniMax · Full</td>
+<td>Supplied six-section reference skill, including companion camera, speech and sound rules</td>
+</tr>
+</tbody>
+</table>
+<h2 id="refine-a-prompt-on-its-own">Refine a prompt on its own</h2>
+<p>Choose <strong>MiniMax · Refine</strong> from Project Type. Write or paste a production prompt, then click <strong>Refine Prompt</strong>. No media or segments are required. The editor fills the workspace; timeline, conditioning, segment timing, reference media and Director’s Intent controls are hidden.</p>
+<p>Type <code>/</code> and use the existing annotation suggestions: <code>/refine</code> edits a nearby passage, <code>/refine-global</code> applies across the prompt, <code>/keep</code> protects a detail, <code>/avoid</code> excludes a detail and <code>/focus</code> adds emphasis. These remain editable note boxes, with the same completion and spelling features as the other prompt editors. A leading <code>/refine</code> note before the scene applies to the full prompt unless it identifies a narrower target. Completed global refinement notes are removed after a successful revision; other annotations remain. If the model returns the production text unchanged, the editor keeps your draft and annotations and reports <strong>no text changes</strong>.</p>
+<p><img alt="Standalone MiniMax prompt refinement with inline annotations" loading="lazy" decoding="async" width="1330" height="840" src="images/minimax-prompt-refinement.png" /></p>
+<p>Refinement uses only your current prompt and its inline annotations. It preserves the existing MiniMax format, stated timing, identities, dialogue and audio direction unless you request a change. Use <strong>Copy</strong> to take the result into your generation workflow. Save and reopen it as a normal project; each workspace keeps its own draft. Switching back to a timeline workspace restores its segment controls and draft.</p>
+<h2 id="edit-the-beats-then-develop-the-full-prompt">Edit the beats, then develop the full prompt</h2>
+<p>MiniMax adds an editable <strong>Unified Prompt</strong> below the segment editor. Write or paste the production draft directly. Use its <strong>Generate</strong> button to rebuild it from the current segments, reference roles and creative direction using the selected template. Segment refinement and timing remain in the upper controls.</p>
+<p>The two editors retain separate text. Pasting or editing the unified prompt does not change the timeline. Manual timing edits update recognized timecodes locally. Segment wording reaches the unified draft through the local review below or an explicit Generate/Refine action.</p>
+<p>MiniMax gives each recognized shot passage a soft highlight. Its boundary starts
+at the timecode (or the first shot's untimed text) and ends before the next
+<code>[Shot N]</code> label. Blank lines between shots and the sound/music sections stay
+outside the highlight.</p>
+<p>Generate and Refine include a timecode on the first shot, including when
+refining an older untimed draft. A first start frame uses <code>00:00.00</code>; a first
+end frame uses its segment end time, such as <code>00:03.00</code> for a three-second
+segment. Prompt-only refinement preserves an existing opening timecode.
+Older untimed first shots remain editable in saved projects.</p>
+<p>While you type in a selected segment's prompt box, the unified editor scrolls
+to that passage and previews its wording changes in red and green. <strong>Approve</strong>
+keeps the change in that passage only; <strong>Reject</strong> keeps the original unified
+text. Clicking away from the segment editor also rejects an unapproved
+preview. Your segment edit stays saved either way. The shot label, timecode,
+comma/space separators, other shots and their spacing stay intact. These edits
+run locally without an AI request.</p>
+<p><img alt="A live red/green review confined to the selected MiniMax shot, with Approve and Reject controls" loading="lazy" decoding="async" width="1320" height="940" src="images/segment-prompt-live-review.png" /></p>
+<p>The lower <strong>Generate</strong> button rebuilds the production brief from every current
+timeline segment, including newly split or inserted beats. Current segment
+actions, order and timing take precedence over conflicting older global notes;
+beats that share an image still retain their separate action progression.
+It transfers segment content one for one, retaining wording wherever possible
+while adapting section placement, references, dialogue markup and timing to the
+workspace format. Complete action, appearance, dialogue and sound details take
+priority over length targets. There is no 350–500-word compression target;
+the production description grows with the source material. A response that the
+provider marks as truncated is rejected rather than saved as complete.
+Across workspace Generate and Refine instructions, word and sentence targets
+are soft guidance: preserving details wins. Refinement keeps content outside
+your requested edits; an explicit request to shorten or remove content still
+authorizes that change.
+If the timeline changes while generation is running, the app keeps your draft
+and asks you to generate again from the updated sequence.</p>
+<p><img alt="A selected segment prompt with the full production draft below" loading="lazy" decoding="async" width="1540" height="377" src="images/shared-segment-editors.png" /></p>
+<h2 id="apply-a-saved-quick-fix">Apply a saved Quick Fix</h2>
+<p>Use <strong>Quick Fix</strong> immediately before Generate in either prompt header. A preset's
+<strong>Show in</strong> setting controls menu availability: <strong>Segment</strong> lists it in the
+segment menu, <strong>Unified</strong> lists it in the unified menu, and <strong>Both</strong> lists it in
+both. Selecting a preset always refines only the editor whose button you used.
+The segment button inserts the instruction at the bottom of the selected
+segment; the unified button inserts it at the top of the production prompt.
+The result uses that editor's normal inline approve/reject controls.</p>
+<p>The included <strong>Refine Camera</strong> preset is available in Both menus with “refine
+camera angle and shot descriptions.” <strong>Format Prompt</strong> is available in Unified
+with “Format the spacing between shots to make it more human legable”. Choose
+<strong>Effects Library…</strong> to browse catalog artwork, add your own effects and edit presets. Set <strong>Apply to</strong> for Segment, Unified or Both, and enable <strong>Show in menu</strong> for the actions you want in Quick Fix. Imported effects keep this option off until you enable it. Presets are saved in your app settings. An empty editor disables its
+menu options; content in the other editor is not required.</p>
+<p>Set <strong>Category</strong> in the preset editor to group related fixes. The menu shows
+category labels with separators between groups. Matching category names share
+one group, and only categories with actions available in that editor appear.
+Existing presets without a category use <strong>General</strong>. New installations include
+<strong>Refine Camera</strong> under <strong>Camera</strong> and <strong>Format Prompt</strong> under <strong>Formatting</strong>.</p>
+<p><img alt="Quick Fix actions grouped by category" loading="lazy" decoding="async" width="141" height="158" src="images/quick-fix-categories.png" /></p>
+<p><img alt="Quick Fix controls in both prompt headers" loading="lazy" decoding="async" width="776" height="674" src="images/quick-fixes.png" /></p>
+<p><img alt="Editing the name, target and instruction of a Quick Fix preset" loading="lazy" decoding="async" width="560" height="440" src="images/quick-fix-presets.png" /></p>
+<h2 id="apply-a-production-brief-to-the-timeline">Apply a production brief to the timeline</h2>
+<p>The lower <strong>Generate</strong> and <strong>Refine</strong> buttons edit only the combined production text. To apply that text to your sequence, click <strong>Rewrite timeline from combined prompt</strong> in the timeline’s right-hand rail, below <strong>＋</strong> and <strong>T＋</strong>. It aligns segment wording and timing to the complete brief and presents the timeline changes for review. Your combined prompt stays unchanged.</p>
+<p><img alt="Timeline controls, including the separate rewrite action beneath the add buttons" loading="lazy" decoding="async" width="777" height="409" src="images/timeline-navigation.png" /></p>
+<h2 id="adjust-timing-through-the-shared-editor">Adjust timing through the shared editor</h2>
+<p><strong>Refine</strong> above the segment editor improves the selected beat and can resize that segment when its action or dialogue needs a different duration. <strong>Refine Timing</strong> changes its duration while preserving its wording. Other segments and the combined production text remain unchanged.</p>
+<p>Select <strong>Global</strong> in the segment editor to edit shared direction. Add an instruction such as <code>/refine-global Resize the segments proportionally to 15 seconds</code>, then choose <strong>Refine Prompt</strong>. Director scales the current segment durations to the requested total while preserving their proportions and individual prompt text. Other explicit global timing edits can change multiple segment durations. In MiniMax, the unified production prompt is then generated from the updated sequence. Manual segment edits preserve the draft's prose; recognized timecodes follow manual timing and Start/End frame-mode changes locally. Clicking a segment highlights its code and places the unified cursor immediately after it. See <a href="#timeline">live timecodes</a> for supported formats and incomplete drafts.</p>
+<h2 id="direct-motion-through-frame-anchors">Direct motion through frame anchors</h2>
+<p>A <strong>Start</strong> frame defines the state at the beginning of its segment; motion
+continues from that state toward the following visual anchor. An <strong>End</strong> frame
+defines the target at the end of its segment; preceding motion must reach it.
+Generate and Refine compare the surrounding timeline visuals and their actual
+anchor times, including images separated by text-only beats. Camera direction
+uses changes in viewpoint, background landmarks and subject placement together;
+a subject moving left does not by itself imply a left pan. Untimed references
+retain their selected roles rather than becoming timeline endpoints.</p>
+<h2 id="check-conditioning-at-a-glance">Check conditioning at a glance</h2>
+<p>The strip under the MiniMax timeline shows large image previews, with each shot’s timeline <strong>Start</strong> and <strong>End</strong> times together in a shaded bottom row. Video tiles show their timeline range too; source trim ranges and MiniMaxCondFrame values remain in tooltips. Untimed references show their roles. Drag the dotted handle below the strip to resize it, or double-click to hide and reopen it. The previews expand with the panel. The strip flags an opening that needs to move to zero or an ending that needs to reach the sequence total. It describes your setup; it does not move media automatically.</p>
+<p><img alt="Compact conditioning frame and timing guide" loading="lazy" decoding="async" width="776" height="144" src="images/conditioning-guide.png" /></p>
+<p>Both MiniMax templates receive <code>${workflow_name}</code> and <code>${workflow_direction}</code> from the current asset setup, including I2V, FL2V and last-frame L2V. Asset labels, subjects and speakers remain distinct. Dialogue requests can add original spoken lines when none are supplied.</p>
+<h2 id="keep-your-direction-and-drafts">Keep your direction and drafts</h2>
+<p><strong>Director’s Intent</strong>, prompt options and inline refinement notes remain available across timeline workspaces. Prompt Refinement uses only its standalone prompt and annotations. The native splitter below it uses the same handle as the split between the segment and unified prompts. Drag up to collapse and down to reopen; its height and collapsed state persist. Switching workspaces does not submit an AI request. Projects retain segment prompts, global direction and each workspace’s unified draft.</p>
+<p><strong>Continue:</strong> <a href="#references">Reference images</a> · <a href="#workspaces">Custom workspaces and exports</a> · <a href="#start">Complete feature guide</a></p>
+<p>The Official Skill variants are additional defaults. They receive the detected workflow, duration, asset map, Director’s Intent, global direction, sound/dialogue/music options, and current prompt and instructions during refinement. Their worked-example subjects and timings are format illustrations, never preset content for your scene.</p>
+<p>For two end-frame segments lasting 3.0 and 7.5 seconds, the condition values are <strong>3.0</strong> and <strong>10.5</strong>. End frames use the cumulative segment ending time; start frames use the cumulative segment starting time. These are absolute target-video times, not each segment’s duration or a frame count. The strip is a setup guide; it does not modify external ComfyUI nodes.</p></section><section id="refinement" class="chapter" data-title="Refinement and audio"><span class="eyebrow">DIRECTOR GUIDE</span><h1 id="turn-a-draft-into-direction">Turn a draft into direction.</h1>
+<h2 id="put-the-creative-intent-into-words">Put the creative intent into words</h2>
+<p>A reference image shows a moment. <strong>Director’s Intent</strong> tells the AI how the sequence should move: the performance, the camera path, the emotional pace and what should stay consistent. Write it once and keep it visible across the stock workspaces.</p>
+<p>For the Aurora example: “Follow the traveler at walking pace. Preserve the mountain setting, cool blue light and warm lantern glow. End with a quiet moment at the horizon.” A useful intent describes what happens between the images, as well as the result you want to reach.</p>
+<p><img alt="Shared intent, total length, sound options and editable language and accent controls" loading="lazy" decoding="async" width="1540" height="164" src="images/direction-and-audio.png" /></p>
+<p>Set <strong>Total length</strong> to guide the sequence’s pacing, or use Auto to let the initial generation suggest it. Collapse <strong>Director’s Intent</strong> when you want a larger writing area; its contents and options remain available when you reopen it.</p>
+<h2 id="edit-directly-then-refine">Edit directly, then refine</h2>
+<p>Write in the prompt editor as you would in any draft. Click a timeline card to
+switch the upper editor to <strong>Segment</strong>, then use its <strong>Generate</strong> or <strong>Refine</strong>
+button. The AI works on that segment's text, with nearby beats supplying
+continuity context. Other segment prompts and the lower production brief stay
+as you wrote them.</p>
+<p>The working animation and streamed text appear in that same upper editor.
+When the result is ready, approve or reject individual paragraph changes there,
+or use <strong>Approve all</strong> / <strong>Deny all</strong>. These controls also let you review text
+generated for an initially empty segment. Use the lower editor's own buttons
+when you want to generate or refine the combined production brief.</p>
+<p>Generate and Refine request a defined response format for the chosen operation.
+Segment requests return that segment's prompt and duration; the combined editor
+returns production text, and timing-only actions return durations. Quick Fix uses
+the contract of the editor where you clicked it.</p>
+<p>Director checks the completed response before offering it for review. An
+unfinished stream, missing fields, invalid timing or a response for a different
+operation is rejected and follows your configured retry settings. The existing
+draft stays available if the provider cannot complete a valid response.</p>
+<p><img alt="Segment refinement progress inside the upper editor" loading="lazy" decoding="async" width="776" height="180" src="images/segment-working.png" /></p>
+<p><img alt="Paragraph diff and approval controls inside the selected segment editor" loading="lazy" decoding="async" width="776" height="180" src="images/segment-review.png" /></p>
+<p>Approving a change removes its review colors and strikethrough. <strong>Approve all</strong>
+also clears the selected segment's text review, leaving its accepted wording
+plain and editable.</p>
+<p>LTX’s <strong>Refine Timing</strong> is useful when the words are right but the beat needs a different duration. It keeps the selected prompt’s wording. Prompt refinement can change both wording and the selected duration; the rest of the LTX sequence remains intact.</p>
+<h2 id="keep-requests-beside-the-passage">Keep requests beside the passage</h2>
+<p>Type <code>/</code>, choose a suggestion and press <strong>Tab</strong>. Director turns the directive into an outlined editable note. Click into the note to write or change the instruction; it supports wrapped and multiline text.</p>
+<p><img alt="Local and global refinement notes kept inside the same production editor" loading="lazy" decoding="async" width="1540" height="181" src="images/inline-refinement-notes.png" /></p>
+<table>
+<thead>
+<tr>
+<th>Note</th>
+<th>Use it to say</th>
+<th>Example</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>/refine</code> · Refinement</td>
+<td>How a nearby passage or cue should change</td>
+<td>“Make the approach slower and describe the coat movement.”</td>
+</tr>
+<tr>
+<td><code>/refine-global</code> · Global refinement</td>
+<td>How the entire draft should change</td>
+<td>“Keep one continuous shot and give the final hold more room.”</td>
+</tr>
+<tr>
+<td><code>/keep</code> · Keep</td>
+<td>Which detail should remain</td>
+<td>“Preserve the blue-gold lighting.”</td>
+</tr>
+<tr>
+<td><code>/avoid</code> · Avoid</td>
+<td>What the revision should exclude</td>
+<td>“Avoid a sudden camera cut.”</td>
+</tr>
+<tr>
+<td><code>/focus</code> · Focus</td>
+<td>Which creative element deserves attention</td>
+<td>“Focus on the transition from walking to stillness.”</td>
+</tr>
+</tbody>
+</table>
+<p>A successfully applied global refinement note is consumed after refinement. Other notes remain as creative guidance. Remove a note through its context menu when you no longer need it. Copy and export preserve notes as readable directive text, so review the visible draft before sending it to a renderer.</p>
+<h2 id="plan-the-sound-of-the-scene">Plan the sound of the scene</h2>
+<p><strong>SFX</strong> requests sound direction connected to the action: footsteps, fabric, impacts, water or environmental ambience. <strong>Reduce Music</strong> asks for scene-specific ambient sound to discourage unwanted music. These settings guide the generated prompt; the video model determines the final audio result.</p>
+<p>Enable <strong>Spoken Dialog</strong> to expose language and accent. Both fields are editable, so you can describe the voice the scene needs. Leave them on image/context guidance when you want the supplied material to determine those attributes. Put exact wording in your intent when a specific line is required.</p>
+<p><strong>HDR</strong> adds quality-oriented prompt direction, including the LTX global quality prefix. It does not change the resolution or dynamic range of imported files.</p>
+<h2 id="polish-without-breaking-the-flow">Polish without breaking the flow</h2>
+<p>When an installed system dictionary is available, prompt and description editors underline possible spelling errors. Right-click a word to choose a replacement. <strong>Copy</strong> takes the current visible editor text to the clipboard.</p>
+<p>Request progress stays in the app. Set timeout, retry count and cooldown in <strong>Settings → Application</strong>; retries show their progress and provider errors explain the failed request. MiniMax also provides a retry action after an unsuccessful operation. Your configured provider handles generation and refinement; no video is rendered inside Director.</p>
+<p><strong>Continue:</strong> <a href="#prompts">Prompt workflows</a> · <a href="#install">Installation and provider setup</a> · <a href="#start">Complete feature guide</a></p></section><section id="references" class="chapter" data-title="MiniMax references"><span class="eyebrow">DIRECTOR GUIDE</span><h1 id="give-every-reference-a-purpose">Give every reference a purpose.</h1>
+<h2 id="four-sources-one-coherent-production-brief">Four sources. One coherent production brief.</h2>
+<p>Use a picture to guide a face, wardrobe, atmosphere, prop or composition without placing that picture at a particular second. MiniMax’s four mixed reference slots keep images, videos and sound samples beside the timeline and production brief. Each reference carries its own role and notes.</p>
+<p><img alt="A visual-style reference with notes in the MiniMax References workspace" loading="lazy" decoding="async" width="1560" height="1060" src="images/minimax-references.png" /></p>
+<h2 id="add-the-image-define-the-role">Add the image. Define the role.</h2>
+<p>Open <strong>Reference media</strong> in a MiniMax timeline workspace. Drop an image, video or audio file into any of the four slots, click <strong>Browse</strong>, or use <strong>Paste</strong> for clipboard image pixels or a local media file. Choose the role and add notes describing exactly what to use.</p>
+<table>
+<thead>
+<tr>
+<th>Role</th>
+<th>Guide the generation toward</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Identity</td>
+<td>A subject’s recognizable features</td>
+</tr>
+<tr>
+<td>Wardrobe</td>
+<td>Clothing, accessories and their details</td>
+</tr>
+<tr>
+<td>Setting</td>
+<td>Environmental or location attributes</td>
+</tr>
+<tr>
+<td>Visual style</td>
+<td>Lighting, palette, atmosphere or treatment</td>
+</tr>
+<tr>
+<td>Object / prop</td>
+<td>A particular item and its appearance</td>
+</tr>
+<tr>
+<td>Composition</td>
+<td>Framing and spatial arrangement</td>
+</tr>
+<tr>
+<td>Voice / speaker</td>
+<td>Vocal identity, timbre or performance</td>
+</tr>
+<tr>
+<td>Sound / ambience</td>
+<td>An ambient or physical sound texture</td>
+</tr>
+<tr>
+<td>Motion / camera</td>
+<td>Movement or camera behavior from a video</td>
+</tr>
+</tbody>
+</table>
+<p><img alt="Four mixed references and the ComfyUI export action" loading="lazy" decoding="async" width="1540" height="1020" src="images/minimax-comfyui-export.png" /></p>
+<p>For the Aurora scene, choose <strong>Visual style</strong> and write “Use the cool sky, warm lanterns and luminous atmosphere.” That gives the picture a clear job while the timeline continues to describe when the traveler moves and arrives.</p>
+<p>References keep their original resolution in the saved project. AI analysis uses a size-limited copy. Roles and notes travel with the .LTXD project. Right-click the reference image and choose <strong>Export Media</strong> to save the full-resolution stored image into the project’s export folder. It also appears in Recent exports. Video and audio references retain their original media extension when reopened or exported; their thumbnail does not change the filename. Existing .LTXD references recover the extension from the stored source. Automatic filenames avoid overwriting earlier exports. <strong>Clear</strong> in the same context menu removes only that slot’s reference; it does not remove timeline media or change the sequence’s duration.</p>
+<h2 id="use-a-video-for-its-soundtrack">Use a video for its soundtrack</h2>
+<p>For an uploaded video sample, enable <strong>Use ref audio only</strong> to use its soundtrack without borrowing its visual appearance or motion. The checkbox is available when the imported video contains a usable audio stream. Leave it off to use the video and its paired soundtrack together. Standalone audio files can be dropped into a slot directly.</p>
+<p>Video and audio originals are copied into Director’s managed media folder. Their soundtrack and selected audio-only state travel inside saved .LTXD projects. Gemini receives the actual audio for prompt analysis; with OpenAI, provide explicit sound notes because this transport does not audition reference audio. Both providers export the real audio into the ComfyUI graph.</p>
+<h2 id="export-directly-to-comfyui">Export directly to ComfyUI</h2>
+<p>Choose <strong>Export ComfyUI</strong> in the top toolbar, marked with Comfy’s official logo. The exporter adapts the supplied MiniMax graph, fills its prompt and duration, and applies the pictured 16:9 / 0.5 MP / multiple 32 / 20-step defaults, and copies referenced media into <strong>ComfyUI/input</strong> using the existing ComfyUI root setting. Exported <code>Load Image</code>, <code>Load Video</code> and <code>Load Audio</code> fields use those relative input paths. Repeated exports avoid overwriting prior input files.</p>
+<p>All timeline images connect directly to their timed condition nodes, including the image at zero seconds; timeline videos feed their full frame batch and soundtrack into a timed audiovisual guide at their starting position. Later image checkpoints are chained at their cumulative timeline times. Two end images lasting 3.0 and 7.5 seconds anchor at <strong>3.0</strong> and <strong>10.5</strong> seconds. Audio-only references go to standalone audio inputs; untimed video-reference soundtracks go to paired video-audio inputs.</p>
+<p>The graph retains the supplied model, sampler and decoder subgraphs. ComfyUI needs the same native MiniMax and custom nodes used by that base workflow. The export checks the native node’s media limits: 9 image inputs, 3 video inputs and 3 standalone audio inputs. Director still offers four mixed reference slots; timed conditioning assets are additional inputs.</p>
+<h2 id="choose-the-right-source-pattern">Choose the right source pattern</h2>
+<p><strong>MiniMax</strong> recognizes the supplied combination and prepares the prompt around it:</p>
+<table>
+<thead>
+<tr>
+<th>Your inputs</th>
+<th>Recognized workflow</th>
+<th>How to direct it</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Text segments</td>
+<td>Text to video</td>
+<td>Describe the scene and action; use segment durations for pacing</td>
+</tr>
+<tr>
+<td>One timeline image</td>
+<td>Image to video</td>
+<td>Describe movement from or toward the image, using its frame role</td>
+</tr>
+<tr>
+<td>Two timeline images with start and end roles</td>
+<td>First / last frame</td>
+<td>Describe the visible path from the opening state to the destination</td>
+</tr>
+<tr>
+<td>Other multiple-image timelines</td>
+<td>Multiple keyframes</td>
+<td>Describe the progression through the ordered visual checkpoints</td>
+</tr>
+<tr>
+<td>Timeline video without images</td>
+<td>Video to video</td>
+<td>State whether to edit, continue or draw movement guidance from the source</td>
+</tr>
+<tr>
+<td>Images and video, or an untimed reference slot</td>
+<td>Mixed references</td>
+<td>Explain each asset’s role and which attributes to preserve</td>
+</tr>
+</tbody>
+</table>
+<p>A start image anchors the beginning of its segment; an end image is reached at the segment’s end. Hover over the detected workflow label to inspect asset labels and checkpoint times. Video ranges follow the source metadata retained with the segment.</p>
+<h2 id="references-and-timeline-frames-work-together">References and timeline frames work together</h2>
+<p>Use <strong>MiniMax Full Reference</strong> to combine timeline checkpoints, source video, and four untimed media references in one production brief.</p>
+<p>An untimed image supplies attributes rather than chronology: it does not add a segment, move a checkpoint or extend the plan. For a sequence guided entirely by the reference slots, add a text segment to establish the action and duration.</p>
+<h2 id="generate-review-and-refine">Generate, review and refine</h2>
+<p>Write your intent and develop the segment prompts with <strong>Magic Build</strong>. Review reference roles in the full production draft and edit it directly. After segment changes, the <strong>Regenerate</strong> action in the change notice can rebuild an existing draft using the selected template.</p>
+<p>Image labels and video labels are assigned consistently within the asset inventory. Changing a reference remains a preparation step; you choose when to submit another generation or refinement request.</p>
+<p><strong>Continue:</strong> <a href="#prompts">Prompt workflows</a> · <a href="#refinement">Refinement</a> · <a href="#start">Complete feature guide</a></p>
+<p>Drag a reference image into your file manager or the timeline to use its full-resolution image. Drop a still image from your file manager onto a reference slot to replace it. The image highlights on hover, and a blue border marks an accepted drop.</p>
+<p>The final <strong>Video Combine</strong> node saves a 24 fps WebM with YUV420p, CRF 15, metadata and audio trimming enabled. Media and conditioning occupy separate groups; unused sample guides and video branches are removed. The <strong>Get Condition → Set Cooked Condition</strong> connection is retained when there are no timed guides.</p>
+<p>Timeline videos connect <strong>Load Video → IMAGE</strong> and <strong>Load Video → audio</strong> to the timed condition node at the clip’s start. The full loaded batch supplies frame conditioning; its audio shares the same time anchor. Opening still fallbacks and tail-only video samplers are omitted. Still-image checkpoints retain their conditioning guides. Guided output may differ from the source; no automatic audio crossfade is applied.</p>
+<p>Timeline video segments use <strong>MiniMaxH3AddGuide only</strong>, with frames and audio at the same start index. They do not consume native video-reference inputs. Prompt generation and refinement use the original a32 rules and asset labels.</p>
+<p>Timeline images and videos are conditioning media only. Native reference inputs are populated exclusively by the four reference slots. The Lazy Switch and first-frame Set/Get detour are removed from exports.</p></section><section id="effects" class="chapter" data-title="Effects Library"><span class="eyebrow">DIRECTOR GUIDE</span><h1 id="effects-library">Effects Library</h1>
+<p><img alt="Native Effects Library with the catalog artwork" loading="lazy" decoding="async" width="850" height="740" src="images/effects-library.png" /></p>
+<p>Open <strong>Effects Library</strong> from the main toolbar or the last item in either <strong>Quick Fix</strong> menu. Search by effect name, anatomy, species, stage or prompt wording, and narrow the results with the category selector. The app includes all 100 Werecreature effects, their original catalog artwork, linked excerpt previews, and 17 recorded source soundtrack samples.</p>
+<p>Select a tile to see its source and preview notes. Linked video excerpts play silently inside the selected tile. Choose a different excerpt below the tiles when several references are available. Generated concept artwork is an appearance aid; excerpt notes describe what the footage actually demonstrates. The separate <strong>Source catalog</strong> opens the complete offline illustrated catalog and its provenance.</p>
+<h2 id="apply-an-effect">Apply an effect</h2>
+<p>Drag a tile onto a timeline segment or its prompt editor. A green outline accepts the effect; a red outline means that target cannot accept it. The segment must have prompt text and refinement must be idle. A segment drop selects that segment and refines only its prompt, even if the editor previously used Global scope.</p>
+<p>You can also choose <strong>Selected segment</strong> or <strong>Unified prompt</strong>, select a tile, and press <strong>Apply &amp; refine</strong>. Each effect has an <strong>Apply to</strong> setting in <strong>Edit</strong>: Segment, Unified, or Both. Imported effects begin with Segment scope. Applying an effect uses the existing prompt review flow so you can inspect the rewrite. It preserves the shot structure and existing subject labels. Previewing a clip or sound does not attach it to an AI request.</p>
+<h2 id="sound">Sound</h2>
+<p>The <strong>Sound</strong> category contains written sound recipes. <strong>Source soundtracks</strong> contains the 17 actual recorded WAV samples. Sound tiles display a play symbol; click to listen or choose an associated sample and press <strong>Play sound</strong>. Audio starts only on a click. <strong>Save sample</strong> copies the selected recording to a location you choose. Samples are mixed source soundtracks that may contain dialogue and music, rather than isolated foley. Only one library preview plays at a time; starting it pauses the project video.</p>
+<p>Apply a sound recipe to refine its wording in a segment. Recordings remain preview assets until you explicitly attach them through a supported media workflow. Visual effects do not automatically enable their optional sound recipes.</p>
+<h2 id="your-effects-and-menus">Your effects and menus</h2>
+<p>Your existing Quick Fixes migrate automatically with <strong>Show in menu</strong> enabled. Imported catalog entries have this option off. Select a tile, choose <strong>Edit</strong>, and check <strong>Show in menu</strong> to expose it in the appropriate Quick Fix menu. Category headings and the existing button menus remain compact.</p>
+<p>Choose <strong>Add your own</strong> to enter a name, category, scope and refinement instruction. Browse for a thumbnail and optional video or recording. <strong>Generate thumbnail with default image model</strong> uses the image source selected in Settings. Save to keep the effect. Cancel leaves the entry unchanged. Editing an imported entry saves your own override; the shipped source catalog remains intact. <strong>Remove / hide</strong> removes custom entries or hides an imported entry.</p>
+<p>Drag the dock title to move or float the panel. Right-click the title for left, right, bottom and floating options, plus width and height boxes. Adjust <strong>Tile size</strong> to fit more items or inspect the artwork. Panel placement and tile size persist between sessions.</p></section><section id="projects" class="chapter" data-title="Projects and properties"><span class="eyebrow">DIRECTOR GUIDE</span><h1 id="a-home-for-every-creative-project">A home for every creative project.</h1>
+<h2 id="turn-individual-experiments-into-a-collection-of-work">Turn individual experiments into a collection of work</h2>
+<p>Your project is more than a prompt. It includes the reference media, the timing, the creative intent and the decisions that make the sequence yours. Director’s local library keeps that context together in a gallery you can browse, organize and reopen.</p>
+<p><img alt="Saved projects with colored status cards and a docked Properties panel" loading="lazy" decoding="async" width="1560" height="870" src="images/project-properties.png" /></p>
+<h2 id="save-it-with-a-name-and-a-cover">Save it with a name and a cover</h2>
+<p><strong>New Project</strong> immediately creates an empty <strong>Untitled project</strong> in the
+library. You can switch to another project and return to its working draft
+before saving manually. Rename it and add a description in <strong>Properties</strong>.
+Choose <strong>Save to Library</strong> to save its content; later saves update that same
+project. In project details, choose a segment frame as its cover or upload a
+custom thumbnail. A recognizable cover helps you find the right plan as the library grows.</p>
+<p>Open <strong>Projects</strong> from the toolbar. Select a saved project to return to it, or use its context menu to open it or edit the details. Search matches project names and descriptions. The <strong>Icons</strong> menu chooses small, medium or large cards.</p>
+<p><img alt="The native project gallery with search, sorting, status filters and thumbnail cards" loading="lazy" decoding="async" width="330" height="991" src="images/project-library.png" /></p>
+<h2 id="arrange-the-library-around-your-work">Arrange the library around your work</h2>
+<p>Assign a <strong>Collection</strong> to group related projects. Collections appear as their own gallery tiles, with covers assembled from member thumbnails. Open a collection to browse its projects and use <strong>UP</strong> to return.</p>
+<p>Choose <strong>Title A–Z</strong>, <strong>Title Z–A</strong> or <strong>Custom</strong> sorting. Dragging a project or collection establishes a custom order. Status and label filters help narrow the gallery; the app remembers your selected filter choices.</p>
+<h2 id="make-progress-visible">Make progress visible</h2>
+<p>A project has one <strong>Status</strong> and can have several additional <strong>Tags</strong>. Status colors identify the project’s stage, and thumbnail pills show its labels. The stock status choices include Done, Consider and Re-shoot; customize names and colors in <strong>Settings → Application</strong>.</p>
+<p>Archive a project when it should move out of the active flow while remaining available. Collection context actions can apply status, labels and archive choices to their members. Deletion is a separate confirmed action that removes the selected saved project.</p>
+<h2 id="put-the-next-steps-beside-the-plan">Put the next steps beside the plan</h2>
+<p>Open <strong>Properties</strong> to edit the project name, description, collection, download folder, status, archive state and tags in a dock. Metadata edits save as you work. The context-menu project-details dialog provides another way to edit the same project information.</p>
+<p><img alt="Project details with download folder, status and dated task notes" loading="lazy" decoding="async" width="350" height="991" src="images/project-details.png" /></p>
+<p>Add dated tasks and notes, edit their text or date, check them off when complete, and remove them when they no longer apply. A note such as “Review pacing at the transition into the final hold” stays with the project instead of becoming a loose reminder elsewhere.</p>
+<h2 id="switch-ideas-without-losing-the-working-draft">Switch ideas without losing the working draft</h2>
+<p>Several saved projects can remain open as in-memory workspaces. Switching restores each project’s timeline, prompts, options and view. Use <strong>Save to Library</strong> to write creative edits to disk; closing the app saves dirty library projects with visible progress. Give a new unsaved project an initial library save or portable export to establish its destination.</p>
+<p>LTX and MiniMax retain their prompt drafts across workspace changes. Projects also retain their attached review video and workflow JSON files, so you can return to the prompt and its production context together.</p>
+<h2 id="carry-the-complete-project">Carry the complete project</h2>
+<p><strong>Export Project</strong> writes a portable <strong>.LTXD</strong> archive to the download folder. It preserves editable sequence state, original-resolution timeline media, prompt drafts, intent and supported project attachments. <strong>Open</strong> restores a native project; <strong>Import</strong> reads Director JSON.</p>
+<p>Timeline previews are kept separately from the original media to make navigation and loading more responsive. Original-resolution files remain the sources used for project and media exports. The preview cache can be rebuilt; keep important work in a saved project or exported archive.</p>
+<h2 id="arrange-a-workspace-that-stays-comfortable">Arrange a workspace that stays comfortable</h2>
+<p>Move, resize, show or hide the project library, Properties, Preview and Project Files docks. Supported docks can float; reference images stay docked inside the main window. Panel layout and sizes are remembered. Adjust toolbar text scale from <strong>75% to 200%</strong> to suit your screen.</p>
+<p><strong>Continue:</strong> <a href="#review">Video review</a> · <a href="#workspaces">Portable exports</a> · <a href="#start">Complete feature guide</a></p></section><section id="review" class="chapter" data-title="Video and project files"><span class="eyebrow">DIRECTOR GUIDE</span><h1 id="bring-the-finished-motion-back-to-the-plan">Bring the finished motion back to the plan.</h1>
+<h2 id="review-in-the-same-place-you-directed">Review in the same place you directed</h2>
+<p>After rendering in your video workflow, bring the result into Director. Keeping the video beside the prompt and timeline makes it easier to judge pacing, spot a transition that needs work and choose the frame for your next pass.</p>
+<p><img alt="The native video preview beside the source plan and segment editor" loading="lazy" decoding="async" width="1560" height="1060" src="images/video-review.png" /></p>
+<h2 id="attach-and-play-a-render">Attach and play a render</h2>
+<p>Save or open a library project, then open <strong>Preview</strong> from the toolbar. Drop the rendered video into the preview area or choose <strong>Add Video</strong>. Supported review files include MP4, WebM, MOV, MKV, AVI and M4V; successful playback also depends on the available codec support.</p>
+<p>The project keeps its own attached video copy. Use <strong>Play</strong> and <strong>Pause</strong> to review the motion. Click the preview’s playback bar to jump to a moment. <strong>Fullscreen</strong> opens a larger player with its own controls; return to the dock when you want to compare the result with the prompt.</p>
+<p><img alt="The project video player with seeking, playback, export and fullscreen controls" loading="lazy" decoding="async" width="900" height="620" src="images/video-preview.png" /></p>
+<p>The preview loads the saved video when its dock is opened. <strong>Export Video</strong> copies the attached render into the project download folder for reuse or sharing.</p>
+<h2 id="capture-the-moment-you-need">Capture the moment you need</h2>
+<p>Pause on a useful frame and right-click the video. Choose <strong>Export Current Frame</strong> to save a PNG in the download folder, or <strong>Copy Current Frame to Clipboard</strong> to place the decoded frame on the clipboard. These actions are also available from the fullscreen video surface.</p>
+<p>Use the copied frame to replace an image segment, or save it as a new visual checkpoint. Frame capture uses the decoded video image rather than the on-screen player size. It becomes available after a video frame has loaded.</p>
+<h2 id="keep-the-workflow-with-the-project">Keep the workflow with the project</h2>
+<p>Open <strong>Project Files</strong> and add or drop ComfyUI workflow JSON. Keep several workflow attachments when a project needs alternative rendering setups. Select one to export it to the download folder or remove it from the project.</p>
+<p><img alt="A rendering workflow JSON attached in the Project Files dock" loading="lazy" decoding="async" width="450" height="300" src="images/project-files.png" /></p>
+<p>Attaching files does not run the workflow. It keeps the rendering setup available alongside the visual plan, and portable project exports can carry the supported attachments with them.</p>
+<h2 id="a-practical-next-pass-workflow">A practical next-pass workflow</h2>
+<ol>
+<li>Render the exported plan in your chosen video pipeline.</li>
+<li>Attach the result to its Director project and review the pacing.</li>
+<li>Capture a useful frame or identify the beat that needs attention.</li>
+<li>Update the relevant image or inline refinement note.</li>
+<li>Refine, export and keep the revised plan in the same project.</li>
+</ol>
+<p><strong>Continue:</strong> <a href="#timeline">Media replacement</a> · <a href="#projects">Project organization</a> · <a href="#workspaces">Exports</a></p></section><section id="shots" class="chapter" data-title="Finished shot sequences"><span class="eyebrow">DIRECTOR GUIDE</span><h1 id="finish-the-film-shot-by-shot">Finish the film, shot by shot</h1>
+<p><strong>Shot Sequence</strong> brings completed renders together in one continuous preview, with the sound from your original movies. Every collection receives a dedicated Shot Sequence project tile. Open it to order shots, tune their joins, and bake a finished WebM.</p>
+<p><img alt="The native Shot Sequence workspace with ordered completed shots and a continuous RAM preview" loading="lazy" decoding="async" width="1460" height="1060" src="images/shot-sequence.png" /></p>
+<h2 id="bring-in-your-completed-shots">Bring in your completed shots</h2>
+<p>Open a collection and select <strong>Shot Sequence</strong>. Drop movie files onto the NLA timeline at the desired position. The blue border and insertion line show the closest shot boundary to the cursor. Use <strong>Add shots</strong>, or choose <strong>Add collection previews…</strong> to bring in the saved rendered videos from that collection. Director copies imports into managed storage; their originals and shot order travel inside saved <code>.LTXD</code> projects.</p>
+<p>Hold <strong>Ctrl</strong> while dropping a movie onto an existing video or audio strip to replace that shot in place. The new movie keeps its full length, the sequence slot stays put, and only changed content and joins are rebuilt. If you drop multiple movies, the additional files follow the replacement.</p>
+<p>Drag linked video/audio strips to reorder them, use the left/right buttons, or select shots and press <strong>Delete</strong> or choose <strong>Delete</strong> from the right-click menu to remove them from the sequence. The preview player stays on the assembled sequence; double-click a strip or drag the scrubhead to seek within that sequence. Save the project to keep its order, blend settings and output options. Completed shots import at their full source lengths, independent of generation duration limits. Intentional trims stay attached when you reorder, save or reopen them. <strong>Restore full clips</strong> re-reads the source movies and removes their trims. The sequence workspace has no duration ceiling. Right-click a video or audio strip to choose <strong>Shot status</strong> from the statuses configured in Application Settings. Both linked strips take on that status color. Statuses are saved with the sequence; assigning one leaves the preview cache intact. Choose <strong>Export segment video</strong> from the same menu to export that shot’s current source interval with audio to the configured download folder; it appears in Recent exports.</p>
+<p>The NLA timeline places shots on alternating video tracks with linked audio tracks below. Strip widths follow actual movie duration; shaded regions show overlaps. Use <strong>+</strong>, <strong>−</strong> and <strong>Fit</strong> to inspect a long sequence, Ctrl-click to select multiple strips, and drag the time ruler or scrubhead to seek the assembled RAM preview. With the timeline or player focused, press <strong>Left</strong> or <strong>Right</strong> to pause and step backward or forward by one sequence frame. This also works in fullscreen; the playhead stays visible and stops at the first or last frame. Thumbnail filmstrips show moments from each source movie, and linked audio strips show the source waveform. Illustrated controls make importing, restoring, moving and zooming shots easy to recognize.</p>
+<h2 id="trim-the-moment-split-the-action">Trim the moment. Split the action.</h2>
+<p>Drag the left or right handle on a video or audio strip to adjust its source in or out point. Both linked strips move together, and following shots close up automatically. Edits snap to the sequence’s 24 fps frame grid and stay within the original movie, with a minimum of one frame. Drag back outward to recover hidden footage, or press <strong>Esc</strong> during a drag to cancel. Your source file stays intact.</p>
+<p>Place the playhead inside a shot, right-click its video or audio strip, and choose <strong>Split at playhead</strong>. The two pieces remain adjacent without adding a blend or shortening the sequence. Both retain the shot’s status; the second piece retains its outgoing transition. Trim, move, export or delete either piece independently. The command is disabled when the playhead is outside the shot or on its edge.</p>
+<p><strong>Export segment video</strong> uses the current in/out range, copies the original video and audio codecs, and keeps the original container. Untrimmed movies are copied directly. Trimmed exports use FFmpeg stream copy for speed and unchanged encoded quality. Stream-copy cuts depend on the source keyframes and packet boundaries, so an export may include leading footage needed to decode the chosen start. The RAM preview and final bake use the exact edited sequence frame range.</p>
+<p>Unchanged source blocks stay cached across trims and splits. Splitting adjacent pieces can reuse the assembled preview as-is; filmstrip thumbnails and waveforms follow each piece’s source range.</p>
+<h2 id="shape-the-join">Shape the join</h2>
+<p>The defaults are <strong>perceptual_crossfade</strong>, <strong>1 second</strong> of overlap, and <strong>Source side</strong>. Select a shot to edit its <strong>Blend</strong>, <strong>Overlap</strong> and <strong>Side</strong> in the existing top controls. Each shot owns its settings.</p>
+<p>The selected shot’s settings control the join into the following shot and remain attached when you reorder or replace it. You can configure the last shot too; its settings take effect when another shot follows it. New shots copy their preceding neighbor’s settings, or the following neighbor’s at the beginning of the timeline. The first shot uses the initial defaults. After insertion, each shot can be edited independently. Settings appear on the video strip and are saved with the project; the timeline, mixed audio, RAM preview and final bake all use them.</p>
+<table>
+<thead>
+<tr>
+<th>Mode</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>cut</code></td>
+<td>Remove the selected side's overlap and join the remaining footage directly</td>
+</tr>
+<tr>
+<td><code>linear_blend</code></td>
+<td>Mix pixel values through the overlap</td>
+</tr>
+<tr>
+<td><code>filmic_crossfade</code></td>
+<td>Mix in gamma-corrected linear light for a brighter photographic fade</td>
+</tr>
+<tr>
+<td><code>perceptual_crossfade</code></td>
+<td>Mix in LAB color space for a perceptual color transition</td>
+</tr>
+</tbody>
+</table>
+<p>For blends, Source side fades the source tail toward the next shot's head. Destination side reverses that overlap weighting. For cuts, Source side trims the source tail; Destination side trims the next shot's head. An overlap longer than an available shot is reduced to fit. Set overlap to zero for a direct join without trimming.</p>
+<p>The source movies' audio follows the same joins. Blends crossfade the two soundtracks, while cuts trim audio on the selected side. Silent movies contribute silence; mono and multichannel sources are normalized to stereo for the finished sequence.</p>
+<h2 id="watch-continuously-in-ram">Watch continuously, in RAM</h2>
+<p>Adding or editing shots automatically starts a background preview update. Use the player's Play/Pause button to watch the assembled movie with source audio. The timeline scrubhead and player position stay linked in both directions. Scrubbing auditions the mixed sequence audio even while paused, then returns to the selected position; playback resumes only if it was already playing. During playback, a zoomed timeline scrolls to keep the playhead in view. Fullscreen, frame export and clipboard frame capture remain available.</p>
+<p>Preview progress appears directly on the timeline. The thin coverage line above the strips shows <strong>green</strong> for completed cached regions and <strong>red</strong> for regions waiting to rebuild. As the worker completes more footage, the playable prefix grows. Scrubbing into unfinished footage keeps that position pending until it is ready.</p>
+<p><img alt="Cached clip bodies stay green while changed overlap regions wait to rebuild" loading="lazy" decoding="async" width="1404" height="207" src="images/shot-sequence-cache.png" /></p>
+<p>Changing a blend rebuilds the affected overlaps, while reordering or replacing shots reuses unchanged clip regions. Completed source blocks and joins are stored as disposable workfiles in the operating system's per-user cache: normally <code>~/.cache/ltx-director-director/shot-sequences/v1</code> on Linux, respecting <code>XDG_CACHE_HOME</code>, or the Qt local application cache location on Windows. The workfiles survive closing the app; the playable assembled sequence is held in RAM.</p>
+<p>The preview cache keeps a bounded 128 MiB memory working set and prunes older workfiles around a 2 GiB disk budget. Decoded filmstrip thumbnails have their own bounded memory cache. Final-bake CRF changes leave the preview intact. Preview uses a reduced canvas; baking uses the selected output dimensions and original source movies.</p>
+<h2 id="bake-the-final-movie">Bake the final movie</h2>
+<p>Choose output width and height, then click <strong>Bake WebM</strong> in the player controls. The finished file includes video and source audio, encoded as VP9 and Opus. <strong>CRF defaults to 15</strong>; lower values retain more detail and usually produce larger files. Baking uses the same blend and overlap settings as the RAM preview at the selected output resolution.</p>
+<p>Clips are normalized to 24 fps and fitted to the output canvas without stretching. Only overlap frame buffers and working audio are retained during composition; full-resolution movies do not need to be loaded as one giant image batch. Baking runs in the background with its own progress bar, and the finished file appears in <strong>Recent exports</strong>, where it can be opened, revealed or dragged into another application.</p></section><section id="workspaces" class="chapter" data-title="Workspaces and exports"><span class="eyebrow">DIRECTOR GUIDE</span><h1 id="make-the-workspace-yours-take-the-result-with-you">Make the workspace yours. Take the result with you.</h1>
+<h2 id="give-every-output-a-clear-destination">Give every output a clear destination</h2>
+<p>Director brings prompts, source media and portable projects into your production workflow with distinct actions for each purpose.</p>
+<table>
+<thead>
+<tr>
+<th>What you want to take out</th>
+<th>Action</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Visible prompt text</td>
+<td>Copy in the editor</td>
+<td>Clipboard text for your generation workflow</td>
+</tr>
+<tr>
+<td>Editable project and media</td>
+<td>Export Project</td>
+<td>Portable .LTXD archive</td>
+</tr>
+<tr>
+<td>LTX timeline, prompts and media references</td>
+<td>Export in LTX Video</td>
+<td>Director JSON for ComfyUI</td>
+</tr>
+<tr>
+<td>Original segment image or clip</td>
+<td>Export image / Export video on a timeline card</td>
+<td>Original source media file</td>
+</tr>
+<tr>
+<td>Attached rendered video</td>
+<td>Export Video in Preview</td>
+<td>Copy of the project render</td>
+</tr>
+<tr>
+<td>Current video frame</td>
+<td>Video context menu → Export Current Frame</td>
+<td>PNG captured from the decoded frame</td>
+</tr>
+<tr>
+<td>Attached workflow JSON</td>
+<td>Export in Project Files</td>
+<td>The selected attachment</td>
+</tr>
+<tr>
+<td>Custom workspace setup</td>
+<td>Export in Settings → Workspaces</td>
+<td>Reusable workspace-definition JSON</td>
+</tr>
+</tbody>
+</table>
+<h2 id="one-folder-a-visible-handoff">One folder. A visible handoff.</h2>
+<p>Set <strong>Download folder</strong> in project Properties for a project-specific destination. Leave it blank to use <strong>Settings → Application → Default download folder</strong>. Exports receive descriptive automatic names; repeated names get numbered suffixes so an earlier output remains available.</p>
+<p>The download button signals completion with a pulse and badge. Click it for <strong>Recent exports</strong>. Open a file with a double-click, use the context menu for <strong>Open folder</strong>, or drag selected files into another application. Click inside the app outside the tray to dismiss it; switching to another window keeps it open. Use the broom to clear history. History remains available after restarting the app; moved or deleted files are marked unavailable.</p>
+<p><img alt="Recent exports grouped in a native tray with direct folder access" loading="lazy" decoding="async" width="430" height="470" src="images/export-history.png" /></p>
+<p><strong>Save to Library</strong> stores the editable project inside Director’s local gallery. <strong>Export Project</strong> creates the portable copy in your download folder. Use both when you want a working library project and a handoff archive.</p>
+<h2 id="connect-the-ltx-plan-to-comfyui">Connect the LTX plan to ComfyUI</h2>
+<p>Set the desired output width and height in LTX’s timeline header, then choose <strong>Export</strong>. Configure the <strong>ComfyUI working directory</strong> in Application Settings so Director can place media in the workflow’s input area.</p>
+<p>Director JSON includes segment timing at 24 fps, prompt text, frame roles, supported video metadata and global direction. Text-only segments retain their type. When an imported video contains audio, export can extract and include its soundtrack as an audio segment for the receiving workflow. Export defaults include crop resizing and audio inpainting.</p>
+<p>Use <strong>Import</strong> to reopen a supported LTX timeline JSON timeline. It restores supported image, video and text segments and global context; it is not an editor for every ComfyUI node or specialized track. For the complete native working project, use .LTXD.</p>
+<h2 id="design-a-workspace-around-your-process">Design a workspace around your process</h2>
+<p>Open <strong>Settings → Workspaces</strong>. Stock and custom definitions let you choose the editor structure and the instructions used for prompt generation and refinement.</p>
+<p><img alt="A custom cinematic workspace with a Generic engine, unified prompt and editable instructions" loading="lazy" decoding="async" width="960" height="850" src="images/workspace-definitions.png" /></p>
+<table>
+<thead>
+<tr>
+<th>Setting</th>
+<th>Creative control</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Name and ID</td>
+<td>Recognizable selector name and reusable workspace identity</td>
+</tr>
+<tr>
+<td>Generation engine</td>
+<td>LTX, MiniMax Frames, MiniMax References or Generic</td>
+</tr>
+<tr>
+<td>Prompt layout</td>
+<td>One unified production prompt or individual segment prompts</td>
+</tr>
+<tr>
+<td>Maximum shots</td>
+<td>Maximum timeline segments; set 0 (Unlimited) for no count limit</td>
+</tr>
+<tr>
+<td>Global prompt</td>
+<td>Shared direction where supported by the segmented setup</td>
+</tr>
+<tr>
+<td>Audio generation</td>
+<td>Availability of audio-direction controls</td>
+</tr>
+<tr>
+<td>Reference media and kinds</td>
+<td>Which source types and reference attributes the workspace accepts</td>
+</tr>
+<tr>
+<td>Untimed image slots</td>
+<td>Up to two visual-reference targets where supported</td>
+</tr>
+<tr>
+<td>Generation instructions</td>
+<td>Your master direction for creating a first draft</td>
+</tr>
+<tr>
+<td>Refinement instructions</td>
+<td>Your rules for developing the edited draft</td>
+</tr>
+</tbody>
+</table>
+<p>Choose <strong>New</strong>, set the name, engine and layout, then write the generation and refinement instructions. <strong>Generic</strong> supports a unified or segmented layout for your own prompting approach. Its templates configure prompt authoring; they do not install or run a video model.</p>
+<p>MiniMax workspaces default to <strong>9 shots</strong>. Save a different limit or choose
+<strong>Unlimited</strong> for your own workspace. The count includes image, video and text
+segments, and applies to additions, splits and AI timeline edits. Existing
+projects above the limit keep all their segments; reduce the count or raise the
+setting to add more. The sequence-duration setting remains independent.</p>
+<p><img alt="MiniMax workspace settings with a nine-shot maximum" loading="lazy" decoding="async" width="1020" height="860" src="images/workspace-shot-limit.png" /></p>
+<h2 id="reuse-the-direction-you-like">Reuse the direction you like</h2>
+<p>Templates can include the supported fields listed in the editor, such as Director’s Intent, the current prompt, ordered plan and total duration. Use these fields to blend project context with your preferred camera, continuity or writing rules.</p>
+<p>Choose <strong>Save / rename</strong> to keep the definition, <strong>Export</strong> to share or reuse it, and <strong>Import</strong> to load a definition JSON. An import with a matching ID replaces that local definition. <strong>Restore stock</strong> brings back the included definitions while preserving custom definitions with other IDs. <strong>Delete</strong> removes the selected definition.</p>
+<p>Native projects carry their workspace identity and a portable definition. Opening a project can install its definition when it is missing locally; an existing local definition with the same ID takes precedence. This lets you carry a setup with the project while continuing to manage your local templates.</p>
+<p><strong>Continue:</strong> <a href="#prompts">Prompt workflows</a> · <a href="#install">Application setup</a> · <a href="#start">Complete feature guide</a></p>
+<p>The shipped defaults are LTX Video, two guide-based MiniMax templates and two Official Skill variants of Standard / Keyframes and Full Reference. Upgrades replace untouched old MiniMax factory definitions and preserve custom definitions. Unified workspaces share the segment editor and keep a separate production draft below it.</p></section><section id="comfy" class="chapter" data-title="ComfyUI handoff"><span class="eyebrow">DIRECTOR GUIDE</span><h1 id="comfyui-export-artwork">ComfyUI export artwork</h1>
+<p>The ComfyUI export action uses the official Comfy logo from <a href="https://github.com/Comfy-Org/ComfyUI_frontend/blob/main/public/assets/images/comfy-logo-single.svg">Comfy-Org/ComfyUI_frontend</a>, used to identify the export destination. Source repository <a href="https://github.com/Comfy-Org/ComfyUI_frontend/blob/main/LICENSE">license</a>. The mark identifies ComfyUI; this application is Prompt Director.</p>
+<p>The packaged graph is adapted from the user-supplied MiniMax workflow. Its source media names, editor previews and scene prompt are removed; export fills them from the current project.</p></section><section id="install" class="chapter" data-title="Installation"><span class="eyebrow">DIRECTOR GUIDE</span><h1 id="start-directing-with-prompt-director">Start directing with Prompt Director.</h1>
+<h2 id="your-desktop-workspace-for-ai-video-planning">Your desktop workspace for AI video planning</h2>
+<p>Install Prompt Director, open a project and start arranging your sequence. Timeline editing and project organization work locally. Connect Gemini, OpenAI API, or your eligible ChatGPT plan when you want help generating or refining prompts.</p>
+<p><img alt="The Prompt Director startup screen" loading="lazy" decoding="async" width="980" height="558" src="images/aurora-startup.png" /></p>
+<h2 id="install-the-current-experimental-build">Install the current experimental build</h2>
+<p>You need <strong>Python 3.10 or newer</strong> and a desktop environment supported by Qt 6. A virtual environment keeps Director’s dependencies separate from other Python applications.</p>
+<h3 id="linux-and-macos">Linux and macOS</h3>
+<pre><code class="language-bash">python3 -m venv ~/.venvs/ltx-director
+source ~/.venvs/ltx-director/bin/activate
+python -m pip install --upgrade pip
+python -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a99-py3-none-any.whl'
+prompt-director
+</code></pre>
+<h3 id="windows-powershell">Windows PowerShell</h3>
+<pre><code class="language-powershell">py -m venv &quot;$env:USERPROFILE\ltx-director-venv&quot;
+&amp; &quot;$env:USERPROFILE\ltx-director-venv\Scripts\Activate.ps1&quot;
+python -m pip install --upgrade pip
+python -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a99-py3-none-any.whl'
+prompt-director
+</code></pre>
+<p>On first launch, Prompt Director migrates preferences, custom workspaces, projects and managed media from the previous LTX Director folders. Existing files in the new folders take priority, and the original folders are retained.</p>
+<p>The package installs Qt components, image handling and the bundled FFmpeg helper. Review-video playback also depends on codec availability on the system.</p>
+<h2 id="connect-your-prompt-writing-provider">Connect your prompt-writing provider</h2>
+<p>Open <strong>Settings → Application</strong> to choose <strong>Gemini</strong>, <strong>OpenAI</strong>, or <strong>chatgpt</strong>. Gemini and OpenAI API use their existing API keys. For ChatGPT-plan authentication, open the new <strong>ChatGPT plan</strong> tab, select <strong>Continue with ChatGPT</strong>, approve plan usage in your browser, then choose a model from your account-specific model catalog. Return to the Application tab to select the <strong>chatgpt</strong> provider. No API key is required for the ChatGPT-plan route. Set the request timeout, additional retry attempts and cooldown to fit your provider.</p>
+<p><img alt="Application Settings with provider selection, request controls, display scale and folders" loading="lazy" decoding="async" width="960" height="850" src="images/application-settings.png" /></p>
+<p>API keys can be retained for the session or stored through the app’s persistent-key option. Use persistent storage on a computer you trust. Keys are excluded from portable project exports. AI requests send the selected project context to the provider; local editing and project storage do not require an AI call.</p>
+<h2 id="set-up-your-working-space">Set up your working space</h2>
+<p>Set a default download folder for exports and a ComfyUI working directory for LTX JSON handoff. Customize status tags and other labels. Adjust text scale from 75% to 200%, either here or from the main toolbar. Open <strong>Workspaces</strong> when you want to customize prompt layouts and master instructions.</p>
+<p>On Linux, the first launch installs an application-menu shortcut for the current installation. Refresh it manually with:</p>
+<pre><code class="language-bash">prompt-director-install-desktop
+</code></pre>
+<p>Remove that shortcut with <code>prompt-director-uninstall-desktop</code>. Keep the virtual environment in place while its launcher is in use.</p>
+<h2 id="run-from-source">Run from source</h2>
+<pre><code class="language-bash">git clone --branch experimental https://github.com/etoven/ltx-director-director.git
+cd ltx-director-director
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install .
+prompt-director
+</code></pre>
+<p>On Windows, use <code>py -m venv .venv</code> and activate <code>.venv\Scripts\Activate.ps1</code>. Use the <code>main</code> branch for the stable line and <code>experimental</code> for Aurora development.</p>
+<h2 id="when-a-desktop-dependency-needs-attention">When a desktop dependency needs attention</h2>
+<p>On Ubuntu or Debian, an error naming a missing XCB component can be resolved with <code>sudo apt install libxcb-cursor0 libxkbcommon-x11-0</code>. If the named missing library is <code>libEGL.so.1</code>, install <code>libegl1</code>.</p>
+<p>For inline spelling suggestions, install an Enchant provider and a dictionary for your language. The editors remain usable without a matching dictionary.</p>
+<p>If startup reports missing PySide6 modules, activate the environment used to run Director and reinstall the wheel with <code>python -m pip install --force-reinstall</code> followed by the wheel URL above. For a provider error, check the selected model, API key, quota and connection in Settings.</p>
+<p><strong>Ready for the first sequence? <a href="#start">Open the complete feature and usage guide →</a></strong></p>
+<h2 id="chatgpt-plan-oauth">ChatGPT plan OAuth</h2>
+<p>The ChatGPT-plan provider is for eligible Plus/Pro accounts on locally installed open-source clients. Requests are made to the official Responses API with <code>store=false</code> and <code>stream=true</code>, using a model listed for your authenticated account. The app stores its account tokens in <code>~/.config/PromptDirector/chatgpt-oauth.json</code> (owner-only permissions on Unix), separate from project exports and QSettings API keys. You can switch accounts, refresh the live model list, sign out, and manage plan usage in ChatGPT Settings. API-key providers are unchanged. The app's workspace prompts, selected timeline references and images are sent to the selected provider when generating AI content; the ChatGPT sign-in itself does not grant access to your conversation history.</p>
+<p>ChatGPT-plan usage is subject to your account limits and selected-model eligibility. If authorization or permissions expire, reconnect from the ChatGPT plan tab. Documentation: https://developers.openai.com/siwc/token-sharing-open-source/sign-in</p>
+<h2 id="live-generation-streaming">Live generation streaming</h2>
+<p>Every prompt-generation and refinement action now displays the in-progress model output. Magic Build and segment/global refinements use a two-column generation overlay; MiniMax/Generic unified prompts display a collapsible Live AI Activity panel immediately above the editable prompt. The left column shows only provider-published reasoning <strong>summaries</strong> when the model provides them; the right column streams generated prompt text. Both columns have an Auto-scroll control. On retries the stream resets to avoid mixing separate attempts. The finished prompt is applied to the editable project only once the provider response passes its normal validation.</p>
+<p>Gemini is streamed through <code>streamGenerateContent</code> with <code>includeThoughts</code> when accepted. OpenAI API and ChatGPT OAuth use Responses streaming and request <code>reasoning.summary=auto</code> when supported. Non-thinking models still stream generated text; unsupported summary options automatically fall back to text-only streaming. Private reasoning and cryptographic thought signatures are never displayed.</p>
+<h2 id="structured-streaming-and-completed-draft-recovery">Structured streaming and completed-draft recovery</h2>
+<p>The Live AI Activity panel decodes JSON prompt content incrementally into readable field cards rather than showing escaped JSON syntax. Custom SVG icons identify reasoning summaries and generated prompt output. Live generated text is presentation-only until the AI response finishes validation.</p>
+<p>A completion is fingerprinted using the same provider and model that originally generated it. This fixes false "inputs changed" rejection when ChatGPT OAuth uses a model different from the Gemini default. Genuine concurrent timeline or editor changes preserve the completed prompt in a reviewable state: choose <strong>Use generated result</strong> to apply it explicitly or <strong>Copy generated</strong> to copy it without replacing your edits.</p>
+<h2 id="one-contextual-ai-control-and-live-in-editor-diff">One contextual AI control and live in-editor diff</h2>
+<p>Each active prompt editor now displays one contextual <strong>Generate</strong> or <strong>Refine</strong> split-button. Its dropdown exposes the available operations for that workspace: generate timeline prompts, generate unified prompt, refine unified prompt, refine selected segment, refine global direction and refine timing. There are no duplicate visible refine buttons or regenerate controls. The existing actions and worker paths are reused.</p>
+<p>Generated prompt text animates <em>inside the active text box</em>, with newly arriving text tinted red and removed/replaced passages struck through in muted red. Unchanged lines remain visible as anchors. This temporary diff does not enter project state, and the original QTextDocument/undo history is preserved. On completion or error the original editor document is restored before validating/applying the finished response. When a user begins to edit, inline animation suspends immediately, restores the original editor and yields to the user, with the existing result-conflict recovery available if necessary.</p>
+<p>Reasoning summaries and provider progress are displayed in a separate <strong>AI ACTIVITY</strong> Qt dock. The panel can be floated or docked; open it through the primary AI button dropdown. It automatically opens when the selected model publishes a reasoning summary. JSON model output is parsed incrementally so red typing shows decoded prompt prose rather than escape sequences or schema keys. If a model provides no text until completion, the normal validated result application still works.</p>
+<h2 id="gpt-6-combined-segment-and-unified-refinement">GPT-6+ combined segment and unified refinement</h2>
+<p>Existing workspace creative/production prompts stay intact. For supported GPT-6+ OpenAI API-key or ChatGPT-plan models, and supported Gemini Flash text models, the same Generate/Refine action adds an extra JSON segments array to the ordinary unified prompt response. This is automatic and not an extra button. IDs identify existing media so the plan can propose changes in prompt, duration, frame role, order, inserts, or deletions without inventing physical source files. The revised unified prompt and segment plan are validated together before being applied.</p>
+<p>MiniMax and Generic workflows now show only the actual unified text editor, not a second segment prompt box. The timeline toolbar contains the one contextual Generate/Refine button, and the segment/global/unified target selector. The button has no dropdown: mark edits anywhere using <code>/refine</code> or <code>/refine-global</code>, then click Refine. Prompt-only refinement workspaces keep that same button in the visible editor header. Red in-editor generated-text animation auto-scrolls while editors and timeline edit controls are locked, so no concurrent-edit conflict warning is needed.</p>
+<p>Completed segment JSON records preview proposed timeline operations as they stream; the full validated plan commits atomically. New tiles slide into place and expand to their planned duration. When the model's segment JSON requests artwork, the app discovers its configured image tools automatically and shows a one-time cost approval. For ChatGPT OAuth text models, it prefers the separate Gemini API's <code>gemini-3.1-flash-lite-image</code> (Nano Banana 2 Lite), then a conventional OpenAI API key where available. Other supported Gemini planning models also use Flash Lite Image. The new tile shows a pulsing generation placeholder while the selected paid image API renders. On success the real PNG replaces the placeholder as a start frame; on failure the proposed segment and image prompt remain with a right-click Retry artwork generation entry. If there is no image API key or the user declines the one-time cost approval, the artwork request remains pending. Automatic image generation is limited to four new images per pass; additional requests wait for manual initiation. ChatGPT-plan OAuth alone never has image generation access. Paid Gemini/OpenAI keys are kept separate; approval is remembered per provider until changed in settings.</p>
+<p>The AI activity dock continues to show provider-published reasoning summaries, while project identity checks still prevent stale worker output from overwriting a different project.</p>
+<h2 id="single-button-slash-refinement-and-automatic-image-tools-1130a81">Single-button slash refinement and automatic image tools (1.13.0a81)</h2>
+<p>Write <code>/refine</code> or <code>/refine-global</code> in the unified prompt, current segment prompt, director intent, or global direction, and click the only <strong>Refine</strong> button. In unified modes the model returns both the revised production prompt and the appended <code>segments</code> JSON for automatic timeline diff/application; there are no separate Generate Timeline or segment-operation actions in a dropdown. Gemini Flash text models can provide this JSON too.</p>
+<p>If the returned JSON requests frame artwork, the app automatically uses an available supported image backend. Its default ChatGPT OAuth fallback is the separate paid <code>gemini-3.1-flash-lite-image</code> API with a Gemini key; an OpenAI API key is another option. Image generation is <strong>not</strong> included in ChatGPT subscription OAuth. Before the first paid generation with each provider, a one-time approval warning appears. Both approvals and declines are remembered once per provider; declining leaves the artwork tile pending. Right-click a pending tile to explicitly revisit a declined decision. At most four automatic image requests are submitted in a single refinement.</p>
+<h2 id="directors-intent-selector-correction-1130a81">Director's Intent selector correction (1.13.0a81)</h2>
+<p>The two-item selector next to the <strong>Director's Intent</strong> text area chooses the <strong>visible editor contents</strong>, NOT an AI target or separate generation command. Choose <strong>Director's Intent</strong> to edit the persistent overall creative intent, or <strong>Selected Segment</strong> to edit the actual prompt belonging to whichever timeline segment is selected. The selector occupies the same editor position, so there are no additional duplicate prompt boxes. Edits and inline <code>/refine</code> annotations are saved on their corresponding segment; changing timeline selection updates the visible text. Switching back preserves the original creative intent and unified production prompt. The one Generate/Refine button remains in the shared timeline controls; refinements always read /refine annotations from all existing prompts and return a unified production prompt and segment JSON together when supported.</p></section><footer><h2>Keep creating.</h2><p>Open Help → Setup wizard whenever you want to revisit your sources. The donation link will be added in a future update.</p><a href="../effects/index.html">Open the full source Effects catalog</a><p>Wizard header art was created for Director. Product screenshots illustrate the native controls; draft progress displays are interface examples, not model benchmarks.</p></footer></main>
+<dialog id="tour"><button id="tour-close" aria-label="Close tour">×</button><span class="eyebrow">A SHORT CREATIVE LOOP</span><h2 id="tour-title"></h2><p id="tour-text"></p><p id="tour-count"></p><div class="tour-controls"><button id="tour-prev">Back</button><button id="tour-next">Next</button></div></dialog><script src="manual.js"></script></body></html>
