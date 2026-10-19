@@ -8,6 +8,7 @@ from PySide6.QtCore import QLocale, Qt
 from PySide6.QtGui import QAction, QColor, QSyntaxHighlighter, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import QTextEdit
 from .inline_cues import NOTE_TAG
+from .prompt_timecodes import timecodes, utf16_length
 
 try:
     import enchant
@@ -34,6 +35,7 @@ def system_dictionary():
 class SpellHighlighter(QSyntaxHighlighter):
     def __init__(self, editor: QTextEdit, dictionary):
         super().__init__(editor.document())
+        self.editor = editor
         self.dictionary = dictionary
         self._known: dict[str, bool] = {}
         self._format = QTextCharFormat()
@@ -58,6 +60,13 @@ class SpellHighlighter(QSyntaxHighlighter):
         pill.setFontWeight(700)
         for match in DIRECTIVES.finditer(text):
             self.setFormat(match.start(), len(match.group()), pill)
+        if getattr(self.editor, 'highlight_timeline_timecodes', False):
+            timing = QTextCharFormat()
+            timing.setForeground(QColor('#d0f3ff'))
+            timing.setBackground(QColor('#245163'))
+            timing.setFontWeight(700)
+            for match in timecodes(text):
+                self.setFormat(utf16_length(text[:match.start()]), len(match.group()), timing)
 
     def accept(self, word: str) -> None:
         self.dictionary.add_to_session(word)

@@ -29,6 +29,23 @@ time stay fixed. The drag snaps to frames and stops at one frame per segment or
 the available video source limits. The final card's right grip changes the
 overall length; the Duration field still edits a single card.
 
+Recognized timecodes in the **unified prompt** follow manual timeline edits
+immediately, using local pattern matching without an AI request. Director
+counts through the segments in order and highlights `MM:SS.xx`, `HH:MM:SS`
+and 24 fps SMPTE codes. A range uses both segment boundaries; a lone code uses
+the segment's **Start** or **End** frame mode. Reordering cards, dragging a
+divider, editing Duration or changing that frame mode updates the codes while
+preserving your prose. Resizing keeps the text cursor and selection in place.
+
+Click a card to emphasize its matching timecode and scroll the unified prompt
+to it. The cursor lands just after the start code, or the end code in End mode.
+Typing refreshes the highlights without changing the timeline or rewriting
+your text. Broken codes are skipped, later valid codes continue matching in
+order, and extra cues stay as written. Repair a code to reconnect it on the
+next timing edit.
+
+![Moving the first divider updates both ranges; the selected second segment's timecodes are emphasized](images/unified-prompt-timecodes.png)
+
 Use the **Re-time all** clock button beneath Rewrite Timeline in the right rail
 to distribute time using dialogue delivery, action, camera movement, frame roles
 and shot pacing. Set the sequence-length box below the timeline to the desired

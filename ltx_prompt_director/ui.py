@@ -65,6 +65,7 @@ from .spellcheck import install_spellcheck
 from .prompt_tags import prompt_content, consume_global_refinements, install_prompt_tags, render_prompt_notes, insert_note
 from .quick_fixes import QuickFixEditor, load_presets, preset_groups
 from .inline_cues import PromptTextEdit
+from .prompt_timecodes import document_cues, retime_prompt
 
 FPS = 24
 MIN_DURATION = 0.01
@@ -4111,10 +4112,12 @@ class MainWindow(QMainWindow):
         unified_layout = QVBoxLayout(self.unified_panel)
         unified_layout.setContentsMargins(9, 6, 9, 5)
         self.unified_prompt = PromptTextEdit()
+        self.unified_prompt.highlight_timeline_timecodes = True
         self.unified_prompt.setObjectName("promptEditor")
         self.unified_prompt.setAcceptRichText(False)
         self.unified_prompt.setPlaceholderText("Generate the unified prompt from your segments, or write and refine your own…")
         self.unified_prompt.textChanged.connect(self.minimax_editor_changed)
+        self.unified_prompt.textChanged.connect(self.highlight_selected_prompt_timecode)
         for editor in (self.intent,self.segment_prompt,self.unified_prompt):
             editor.setMinimumHeight(32)
             editor.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Ignored)
@@ -6182,6 +6185,7 @@ class MainWindow(QMainWindow):
             return
         ordered_ids = [self.timeline.item(row).data(Qt.ItemDataRole.UserRole) for row in range(self.timeline.count())]
         self.segments = order_segments_by_ids(self.segments, ordered_ids)
+        self.retime_unified_prompt()
         self.update_timeline_layout()
         self.mark_dirty()
 
@@ -6226,6 +6230,7 @@ class MainWindow(QMainWindow):
             self.frame_number.setText("Frame —")
         self._loading = False
         self.update_counts()
+        self.highlight_selected_prompt_timecode()
 
     def reload_clicked_segment(self, item: QListWidgetItem) -> None:
         """A timeline click targets the segment, even when already selected."""
@@ -6235,6 +6240,7 @@ class MainWindow(QMainWindow):
         if self.unified_workspace and not self.prompt_only_workspace:
             self.prompt_scope.setCurrentIndex(self.prompt_scope.findData("segment"))
         self.refresh_segment_prompt_box(row)
+        self.highlight_selected_prompt_timecode(scroll=True)
 
     def refresh_segment_prompt_box(self, row: int) -> None:
         """Update only the segment prompt box, preserving all other editor state."""
@@ -6311,6 +6317,7 @@ class MainWindow(QMainWindow):
         self.end_button.setChecked(role == "end")
         self.start_button.blockSignals(False)
         self.end_button.blockSignals(False)
+        self.retime_unified_prompt()
         self.mark_dirty()
 
     def change_duration(self, segment_id: str, value: float) -> None:
@@ -6319,6 +6326,7 @@ class MainWindow(QMainWindow):
         value = min(max(MIN_DURATION, round(value, 2)), self.available_segment_duration(segment))
         self.preserve_timeline_scale_for_growth(sum(item.duration for item in self.segments) - segment.duration + value)
         segment.duration = value
+        self.retime_unified_prompt()
         self.mark_dirty()
         for row in range(self.timeline.count()):
             item = self.timeline.item(row)
@@ -6395,6 +6403,7 @@ class MainWindow(QMainWindow):
                     changed = True
         if not changed:
             return
+        self.retime_unified_prompt()
         self.mark_dirty()
         self.update_timeline_layout()
         self.sync_selected_duration_control()
@@ -8322,6 +8331,49 @@ class MainWindow(QMainWindow):
         self.sync_minimax_panel(cache_state)
         self.minimax_panel.focus_prompt_editor()
         return self.minimax_panel
+
+    def retime_unified_prompt(self) -> None:
+        """Follow timeline edits locally without regenerating the production draft."""
+        if self._loading or self.ai_busy or not self.unified_workspace or self.prompt_only_workspace:
+            return
+        # A diff projection is display text. Never patch it as an authored draft.
+        for review in (getattr(self, 'inline_typing', None), getattr(self, 'paragraph_review', None)):
+            if review is not None and review.editor is self.unified_prompt:
+                return
+        if retime_prompt(self.unified_prompt, [item.duration for item in self.segments],
+                         [item.role for item in self.segments]):
+            self.minimax_editor_changed()
+        self.highlight_selected_prompt_timecode()
+
+    def highlight_selected_prompt_timecode(self, *, scroll: bool = False) -> None:
+        """Emphasize the selected beat; navigate the caret only on an explicit click."""
+        if not hasattr(self, 'unified_prompt'):
+            return
+        if not self.unified_workspace or self.prompt_only_workspace:
+            self.unified_prompt.setExtraSelections([])
+            return
+        for review in (getattr(self, 'inline_typing', None), getattr(self, 'paragraph_review', None)):
+            if review is not None and review.editor is self.unified_prompt:
+                return
+        row = self.timeline.currentRow()
+        selections = []
+        cue = next((cue for index, cue in enumerate(document_cues(self.unified_prompt))
+                    if index == row), ()) if row >= 0 else ()
+        for start, code in cue:
+            selection = QTextEdit.ExtraSelection()
+            selection.cursor = QTextCursor(self.unified_prompt.document())
+            selection.cursor.setPosition(start)
+            selection.cursor.setPosition(start + len(code), QTextCursor.MoveMode.KeepAnchor)
+            selection.format.setBackground(QColor('#80612a'))
+            selection.format.setForeground(QColor('#fff0bf'))
+            selections.append(selection)
+        self.unified_prompt.setExtraSelections(selections)
+        if scroll and selections:
+            segment = self.current_segment()
+            cursor = selections[-1 if segment and segment.role == 'end' else 0].cursor
+            cursor.setPosition(cursor.selectionEnd())
+            self.unified_prompt.setTextCursor(cursor)
+            self.unified_prompt.ensureCursorVisible()
 
     def minimax_editor_changed(self) -> None:
         if self._loading or not self.minimax_panel or not self.unified_workspace:

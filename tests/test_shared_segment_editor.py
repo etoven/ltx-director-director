@@ -38,11 +38,17 @@ def test_unified_edit_never_conforms_or_mutates_segments(window, draft):
 def test_segment_edits_and_duration_preserve_unified_draft(window, mode):
     window.set_project_type(mode)
     window.unified_prompt.setPlainText('My manually edited production draft')
-    window.segment_prompt.setPlainText('New motion')
-    window.change_duration(window.segments[0].id, 4)
+    # The editor opens in Global scope. A card click selects Segment scope and
+    # exposes the native segment editor rather than editing global direction.
+    window.reload_clicked_segment(window.timeline.item(0))
+    with patch.object(window, 'start_ai_worker') as worker:
+        window.intent_segment_prompt.setPlainText('New motion')
+        window.change_duration(window.segments[0].id, 4)
+    worker.assert_not_called()
     assert window.segments[0].prompt == 'New motion'
     assert window.unified_prompt.toPlainText() == 'My manually edited production draft'
-    assert 'Segment changes available' in window.minimax_panel.cache_state.text()
+    assert window.minimax_prompt_text == 'My manually edited production draft'
+    assert window.global_prompt.toPlainText() == ''
 
 @pytest.mark.parametrize('mode', ['minimax_base_guide', 'minimax_full_reference_guide', 'minimax_official_skill_base', 'minimax_official_skill_reference'])
 def test_generated_prompt_does_not_drive_timeline(window, mode):
