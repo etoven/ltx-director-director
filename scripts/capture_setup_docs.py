@@ -27,13 +27,13 @@ def capture_local():
     panel = w.project_preview_panel
     w.project_preview_dock.setFloating(True); w.project_preview_dock.resize(740, 500)
     panel.title.setText('Local generation · interface example')
-    panel.empty.setText('Draft video samples appear here during generation.\nThis is a control example; no model render was run.')
+    panel.empty.setText('Live noisy latents appear here during generation.\nThis is a control example; no model render was run.')
     w.project_preview_dock.show()
     QTimer.singleShot(250, capture_preview)
 def capture_preview():
     w.local_video_pill.update_event({'kind': 'progress', 'percent': 42, 'eta_seconds': 80})
     w.project_preview_dock.grab().save(str(out / 'local-video-controls.png'))
-    dialog = SettingsDialog(w.settings, w); dialog.resize(1000, 1000)
+    dialog = SettingsDialog(w.settings, w); dialog.resize(1000, 1060)
     dialog.layout().itemAt(0).widget().setCurrentIndex(1)
     panel = dialog.local_models; panel.tabs.setCurrentIndex(1)
     for key, name in {'video_model': 'minimax_h3_ref2va_pruned_int8_convrot.safetensors',

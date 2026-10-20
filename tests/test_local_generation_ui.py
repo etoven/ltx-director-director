@@ -135,13 +135,20 @@ def test_native_video_uses_unified_output_reference_panel_and_settings_directly(
         setup.video_seed.stepBy(1); assert setup.video_seed.value() == 931351171509953
         setup.video_seed.setValue(931351171509952)
         assert (setup.video_width.value(), setup.video_height.value(), setup.video_duration.value(), setup.video_steps.value()) == (960, 544, 15, 20)
+        assert setup.video_preview_mode.currentData() == 'noisy'
+        assert setup.video_preview_every.value() == 5 and not setup.video_preview_every.isEnabled()
+        setup.video_preview_mode.setCurrentIndex(setup.video_preview_mode.findData('denoised'))
+        assert setup.video_preview_every.isEnabled()
+        setup.video_preview_every.setValue(7)
+        assert setup.value()['video_preview_mode'] == 'denoised' and setup.value()['video_preview_every'] == 7
+        setup.video_preview_mode.setCurrentIndex(0)
         save_profile(w.settings, setup.value())
         jobs = []
         with patch('ltx_prompt_director.ui.validate_profile'), \
-             patch.object(w, 'start_disk_job', side_effect=lambda op, args, ready, fail, **kw: jobs.append((op, args, ready, fail))):
+             patch.object(w, 'start_disk_job', side_effect=lambda op, args, ready, fail, **kw: jobs.append((op, args, ready, fail, kw))):
             w.generate_local_video()
         assert len(jobs) == 1
-        operation, args, ready, failed = jobs[0]
+        operation, args, ready, failed, callbacks = jobs[0]
         w.minimax_reference_images[0]['name'] = 'Edited after start'
         with patch('ltx_prompt_director.ui.run_request', return_value={'path': '/result.mp4'}) as run:
             operation(*args)
@@ -154,6 +161,23 @@ def test_native_video_uses_unified_output_reference_panel_and_settings_directly(
         assert request['references'][2]['kind'] == 'audio' and request['references'][2]['path'] == '/source/only.wav'
         assert w.unified_prompt.toPlainText() == authored
         assert w.minimax_reference_images[3]['kind'] == 'video'
+        # Live frames use the existing video surface without attaching a PNG
+        # as the saved project video. Results from a stale workspace are ignored.
+        from PySide6.QtGui import QImage
+        with tempfile.TemporaryDirectory() as folder:
+            frame = QImage(32, 18, QImage.Format.Format_RGB32); frame.fill(0xff808040)
+            path = str(Path(folder) / 'latent.png'); assert frame.save(path)
+            event = {'kind': 'preview', 'path': path, 'media': 'image', 'preview_mode': 'noisy', 'step': 2}
+            callbacks['progress'](event)
+            panel = w.project_preview_panel
+            assert 'live noisy latent' in panel.title.text()
+            assert panel.pending_preview_path == '' and not panel.export.isEnabled()
+            assert panel.video.videoSink().videoFrame().isValid()
+            assert panel.player.source().isEmpty()
+            w.workspace_revision += 1
+            with patch.object(panel.video.videoSink(), 'setVideoFrame') as show:
+                callbacks['progress'](event); show.assert_not_called()
+            w.workspace_revision -= 1
         failed('Diagnostic test finished')
         assert not w._local_video_busy
         setup.video_random_seed.setChecked(True)

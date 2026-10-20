@@ -146,7 +146,7 @@ class LocalModelsPanel(QWidget):
         self.steps = QSpinBox(); self.steps.setRange(4, 100); self.steps.setValue(int(self.profile.get('steps', 30)))
         engine_form.addRow('Default image sampling steps', self.steps)
         self.every = QSpinBox(); self.every.setRange(1, 50); self.every.setValue(int(self.profile.get('preview_every', 5)))
-        engine_form.addRow('Preview every N steps', self.every)
+        engine_form.addRow('Image preview every N steps', self.every)
         self.variant = QComboBox(); self.variant.addItem('Klein Base 4B · FP8 · lower memory', '4b')
         self.variant.addItem('Klein Base 9B · FP8 · more detail, more memory', '9b')
         self.variant.setCurrentIndex(max(0, self.variant.findData(self.profile.get('image_variant', '4b'))))
@@ -180,6 +180,17 @@ class LocalModelsPanel(QWidget):
         self.video_duration.setSuffix(' seconds')
         self.video_duration.setToolTip('15 seconds aligns to 362 frames at 24 fps (15.08 s). 16:9 at 0.5 MP uses 960 × 544.')
         self.tabs.widget(1).layout().insertRow(5, 'Video length', self.video_duration)
+        self.video_preview_mode = QComboBox()
+        self.video_preview_mode.addItem('Live noisy latent · no VAE decode', 'noisy')
+        self.video_preview_mode.addItem('Denoised estimate · periodic VAE decode', 'denoised')
+        self.video_preview_mode.setCurrentIndex(max(0, self.video_preview_mode.findData(self.profile.get('video_preview_mode', 'noisy'))))
+        self.video_preview_mode.setToolTip('Noisy mode shows actual latent changes with approximate colors, without extra model passes. Denoised mode decodes an opening-chunk clean estimate and pauses sampling for the VAE.')
+        self.tabs.widget(1).layout().insertRow(6, 'Video preview', self.video_preview_mode)
+        self.video_preview_every = QSpinBox(); self.video_preview_every.setRange(1, 50)
+        self.video_preview_every.setValue(int(self.profile.get('video_preview_every', 5)))
+        self.video_preview_every.setEnabled(self.video_preview_mode.currentData() == 'denoised')
+        self.video_preview_mode.currentIndexChanged.connect(lambda: self.video_preview_every.setEnabled(self.video_preview_mode.currentData() == 'denoised'))
+        self.tabs.widget(1).layout().insertRow(7, 'Denoised preview every N steps', self.video_preview_every)
         row = QHBoxLayout()
         self.scan_button = QPushButton('Find my model files'); self.scan_button.clicked.connect(self.scan)
         self.prepare = QPushButton('Prepare local engine'); self.prepare.clicked.connect(lambda: self.setup('install'))
@@ -211,6 +222,7 @@ class LocalModelsPanel(QWidget):
         return {**self.profile, **{k: v.text().strip() for k, v in self.fields.items()},
                 'device': self.device.currentData(), 'offload': self.offload.isChecked(),
                 'steps': self.steps.value(), 'preview_every': self.every.value(), 'image_variant': self.variant.currentData(),
+                'video_preview_mode': self.video_preview_mode.currentData(), 'video_preview_every': self.video_preview_every.value(),
                 'video_steps': self.video_steps.value(), 'video_sampler': self.video_sampler.currentData(),
                 'video_width': self.video_width.value(), 'video_height': self.video_height.value(), 'video_duration': self.video_duration.value(),
                 'video_variant': self.video_variant.currentData(), 'video_seed': -1 if self.video_random_seed.isChecked() else self.video_seed.value(), 'writer_repo': self.writer_repo.currentText().strip()}

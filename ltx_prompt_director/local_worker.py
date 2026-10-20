@@ -291,11 +291,11 @@ def video_generation(request):
                 progress(f'H3 {name} encoder · layer {number}/{total}'))
     current_step = [0]
     def denoiser_progress(number, total):
-        emit('log', message=f'H3 denoiser · block {number}/{total}')
+        emit('log', message=f'H3 sampling network · layer {number}/{total}')
         steps = int(request.get('steps', profile.get('video_steps', 20)))
         fraction = current_step[0] + (number - 1) / total
         eta = (time.monotonic() - started[0]) / fraction * max(0, steps - fraction) if fraction >= 1 and started[0] else None
-        progress(f'Rendering video and audio · step {current_step[0] + 1}/{steps} · block {number}/{total}',
+        progress(f'Rendering video and audio · step {current_step[0] + 1}/{steps} · network layer {number}/{total}',
                  fraction / steps * 94, eta)
     for index, block in enumerate(pipe.dit.blocks):
         block.register_forward_pre_hook(lambda module, inputs, number=index + 1, total=len(pipe.dit.blocks):
@@ -333,12 +333,20 @@ def video_generation(request):
         else:
             image = _pil_reference(ref)
             if image is not None: references.append({'type': 'image', 'image': image})
-    steps = int(request.get('steps', profile.get('video_steps', 20))); every = max(1, int(profile.get('preview_every', 5)))
+    steps = int(request.get('steps', profile.get('video_steps', 20)))
     diagnostic_steps = max(0, int(request.get('diagnostic_steps', 0)))
     completed_steps = [0]
     root = Path(request['job_dir']); started = [None]
+    from .local_previews import H3VideoPreview
+    preview = H3VideoPreview(pipe, profile, root, int(request['width']), int(request['height']), steps, dtype, emit)
+    progress('Preview: ' + ('live noisy latent · no VAE decoding during sampling' if profile.get('video_preview_mode', 'noisy') == 'noisy'
+                              else f'denoised estimate · every {profile.get("video_preview_every", 5)} steps'))
     last_video = [None]; original_step = pipe.step
     def step(scheduler, latents, progress_id, **kwargs):
+        if scheduler is pipe.scheduler:
+            if progress_id == 0: preview.noisy(latents, 0)
+            preview.capture_clean(scheduler, latents, progress_id, kwargs['noise_pred'],
+                                  kwargs.get('input_latents'), kwargs.get('inpaint_mask'))
         output = original_step(scheduler, latents, progress_id, **kwargs)
         if scheduler is pipe.scheduler:
             last_video[0] = output.detach()
@@ -355,18 +363,7 @@ def video_generation(request):
             eta = (time.monotonic() - started[0]) / done * max(0, total - done)
             progress('Rendering video and audio', done / total * 94, eta)
             diagnostic_end = diagnostic_steps and done >= diagnostic_steps
-            if last_video[0] is not None and (done % every == 0 or done == total or diagnostic_end):
-                pipe.load_models_to_device(['video_vae'])
-                count = min(last_video[0].shape[2], pipe.video_vae.tokens_chunk_size)
-                decoded = pipe.video_vae.decode_video(last_video[0][:, :, :count], dtype=dtype,
-                                                       tiled=True, tile_size=256, tile_overlap=64)
-                frames = pipe.vae_output_to_video(decoded, min_value=0, max_value=1)
-                from diffsynth.utils.data import save_video
-                path = root / f'preview-{done}.mp4'
-                save_video(frames, str(path), fps=24, quality=5)
-                emit('preview', path=str(path), media='video', draft=True)
-                del decoded, frames
-                pipe.load_models_to_device(pipe.in_iteration_models)
+            if last_video[0] is not None: preview.finish_step(last_video[0], done)
             if diagnostic_end:
                 progress(f'Diagnostic check: decoding after {done}/{total} sampling steps. Output is unfinished.')
                 break

@@ -329,3 +329,15 @@ def test_portable_embedded_reference_survives_a_missing_original_path():
     output = BytesIO(); Image.new('RGB', (8, 8), 'red').save(output, format='PNG')
     reference = {'path': '/missing/original.png', 'image': 'data:image/png;base64,' + base64.b64encode(output.getvalue()).decode()}
     assert _pil_reference(reference).getpixel((0, 0)) == (255, 0, 0)
+
+
+def test_video_preview_defaults_and_optional_denoised_schedule():
+    from ltx_prompt_director.local_previews import denoised_preview_due
+    profile = local.default_profile()
+    assert profile['video_preview_mode'] == 'noisy'
+    assert profile['video_preview_every'] == 5
+    assert not any(denoised_preview_due(profile, n, 20) for n in range(21))
+    profile['video_preview_mode'] = 'denoised'
+    assert [n for n in range(21) if denoised_preview_due(profile, n, 20)] == [5, 10, 15]
+    profile['video_preview_every'] = 3
+    assert [n for n in range(21) if denoised_preview_due(profile, n, 20)] == [3, 6, 9, 12, 15, 18]

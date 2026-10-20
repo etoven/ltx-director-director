@@ -20,7 +20,7 @@ from uuid import uuid4
 
 from PySide6.QtCore import QBuffer, QIODevice, QDateTime, QEasingCurve, QEvent, QEventLoop, QObject, QRunnable, QPoint, QRectF, QSettings, QSize, QStandardPaths, Qt, QThreadPool, QTimer, QUrl, QVariantAnimation, Signal, Slot
 from PySide6.QtGui import QAction, QActionGroup, QBrush, QColor, QCursor, QIcon, QImageReader, QPainter, QPen, QPixmap, QTextCharFormat, QTextCursor, QTextOption
-from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
+from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer, QVideoFrame
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
@@ -4306,12 +4306,26 @@ class MainWindow(QMainWindow):
             if value.get("kind") == "progress": self.local_video_pill.update_event(value)
             elif value.get("kind") == "preview":
                 panel = self.project_preview_panel
+                if value.get("media") == "image":
+                    image = QImageReader(value["path"]).read()
+                    if image.isNull(): return
+                    panel.release_memory_video()
+                    panel._source_generation += 1
+                    panel._memory_preview = False; panel._initial_media_pending = False
+                    panel.player.stop(); panel.player.setSource(QUrl())
+                    panel.pending_preview_path = ""
+                    panel.title.setText(f"Local video · live noisy latent · step {value.get('step', 0)} · approximate colors")
+                    panel.empty.hide(); panel.video.show()
+                    panel.export.setEnabled(False); panel.fullscreen.setEnabled(False)
+                    panel.video.videoSink().setVideoFrame(QVideoFrame(image))
+                    self.local_video_pill.reposition(); self.local_video_pill.raise_()
+                    return
                 panel.release_memory_video()
                 panel._memory_preview = False
                 panel._source_generation += 1
                 panel.pending_preview_path = value["path"]
                 panel._initial_media_pending = True
-                panel.title.setText("Local video · draft sample")
+                panel.title.setText("Local video · denoised draft estimate")
                 panel.empty.hide(); panel.video.show()
                 panel.export.setEnabled(False)
                 panel.player.setSource(QUrl.fromLocalFile(value["path"]))

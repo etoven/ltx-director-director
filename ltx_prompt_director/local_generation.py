@@ -35,7 +35,7 @@ def engine_python():
 def default_profile():
     return dict(python=engine_python(), models_root=str(Path.home() / 'Programs/ComfyUI/models'),
                 video_model='', video_encoder='', video_vae='', audio_vae='', video_assets='', video_variant='ref2va', video_seed=-1,
-                video_width=960, video_height=544, video_duration=15, video_steps=20, video_sampler='res_multistep',
+                video_width=960, video_height=544, video_duration=15, video_steps=20, video_sampler='res_multistep', video_preview_mode='noisy', video_preview_every=5,
                 image_model='', image_encoder='', image_vae='', image_assets='', image_variant='4b',
                 llm_model='', writer_repo='Qwen/Qwen3-4B-Instruct-2507', device='cuda', offload=True,
                 steps=30, preview_every=5, vram_gb=0)
