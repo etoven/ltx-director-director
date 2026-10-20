@@ -4,6 +4,8 @@
 
 Open **Effects Library** from the main toolbar or the last item in either **Quick Fix** menu. Search by effect name, anatomy, species, stage or prompt wording, and narrow the results with the category selector. The app includes all 100 Werecreature effects, their original catalog artwork, linked excerpt previews, and 17 recorded source soundtrack samples.
 
+Use **Grid / List** to switch thumbnail layouts. Select an effect and click the heart to save it as a favorite; **Favorites** filters the browser to your saved entries. These choices do not change the source catalog or Quick Fix menu.
+
 Select a tile to see its source and preview notes. Linked video excerpts play silently inside the selected tile. Choose a different excerpt below the tiles when several references are available. Generated concept artwork is an appearance aid; excerpt notes describe what the footage actually demonstrates. The separate **Source catalog** opens the complete offline illustrated catalog and its provenance.
 
 ## Apply an effect
@@ -22,6 +24,6 @@ Apply a sound recipe to refine its wording in a segment. Recordings remain previ
 
 Your existing Quick Fixes migrate automatically with **Show in menu** enabled. Imported catalog entries have this option off. Select a tile, choose **Edit**, and check **Show in menu** to expose it in the appropriate Quick Fix menu. Category headings and the existing button menus remain compact.
 
-Choose **Add your own** to enter a name, category, scope and refinement instruction. Browse for a thumbnail and optional video or recording. **Generate thumbnail with default image model** uses the image source selected in Settings. Save to keep the effect. Cancel leaves the entry unchanged. Editing an imported entry saves your own override; the shipped source catalog remains intact. **Remove / hide** removes custom entries or hides an imported entry.
+Choose **Add Custom** to enter a name, category, scope and refinement instruction. Browse for a thumbnail and optional video or recording. **Generate thumbnail with default image model** uses the image source selected in Settings. Save to keep the effect. Cancel leaves the entry unchanged. Editing an imported entry saves your own override; the shipped source catalog remains intact. **Delete / hide** removes custom entries or hides an imported entry.
 
 Drag the dock title to move or float the panel. Right-click the title for left, right, bottom and floating options, plus width and height boxes. Adjust **Tile size** to fit more items or inspect the artwork. Panel placement and tile size persist between sessions.

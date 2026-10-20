@@ -1,0 +1,9 @@
+# Aurora a107: workspace style and Effects browser layout
+
+The native workspace follows the supplied main-UI reference with a slate/navy palette, bundled condensed type, consistent editor action heights, clearer reference cards, a compact branded toolbar and an Effects dock that opens on the left. Existing saved panel arrangements and dimensions remain authoritative. Fresh workspaces use a taller timeline; the conditioning guide appears when segments exist, with its resize/collapse handle and prior settings retained.
+
+The Effects browser has separate full-width search/category rows, Grid/List and Favorites controls, consistent thumbnail cells and a full-width Apply button. It adapts the grid to the dock width. All catalog tiles retain their original supplied artwork, letterboxed without cropping; legacy/custom presets without artwork use existing vector icons. Source previews, sound playback/export, custom entries, generated thumbnails, scopes, show-in-menu migration and dock sizing remain available. Reference filenames, roles, notes, audio-only video selection, import/export and drag/drop remain intact.
+
+Validation: actual native captures are compared with the supplied reference at desktop size. Native regression checks cover favorites/list/grid, catalog artwork, menu migration, drag acceptance, references, editor layout and generated-media preservation. Release CI and installed-wheel checks verify publication. GPU inference is deferred while the user's render uses the device; actual 9B loading and numerical layer checks were completed in a106.
+
+Local verification completed: ten isolated Effects/local-generation/video-control groups, four focused editor/toolbar/conditioning regressions and two reference export/history checks passed. Desktop captures were inspected at 100% and 120% text scale; the installed wheel is verified before publication. Original catalog media files are unchanged.

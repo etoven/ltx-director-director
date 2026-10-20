@@ -4,7 +4,7 @@
 
 Start with an image, a video clip or a written beat. Arrange the sequence, describe the motion you want, and turn the plan into a prompt you can shape. Director keeps the timing, media and words together as your idea develops.
 
-![A complete MiniMax plan in the Aurora workspace](docs/images/ltx-director-director-overview.png)
+![The Aurora workspace with Effects Library and Reference Media](docs/images/aurora-workspace.png)
 
 *The examples use locally authored demonstration projects. Open Help for the searchable offline manual and guided setup.*
 

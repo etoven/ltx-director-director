@@ -3445,7 +3445,7 @@ class MainWindow(QMainWindow):
         self._project_open_timer.setInterval(90)
         self._project_open_timer.timeout.connect(self.open_pending_library_project)
         self._pending_project_id: str | None = None
-        self.timeline_height = max(184, min(430, self.settings.value("timeline_panel_height", 184, int)))
+        self.timeline_height = max(184, min(430, self.settings.value("timeline_panel_height", 420, int)))
         self.thread_pool = QThreadPool.globalInstance()
         self.disk_pool = QThreadPool(self)
         self.disk_pool.setMaxThreadCount(1)
@@ -3531,6 +3531,12 @@ class MainWindow(QMainWindow):
         toolbar.setMovable(False)
         toolbar.setIconSize(QSize(22, 22))
         self.addToolBar(toolbar)
+        self.toolbar_brand = QWidget();self.toolbar_brand.setObjectName('workspaceBrand')
+        brand_row=QHBoxLayout(self.toolbar_brand);brand_row.setContentsMargins(8,0,18,0);brand_row.setSpacing(8)
+        brand_icon=QLabel();brand_icon.setPixmap(QPixmap(str(files('ltx_prompt_director').joinpath('assets/icon.png'))).scaled(24,24,Qt.AspectRatioMode.KeepAspectRatio,Qt.TransformationMode.SmoothTransformation))
+        brand_row.addWidget(brand_icon)
+        brand_row.addWidget(QLabel(f'PROMPT DIRECTOR <span style="color:#808b9d;font-size:12px">{__version__}</span>'))
+        self.toolbar_brand_action=toolbar.addWidget(self.toolbar_brand)
         projects_action = self.project_dock.toggleViewAction()
         projects_action.setText("Projects")
         projects_action.setIcon(toolbar_icon("projects"))
@@ -3539,6 +3545,7 @@ class MainWindow(QMainWindow):
         preview_action.setText("Preview")
         preview_action.setIcon(toolbar_icon("preview"))
         toolbar.addAction(preview_action)
+        self.effects_dock.toggleViewAction().setIcon(toolbar_icon('catalog'))
         toolbar.addAction(self.effects_dock.toggleViewAction())
         files_action = self.project_files_dock.toggleViewAction()
         files_action.setText("Project Files")
@@ -4386,7 +4393,7 @@ class MainWindow(QMainWindow):
             if state == QMediaPlayer.PlaybackState.PlayingState else None)
         self.effects_dock.setWidget(self.effects_panel)
         self.effects_dock.setMinimumSize(280, 220)
-        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.effects_dock)
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.effects_dock)
         self.effects_dock.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.effects_dock.customContextMenuRequested.connect(self.effects_dock_menu)
         self.effects_dock.dockLocationChanged.connect(lambda *_: self.save_window_panel_state())
@@ -4869,7 +4876,11 @@ class MainWindow(QMainWindow):
         theme = theme.replace("__TIMELINE_SPIN_PAD__", str(metric(16))).replace("__TIMELINE_SPIN_BUTTON__", str(metric(13))).replace("__TIMELINE_ARROW__", str(metric(7)))
         for size in (15, 10, 9, 8):
             theme = theme.replace(f"font-size:{size}px", f"font-size:{scaled(size)}px")
-        self.setStyleSheet(theme)
+        from .workspace_style import workspace_style
+        self.setStyleSheet(workspace_style(theme,scale))
+        self.findChild(QToolBar,'mainToolbar').setIconSize(QSize(metric(24),metric(24)))
+        self.minimax_panel.cache_state.setMinimumWidth(metric(90))
+        for target in self.minimax_panel.reference_targets:target.preview.setFixedSize(metric(116),metric(112))
         self.timeline_scale.setFixedWidth(metric(98))
         self.timeline_fit_button.setIconSize(QSize(metric(18), metric(18)))
         self.timeline_fit_button.setFixedSize(metric(32), metric(32))
@@ -4898,7 +4909,7 @@ class MainWindow(QMainWindow):
             option.setFixedHeight(max(metric(20), option.fontMetrics().height() + metric(4)))
         self.voice_options_button.setFixedSize(metric(24), metric(23))
         self.prompt_scope.setFixedWidth(metric(94))
-        self.prompt_scope.setFixedHeight(metric(23))
+        self.prompt_scope.setFixedHeight(metric(28))
         self.ruler.setFixedHeight(metric(28))
         self.timeline_height_handle.set_scale(scale)
         self.conditioning_height_handle.set_scale(scale)
@@ -4914,7 +4925,7 @@ class MainWindow(QMainWindow):
         ):
             action.setIcon(prompt_action_icon(image))
             action.setIconSize(QSize(metric(15), metric(15)))
-            action.setFixedHeight(metric(23))
+            action.setFixedHeight(metric(28))
             action.setMinimumWidth(0)
             action.setFixedWidth(max(
                 metric(71),
@@ -4924,9 +4935,9 @@ class MainWindow(QMainWindow):
         ):
             action.setIcon(prompt_action_icon(image))
             action.setIconSize(QSize(metric(18), metric(18)))
-            action.setFixedSize(metric(27), metric(23))
+            action.setFixedSize(metric(30), metric(28))
         for button in (self.segment_quick_fix_button, self.combined_quick_fix_button):
-            button.setFixedHeight(metric(23))
+            button.setFixedHeight(metric(28))
             button.setFixedWidth(button.fontMetrics().horizontalAdvance(button.text()) + metric(27))
         self.output_width.setMinimumWidth(metric(74))
         self.output_height.setMinimumWidth(metric(74))
@@ -6044,6 +6055,7 @@ class MainWindow(QMainWindow):
         if not hasattr(self,'editor_root') or getattr(self,'_fitting_panels',False):return
         self._fitting_panels=True
         try:
+            self.toolbar_brand_action.setVisible(self.width()>=1450)
             self.editor_root.layout().activate()
             timeline_resized=False
             if not self.timeline_shell.isHidden():
@@ -8000,7 +8012,7 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "conditioning_guide"):
             return
         available = self.unified_workspace and not self.prompt_only_workspace
-        self.conditioning_guide.setVisible(available and self.conditioning_height > 0)
+        self.conditioning_guide.setVisible(available and bool(self.segments) and self.conditioning_height > 0)
         self.conditioning_height_handle.setVisible(available)
         if self.prompt_only_workspace:
             return

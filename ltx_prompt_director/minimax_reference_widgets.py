@@ -6,7 +6,7 @@ import hashlib
 from pathlib import Path
 
 from PySide6.QtCore import QBuffer, QEvent, QIODevice, QMimeData, QStandardPaths, QUrl, Qt, Signal
-from PySide6.QtGui import QAction, QDrag, QImage, QPixmap
+from PySide6.QtGui import QAction, QDrag, QImage, QPixmap, QIcon
 from PySide6.QtWidgets import QApplication, QCheckBox, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton, QVBoxLayout
 
 from .minimax_reference import REFERENCE_ROLES
@@ -49,7 +49,12 @@ class MiniMaxReferenceSlot(QFrame):
         self.clear_action.triggered.connect(self.clear)
         layout.addLayout(row)
         body = QHBoxLayout()
-        self.preview = QLabel("Drop media here")
+        self.preview = QLabel()
+        self._source_pixmap=QPixmap()
+        self._empty_pixmap=QIcon(str(Path(__file__).parent/'assets/toolbar-open.svg')).pixmap(42,42)
+        self.preview.setPixmap(self._empty_pixmap)
+        self.preview.setAccessibleName('Reference media · drop image, video or audio')
+        self.preview.setToolTip('Drop image, video or audio here, or use Browse or Paste.')
         self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.preview.setFixedSize(116, 72)
         self.preview.setObjectName("referenceImagePreview")
@@ -59,6 +64,7 @@ class MiniMaxReferenceSlot(QFrame):
         body.addWidget(self.preview)
         fields = QVBoxLayout()
         self.filename = QLabel("No image")
+        self.filename.hide()
         self.filename.setTextFormat(Qt.TextFormat.PlainText)
         self.filename.setMaximumWidth(300)
         fields.addWidget(self.filename)
@@ -101,6 +107,7 @@ class MiniMaxReferenceSlot(QFrame):
         self.role.blockSignals(False)
         self.notes.blockSignals(False)
         self.filename.setText(value["name"] if value else "No media")
+        self.filename.setVisible(bool(value))
         self.filename.setToolTip(value["name"] if value else "")
         self.preview.clear()
         pixmap = QPixmap()
@@ -110,9 +117,11 @@ class MiniMaxReferenceSlot(QFrame):
             except (ValueError, IndexError, KeyError):
                 pass
         if pixmap.isNull():
-            self.preview.setText("♫ Audio" if value and value.get("kind") == "audio" else "Preview unavailable" if value else "Drop image, video or audio")
+            if value:self.preview.setText("♫ Audio" if value.get("kind") == "audio" else "Preview unavailable")
+            else:self.preview.setPixmap(self._empty_pixmap)
         else:
             self.preview.setPixmap(pixmap.scaled(self.preview.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+        self._source_pixmap=pixmap
 
     def metadata_changed(self, *_args) -> None:
         if self.value:
@@ -266,6 +275,8 @@ class MiniMaxReferenceSlot(QFrame):
         return mime
 
     def eventFilter(self, watched, event):
+        if watched is self.preview and event.type()==QEvent.Type.Resize and not self._source_pixmap.isNull():
+            self.preview.setPixmap(self._source_pixmap.scaled(self.preview.size(),Qt.AspectRatioMode.KeepAspectRatio,Qt.TransformationMode.SmoothTransformation))
         if watched is self.preview:
             if event.type() == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
                 self._drag_start = event.position().toPoint()

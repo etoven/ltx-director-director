@@ -11,7 +11,7 @@ from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer, QVideoSink
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLineEdit,
     QComboBox, QPushButton, QListWidget, QListWidgetItem, QLabel, QDialog,
     QFormLayout, QTextEdit, QCheckBox, QDialogButtonBox, QFileDialog,
-    QMessageBox, QSpinBox)
+    QMessageBox, QSpinBox, QToolButton)
 from .effects_library import (MIME, ROOT, catalog, media_path, load_effects,
                               save_effect, remove_effect, refinement)
 from .quick_fixes import TARGETS
@@ -146,12 +146,15 @@ class EffectsPanel(QWidget):
     def __init__(self, owner):
         super().__init__()
         self.owner = owner
-        layout = QVBoxLayout(self)
+        self.setObjectName('effectsPanel')
+        try:self.favorites=set(json.loads(owner.settings.value('effects/favorites','[]')))
+        except (ValueError,TypeError):self.favorites=set()
+        layout = QVBoxLayout(self);layout.setContentsMargins(8,8,8,8);layout.setSpacing(8)
         row = QHBoxLayout()
-        self.search = QLineEdit(); self.search.setPlaceholderText('Search effects, anatomy, species…')
+        self.search = QLineEdit(); self.search.setPlaceholderText('Search effects and presets…')
         self.search.setClearButtonEnabled(True); row.addWidget(self.search)
-        self.category = QComboBox(); row.addWidget(self.category)
         layout.addLayout(row)
+        self.category = QComboBox();layout.addWidget(self.category)
         row = QHBoxLayout()
         self.scope = QComboBox()
         self.scope.addItem('Selected segment', 'segment'); self.scope.addItem('Unified prompt', 'unified')
@@ -160,11 +163,25 @@ class EffectsPanel(QWidget):
         self.size = QSpinBox(); self.size.setRange(96, 300); self.size.setSingleStep(16)
         self.size.setValue(int(owner.settings.value('effects/tile_size', 160))); row.addWidget(self.size)
         layout.addLayout(row)
+        row=QHBoxLayout();row.setSpacing(6)
+        self.list_view=QToolButton();self.list_view.setText('▦ Grid / List');self.list_view.setCheckable(True)
+        self.list_view.setToolTip('Switch between thumbnail grid and compact list')
+        self.list_view.setChecked(owner.settings.value('effects/list_view',False,bool))
+        self.list_view.toggled.connect(self.resize_tiles);row.addWidget(self.list_view)
+        row.addStretch()
+        self.favorites_only=QToolButton();self.favorites_only.setText('Favorites');self.favorites_only.setCheckable(True)
+        self.favorites_only.toggled.connect(self.filter);row.addWidget(self.favorites_only)
+        self.favorite=QToolButton();self.favorite.setText('♡');self.favorite.setCheckable(True)
+        self.favorite.toggled.connect(lambda checked:self.favorite.setText('♥' if checked else '♡'))
+        self.favorite.setToolTip('Add or remove the selected effect from favorites')
+        self.favorite.clicked.connect(self.toggle_favorite);row.addWidget(self.favorite)
+        layout.addLayout(row)
         self.tiles = EffectList(self)
+        self.tiles.setObjectName('effectTiles')
         self.tiles.setViewMode(QListWidget.ViewMode.IconMode)
         self.tiles.setResizeMode(QListWidget.ResizeMode.Adjust)
         self.tiles.setMovement(QListWidget.Movement.Static)
-        self.tiles.setWordWrap(True); self.tiles.setSpacing(8); self.tiles.setDragEnabled(True)
+        self.tiles.setWordWrap(True); self.tiles.setSpacing(6); self.tiles.setDragEnabled(True)
         layout.addWidget(self.tiles, 1)
         self.details = QLabel('Drag an effect onto a segment or prompt editor, or select one and Apply.')
         self.details.setWordWrap(True); self.details.setTextFormat(Qt.TextFormat.PlainText)
@@ -174,14 +191,17 @@ class EffectsPanel(QWidget):
         self.play = QPushButton('▶ Play sound')
         self.play.clicked.connect(self.play_sound); row.addWidget(self.play)
         self.export = QPushButton('Save sample…'); self.export.clicked.connect(self.save_sample); row.addWidget(self.export)
-        self.apply = QPushButton('Apply and refine'); self.apply.clicked.connect(self.apply_current); row.addWidget(self.apply)
         layout.addLayout(row)
+        self.apply = QPushButton('Apply and refine'); self.apply.clicked.connect(self.apply_current)
+        self.apply.setObjectName('effectApply');layout.addWidget(self.apply)
         row = QHBoxLayout()
-        for pair in [[('Add your own…', lambda: self.edit(None)), ('Edit…', self.edit_current)],
-                     [('Remove / hide', self.remove_current), ('Source catalog', self.open_catalog)]]:
+        for pair in [[('＋ Add Custom', lambda: self.edit(None)), ('⚙ Edit Selected', self.edit_current)],
+                     [('Delete / hide', self.remove_current), ('Source Catalog', self.open_catalog)]]:
             row = QHBoxLayout()
             for label, fn in pair:
                 button = QPushButton(label); button.clicked.connect(fn); row.addWidget(button)
+                button.setObjectName('effectDelete' if label.startswith('Delete') else 'effectSecondary')
+                button.setStyleSheet('border-radius:14px;')
             layout.addLayout(row)
         self.player = QMediaPlayer(self); self.audio = QAudioOutput(self)
         self.player.setAudioOutput(self.audio)
@@ -195,6 +215,7 @@ class EffectsPanel(QWidget):
         self.tiles.itemDoubleClicked.connect(lambda *_: self.apply_current())
         self.tiles.itemClicked.connect(self.tile_clicked)
         self.size.valueChanged.connect(self.resize_tiles)
+        self.reflow=QTimer(self);self.reflow.setSingleShot(True);self.reflow.timeout.connect(self.resize_tiles)
         self.media.currentIndexChanged.connect(self.preview_media)
         self.availability = QTimer(self); self.availability.setInterval(400)
         self.availability.timeout.connect(self.update_available); self.availability.start()
@@ -213,10 +234,11 @@ class EffectsPanel(QWidget):
         query = self.search.text().casefold(); category = self.category.currentText()
         for e in self.entries:
             if category not in ('All categories', e['category']): continue
+            if self.favorites_only.isChecked() and e['id'] not in self.favorites:continue
             searchable = {key: e.get(key, '') for key in ('id', 'name', 'category', 'anatomy', 'stage', 'species', 'prompt', 'match_instruction', 'description')}
             if query and query not in json.dumps(searchable, ensure_ascii=False).casefold(): continue
             label = ('▶ ' if e.get('audio') else '') + e['name']
-            icon = QIcon(media_path(e.get('thumbnail')))
+            icon = self.tile_icon(e)
             if e.get('audio') or e.get('source_audio_ids') and e.get('category') == 'Sound':
                 pix = icon.pixmap(192, 120)
                 if not pix.isNull():
@@ -231,12 +253,55 @@ class EffectsPanel(QWidget):
             self.tiles.addItem(item)
         if self.tiles.count(): self.tiles.setCurrentRow(0)
         else: self.select(None)
+        self.resize_tiles()
 
     def resize_tiles(self, *_):
         size = self.size.value()
-        self.tiles.setIconSize(QSize(size, round(size * .63)))
-        self.tiles.setGridSize(QSize(size + 24, round(size * .63) + 62))
+        listing=self.list_view.isChecked()
+        self.tiles.setViewMode(QListWidget.ViewMode.ListMode if listing else QListWidget.ViewMode.IconMode)
+        self.tiles.setFlow(QListWidget.Flow.TopToBottom if listing else QListWidget.Flow.LeftToRight)
+        self.tiles.setWrapping(not listing)
+        available=max(120,self.tiles.viewport().width()-8)
+        columns=max(1,round(available/(size+28)))
+        cell=min(size+16,max(112,available//columns))
+        actual=min(size,cell-26)
+        self.tiles.setIconSize(QSize(72,46) if listing else QSize(actual,round(actual*.63)))
+        self.tiles.setGridSize(QSize() if listing else QSize(cell,round(actual*.63)+64))
+        for index in range(self.tiles.count()):
+            self.tiles.item(index).setSizeHint(QSize(available,66) if listing else QSize(cell-10,round(actual*.63)+54))
+        self.owner.settings.setValue('effects/list_view',listing)
         self.owner.settings.setValue('effects/tile_size', size)
+
+    def resizeEvent(self,event):
+        super().resizeEvent(event)
+        if hasattr(self,'reflow'):self.reflow.start(0)
+
+    def tile_icon(self,entry):
+        icon=QIcon(media_path(entry.get('thumbnail')))
+        if not icon.isNull():
+            original=icon.pixmap(192,120)
+            pix=QPixmap(192,120);pix.fill(QColor('#222631'))
+            painter=QPainter(pix);painter.drawPixmap((192-original.width())//2,(120-original.height())//2,original);painter.end()
+            return QIcon(pix)
+        # Legacy/custom presets have no catalog artwork. Give them a real tile
+        # using existing vector icons; bundled effect images remain untouched.
+        pix=QPixmap(192,120);pix.fill(QColor('#222a36'))
+        painter=QPainter(pix)
+        symbol='toolbar-preview.svg' if entry.get('category')=='Camera' else 'ai-prompt.svg'
+        mark=QIcon(str(Path(__file__).parent/'assets'/symbol)).pixmap(54,54)
+        painter.drawPixmap((pix.width()-mark.width())//2,24,mark)
+        painter.setPen(QColor('#9db5c9'));painter.drawText(pix.rect().adjusted(8,82,-8,-8),Qt.AlignmentFlag.AlignCenter,entry.get('category','Custom'))
+        painter.end()
+        return QIcon(pix)
+
+    def toggle_favorite(self):
+        entry=self.current()
+        if not entry:return
+        if entry['id'] in self.favorites:self.favorites.remove(entry['id'])
+        else:self.favorites.add(entry['id'])
+        self.owner.settings.setValue('effects/favorites',json.dumps(sorted(self.favorites)))
+        if self.favorites_only.isChecked():self.filter()
+        else:self.favorite.setChecked(entry['id'] in self.favorites)
 
     def current(self):
         item = self.tiles.currentItem()
@@ -245,6 +310,7 @@ class EffectsPanel(QWidget):
     def select(self, item, *_):
         self.stop_preview(); self.media.blockSignals(True); self.media.clear()
         e = self.current()
+        self.favorite.setEnabled(bool(e));self.favorite.setChecked(bool(e and e['id'] in self.favorites))
         if not e:
             self.details.setText('No matching effects.'); self.media.blockSignals(False); self.update_available(); return
         details = [e['name'], e.get('origin', ''), e.get('thumbnail_note', ''), e.get('usage_note', '')]
@@ -271,7 +337,7 @@ class EffectsPanel(QWidget):
     def stop_preview(self):
         self.player.stop()
         if self.active_item is not None:
-            self.active_item.setIcon(QIcon(media_path(self.active_item.data(Qt.ItemDataRole.UserRole).get('thumbnail'))))
+            self.active_item.setIcon(self.tile_icon(self.active_item.data(Qt.ItemDataRole.UserRole)))
         self.active_item = None
 
     def preview_media(self, *_):

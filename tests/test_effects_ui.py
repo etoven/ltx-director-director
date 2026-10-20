@@ -21,6 +21,13 @@ def test_effects_dock_search_artwork_and_menu_migration():
         panel.search.setText('FX001')
         assert panel.tiles.count() == 1
         assert not panel.tiles.item(0).icon().isNull()
+        panel.favorite.click();assert 'FX001' in panel.favorites
+        panel.favorites_only.setChecked(True);panel.search.clear()
+        assert panel.tiles.count()==1 and panel.current()['id']=='FX001'
+        panel.list_view.click();assert panel.tiles.viewMode()==panel.tiles.ViewMode.ListMode
+        panel.list_view.click();assert panel.tiles.viewMode()==panel.tiles.ViewMode.IconMode
+        panel.favorite.click();assert not panel.tiles.count()
+        panel.favorites_only.setChecked(False);panel.search.setText('FX001')
         menu = w.segment_quick_fix_button.menu()
         w.populate_quick_fix_menu(menu, 'segment')
         labels = [a.text() for a in menu.actions()]
