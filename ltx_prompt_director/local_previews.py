@@ -1,26 +1,61 @@
 """Cheap live latent views and explicitly requested H3 clean-estimate previews."""
 from pathlib import Path
 
+# Fixed H3 latent-to-RGB projection coefficients. This is an approximate color
+# view of the current samples, not a VAE reconstruction or a clean prediction.
+H3_RGB = (
+    (-.018555,.024344,-.017536),(.150164,.137244,.129221),(.027367,-.050369,-.208606),
+    (-.000793,-.164622,-.323161),(-.048556,.013970,-.074286),(.011740,.014172,-.006906),
+    (.061517,.061212,.110025),(.035321,.086879,.110059),(-.017426,.002997,.035356),
+    (.531539,.548819,.624404),(-.024968,-.040234,-.034302),(-.032549,-.029096,-.017221),
+    (.022609,.020286,.050661),(-.084001,-.038131,-.020805),(-.018830,.010412,.061120),
+    (.020777,.011196,-.030994),(-.008390,-.012201,-.025687),(-.013281,-.002924,.006331),
+    (.000260,.001833,-.011038),(.105471,.100482,.132106),(.016529,.015213,.009999),
+    (-.014015,-.017438,-.019134),(-.033787,-.009984,-.019725),(.004224,.017284,.027196))
+
+
+def noisy_latent_video(latents, path, width, height, fps=24):
+    """Stream all current temporal samples into a lightweight, silent movie.
+
+    H3 represents 17 video frames in each five-token temporal chunk, plus an
+    opening five frames. Interpolate the cheap RGB projection across that grid;
+    the full VAE decode remains separate. No model is loaded for this preview.
+    """
+    import av
+    import numpy as np
+    import torch
+    from PIL import Image
+    samples = latents.detach()[0].to(device='cpu',dtype=torch.float32)
+    if samples.shape[0]!=len(H3_RGB):raise ValueError('Expected 24 H3 latent channels.')
+    rgb = torch.einsum('cthw,cr->thwr',samples,torch.tensor(H3_RGB))
+    rgb = torch.nan_to_num(rgb+torch.tensor((.057426,-.022078,-.071449)))
+    rgb = ((rgb.clamp(-1,1)+1)*127.5).numpy()
+    count = max(1,((samples.shape[1]-2)//5)*17+5)
+    scale = min(1,640/max(width,height))
+    size = tuple(max(2,round(v*scale/2)*2) for v in (width,height))
+    target=Path(path);partial=target.with_suffix('.partial.mp4')
+    try:
+        with av.open(str(partial),'w') as container:
+            stream=container.add_stream('libx264',rate=fps)
+            stream.width,stream.height=size;stream.pix_fmt='yuv420p'
+            stream.options={'preset':'ultrafast','crf':'26'}
+            for index in range(count):
+                position=index*(len(rgb)-1)/max(1,count-1)
+                low=int(position);high=min(low+1,len(rgb)-1);blend=position-low
+                pixels=(rgb[low]*(1-blend)+rgb[high]*blend).clip(0,255).astype(np.uint8)
+                image=Image.fromarray(pixels).resize(size,Image.Resampling.BILINEAR)
+                frame=av.VideoFrame.from_image(image);frame.pts=index
+                for packet in stream.encode(frame):container.mux(packet)
+            for packet in stream.encode():container.mux(packet)
+        partial.replace(target)
+    finally:partial.unlink(missing_ok=True)
+    return count
+
 
 def denoised_preview_due(profile, done, total):
     return (profile.get('video_preview_mode', 'noisy') == 'denoised'
             and 0 < done < total
             and done % max(1, int(profile.get('video_preview_every', 5))) == 0)
-
-
-def noisy_latent_image(latents, width, height):
-    """Visualize actual current latent channels, without running a VAE/model.
-
-    Colors are a fixed channel view, not a decoded prediction of the final RGB.
-    Only one tiny latent frame is transferred to the CPU.
-    """
-    import torch
-    from PIL import Image
-    frame = latents.detach()[0, :3, latents.shape[2] // 2].float().cpu()
-    rgb = ((torch.nan_to_num(frame).tanh() + 1) * 127.5).clamp(0, 255).byte()
-    image = Image.fromarray(rgb.permute(1, 2, 0).numpy())
-    scale = min(1, 640 / max(width, height))
-    return image.resize((max(1, round(width * scale)), max(1, round(height * scale))), Image.Resampling.NEAREST)
 
 
 class H3VideoPreview:
@@ -31,9 +66,9 @@ class H3VideoPreview:
 
     def noisy(self, latents, done):
         if self.profile.get('video_preview_mode', 'noisy') != 'noisy': return
-        path = self.root / f'latent-{done}.png'
-        noisy_latent_image(latents, self.width, self.height).save(path)
-        self.emit('preview', path=str(path), media='image', draft=True,
+        path = self.root / f'latent-{done}.mp4'
+        count=noisy_latent_video(latents,path,self.width,self.height)
+        self.emit('preview', path=str(path), media='video', draft=True, frames=count,
                   preview_mode='noisy', step=done, sampling_steps=self.total)
 
     def capture_clean(self, scheduler, latents, index, noise_pred, input_latents=None, inpaint_mask=None):
@@ -41,9 +76,8 @@ class H3VideoPreview:
         done = index + 1
         if not denoised_preview_due(self.profile, done, self.total): return
         # Flow velocity already exists from this sampling pass. Estimate x0 for
-        # only the opening chunk; never run an extra denoiser forward pass.
-        count = min(latents.shape[2], self.pipe.video_vae.tokens_chunk_size)
-        selection = (slice(None), slice(None), slice(0, count))
+        # the full clip; never run an extra denoiser forward pass.
+        selection = (slice(None), slice(None), slice(None))
         current = latents[selection].detach()
         velocity = noise_pred[selection].detach()
         self.clean = current - velocity * scheduler.sigmas[index].to(current)

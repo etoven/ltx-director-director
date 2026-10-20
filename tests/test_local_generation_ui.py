@@ -46,7 +46,29 @@ def test_wizard_cancel_preserves_credentials_and_finish_separates_sources():
 
 def test_local_progress_is_ignored_after_a_project_switch_and_no_paid_prompt():
     from ltx_prompt_director.artwork_tools import ArtworkTool
+    from unittest.mock import MagicMock
+    from PySide6.QtMultimedia import QMediaPlayer
     with window() as w:
+        image=w.image_generation_panel
+        image.receive_event({'kind':'error','message':'Previous run failure'})
+        image.begin();assert not image.log.output.toPlainText()
+        panel=w.project_preview_panel
+        with patch.object(panel,'player',MagicMock()) as player:
+            panel._generation_preview_active=True;panel._initial_media_pending=True
+            panel._initial_media_autoplay=True;panel._initial_media_position=0
+            panel.media_status_changed(QMediaPlayer.MediaStatus.LoadedMedia)
+            player.play.assert_called_once();player.pause.assert_not_called()
+            panel.media_status_changed(QMediaPlayer.MediaStatus.BufferedMedia)
+            player.play.assert_called_once()
+            player.playbackState.return_value=QMediaPlayer.PlaybackState.PlayingState
+            panel.toggle_playback();assert not panel._generation_autoplay
+            panel._initial_media_pending=True;panel._initial_media_autoplay=False
+            panel.media_status_changed(QMediaPlayer.MediaStatus.LoadedMedia)
+            assert player.pause.call_count==2
+            panel._generation_preview_active=False;player.reset_mock()
+            panel._initial_media_pending=True
+            panel.media_status_changed(QMediaPlayer.MediaStatus.LoadedMedia)
+            player.pause.assert_called_once();player.play.assert_not_called()
         scope = (w.workspace_revision, w.current_project_id, w.project_type)
         with patch.object(w.image_generation_panel, 'receive_event') as receive:
             w.local_image_progress({'kind': 'progress', 'percent': 42, 'eta_seconds': 10}, scope)

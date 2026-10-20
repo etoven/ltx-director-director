@@ -184,7 +184,7 @@ class LocalModelsPanel(QWidget):
         self.video_preview_mode.addItem('Live noisy latent · no VAE decode', 'noisy')
         self.video_preview_mode.addItem('Denoised estimate · periodic VAE decode', 'denoised')
         self.video_preview_mode.setCurrentIndex(max(0, self.video_preview_mode.findData(self.profile.get('video_preview_mode', 'noisy'))))
-        self.video_preview_mode.setToolTip('Noisy mode shows actual latent changes with approximate colors, without extra model passes. Denoised mode decodes an opening-chunk clean estimate and pauses sampling for the VAE.')
+        self.video_preview_mode.setToolTip('Noisy mode shows actual latent changes with approximate colors, without extra model passes. Both modes preview the full clip. Denoised mode decodes a clean estimate and pauses sampling for the VAE.')
         self.tabs.widget(1).layout().insertRow(6, 'Video preview', self.video_preview_mode)
         self.video_preview_every = QSpinBox(); self.video_preview_every.setRange(1, 50)
         self.video_preview_every.setValue(int(self.profile.get('video_preview_every', 5)))
@@ -310,6 +310,12 @@ class ImageGenerationPanel(QWidget):
         layout.addWidget(self.cancel)
         self.log = GenerationLog(); layout.addWidget(self.log)
         self.pixmap = QPixmap()
+
+    def begin(self):
+        self.log.clear();self.pixmap=QPixmap();self.image.clear()
+        self.image.setText('Waiting for the local engine…')
+        self.caption.setText('Starting local image generation…')
+        self.pill.hide();self.cancel.setEnabled(True)
 
     def receive_event(self, event):
         self.log.receive_event(event)

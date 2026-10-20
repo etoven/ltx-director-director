@@ -1290,6 +1290,7 @@ class ProjectPreviewPanel(QWidget):
 
     def set_project(self, name: str, video_path: str = "") -> None:
         self.release_memory_video()
+        self._generation_preview_active = False
         self._memory_preview = False
         self._initial_media_pending = False
         self.title.setText(name)
@@ -1373,6 +1374,7 @@ class ProjectPreviewPanel(QWidget):
 
     def clear_project(self) -> None:
         self.release_memory_video()
+        self._generation_preview_active = False
         self._memory_preview = False
         self._initial_media_pending = False
         self._source_generation += 1
@@ -1394,8 +1396,10 @@ class ProjectPreviewPanel(QWidget):
         # never undo the user's pause or stop a replay at position zero.
         self._initial_media_pending = False
         if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+            if getattr(self,'_generation_preview_active',False):self._generation_autoplay=False
             self.player.pause()
         else:
+            if getattr(self,'_generation_preview_active',False):self._generation_autoplay=True
             if self.player.mediaStatus() == QMediaPlayer.MediaStatus.EndOfMedia or (self.duration and self.player.position() >= self.duration):
                 self.player.setPosition(0)
             self.player.play()
@@ -1417,7 +1421,7 @@ class ProjectPreviewPanel(QWidget):
             self.fullscreen.setEnabled(True)
             if not getattr(self, "_initial_media_pending", False):return
             self._initial_media_pending = False
-            if getattr(self, "_memory_preview", False):
+            if getattr(self, "_memory_preview", False) or getattr(self,'_generation_preview_active',False):
                 self.player.setPosition(min(self.duration,self._initial_media_position) if self._initial_media_autoplay else min(self.duration,max(1,self._initial_media_position)))
                 if self._initial_media_autoplay:self.player.play()
                 else:self.player.pause()
@@ -4295,6 +4299,7 @@ class MainWindow(QMainWindow):
         workspace = (self.workspace_revision, self.current_project_id, self.project_type)
         previous_preview = getattr(self.project_preview_panel, "pending_preview_path", "")
         self.local_video_log.clear()
+        self.project_preview_panel._generation_autoplay = True
         self._local_video_busy = True; self._local_video_cancel.clear()
         self.local_video_generate.setEnabled(False); self.local_video_cancel_button.show()
         self.project_preview_dock.show()
@@ -4324,13 +4329,16 @@ class MainWindow(QMainWindow):
                 panel._memory_preview = False
                 panel._source_generation += 1
                 panel.pending_preview_path = value["path"]
+                panel._generation_preview_active = True
                 panel._initial_media_pending = True
-                panel.title.setText("Local video · denoised draft estimate")
+                panel._initial_media_position = 0
+                panel._initial_media_autoplay = panel._generation_autoplay
+                panel.title.setText("Local video · live noisy latents · approximate colors" if value.get('preview_mode')=='noisy'
+                    else "Local video · denoised draft estimate")
                 panel.empty.hide(); panel.video.show()
                 panel.export.setEnabled(False)
                 panel.player.setSource(QUrl.fromLocalFile(value["path"]))
                 panel.player.setLoops(QMediaPlayer.Loops.Infinite)
-                panel.player.play()
         def operation():
             references = []
             for reference in extra_references:
@@ -9488,6 +9496,7 @@ class MainWindow(QMainWindow):
         if not item or tool is None or not item.artwork_prompt:
             return
         if cancel is not None: self._local_artwork_cancel[segment_id] = cancel
+        if cancel is not None:self.image_generation_panel.begin()
         self._artwork_jobs = getattr(self, "_artwork_jobs", 0) + 1
         self.minimax_panel.ai_marquee.begin("✦ Rendering image…")
         item.artwork_status = "generating"

@@ -1,0 +1,9 @@
+# Aurora a106: mixed 9B weights and continuous video drafts
+
+Klein 9B keeps the supplied scaled FP8 transformer weights and mixed Qwen 8B encoder weights in their checkpoint storage formats. Native linear layers expand only their current weight matrix for BF16 computation, including packed NVFP4 layers and optional pre-quantization scales. Loading validates all model keys and shapes; missing tensors do not initialize randomly. The working 4B loading path is preserved. Image ETA starts at the first sampling network pass, excluding prompt encoding/loading, and a new image job clears the previous verbose output.
+
+H3 noisy previews encode the complete temporal latent grid into a lightweight looping video with approximate RGB projection, without loading a VAE or adding a network pass. Optional clean estimates retain all temporal samples and decode at the configured interval (five steps by default). The player initializes draft playback once, respects pause, and retains normal saved-video behavior. Stale project callbacks remain ignored.
+
+Validation: CPU tensor-format tests compare mixed Qwen output to a dequantized reference and reject incomplete weights. Preview tests verify frame count, temporal change, source preservation, full-clip clean estimates and zero noisy-mode VAE calls. Native UI checks cover fresh logs, draft autoplay/pause, buffered events, saved-video behavior and project/result preservation. Actual-checkpoint CPU checks and release CI are recorded with publication; no full 9B GPU render is claimed while the user's render is active.
+
+The H3 preview uses fixed numeric latent-to-RGB projection data also used by the H3 latent format in ComfyUI; no ComfyUI process, source modules or execution graph are loaded. Runtime dependencies remain in the selected private engine venv and worker helpers ship in the application wheel.

@@ -94,12 +94,17 @@ def image_generation(request):
     if not (assets / 'model_index.json').is_file():
         raise ValueError('Download the image configuration/tokenizer files in Local models first.')
     cache = data_root() / 'weight-cache'
-    model_file = prepare_float_checkpoint(profile['image_model'], cache)
-    encoder_file = prepare_float_checkpoint(profile['image_encoder'], cache)
+    mixed = profile.get('image_variant','4b')=='9b'
+    model_file = profile['image_model'] if mixed else prepare_float_checkpoint(profile['image_model'], cache)
+    encoder_file = profile['image_encoder'] if mixed else prepare_float_checkpoint(profile['image_encoder'], cache)
     dtype = torch.bfloat16 if profile.get('device') != 'cpu' else torch.float32
     progress('Loading image model…')
-    transformer = Flux2Transformer2DModel.from_single_file(model_file, config=str(assets),
-        subfolder='transformer', torch_dtype=dtype, local_files_only=True)
+    if mixed:
+        from .local_image_quant import load_klein_transformer, load_mixed_qwen
+        transformer = load_klein_transformer(model_file,assets,dtype,progress)
+    else:
+        transformer = Flux2Transformer2DModel.from_single_file(model_file, config=str(assets),
+            subfolder='transformer', torch_dtype=dtype, local_files_only=True)
     # The Klein text encoder does not use its language-model head. Tie it to the
     # embeddings rather than inventing missing head weights from encoder-only files.
     import shutil
@@ -112,7 +117,8 @@ def image_generation(request):
     if link.is_symlink() or link.exists(): link.unlink()
     try: link.symlink_to(Path(encoder_file).resolve())
     except OSError: shutil.copyfile(encoder_file, link)
-    encoder = AutoModelForCausalLM.from_pretrained(str(te_root), torch_dtype=dtype, local_files_only=True)
+    encoder = (load_mixed_qwen(encoder_file,te_root,dtype,progress) if mixed else
+        AutoModelForCausalLM.from_pretrained(str(te_root), torch_dtype=dtype, local_files_only=True))
     for index, layer in enumerate(encoder.model.layers):
         layer.register_forward_pre_hook(lambda module, inputs, number=index + 1, total=len(encoder.model.layers):
             progress(f'Image prompt encoder · layer {number}/{total}'))
@@ -138,10 +144,14 @@ def image_generation(request):
     pipe.vae.enable_tiling()
     width = int(request.get('width', 1024)); height = int(request.get('height', 1024))
     steps = int(request.get('steps', 30)); every = max(1, int(profile.get('preview_every', 5)))
-    root = Path(request['job_dir']); started = time.monotonic()
+    root = Path(request['job_dir']); started = [None]
+    def sampling_started(*_):
+        if started[0] is None:started[0]=time.monotonic()
+    transformer.register_forward_pre_hook(sampling_started)
     def callback(pipeline, step, timestep, kwargs):
         done = step + 1
-        eta = (time.monotonic() - started) / done * max(0, steps - done)
+        eta = ((time.monotonic() - started[0]) / done * max(0, steps - done)
+               if started[0] is not None else None)
         progress('Rendering image', done / steps * 95, eta)
         if done % every == 0 or done == steps:
             # Decode actual current latents. The preview is explicitly a draft.
