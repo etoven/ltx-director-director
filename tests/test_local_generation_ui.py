@@ -11,6 +11,35 @@ from ltx_prompt_director.local_generation import PROFILE_KEY
 APP = QApplication.instance() or QApplication([])
 
 
+def test_loras_are_settings_only_persistent_and_cancel_safe():
+    from ltx_prompt_director.local_generation import load_profile
+    from ltx_prompt_director.local_widgets import LoraList
+    from ltx_prompt_director.onboarding_local import WizardLocalModelsPanel
+    with window() as w:
+        dialog = SettingsDialog(w.settings, w)
+        adapters = dialog.local_models.loras
+        adapters['video'].add_button.click(); adapters['video'].add_button.click()
+        first, second = adapters['video'].rows
+        first.path.setText('/models/film.safetensors'); first.trigger.setText('film grain'); first.weight.setValue(.65)
+        second.path.setText('/models/action.safetensors'); second.weight.setValue(.35); second.enabled.setChecked(False)
+        image = adapters['image'].add_row(); image.path.setText('/models/ink.safetensors'); image.trigger.setText('ink lines')
+        assert first.weight.minimum() == 0 and first.weight.maximum() == 1
+        dialog.accept()
+        saved = load_profile(w.settings)
+        assert len(saved['video_loras']) == 2 and saved['video_loras'][0]['weight'] == .65
+        assert saved['image_loras'][0]['trigger'] == 'ink lines'
+        reopened = SettingsDialog(w.settings, w)
+        assert reopened.local_models.loras['video'].rows[0].trigger.text() == 'film grain'
+        reopened.local_models.loras['video'].remove_row(reopened.local_models.loras['video'].rows[0])
+        reopened.reject()
+        assert load_profile(w.settings) == saved
+        wizard = WizardLocalModelsPanel(w, lambda: ['video', 'image'])
+        assert not wizard.loras and not wizard.findChildren(LoraList)
+        assert wizard.value()['video_loras'] == saved['video_loras']
+        assert wizard.value()['image_loras'] == saved['image_loras']
+        wizard.deleteLater()
+
+
 @contextmanager
 def window():
     with tempfile.TemporaryDirectory() as folder:

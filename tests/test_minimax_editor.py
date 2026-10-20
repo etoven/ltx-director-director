@@ -46,6 +46,10 @@ class UnifiedEditorTests(unittest.TestCase):
         from test_local_generation_ui import test_wizard_cancel_preserves_credentials_and_finish_separates_sources
         test_wizard_cancel_preserves_credentials_and_finish_separates_sources()
 
+    def test_local_lora_settings(self):
+        from test_local_generation_ui import test_loras_are_settings_only_persistent_and_cancel_safe
+        test_loras_are_settings_only_persistent_and_cancel_safe()
+
     def test_local_existing_references_and_verbose_output(self):
         from test_local_generation_ui import test_native_video_uses_unified_output_reference_panel_and_settings_directly
         test_native_video_uses_unified_output_reference_panel_and_settings_directly()
@@ -62,7 +66,7 @@ class UnifiedEditorTests(unittest.TestCase):
 
     def test_local_generation_transport_and_media_contracts(self):
         import subprocess, sys, os
-        code = "import os,sys,pytest; rc=pytest.main(['-q','tests/test_local_generation.py']); sys.stdout.flush(); sys.stderr.flush(); os._exit(rc)"
+        code = "import os,sys,pytest; rc=pytest.main(['-q','tests/test_local_generation.py','tests/test_local_lora.py']); sys.stdout.flush(); sys.stderr.flush(); os._exit(rc)"
         env = dict(os.environ, PYTEST_DISABLE_PLUGIN_AUTOLOAD='1', QT_QPA_PLATFORM='offscreen')
         subprocess.run([sys.executable, '-c', code], env=env, check=True, timeout=20)
 

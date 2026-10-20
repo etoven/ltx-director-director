@@ -134,6 +134,8 @@ def image_generation(request):
     pipe = Flux2KleinPipeline.from_pretrained(str(assets), transformer=transformer,
         text_encoder=encoder, tokenizer=tokenizer, vae=vae, torch_dtype=dtype, local_files_only=True,
         is_distilled='base' not in Path(profile['image_model']).name.lower())
+    from .local_lora import load_image_loras, generation_prompt
+    load_image_loras(transformer, profile, progress)
     device = profile.get('device', 'cuda')
     if device == 'cuda' and profile.get('offload', True):
         free = torch.cuda.mem_get_info()[0] / 2**30
@@ -172,7 +174,7 @@ def image_generation(request):
     for ref in request.get('references', []):
         image = _pil_reference(ref)
         if image is not None: images.append(image)
-    arguments = dict(prompt=request['prompt'], width=width, height=height, num_inference_steps=steps,
+    arguments = dict(prompt=generation_prompt(request['prompt'], profile, 'image'), width=width, height=height, num_inference_steps=steps,
         guidance_scale=4.0 if 'base' in Path(profile['image_model']).name.lower() else 1.0,
         generator=torch.Generator('cpu').manual_seed(int(request.get('seed', 42))),
         callback_on_step_end=callback, callback_on_step_end_tensor_inputs=['latents'])
@@ -287,13 +289,15 @@ def video_generation(request):
         model_configs=[ModelConfig(path=profile[k], **config)
                        for k in ('video_model', 'video_encoder', 'video_vae', 'audio_vae')],
         processor_config=ModelConfig(path=profile['video_assets']), vram_limit=limit)
+    from .local_lora import load_video_loras, generation_prompt
+    load_video_loras(pipe, profile, progress)
     from .local_h3_quant import optimize_h3_convolutions, stream_h3_feed_forward, stream_h3_video_pixels
     optimize_h3_convolutions(pipe); stream_h3_feed_forward(pipe); stream_h3_video_pixels(pipe)
     if profile.get('video_sampler', 'res_multistep') == 'res_multistep':
         from .local_h3_sampling import H3ResMultistepScheduler
         pipe.scheduler = H3ResMultistepScheduler()
         pipe.scheduler_audio = H3ResMultistepScheduler(audio=True)
-        progress('Sampler: RES multistep · simple schedule · guidance 1 · no Lightning LoRA')
+        progress('Sampler: RES multistep · simple schedule · guidance 1')
     encoder = pipe.text_encoder.model
     for label, layers in (('vision', encoder.visual.blocks), ('prompt', encoder.language_model.layers)):
         for index, layer in enumerate(layers):
@@ -381,7 +385,7 @@ def video_generation(request):
     count = align_h3_frames(request.get('duration', 5))
     seed = resolve_video_seed(request.get('seed', profile.get('video_seed', -1)))
     progress(f'MiniMax seed: {seed}')
-    args = dict(prompt=request['prompt'], height=int(request['height']), width=int(request['width']),
+    args = dict(prompt=generation_prompt(request['prompt'], profile, 'video'), height=int(request['height']), width=int(request['width']),
         num_frames=count, num_inference_steps=steps, seed=seed, progress_bar_cmd=iterate,
         ref_image_short_edge=min(768, int(request['height']), int(request['width'])),
         ref_video_short_edge=min(480, int(request['height']), int(request['width'])),

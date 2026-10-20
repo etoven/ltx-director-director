@@ -38,11 +38,14 @@ def default_profile():
                 video_width=960, video_height=544, video_duration=15, video_steps=20, video_sampler='res_multistep', video_preview_mode='noisy', video_preview_every=5,
                 image_model='', image_encoder='', image_vae='', image_assets='', image_variant='4b',
                 llm_model='', writer_repo='Qwen/Qwen3-4B-Instruct-2507', device='cuda', offload=True,
-                steps=30, preview_every=5, vram_gb=0)
+                steps=30, preview_every=5, vram_gb=0, video_loras=[], image_loras=[])
 
 
 def normalize_profile(profile):
+    from .local_lora import normalize_loras
     value = dict(profile)
+    for kind in ('image', 'video'):
+        if kind + '_loras' in value: value[kind + '_loras'] = normalize_loras(value[kind + '_loras'])
     for key in ('python', 'models_root', 'video_model', 'video_encoder', 'video_vae', 'audio_vae',
                 'video_assets', 'image_model', 'image_encoder', 'image_vae', 'image_assets', 'llm_model'):
         if value.get(key): value[key] = str(Path(value[key]).expanduser().absolute())
@@ -113,6 +116,8 @@ def recommended_writer(vram_gb):
 
 
 def validate_profile(profile, kind):
+    from .local_lora import active_loras
+    if kind in ('image', 'video'): active_loras(profile, kind, validate=True)
     fields = {'video': ('video_model', 'video_encoder', 'video_vae', 'audio_vae', 'video_assets'),
               'image': ('image_model', 'image_encoder', 'image_vae', 'image_assets'),
               'text': ('llm_model',)}[kind]
@@ -130,7 +135,7 @@ def validate_profile(profile, kind):
         if profile.get('device') == 'cpu':
             raise ValueError('Quantized native H3 video requires an NVIDIA GPU. CPU mode is available for images and writing.')
         if 'pruned' not in Path(profile['video_model']).name.lower():
-            raise ValueError('Select a pruned H3 checkpoint. No Lightning/Turbo LoRA is used by this engine.')
+            raise ValueError('Select a pruned H3 checkpoint. Optional LoRAs are configured separately in Settings.')
         for key, fallback in (('video_width', 960), ('video_height', 544)):
             value = int(profile.get(key, fallback))
             if not 256 <= value <= 2048 or value % 32:

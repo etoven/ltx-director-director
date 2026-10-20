@@ -8,7 +8,7 @@ from PySide6.QtCore import Qt, Signal, QEvent
 from PySide6.QtGui import QPixmap, QValidator
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QLabel,
     QLineEdit, QComboBox, QPushButton, QCheckBox, QSpinBox, QTabWidget, QFileDialog,
-    QMessageBox, QDoubleSpinBox, QPlainTextEdit, QAbstractSpinBox)
+    QMessageBox, QDoubleSpinBox, QPlainTextEdit, QAbstractSpinBox, QScrollArea, QSizePolicy)
 from .local_generation import (load_profile, scan_models, recommended_variant, recommended_writer, run_request)
 
 
@@ -109,8 +109,66 @@ class GenerationLog(QWidget):
             self.output.appendPlainText('Saved ' + str(event['path']) + seed)
 
 
+class LoraList(QWidget):
+    """Settings-only adapter stack; no checkpoint reads on the GUI thread."""
+    def __init__(self, rows, kind):
+        super().__init__(); self.rows = []; self.kind = kind
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
+        layout = QVBoxLayout(self); layout.setContentsMargins(0, 0, 0, 0); layout.setSpacing(6)
+        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        header = QHBoxLayout(); header.addWidget(QLabel('LoRAs · ' + ('H3 video' if kind == 'video' else 'Flux Klein images'))); header.addStretch()
+        self.add_button = QPushButton('+'); self.add_button.setFixedWidth(30)
+        self.add_button.setToolTip('Add another LoRA'); self.add_button.setAccessibleName('Add ' + kind + ' LoRA')
+        self.add_button.clicked.connect(lambda: self.add_row()); header.addWidget(self.add_button); layout.addLayout(header)
+        self.empty = QLabel('No LoRAs. Use + to add a compatible adapter.'); layout.addWidget(self.empty)
+        self.scroll = QScrollArea(); self.scroll.setWidgetResizable(True); self.scroll.setMaximumHeight(180)
+        self.scroll.setMinimumHeight(100)
+        container = QWidget(); self.row_layout = QVBoxLayout(container); self.row_layout.setContentsMargins(0, 0, 4, 0)
+        self.row_layout.setSpacing(8); self.row_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.scroll.setWidget(container); layout.addWidget(self.scroll)
+        for row in rows: self.add_row(row)
+        self.update_visibility()
+
+    def add_row(self, value=None):
+        value = value or {}; row = QWidget(); form = QVBoxLayout(row); form.setContentsMargins(0, 0, 0, 0); form.setSpacing(4)
+        row.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
+        top = QHBoxLayout(); row.enabled = QCheckBox(); row.enabled.setChecked(value.get('enabled', True)); row.enabled.setToolTip('Use this LoRA')
+        row.path = QLineEdit(value.get('path', '')); row.path.setPlaceholderText('Compatible .safetensors LoRA'); row.path.setAccessibleName('LoRA file')
+        browse = QPushButton('…'); browse.setFixedWidth(30); browse.setToolTip('Choose LoRA file')
+        def choose():
+            path, _ = QFileDialog.getOpenFileName(self, 'Choose ' + self.kind + ' LoRA', row.path.text(), 'LoRA weights (*.safetensors)')
+            if path: row.path.setText(path)
+        browse.clicked.connect(choose)
+        remove = QPushButton('×'); remove.setFixedWidth(30); remove.setToolTip('Remove LoRA')
+        remove.clicked.connect(lambda: self.remove_row(row))
+        for control in (row.enabled, row.path, browse, remove): top.addWidget(control)
+        form.addLayout(top)
+        bottom = QHBoxLayout(); row.trigger = QLineEdit(value.get('trigger', '')); row.trigger.setPlaceholderText('Trigger words · added to each generation prompt')
+        row.trigger.setAccessibleName('LoRA trigger words'); bottom.addWidget(row.trigger)
+        bottom.addWidget(QLabel('Weight')); row.weight = QDoubleSpinBox(); row.weight.setRange(0, 1); row.weight.setSingleStep(.05); row.weight.setDecimals(2)
+        row.weight.setValue(float(value.get('weight', 1))); row.weight.setAccessibleName('LoRA weight')
+        row.weight.setToolTip('0 disables this adapter and its trigger words; 1 uses full strength.')
+        bottom.addWidget(row.weight); form.addLayout(bottom)
+        self.rows.append(row); self.row_layout.addWidget(row); self.update_visibility()
+        self.scroll.ensureWidgetVisible(row)
+        return row
+
+    def remove_row(self, row):
+        self.rows.remove(row); self.row_layout.removeWidget(row); row.deleteLater(); self.update_visibility()
+
+    def update_visibility(self):
+        self.empty.setVisible(not self.rows); self.scroll.setVisible(bool(self.rows))
+        if self.rows:
+            height = sum(row.sizeHint().height() for row in self.rows) + 8 * (len(self.rows) - 1) + 4
+            self.scroll.setFixedHeight(min(180, max(100, height)))
+
+    def value(self):
+        return [dict(path=row.path.text().strip(), trigger=row.trigger.text().strip(), weight=row.weight.value(), enabled=row.enabled.isChecked())
+                for row in self.rows if row.path.text().strip()]
+
+
 class LocalModelsPanel(QWidget):
-    def __init__(self, owner, profile=None):
+    def __init__(self, owner, profile=None, *, include_loras=True):
         super().__init__()
         self.owner = owner
         self.profile = copy.deepcopy(profile or load_profile(owner.settings))
@@ -191,6 +249,11 @@ class LocalModelsPanel(QWidget):
         self.video_preview_every.setEnabled(self.video_preview_mode.currentData() == 'denoised')
         self.video_preview_mode.currentIndexChanged.connect(lambda: self.video_preview_every.setEnabled(self.video_preview_mode.currentData() == 'denoised'))
         self.tabs.widget(1).layout().insertRow(7, 'Denoised preview every N steps', self.video_preview_every)
+        self.loras = {}
+        if include_loras:
+            for index, kind in ((1, 'video'), (2, 'image')):
+                self.loras[kind] = LoraList(self.profile.get(kind + '_loras', []), kind)
+                self.tabs.widget(index).layout().addRow(self.loras[kind])
         row = QHBoxLayout()
         self.scan_button = QPushButton('Find my model files'); self.scan_button.clicked.connect(self.scan)
         self.prepare = QPushButton('Prepare local engine'); self.prepare.clicked.connect(lambda: self.setup('install'))
@@ -206,7 +269,7 @@ class LocalModelsPanel(QWidget):
         self.hf_token = QLineEdit(); self.hf_token.setEchoMode(QLineEdit.EchoMode.Password)
         self.hf_token.setPlaceholderText('Optional Hugging Face token for gated models · kept for this dialog only')
         layout.addWidget(self.hf_token)
-        self.status = QLabel('No Lightning or Turbo LoRA is loaded. 4B is the lower-memory image choice; model fit also depends on host RAM and canvas size.')
+        self.status = QLabel('LoRAs are optional and loaded only when selected in Settings. 4B is the lower-memory image choice; model fit also depends on host RAM and canvas size.')
         self.status.setWordWrap(True); self.status.setTextFormat(Qt.TextFormat.PlainText); layout.addWidget(self.status)
         self.log = GenerationLog(); layout.addWidget(self.log)
         self.stop = QPushButton('Cancel preparation'); self.stop.clicked.connect(lambda: self.cancel.set()); self.stop.hide(); layout.addWidget(self.stop)
@@ -219,7 +282,7 @@ class LocalModelsPanel(QWidget):
         layout.addStretch()
 
     def value(self):
-        return {**self.profile, **{k: v.text().strip() for k, v in self.fields.items()},
+        return {**self.profile, **{k + '_loras': v.value() for k, v in self.loras.items()}, **{k: v.text().strip() for k, v in self.fields.items()},
                 'device': self.device.currentData(), 'offload': self.offload.isChecked(),
                 'steps': self.steps.value(), 'preview_every': self.every.value(), 'image_variant': self.variant.currentData(),
                 'video_preview_mode': self.video_preview_mode.currentData(), 'video_preview_every': self.video_preview_every.value(),

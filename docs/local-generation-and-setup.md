@@ -33,7 +33,7 @@ Choose **Automatically configure all local engines** to scan standard model fold
 1. Choose **Prepare local engine**. Director creates a private inference environment under its application data folder. The first installation downloads several GB of Python libraries and CUDA PyTorch. Its dependencies and download cache stay in the managed `local-generation/engine` venv; no separate package installation is required. It does not alter your running ComfyUI instance or require a ComfyUI server. Use **Check engine** to verify actual library imports, dependency consistency and CUDA execution. If preparation was interrupted, run **Prepare local engine** again.
 2. Use **Find my model files** to scan your chosen model folder. The initial folder suggestion is `~/Programs/ComfyUI/models`, but any folder is allowed. Scanning reads filenames in a background worker and leaves model files in place.
 3. For images, choose **Klein Base 4B** or **9B**. The scan suggests 4B on smaller GPUs and 9B when at least 20 GB VRAM is detected. This is a starting recommendation, rather than a guarantee: system RAM, canvas size and other running apps matter too. Pair 4B with its Qwen 4B encoder, or 9B with its Qwen 8B encoder, and select the Flux 2 VAE.
-4. For video, select a **pruned H3** checkpoint, a supported H3 text encoder, video VAE and audio VAE. Choose Ref2VA for reference media, or FL2VA for text and first/last frames. The native backend accepts INT8 ConvRot and the 14 GB NVFP4/AWQ encoder. NVFP4 weights remain packed on disk and are expanded per layer for computation; older NVIDIA GPUs do not need NVFP4 tensor cores. No Lightning or Turbo LoRA is loaded.
+4. For video, select a **pruned H3** checkpoint, a supported H3 text encoder, video VAE and audio VAE. Choose Ref2VA for reference media, or FL2VA for text and first/last frames. The native backend accepts INT8 ConvRot and the 14 GB NVFP4/AWQ encoder. NVFP4 weights remain packed on disk and are expanded per layer for computation; older NVIDIA GPUs do not need NVFP4 tensor cores. LoRAs are optional and selected separately in Settings.
 5. Select **Image models** or **Video models**, then **Get configuration files**. This downloads tokenizer, processor and model configuration files needed alongside your weights. It does not download the model weights.
 6. If weights are missing, choose **Download model set**. Review the approximate size before downloading. Matching files already selected in the dialog are reused. Gated repositories may require accepting the model's terms on Hugging Face and entering a token in the dialog; that token is kept only for that dialog.
 7. Save Settings or finish the wizard. Its final page lists incomplete setup so you can return later. You can also choose **Set up later** and keep using the editor.
@@ -44,7 +44,7 @@ FP8 image checkpoints are expanded into a derived BF16 compatibility cache one t
 
 ![Local controls in Video Preview](images/local-video-controls.png)
 
-Choose **Settings → Local models → Video** to set the canvas, length, sampling steps, sampler and seed. The initial settings are **16:9 at 0.5 MP (960 × 544), 15 seconds, 20 steps**. H3 aligns 15 seconds to **362 frames at 24 fps**, producing about 15.08 seconds. Choose **RES multistep with a simple schedule** or the native Euler sampler. Lightning/Turbo LoRAs are not loaded. Canvas, duration and references affect memory use and render time.
+Choose **Settings → Local models → Video** to set the canvas, length, sampling steps, sampler and seed. The initial settings are **16:9 at 0.5 MP (960 × 544), 15 seconds, 20 steps**. H3 aligns 15 seconds to **362 frames at 24 fps**, producing about 15.08 seconds. Choose **RES multistep with a simple schedule** or the native Euler sampler. No LoRA is selected automatically. Canvas, duration, adapters and references affect memory use and render time.
 
 In Settings, choose **Random for each render** for a fresh variation each time, or turn it off and enter a static seed, including a full 64-bit seed from a workflow. The generation output lists the actual seed used. Seeds make native runs repeatable with the same inputs and settings; different engines and devices can produce different results.
 
@@ -73,3 +73,15 @@ In **Effects Library → Add your own**, write the effect instruction and choose
 The thank-you page has a five-slide showcase with arrow buttons and direct slide selectors. **Review source choices and pending setup** shows your configuration summary. **Support & Donate** remains a placeholder until the donation link is available.
 
 ![The thank-you showcase](images/onboarding-thanks.png)
+
+## Use LoRAs for local generation
+
+![Multiple LoRAs in native generation Settings](images/local-loras.png)
+
+Open **Settings → Local models → Video · H3** or **Images · Flux**. Each page has its own **LoRAs** list. Click **+** to add an adapter, then use **…** to choose its `.safetensors` file. Repeat **+** to stack more adapters. Choose files trained for the selected model and size: H3 video adapters belong in Video, and Flux Klein adapters belong in Images.
+
+Enter the adapter's **trigger words** and set its **Weight** from **0.00 to 1.00**. A weight of 1 applies full strength; lower weights reduce its effect. Turn off the row's checkbox to retain it without using it, or choose **×** to remove it. Zero weight also disables the adapter and its trigger words. Save Settings to use the list; Cancel leaves the saved configuration intact.
+
+Each local render adds the enabled adapter's trigger words to its generation prompt. Image adapters also apply to locally generated tile artwork. Your authored prompt remains unchanged, and image and video triggers stay separate. Duplicate trigger phrases already present in the prompt are not appended again.
+
+Adapter files remain in their selected locations, and Director applies their contributions without changing the base checkpoint. Standard LoRA matrices are supported; DoRA adapters are not supported. Incompatible targets or dimensions appear in verbose output. The setup wizard keeps these advanced settings intact but does not show LoRA controls.

@@ -27,7 +27,7 @@ class WizardLocalModelsPanel(LocalModelsPanel):
     readinessChanged = Signal()
 
     def __init__(self, owner, requested_tasks):
-        super().__init__(owner); self.requested_tasks = requested_tasks; self.verified_engine = None; self.disposed = False
+        super().__init__(owner, include_loras=False); self.requested_tasks = requested_tasks; self.verified_engine = None; self.disposed = False
         self.auto_running = False; self.auto_queue = []; self._auto_next = None
         layout = self.layout()
         while layout.count():
