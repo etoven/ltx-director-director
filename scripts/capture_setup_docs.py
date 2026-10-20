@@ -23,6 +23,14 @@ def capture_wizard():
     QTimer.singleShot(250, capture_local)
 def capture_local():
     wizard.grab().save(str(out / 'local-model-setup.png'))
+    wizard.steps.setCurrentRow(4)
+    QTimer.singleShot(250, capture_getting_started)
+def capture_getting_started():
+    wizard.grab().save(str(out / 'onboarding-getting-started.png'))
+    wizard.steps.setCurrentRow(5)
+    QTimer.singleShot(250, capture_thanks)
+def capture_thanks():
+    wizard.grab().save(str(out / 'onboarding-thanks.png'))
     wizard.reject()
     panel = w.project_preview_panel
     w.project_preview_dock.setFloating(True); w.project_preview_dock.resize(740, 500)

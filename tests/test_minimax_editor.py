@@ -30,6 +30,18 @@ class UnifiedEditorTests(unittest.TestCase):
         self.addCleanup(window.close)
         return window
 
+    def test_onboarding_navigation_readiness_and_guides(self):
+        from test_onboarding_design import (test_nested_navigation_status_and_stale_engine_verification,
+            test_automatic_setup_preserves_manual_files_and_restores_controls,
+            test_setup_errors_cancellation_and_closed_wizard_discard_callbacks,
+            test_guides_carousel_and_existing_setup_choices_are_preserved)
+        test_nested_navigation_status_and_stale_engine_verification()
+        import tempfile
+        with tempfile.TemporaryDirectory() as folder:
+            test_automatic_setup_preserves_manual_files_and_restores_controls(Path(folder))
+        test_setup_errors_cancellation_and_closed_wizard_discard_callbacks()
+        test_guides_carousel_and_existing_setup_choices_are_preserved()
+
     def test_local_setup_and_credential_scope(self):
         from test_local_generation_ui import test_wizard_cancel_preserves_credentials_and_finish_separates_sources
         test_wizard_cancel_preserves_credentials_and_finish_separates_sources()

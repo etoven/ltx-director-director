@@ -1,0 +1,9 @@
+# Aurora a104: onboarding design revisions
+
+The native wizard follows the supplied design references: navy grid canvas, a persistent workspace sidebar, nested local-model substeps with status badges, automatic/manual engine cards, three getting-started choices, a showcase carousel and a fixed footer. Existing writing/image choices, credential controls, model files, samplers, seeds, preview settings, download options and pending-setup summary remain accessible.
+
+Runtime readiness is session verification, not file existence. A successful install/probe marks the exact interpreter/device pair verified; edited selections and failed checks invalidate readiness. File-section badges use the existing preflight. Automatic setup scans familiar roots off the UI thread, preserves selected files, verifies or repairs the private venv and downloads processor/configuration assets for requested or discovered media models. Weights still require the existing explicit download action. Cancellation and closed-wizard guards discard late results, and setup callbacks preserve paths edited while a job runs.
+
+The quick-start tour highlights real workspace controls without altering project content or invoking generation. Illustrated tutorials retain the creative-loop guidance. The thank-you carousel uses existing Director artwork; original private mockups are not packaged. Pending setup remains accessible through a disclosure control. The new main-UI reference is saved privately for the subsequent workspace pass.
+
+Validation: nine isolated native wizard/local UI checks passed, including nested navigation, verification identity, automatic setup, cancellation/stale callbacks, preservation of edited paths, credential scope, tutorials, carousel and generated-media preservation. Publication CI and installed-wheel checks cover the packaged application. No GPU inference was run; the user’s active render was left alone.

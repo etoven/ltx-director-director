@@ -24,6 +24,12 @@ The default image source is used for segment artwork, image edits and **Add your
 
 ## Prepare local models
 
+The wizard’s sidebar expands **Local model setup** into **Engine**, **Video · H3**, **Images · Flux**, and **Writing · local**. Click a substep to open its controls. Amber icons indicate pending configuration or an unverified engine; a green Engine check means its actual dependency, import and execution checks succeeded. The file sections use green checks once their required files are configured. Hover an icon for details.
+
+![Local engine setup with automatic and manual options](images/local-model-setup.png)
+
+Choose **Automatically configure all local engines** to scan standard model folders, preserve files you already selected, prepare or repair Director’s private environment, and get configuration files for the selected or discovered video and image models. Model weights still use the separate **Download model set** action. Expand **Optional Config** for the Hugging Face token and verbose diagnostics. **Cancel preparation** stops the current setup operation. You can instead use every manual control below.
+
 1. Choose **Prepare local engine**. Director creates a private inference environment under its application data folder. The first installation downloads several GB of Python libraries and CUDA PyTorch. Its dependencies and download cache stay in the managed `local-generation/engine` venv; no separate package installation is required. It does not alter your running ComfyUI instance or require a ComfyUI server. Use **Check engine** to verify actual library imports, dependency consistency and CUDA execution. If preparation was interrupted, run **Prepare local engine** again.
 2. Use **Find my model files** to scan your chosen model folder. The initial folder suggestion is `~/Programs/ComfyUI/models`, but any folder is allowed. Scanning reads filenames in a background worker and leaves model files in place.
 3. For images, choose **Klein Base 4B** or **9B**. The scan suggests 4B on smaller GPUs and 9B when at least 20 GB VRAM is detected. This is a starting recommendation, rather than a guarantee: system RAM, canvas size and other running apps matter too. Pair 4B with its Qwen 4B encoder, or 9B with its Qwen 8B encoder, and select the Flux 2 VAE.
@@ -60,4 +66,10 @@ In **Effects Library → Add your own**, write the effect instruction and choose
 
 ## Get help as you work
 
-**Help → Interactive illustrated manual** opens the complete offline guide in your browser. Search the manual, jump between chapters or take the short guided tour. The wizard's Getting started page has three core slides, followed by a thank-you page and a placeholder for the future donation link.
+**Help → Interactive illustrated manual** opens the complete offline guide in your browser. Search the manual, jump between chapters or take the short guided tour. The wizard’s **Getting started** page offers three paths: **Interactive Quick Start** highlights the actual workspace controls; **Interactive Tutorial** opens illustrated walkthroughs; **Go to Workspace** saves your choices and returns to editing. **Browse Features** opens the full manual. The guided tour leaves your projects, media and authored text in place and never starts generation.
+
+![Getting started cards and onboarding progress](images/onboarding-getting-started.png)
+
+The thank-you page has a five-slide showcase with arrow buttons and direct slide selectors. **Review source choices and pending setup** shows your configuration summary. **Support & Donate** remains a placeholder until the donation link is available.
+
+![The thank-you showcase](images/onboarding-thanks.png)

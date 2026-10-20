@@ -4,12 +4,14 @@ from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QPixmap, QDesktopServices
 from PySide6.QtWidgets import (QDialog, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QListWidget, QStackedWidget, QPushButton, QComboBox, QLineEdit, QCheckBox,
-    QFormLayout, QScrollArea, QFrame)
+    QFormLayout, QScrollArea, QFrame, QProgressBar, QSizePolicy, QDialogButtonBox)
 from .ai import GEMINI_MODELS
 from .artwork_tools import IMAGE_MODEL_CHOICES
 from .chatgpt_widgets import ChatGPTSettingsPanel
 from .local_generation import load_profile, save_profile, validate_profile
-from .local_widgets import LocalModelsPanel
+from .onboarding_local import WizardLocalModelsPanel
+from .onboarding_design import (STYLE, GridSurface, WizardNavigation, Artwork, Showcase,
+    WorkspaceTour, TOUR, card, label, primary)
 
 ASSETS = Path(__file__).parent / 'assets' / 'onboarding'
 STEPS = [('Welcome', 'welcome'), ('Your writing companion', 'language'), ('Images and thumbnails', 'images'),
@@ -34,40 +36,44 @@ class OnboardingWizard(QDialog):
         super().__init__(owner)
         self.owner = owner; self.settings = owner.settings
         self.setWindowTitle('Welcome to Director · setup and first steps')
-        self.resize(1080, 800)
-        self.setStyleSheet('QDialog{background:#1c272d} QLabel{font-size:13px} QPushButton{padding:6px 12px} QLineEdit,QComboBox,QSpinBox{min-height:25px}')
-        self.setMinimumSize(780, 600)
-        outer = QHBoxLayout(self); outer.setContentsMargins(0, 0, 0, 0); outer.setSpacing(0)
-        rail = QFrame(); rail.setStyleSheet('background:#10232f;color:#c9e9ec')
-        rail.setFixedWidth(190); left = QVBoxLayout(rail); left.setContentsMargins(18, 24, 18, 24)
-        brand = QLabel('DIRECTOR\nYour creative workspace'); brand.setWordWrap(True); brand.setStyleSheet('font-size:17px;font-weight:bold;padding-bottom:18px')
+        self.setObjectName('onboardingWizard'); self.setStyleSheet(STYLE)
+        self.resize(1280, 950); self.setMinimumSize(1000, 720)
+        outer = QHBoxLayout(self); outer.setContentsMargins(0,0,0,0); outer.setSpacing(0)
+        rail = QFrame(); rail.setObjectName('onboardingRail'); rail.setFixedWidth(248)
+        left = QVBoxLayout(rail); left.setContentsMargins(14,18,14,24); left.setSpacing(20)
+        brand = label('workspace'); brand.setStyleSheet('font-size:23px;font-weight:650;color:#b9bdc9;padding-left:4px')
         left.addWidget(brand)
-        self.steps = QListWidget(); self.steps.setStyleSheet('QListWidget{border:0;background:transparent} QListWidget::item{padding:12px 5px;border:0;margin:3px 0;color:#b4d2db;font-size:12px} QListWidget::item:selected{background:#235165;border:0;border-radius:5px;color:white}')
-        self.steps.addItems([f'{i + 1}  {label}' for i, (label, _) in enumerate(STEPS)])
-        left.addWidget(self.steps, 1)
-        left.addWidget(text_label('A few choices now.<br>A whole sequence of possibilities.'))
+        self.steps = WizardNavigation([name for name,_ in STEPS]); left.addWidget(self.steps,1)
+        self.rail_progress = QProgressBar(); self.rail_progress.setRange(0,6); self.rail_progress.setTextVisible(False)
+        left.addWidget(self.rail_progress)
+        left.addWidget(label('A few choices now…\nA whole sequence of possibilities.', 'muted'))
         outer.addWidget(rail)
-        main = QWidget(); right = QVBoxLayout(main); right.setContentsMargins(22, 18, 22, 16)
-        self.header = QLabel(); self.header.setFixedHeight(175); self.header.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.header.setStyleSheet('background:#14232d;border-radius:8px')
-        right.addWidget(self.header)
-        self.title = QLabel(); self.title.setStyleSheet('font-size:22px;font-weight:bold;padding-top:8px')
-        right.addWidget(self.title)
-        self.pages = QStackedWidget(); right.addWidget(self.pages, 1)
+        main = GridSurface(); right = QVBoxLayout(main); right.setContentsMargins(0,0,0,0); right.setSpacing(0)
+        heading = QWidget(); top = QVBoxLayout(heading); top.setContentsMargins(34,25,34,16); top.setSpacing(8)
+        title_row = QHBoxLayout(); self.title = label('', 'pageTitle'); title_row.addWidget(self.title,1)
+        self.donate = QPushButton('♥ Support & Donate'); self.donate.setEnabled(False)
+        self.donate.setToolTip('The donation link will be added later.'); title_row.addWidget(self.donate)
+        top.addLayout(title_row); self.subtitle = label('', 'muted'); top.addWidget(self.subtitle)
+        self.header = QLabel(); self.header.setFixedHeight(105); self.header.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        top.addWidget(self.header); right.addWidget(heading)
+        self.pages = QStackedWidget(); right.addWidget(self.pages,1)
         self.build_welcome(); self.build_writing(); self.build_images(); self.build_local(); self.build_getting_started(); self.build_thanks()
-        self.hint = QLabel(); self.hint.setWordWrap(True); self.hint.setStyleSheet('color:#84b9c4;padding:4px')
-        right.addWidget(self.hint)
+        footer = QFrame(); footer.setObjectName('onboardingFooter'); footer.setStyleSheet('#onboardingFooter{background:#171a25;border-top:1px solid #303441}')
+        bottom = QVBoxLayout(footer); bottom.setContentsMargins(24,10,24,20); bottom.setSpacing(10)
+        self.hint = label('', 'muted'); self.hint.setAlignment(Qt.AlignmentFlag.AlignRight); bottom.addWidget(self.hint)
         buttons = QHBoxLayout()
         self.later = QPushButton('Set up later'); self.later.clicked.connect(self.setup_later); buttons.addWidget(self.later)
-        buttons.addStretch()
-        self.back = QPushButton('Back'); self.back.clicked.connect(lambda: self.advance(-1)); buttons.addWidget(self.back)
-        self.next = QPushButton('Continue'); self.next.clicked.connect(lambda: self.advance(1)); buttons.addWidget(self.next)
-        right.addLayout(buttons); outer.addWidget(main, 1)
+        buttons.addStretch(); self.back = QPushButton('Back'); self.back.clicked.connect(lambda:self.advance(-1)); buttons.addWidget(self.back)
+        self.next = primary(QPushButton('Continue')); self.next.clicked.connect(lambda:self.advance(1)); buttons.addWidget(self.next)
+        bottom.addLayout(buttons); right.addWidget(footer); outer.addWidget(main,1)
         self.steps.currentRowChanged.connect(self.go)
-        self.steps.setCurrentRow(0)
+        self.steps.localSectionChanged.connect(self.local.tabs.setCurrentIndex)
+        self.local.tabs.currentChanged.connect(self.select_local_section)
+        self.local.readinessChanged.connect(self.update_readiness)
+        self.steps.setCurrentRow(0); self.update_readiness()
 
     def page(self):
-        page = QWidget(); layout = QVBoxLayout(page); layout.setSpacing(12)
+        page = QWidget(); page.setObjectName('onboardingPage'); layout = QVBoxLayout(page); layout.setContentsMargins(32,0,32,24); layout.setSpacing(16)
         scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setFrameShape(QFrame.Shape.NoFrame); scroll.setWidget(page)
         self.pages.addWidget(scroll)
         return layout
@@ -181,38 +187,95 @@ class OnboardingWizard(QDialog):
 
     def build_local(self):
         layout = self.page()
-        self.local = LocalModelsPanel(self.owner)
+        self.local = WizardLocalModelsPanel(self.owner, self.local_tasks)
         layout.addWidget(self.local)
 
+    def local_tasks(self):
+        tasks = []
+        if self.local_video.isChecked(): tasks.append('video')
+        if self.image_model.currentData().startswith('local:'): tasks.append('image')
+        if self.provider.currentData() == 'local': tasks.append('text')
+        return tasks
+
+    def select_local_section(self, index):
+        self.steps.section = index; self.steps.refresh()
+        if self.steps.currentRow() == 3:self.update_local_title()
+
+    def update_local_title(self):
+        self.title.setText('Local model setup — ' + ('Engine','Video · H3','Images · Flux','Writing · local')[self.local.tabs.currentIndex()])
+
+    def update_readiness(self):
+        states = self.local.readiness()
+        for index,(state,explanation) in enumerate(states):self.steps.status(index,state,explanation)
+        if hasattr(self,'progress_checks'):
+            tasks = self.local_tasks(); indexes = {'video':1,'image':2,'text':3}
+            self.progress_checks[0].setChecked(bool(tasks) and all(states[indexes[k]][0]=='ready' for k in tasks))
+            self.progress_checks[1].setChecked(states[0][0]=='ready')
+
     def build_getting_started(self):
-        layout = self.page()
-        self.slide = QStackedWidget(); layout.addWidget(self.slide, 1)
-        for title, body in [
-            ('1 · Build your timeline', 'Create a project, choose its workspace, then add images, video or text beats. '
-                'Put them in order and adjust duration. Save to Library to keep a native project with its media associations.'),
-            ('2 · Direct and refine', 'Write the motion you want. Segment scope changes the selected beat; Global scope acts on '
-                'the sequence. The unified editor has its own controls. Review proposed text and approve or reject changes. '
-                'Drag an effect onto one segment for a focused rewrite.'),
-            ('3 · Preview and hand off', 'Open Video Preview to attach a render or generate locally. Draft previews and a progress pill '
-                'appear during native generation. Export your timeline or prompt workflow when ready. Use Shot Sequence to arrange '
-                'finished shots, trim them and review playback.')]:
-            page = QWidget(); content = QVBoxLayout(page); content.addWidget(text_label('<h3>' + title + '</h3><p>' + body + '</p>')); content.addStretch(); self.slide.addWidget(page)
-        row = QHBoxLayout()
-        for i, label in enumerate(('Timeline', 'Refinement', 'Preview and export')):
-            button = QPushButton(label); button.clicked.connect(lambda _, n=i: self.slide.setCurrentIndex(n)); row.addWidget(button)
-        layout.addLayout(row)
-        help_button = QPushButton('Open the full interactive illustrated manual'); help_button.clicked.connect(lambda: open_manual())
-        layout.addWidget(help_button)
+        layout = self.page(); frame, content = card('Getting started',
+            'Let’s get you familiar with Director’s tools. Choose where you want to begin, or browse the guide.')
+        row = QHBoxLayout(); row.setSpacing(16); self.start_cards = []; self.guide_buttons = []
+        choices = [
+            ('Highly Recommended','Interactive Quick Start','Try a guided tour of your workspace. We will show you the exact controls to use.',
+             'Start Onboarding Tour','../help/images/aurora-startup.png',self.start_quick_start),
+            ('Interactive Tutorial','Onboarding Tutorials','Explore short illustrated walkthroughs of setup, prompts, reference media and local generation.',
+             'Interactive Tutorial','local.png',self.open_tutorials),
+            ('Manual Guide','Explore Features Manually','Go directly to your workspace. Explore files, generation settings and local models at your own pace.',
+             'Go to Workspace','../help/images/timeline-navigation.png',self.go_to_workspace)]
+        for index,(badge,title,body,button_text,image,action) in enumerate(choices):
+            tile, tile_layout = card(recommended=index==0); self.start_cards.append(tile)
+            tag = label(badge); tag.setWordWrap(False); tag.setMinimumHeight(30); tag.setStyleSheet('background:#214b59;border-radius:8px;padding:6px;font-size:13px')
+            tile_layout.addWidget(tag,0,Qt.AlignmentFlag.AlignLeft)
+            tile_layout.addWidget(Artwork(ASSETS/image,145)); tile_layout.addWidget(label(title,'cardTitle'))
+            tile_layout.addWidget(label(body)); tile_layout.addStretch()
+            button = QPushButton(button_text)
+            if index==0:primary(button)
+            button.clicked.connect(action); tile_layout.addWidget(button); self.guide_buttons.append(button)
+            if index==2:
+                manual = QPushButton('Browse Features'); manual.clicked.connect(lambda:open_manual()); tile_layout.addWidget(manual)
+            row.addWidget(tile,1)
+        content.addLayout(row)
+        content.addWidget(label('Onboarding Progress', 'cardTitle'))
+        progress = QHBoxLayout(); self.progress_checks = []
+        for text in ('Setup Local Files','Verify Python Engine','Complete First Guide','Explore Workspace'):
+            check = QCheckBox(text); check.setEnabled(False); progress.addWidget(check); self.progress_checks.append(check)
+        self.progress_checks[2].setChecked(self.settings.value('onboarding/quick_start_complete',False,bool))
+        content.addLayout(progress); layout.addWidget(frame); layout.addStretch()
+
+    def start_quick_start(self):
+        self.hide(); self.workspace_tour = WorkspaceTour(self.owner)
+        self.workspace_tour.completed.connect(lambda:self.progress_checks[2].setChecked(True))
+        self.workspace_tour.finished.connect(lambda:self.show())
+        self.workspace_tour.show(); self.workspace_tour.raise_()
+
+    def open_tutorials(self):
+        self.tutorial = QDialog(self); self.tutorial.setObjectName('onboardingWizard'); self.tutorial.setStyleSheet(STYLE)
+        self.tutorial.setWindowTitle('Director · illustrated tutorials'); self.tutorial.resize(820,650)
+        layout = QVBoxLayout(self.tutorial)
+        self.tutorial_slides = Showcase([(title,body,image) for title,body,_,image in TOUR]); layout.addWidget(self.tutorial_slides)
+        manual = QPushButton('Open the full interactive illustrated manual'); manual.clicked.connect(lambda:open_manual()); layout.addWidget(manual)
+        close = QDialogButtonBox(QDialogButtonBox.StandardButton.Close); close.rejected.connect(self.tutorial.reject); layout.addWidget(close)
+        self.tutorial.show()
+
+    def go_to_workspace(self):
+        self.progress_checks[3].setChecked(True); self.finish()
 
     def build_thanks(self):
-        layout = self.page()
-        layout.addWidget(text_label('<h3>Thanks for making something with Director.</h3>'
-            '<p>Your stories, experiments and feedback help shape this workspace.</p>'))
-        self.summary = text_label(''); layout.addWidget(self.summary)
-        donate = QPushButton('Support development · donation link coming soon'); donate.setEnabled(False); layout.addWidget(donate)
-        manual = QPushButton('Explore the interactive help'); manual.clicked.connect(lambda: open_manual()); layout.addWidget(manual)
-        layout.addWidget(text_label('You can revisit every choice in Settings, or reopen this wizard from Help.'))
-        layout.addStretch()
+        layout = self.page(); frame, content = card()
+        self.showcase = Showcase([
+            ('Explore what’s possible','Craft prompts, create thumbnails and render cinematic video with your local engines and writing companion.','local.png'),
+            ('Find your visual language','Generate and refine scene artwork, use references and create your own Effects Library thumbnails.','images.png'),
+            ('Direct every detail','Shape action, camera motion and sound with focused prompt refinement and reviewable changes.','language.png'),
+            ('Build a sequence','Arrange beats, preserve their media associations and keep the unified production prompt in sync.','getting-started.png'),
+            ('Make your next story','Preview finished work, organize shots and export a production handoff. The full illustrated guide is always in Help.','welcome.png')])
+        self.showcase.setMinimumHeight(500); frame.setMinimumHeight(600)
+        content.addWidget(self.showcase)
+        self.summary_toggle = QPushButton('Review source choices and pending setup'); self.summary_toggle.setCheckable(True)
+        content.addWidget(self.summary_toggle)
+        self.summary = text_label(''); content.addWidget(self.summary); self.summary.hide()
+        self.summary_toggle.toggled.connect(self.summary.setVisible)
+        layout.addWidget(frame); layout.addStretch()
 
     def needs_local(self):
         return self.local_video.isChecked() or self.provider.currentData() == 'local' or self.image_model.currentData().startswith('local:')
@@ -235,11 +298,22 @@ class OnboardingWizard(QDialog):
             self._text_keys[self._last_image_provider] = self.image_key.text().strip()
             if self._last_image_provider == self.provider.currentData(): self.text_key.setText(self.image_key.text())
         self.pages.setCurrentIndex(row); self.title.setText(STEPS[row][0])
+        self.header.setVisible(row < 3); self.donate.setVisible(row == 5)
+        self.rail_progress.setValue(row+1)
+        if row == 3:self.update_local_title()
+        elif row == 4:self.title.setText('Getting started — Quick Tour & Onboarding')
+        elif row == 5:self.title.setText('Thank you for completing the setup')
+        self.subtitle.setText(['A few choices now. A whole sequence of possibilities.',
+            'Choose the writing companion that fits your workflow.', 'Choose how Director creates artwork and thumbnails.',
+            'Set up and configure your local generation engine. Point to existing files or download a matching set.',
+            'Let’s get you familiar with Director’s tools. Choose where you want to begin, or browse the guide.',
+            'You’re all set to begin creating with Director. Explore what’s possible through the showcase below.'][row])
         self.header_source = QPixmap(str(ASSETS / (STEPS[row][1] + '.png'))); self.fit_header()
-        self.back.setEnabled(row > 0); self.next.setText('Finish setup' if row == len(STEPS) - 1 else 'Continue')
+        self.back.setEnabled(row > 0); self.next.setText('Finish' if row == len(STEPS) - 1 else 'Continue')
         self.hint.setText(['Choose cloud and local sources independently.', 'Keep credentials in these controls; you never need to paste keys into a prompt.',
             'Image generation uses its own model and billing choice.', 'Prepare the engine, find files, then get configuration files. Download weights only if needed.',
-            'Three short slides cover the core creative loop.', 'Finish saves your choices. You can keep editing while optional model setup remains pending.'][row])
+            'Ready to go? Explore at your own pace.', 'We hope you enjoy your experience!'][row])
+        self.update_readiness()
         if row == len(STEPS) - 1: self.update_summary()
 
     def fit_header(self):
@@ -281,6 +355,7 @@ class OnboardingWizard(QDialog):
             if self.remember.isChecked(): self.settings.setValue(key + '_key', value)
             else: self.settings.remove(key + '_key')
         save_profile(self.settings, self.local.value())
+        self.settings.setValue('onboarding/quick_start_complete', self.progress_checks[2].isChecked())
         self.settings.setValue('onboarding/seen', True); self.settings.sync()
         self.owner.update_provider_button(); self.accept()
 
