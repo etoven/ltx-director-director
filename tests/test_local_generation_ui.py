@@ -60,7 +60,14 @@ def test_local_progress_is_ignored_after_a_project_switch_and_no_paid_prompt():
         dialog = SettingsDialog(w.settings, w)
         assert dialog.provider.findText('local') >= 0
         assert 'video_encoder' in dialog.local_models.fields
-        dialog.reject()
+        from PySide6.QtWidgets import QDialogButtonBox
+        buttons = dialog.layout().itemAt(1).widget()
+        assert isinstance(buttons, QDialogButtonBox) and buttons.parentWidget() is dialog
+        dialog.local_models.video_random_seed.setChecked(False)
+        dialog.local_models.video_seed.setValue(931351171509952)
+        dialog.accept()
+        from ltx_prompt_director.local_generation import load_profile
+        assert load_profile(w.settings)['video_seed'] == 931351171509952
 
 
 def test_generated_video_attachment_preserves_previous_render_and_discards_stale_metadata():
@@ -108,3 +115,52 @@ def test_unsaved_local_video_can_be_exported():
             operation, arguments = job.call_args.args[:2]
             operation(*arguments)
             assert target.read_bytes() == b'generated video'
+
+
+def test_native_video_uses_unified_output_reference_panel_and_settings_directly():
+    from ltx_prompt_director.local_widgets import LocalModelsPanel, GenerationLog
+    from ltx_prompt_director.local_generation import save_profile
+    with window() as w:
+        w.set_project_type('minimax_references')
+        production = 'summary\nA single continuous shot.\n\ndetailed_description\n[Shot 1] At 00:00.00, steam rises.\n\noverall_soundscape\nQuiet room.\n\nnon_diegetic_music\nN/A'
+        authored = production + '\n/refine Do not send this editing instruction.'
+        w.unified_prompt.setPlainText(authored)
+        assert w.minimax_prompt_text == authored
+        w.minimax_reference_images = [
+            {'name': 'Existing character', 'image': 'data:image/png;base64,example', 'role': 'identity'},
+            {'name': 'Video with sound', 'kind': 'video', 'path': '/source/video.mp4', 'audio_path': '/source/paired.wav'},
+            None, {'name': 'Sound only', 'kind': 'video', 'path': '/source/sound.mp4', 'audio_path': '/source/only.wav', 'audio_only': True}]
+        setup = LocalModelsPanel(w, {'video_seed': 931351171509952})
+        assert setup.video_seed.value() == 931351171509952
+        setup.video_seed.stepBy(1); assert setup.video_seed.value() == 931351171509953
+        setup.video_seed.setValue(931351171509952)
+        assert (setup.video_width.value(), setup.video_height.value(), setup.video_duration.value(), setup.video_steps.value()) == (960, 544, 15, 20)
+        save_profile(w.settings, setup.value())
+        jobs = []
+        with patch('ltx_prompt_director.ui.validate_profile'), \
+             patch.object(w, 'start_disk_job', side_effect=lambda op, args, ready, fail, **kw: jobs.append((op, args, ready, fail))):
+            w.generate_local_video()
+        assert len(jobs) == 1
+        operation, args, ready, failed = jobs[0]
+        w.minimax_reference_images[0]['name'] = 'Edited after start'
+        with patch('ltx_prompt_director.ui.run_request', return_value={'path': '/result.mp4'}) as run:
+            operation(*args)
+        request = run.call_args.args[0]
+        assert request['prompt'] == production
+        assert (request['width'], request['height'], request['duration'], request['steps'], request['seed']) == (960, 544, 15, 20, 931351171509952)
+        assert len(request['references']) == 3
+        assert request['references'][0]['name'] == 'Existing character'
+        assert request['references'][1]['audio_path'] == '/source/paired.wav'
+        assert request['references'][2]['kind'] == 'audio' and request['references'][2]['path'] == '/source/only.wav'
+        assert w.unified_prompt.toPlainText() == authored
+        assert w.minimax_reference_images[3]['kind'] == 'video'
+        failed('Diagnostic test finished')
+        assert not w._local_video_busy
+        setup.video_random_seed.setChecked(True)
+        assert setup.value()['video_seed'] == -1 and not setup.video_seed.isEnabled()
+        log = GenerationLog()
+        log.receive_event({'kind': 'log', 'message': '<b>checkpoint loading</b>'})
+        log.receive_event({'kind': 'error', 'message': 'CUDA failure details'})
+        assert '<b>checkpoint loading</b>' in log.output.toPlainText()
+        assert 'CUDA failure details' in log.output.toPlainText()
+        log.clear(); assert not log.output.toPlainText()

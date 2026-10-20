@@ -5,13 +5,42 @@ from pathlib import Path
 import sys
 import threading
 from PySide6.QtCore import Qt, Signal, QEvent
-from PySide6.QtGui import QPixmap
+from PySide6.QtGui import QPixmap, QValidator
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QLabel,
     QLineEdit, QComboBox, QPushButton, QCheckBox, QSpinBox, QTabWidget, QFileDialog,
-    QScrollArea, QDialog, QDialogButtonBox, QTextEdit, QListWidget, QListWidgetItem,
-    QMessageBox, QDoubleSpinBox)
-from .local_generation import (load_profile, save_profile, scan_models, recommended_variant, recommended_writer,
-    run_request, validate_profile, align_h3_frames, engine_python)
+    QMessageBox, QDoubleSpinBox, QPlainTextEdit, QAbstractSpinBox)
+from .local_generation import (load_profile, scan_models, recommended_variant, recommended_writer, run_request)
+
+
+class SeedSpinBox(QAbstractSpinBox):
+    """Qt's ordinary integer spin box truncates the 64-bit seeds H3 accepts."""
+    MAXIMUM = 2**64 - 1
+
+    def __init__(self):
+        super().__init__(); self.lineEdit().setMaxLength(20); self.setValue(42)
+
+    def value(self):
+        return min(self.MAXIMUM, max(0, int(self.lineEdit().text() or '0')))
+
+    def setValue(self, value):
+        self.lineEdit().setText(str(min(self.MAXIMUM, max(0, int(value)))))
+
+    def validate(self, text, pos):
+        state = QValidator.State
+        if not text: return state.Intermediate, text, pos
+        return (state.Acceptable if text.isascii() and text.isdecimal() and int(text) <= self.MAXIMUM else state.Invalid), text, pos
+
+    def fixup(self, text):
+        return str(min(self.MAXIMUM, max(0, int(text or '0')))) if text.isascii() and text.isdecimal() else '0'
+
+    def stepBy(self, steps):
+        self.setValue(self.value() + steps)
+
+    def stepEnabled(self):
+        flags = QAbstractSpinBox.StepEnabledFlag.StepNone
+        if self.value() > 0: flags |= QAbstractSpinBox.StepEnabledFlag.StepDownEnabled
+        if self.value() < self.MAXIMUM: flags |= QAbstractSpinBox.StepEnabledFlag.StepUpEnabled
+        return flags
 
 
 def progress_text(event):
@@ -23,26 +52,61 @@ def progress_text(event):
 
 
 class ProgressPill(QLabel):
-    def __init__(self, parent, bottom_margin=10):
+    def __init__(self, parent, bottom_margin=10, anchor=None):
         super().__init__(parent)
-        self.bottom_margin = bottom_margin
+        self.bottom_margin = bottom_margin; self.anchor = anchor
         parent.installEventFilter(self)
         self.setStyleSheet('background:rgba(12,28,40,230);color:#d5f9f0;border:1px solid #497f8a;'
                            'border-radius:10px;padding:4px 9px;font-size:11px')
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.hide()
 
+    def reposition(self):
+        target = self.anchor() if callable(self.anchor) else self.anchor
+        corner = target.mapTo(self.parent(), target.rect().bottomRight()) if target else self.parent().rect().bottomRight()
+        self.move(max(4, corner.x() - self.width() - 9),
+                  max(4, corner.y() - self.height() - self.bottom_margin + 1))
+
     def update_event(self, event):
-        self.setText(progress_text(event)); self.adjustSize()
-        self.move(max(4, self.parent().width() - self.width() - 10),
-                  max(4, self.parent().height() - self.height() - self.bottom_margin))
+        self.setText(progress_text(event)); self.adjustSize(); self.reposition()
         self.show(); self.raise_()
 
     def eventFilter(self, watched, event):
-        if event.type() == QEvent.Type.Resize:
-            self.move(max(4, watched.width() - self.width() - 10),
-                      max(4, watched.height() - self.height() - self.bottom_margin))
+        if event.type() == QEvent.Type.Resize: self.reposition()
         return super().eventFilter(watched, event)
+
+
+class GenerationLog(QWidget):
+    """Bounded, plain-text live diagnostics, retained until the next job."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self); layout.setContentsMargins(0, 0, 0, 0)
+        row = QHBoxLayout()
+        self.toggle = QCheckBox('Verbose output'); self.toggle.setChecked(True)
+        row.addWidget(self.toggle); row.addStretch()
+        copy_button = QPushButton('Copy output')
+        copy_button.clicked.connect(self.copy_output); row.addWidget(copy_button)
+        layout.addLayout(row)
+        self.output = QPlainTextEdit(); self.output.setReadOnly(True)
+        self.output.document().setMaximumBlockCount(1500)
+        self.output.setMaximumHeight(145); self.output.setMinimumHeight(70)
+        self.output.setPlaceholderText('Model loading, sampling progress and errors appear here.')
+        self.output.setStyleSheet('font-family:monospace;font-size:11px')
+        self.toggle.toggled.connect(self.output.setVisible); layout.addWidget(self.output)
+
+    def copy_output(self):
+        from PySide6.QtWidgets import QApplication
+        QApplication.clipboard().setText(self.output.toPlainText())
+
+    def clear(self): self.output.clear()
+
+    def receive_event(self, event):
+        if event.get('kind') in ('log', 'progress', 'error'):
+            message = event.get('message', '')
+            if message: self.output.appendPlainText(str(message))
+        elif event.get('kind') == 'result' and event.get('path'):
+            seed = f' · seed {event["seed"]}' if event.get('seed') is not None else ''
+            self.output.appendPlainText('Saved ' + str(event['path']) + seed)
 
 
 class LocalModelsPanel(QWidget):
@@ -59,7 +123,7 @@ class LocalModelsPanel(QWidget):
         self.fields = {}
         sections = [
             ('Engine', [('python', 'Inference Python'), ('models_root', 'Model folder')]),
-            ('Video · H3', [('video_model', 'Pruned H3 checkpoint'), ('video_encoder', 'H3 text encoder · INT8'),
+            ('Video · H3', [('video_model', 'Pruned H3 checkpoint'), ('video_encoder', 'H3 text encoder · INT8 / NVFP4'),
                 ('video_vae', 'Video VAE'), ('audio_vae', 'Audio VAE'), ('video_assets', 'Processor / tokenizer folder')]),
             ('Images · Flux', [('image_model', 'Flux Klein checkpoint'), ('image_encoder', 'Qwen text encoder'),
                 ('image_vae', 'Flux 2 VAE'), ('image_assets', 'Image configuration folder')]),
@@ -80,7 +144,7 @@ class LocalModelsPanel(QWidget):
         self.offload = QCheckBox('Move model layers out of GPU memory when idle')
         self.offload.setChecked(self.profile.get('offload', True)); engine_form.addRow('', self.offload)
         self.steps = QSpinBox(); self.steps.setRange(4, 100); self.steps.setValue(int(self.profile.get('steps', 30)))
-        engine_form.addRow('Default sampling steps', self.steps)
+        engine_form.addRow('Default image sampling steps', self.steps)
         self.every = QSpinBox(); self.every.setRange(1, 50); self.every.setValue(int(self.profile.get('preview_every', 5)))
         engine_form.addRow('Preview every N steps', self.every)
         self.variant = QComboBox(); self.variant.addItem('Klein Base 4B · FP8 · lower memory', '4b')
@@ -95,6 +159,27 @@ class LocalModelsPanel(QWidget):
         self.video_variant.addItem('FL2VA · text / first and last frame', 'fl2va')
         self.video_variant.setCurrentIndex(max(0, self.video_variant.findData(self.profile.get('video_variant', 'ref2va'))))
         self.tabs.widget(1).layout().insertRow(0, 'H3 workflow', self.video_variant)
+        self.video_random_seed = QCheckBox('Random for each render')
+        self.video_seed = SeedSpinBox()
+        seed = int(self.profile.get('video_seed', -1))
+        self.video_seed.setValue(max(0, seed) if seed >= 0 else 42)
+        self.video_random_seed.setChecked(seed < 0); self.video_seed.setEnabled(seed >= 0)
+        self.video_random_seed.toggled.connect(lambda random: self.video_seed.setEnabled(not random))
+        seed_row = QHBoxLayout(); seed_row.addWidget(self.video_random_seed); seed_row.addWidget(self.video_seed)
+        self.tabs.widget(1).layout().insertRow(1, 'Seed', seed_row)
+        self.video_steps = QSpinBox(); self.video_steps.setRange(4, 100); self.video_steps.setValue(int(self.profile.get('video_steps', 20)))
+        self.tabs.widget(1).layout().insertRow(2, 'Video sampling steps', self.video_steps)
+        self.video_sampler = QComboBox(); self.video_sampler.addItem('RES multistep · simple schedule', 'res_multistep'); self.video_sampler.addItem('Euler · native flow schedule', 'euler')
+        self.video_sampler.setCurrentIndex(max(0, self.video_sampler.findData(self.profile.get('video_sampler', 'res_multistep'))))
+        self.tabs.widget(1).layout().insertRow(3, 'Video sampler', self.video_sampler)
+        self.video_width = QSpinBox(); self.video_width.setRange(256, 2048); self.video_width.setSingleStep(32); self.video_width.setValue(int(self.profile.get('video_width', 960)))
+        self.video_height = QSpinBox(); self.video_height.setRange(256, 2048); self.video_height.setSingleStep(32); self.video_height.setValue(int(self.profile.get('video_height', 544)))
+        canvas = QHBoxLayout(); canvas.addWidget(self.video_width); canvas.addWidget(QLabel('×')); canvas.addWidget(self.video_height)
+        self.tabs.widget(1).layout().insertRow(4, 'Video canvas', canvas)
+        self.video_duration = QDoubleSpinBox(); self.video_duration.setRange(4, 15); self.video_duration.setValue(float(self.profile.get('video_duration', 15)))
+        self.video_duration.setSuffix(' seconds')
+        self.video_duration.setToolTip('15 seconds aligns to 362 frames at 24 fps (15.08 s). 16:9 at 0.5 MP uses 960 × 544.')
+        self.tabs.widget(1).layout().insertRow(5, 'Video length', self.video_duration)
         row = QHBoxLayout()
         self.scan_button = QPushButton('Find my model files'); self.scan_button.clicked.connect(self.scan)
         self.prepare = QPushButton('Prepare local engine'); self.prepare.clicked.connect(lambda: self.setup('install'))
@@ -112,6 +197,7 @@ class LocalModelsPanel(QWidget):
         layout.addWidget(self.hf_token)
         self.status = QLabel('No Lightning or Turbo LoRA is loaded. 4B is the lower-memory image choice; model fit also depends on host RAM and canvas size.')
         self.status.setWordWrap(True); self.status.setTextFormat(Qt.TextFormat.PlainText); layout.addWidget(self.status)
+        self.log = GenerationLog(); layout.addWidget(self.log)
         self.stop = QPushButton('Cancel preparation'); self.stop.clicked.connect(lambda: self.cancel.set()); self.stop.hide(); layout.addWidget(self.stop)
         self.links = QLabel('<a href="https://huggingface.co/Comfy-Org/MiniMax-H3">H3 model files</a> · '
             '<a href="https://huggingface.co/black-forest-labs/FLUX.2-klein-base-4b-fp8">Flux 4B</a> · '
@@ -125,7 +211,9 @@ class LocalModelsPanel(QWidget):
         return {**self.profile, **{k: v.text().strip() for k, v in self.fields.items()},
                 'device': self.device.currentData(), 'offload': self.offload.isChecked(),
                 'steps': self.steps.value(), 'preview_every': self.every.value(), 'image_variant': self.variant.currentData(),
-                'video_variant': self.video_variant.currentData(), 'writer_repo': self.writer_repo.currentText().strip()}
+                'video_steps': self.video_steps.value(), 'video_sampler': self.video_sampler.currentData(),
+                'video_width': self.video_width.value(), 'video_height': self.video_height.value(), 'video_duration': self.video_duration.value(),
+                'video_variant': self.video_variant.currentData(), 'video_seed': -1 if self.video_random_seed.isChecked() else self.video_seed.value(), 'writer_repo': self.writer_repo.currentText().strip()}
 
     def browse(self, key):
         if key in ('models_root', 'video_assets', 'image_assets', 'llm_model'):
@@ -152,8 +240,6 @@ class LocalModelsPanel(QWidget):
                 self.fields[key].setText((preferred or paths)[0])
             message = f'Found {sum(map(len, result["files"].values()))} model files. '
             if memory['total_gb']: message += f'GPU: {memory["total_gb"]:.0f} GB total, {memory["free_gb"]:.1f} GB free. Suggested image model: {variant.upper()}.'
-            if 'nvfp4' in self.fields['video_encoder'].text().lower():
-                message += ' The existing H3 NVFP4/AWQ encoder needs an INT8 replacement for this native engine; choose Video models → Download model set.'
             if 'fl2va' in self.fields['video_model'].text().lower():
                 self.video_variant.setCurrentIndex(self.video_variant.findData('fl2va'))
             self.status.setText(message)
@@ -162,7 +248,7 @@ class LocalModelsPanel(QWidget):
 
     def confirm_download(self):
         task = self.task.currentData()
-        estimate = {'video': 'about 50 GB for the pruned checkpoint, INT8 encoder and VAEs',
+        estimate = {'video': 'about 40 GB for the pruned checkpoint, NVFP4/AWQ encoder and VAEs',
                     'image': 'roughly 13–20 GB, depending on the selected model', 'text': 'the selected writing model and its tokenizer files; the download can be several GB'}[task]
         answer = QMessageBox.question(self, 'Download local model set',
             f'Download {estimate} from Hugging Face? Existing matching files are reused. '
@@ -176,14 +262,16 @@ class LocalModelsPanel(QWidget):
         if kind == 'install': profile['python'] = sys.executable
         self.busy = True; self.cancel = threading.Event(); self.stop.show()
         for button in (self.prepare, self.assets, self.download, self.scan_button, self.check): button.setEnabled(False)
-        self.status.setText('Preparing…')
+        self.status.setText('Preparing…'); self.log.clear()
         def event(value):
+            self.log.receive_event(value)
             if value.get('kind') == 'progress': self.status.setText(progress_text(value) + '\n' + value.get('message', ''))
         def ready(value):
             for key, path in value.get('profile_changes', {}).items():
                 if key in self.fields: self.fields[key].setText(path)
             self.status.setText(value.get('message', 'Ready.')); finish()
-        def fail(message): self.status.setText(str(message)); finish()
+        def fail(message):
+            self.status.setText(str(message)); self.log.receive_event({'kind': 'error', 'message': str(message)}); finish()
         def finish():
             self.busy = False; self.stop.hide()
             for button in (self.prepare, self.assets, self.download, self.scan_button, self.check): button.setEnabled(True)
@@ -208,14 +296,24 @@ class ImageGenerationPanel(QWidget):
         self.cancel = QPushButton('Cancel image generation'); self.cancel.clicked.connect(self.cancel_requested)
         self.cancel.setEnabled(False)
         layout.addWidget(self.cancel)
+        self.log = GenerationLog(); layout.addWidget(self.log)
         self.pixmap = QPixmap()
 
     def receive_event(self, event):
+        self.log.receive_event(event)
         if event.get('kind') == 'preview' and event.get('media') == 'image':
             self.pixmap = QPixmap(event['path']); self.fit()
+            self.caption.setText('Local image · draft sample')
         elif event.get('kind') == 'progress':
             self.pill.update_event(event); self.cancel.setEnabled(True)
+            self.caption.setText(event.get('message', 'Rendering image…'))
         elif event.get('kind') == 'result':
+            if event.get('media') == 'image' and event.get('path'):
+                self.pixmap = QPixmap(event['path']); self.fit()
+            self.caption.setText('Local image ready')
+            self.pill.hide(); self.cancel.setEnabled(False)
+        elif event.get('kind') == 'error':
+            self.caption.setText('Local image stopped · see verbose output')
             self.pill.hide(); self.cancel.setEnabled(False)
 
     def fit(self):
@@ -223,55 +321,3 @@ class ImageGenerationPanel(QWidget):
             self.image.setPixmap(self.pixmap.scaled(self.image.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
 
     def resizeEvent(self, event): super().resizeEvent(event); self.fit()
-
-
-class VideoGenerationDialog(QDialog):
-    def __init__(self, owner):
-        super().__init__(owner); self.setWindowTitle('Generate local video'); self.resize(640, 560)
-        layout = QVBoxLayout(self)
-        self.prompt = QTextEdit(); self.prompt.setAcceptRichText(False)
-        self.prompt.setPlainText(owner.minimax_prompt_text if owner.unified_workspace else
-            '\n\n'.join(filter(None, [owner.global_prompt.toPlainText(), *[s.prompt for s in owner.segments]])))
-        layout.addWidget(QLabel('Review the prompt sent to the local video model.'))
-        layout.addWidget(self.prompt, 1)
-        form = QFormLayout()
-        self.duration = QDoubleSpinBox(); self.duration.setRange(4, 14.37); self.duration.setValue(min(14.37, max(4, sum(s.duration for s in owner.segments) or 5)))
-        self.duration.setSuffix(' seconds')
-        self.width = QSpinBox(); self.width.setRange(256, 2048); self.width.setSingleStep(32); self.width.setValue(832)
-        self.height = QSpinBox(); self.height.setRange(256, 2048); self.height.setSingleStep(32); self.height.setValue(480)
-        self.steps = QSpinBox(); self.steps.setRange(4, 100); self.steps.setValue(load_profile(owner.settings)['steps'])
-        form.addRow('Length', self.duration); form.addRow('Width', self.width); form.addRow('Height', self.height); form.addRow('Steps', self.steps)
-        layout.addLayout(form)
-        self.references = QListWidget(); self.references.setMaximumHeight(120)
-        for segment in owner.segments:
-            if segment.kind in ('image', 'video'):
-                item = QListWidgetItem(f'{segment.name} · {segment.kind}')
-                item.setData(Qt.ItemDataRole.UserRole, segment.id)
-                item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-                item.setCheckState(Qt.CheckState.Checked if segment.kind == 'image' else Qt.CheckState.Unchecked)
-                self.references.addItem(item)
-        from .minimax_reference import reference_slots
-        for index, reference in enumerate(reference_slots(owner.minimax_reference_images)):
-            if not reference: continue
-            kind = reference.get('kind', 'image')
-            label = 'audio' if reference.get('audio_only') else kind
-            item = QListWidgetItem(f"Reference {index + 1}: {reference['name']} · {label}")
-            item.setData(Qt.ItemDataRole.UserRole, f'refslot:{index}')
-            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            item.setCheckState(Qt.CheckState.Unchecked); self.references.addItem(item)
-        layout.addWidget(QLabel('Attach selected references · video sound is off unless audio-only is selected'))
-        layout.addWidget(self.references)
-        self.message = QLabel('H3 aligns duration to its frame grid. Small canvases reduce memory and render time. No Lightning/Turbo LoRA is used. Review prompt asset labels to match only the checked references.')
-        self.message.setWordWrap(True); layout.addWidget(self.message)
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        buttons.button(QDialogButtonBox.StandardButton.Ok).setText('Generate')
-        buttons.accepted.connect(self.accept); buttons.rejected.connect(self.reject); layout.addWidget(buttons)
-
-    def accept(self):
-        try:
-            if not self.prompt.toPlainText().strip(): raise ValueError('Enter a video prompt first.')
-            if self.width.value() % 32 or self.height.value() % 32: raise ValueError('Width and height must be multiples of 32.')
-            self.frames = align_h3_frames(self.duration.value())
-        except ValueError as error:
-            self.message.setText(str(error)); return
-        super().accept()

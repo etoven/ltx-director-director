@@ -15,7 +15,7 @@ def _pil_reference(value):
     from PIL import Image
     import base64
     from io import BytesIO
-    if value.get('path'): return Image.open(value['path']).convert('RGB')
+    if value.get('path') and Path(value['path']).is_file(): return Image.open(value['path']).convert('RGB')
     data = value.get('image', '')
     if data.startswith('data:image/'):
         return Image.open(BytesIO(base64.b64decode(data.split(',', 1)[1]))).convert('RGB')
@@ -82,6 +82,7 @@ def prepare_float_checkpoint(path, cache, callback=progress):
 
 
 def image_generation(request):
+    progress('Starting native image runtime…')
     import torch
     from PIL import Image
     from transformers import AutoTokenizer, AutoModelForCausalLM
@@ -112,6 +113,9 @@ def image_generation(request):
     try: link.symlink_to(Path(encoder_file).resolve())
     except OSError: shutil.copyfile(encoder_file, link)
     encoder = AutoModelForCausalLM.from_pretrained(str(te_root), torch_dtype=dtype, local_files_only=True)
+    for index, layer in enumerate(encoder.model.layers):
+        layer.register_forward_pre_hook(lambda module, inputs, number=index + 1, total=len(encoder.model.layers):
+            progress(f'Image prompt encoder · layer {number}/{total}'))
     tokenizer = AutoTokenizer.from_pretrained(str(assets / 'tokenizer'), local_files_only=True)
     vae = AutoencoderKLFlux2.from_config(str(assets / 'vae/config.json'))
     weights = load_file(profile['image_vae'], device='cpu')
@@ -125,7 +129,11 @@ def image_generation(request):
         text_encoder=encoder, tokenizer=tokenizer, vae=vae, torch_dtype=dtype, local_files_only=True,
         is_distilled='base' not in Path(profile['image_model']).name.lower())
     device = profile.get('device', 'cuda')
-    if device == 'cuda' and profile.get('offload', True): pipe.enable_sequential_cpu_offload()
+    if device == 'cuda' and profile.get('offload', True):
+        free = torch.cuda.mem_get_info()[0] / 2**30
+        if profile.get('image_variant', '4b') == '4b' and free >= 9:
+            pipe.enable_model_cpu_offload()
+        else: pipe.enable_sequential_cpu_offload()
     else: pipe.to(device)
     pipe.vae.enable_tiling()
     width = int(request.get('width', 1024)); height = int(request.get('height', 1024))
@@ -159,6 +167,13 @@ def image_generation(request):
         generator=torch.Generator('cpu').manual_seed(int(request.get('seed', 42))),
         callback_on_step_end=callback, callback_on_step_end_tensor_inputs=['latents'])
     if images: arguments['image'] = images
+    encode = pipe.encode_prompt
+    def encode_prompt(*args, **kwargs):
+        progress('Encoding image prompt and references…')
+        result = encode(*args, **kwargs)
+        progress('Prompt encoded; starting image sampling…')
+        return result
+    pipe.encode_prompt = encode_prompt
     output = pipe(**arguments).images[0]
     path = root / 'image.png'; output.save(path)
     emit('result', path=str(path), media='image')
@@ -186,12 +201,39 @@ def read_reference_video(path, *, start=0, duration=15, width=832, height=480, f
     return output
 
 
+def read_reference_audio(path, *, start=0, duration=15, rate=32000):
+    """Decode a bounded reference with the bundled PyAV/FFmpeg runtime."""
+    import av
+    import numpy as np
+    start = max(0.0, float(start)); count = math.ceil(min(15, max(0, float(duration))) * rate)
+    chunks = []; copied = 0; cursor = start
+    with av.open(str(path)) as container:
+        if not container.streams.audio: raise ValueError('Reference has no audio stream.')
+        stream = container.streams.audio[0]
+        if start: container.seek(int(start / stream.time_base), stream=stream, backward=True)
+        resampler = av.AudioResampler(format='fltp', layout='stereo', rate=rate)
+        def append(frame):
+            nonlocal copied, cursor
+            stamp = float(frame.pts * frame.time_base) if frame.pts is not None else cursor
+            cursor = stamp + frame.samples / rate
+            offset = max(0, round((start - stamp) * rate))
+            data = frame.to_ndarray()[:, offset:offset + max(0, count - copied)]
+            if data.shape[1]: chunks.append(data.copy()); copied += data.shape[1]
+        for frame in container.decode(stream):
+            for output in resampler.resample(frame): append(output)
+            if copied >= count: break
+        if copied < count:
+            for output in resampler.resample(None): append(output)
+    if not chunks: raise ValueError('The selected audio reference has no samples in this interval.')
+    return np.concatenate(chunks, axis=1), rate
+
+
 def video_generation(request):
     refs = request.get('references', [])
     image_count = sum(r.get('kind', 'image') == 'image' for r in refs)
     video_count = sum(r.get('kind') == 'video' for r in refs)
-    audio_count = sum(r.get('kind') == 'audio' for r in refs)
-    if image_count > 9 or video_count > 3 or audio_count > 3 or len(refs) > 12:
+    audio_count = sum(r.get('kind') == 'audio' or r.get('kind') == 'video' and bool(r.get('audio_path')) for r in refs)
+    if image_count > 9 or video_count > 3 or audio_count > 3 or image_count + video_count + audio_count > 12:
         raise ValueError('H3 accepts up to 9 images, 3 video and 3 audio references, 12 files in total.')
     if request['profile'].get('video_variant', 'ref2va' if 'ref2va' in Path(request['profile']['video_model']).name.lower() else 'fl2va') != 'ref2va':
         if video_count or audio_count or image_count > 2:
@@ -201,41 +243,99 @@ def video_generation(request):
             raise ValueError('FL2VA keyframes need one Start and one End role.')
     elif not refs:
         raise ValueError('Ref2VA requires reference media. Select references or use a pruned FL2VA checkpoint.')
+    progress('Starting native video runtime…')
     import torch
     from PIL import Image
     from diffsynth.pipelines.minimax_h3_audio_video import MiniMaxH3Pipeline, ModelConfig
     from diffsynth.utils.data.audio_video import write_video_audio
-    from .local_generation import validate_profile, align_h3_frames
+    from .local_generation import validate_profile, align_h3_frames, resolve_video_seed
     profile = request['profile']; validate_profile(profile, 'video')
     dtype = torch.bfloat16
     device = profile.get('device', 'cuda')
     # Native disk offload reads safetensors as blocks are needed rather than
     # holding both the 20GB DiT and its text encoder in host RAM.
-    config = dict(offload_device='disk', offload_dtype=dtype, onload_device='cpu',
-        onload_dtype=dtype, preparing_device=device, preparing_dtype=dtype,
+    config = dict(offload_device='disk', offload_dtype='disk', onload_device='disk',
+        onload_dtype='disk', preparing_device=device, preparing_dtype=dtype,
         computation_device=device, computation_dtype=dtype) if profile.get('offload', True) else {}
+    from .local_h3_quant import register_encoder, register_packaged_vaes, use_cublas_int8
+    use_cublas_int8()
+    register_packaged_vaes()
+    if register_encoder(profile['video_encoder']):
+        progress('Using native NVFP4/AWQ encoder with per-layer BF16 computation…')
     progress('Loading pruned H3 and its encoders…')
-    limit = max(1, torch.cuda.mem_get_info()[0] / 2**30 - 1.5) if device == 'cuda' else None
+    count = align_h3_frames(request.get('duration', 5))
+    # VAE downsamples by 16, then DiT packs 2×2 spatial latent patches.
+    tokens = (((count - 5) // 17) * 5 + 2) * (request['height'] // 32) * (request['width'] // 32)
+    # Packed attention/QKV activations must fit alongside the cached weights.
+    reserve = max(3, (tokens + len(refs) * 4096 + 2048) * 21504 * 2 * 2.5 / 2**30)
+    limit = max(1, torch.cuda.mem_get_info()[0] / 2**30 - reserve) if device == 'cuda' else None
+    if device == 'cuda':
+        free, total = torch.cuda.mem_get_info()
+        progress(f'GPU memory: {free / 2**30:.2f} GiB free / {total / 2**30:.2f} GiB total; '
+                 f'activation allowance {reserve:.2f} GiB; weight cache threshold {limit:.2f} GiB')
     pipe = MiniMaxH3Pipeline.from_pretrained(torch_dtype=dtype, device=device,
         model_configs=[ModelConfig(path=profile[k], **config)
                        for k in ('video_model', 'video_encoder', 'video_vae', 'audio_vae')],
         processor_config=ModelConfig(path=profile['video_assets']), vram_limit=limit)
+    from .local_h3_quant import optimize_h3_convolutions, stream_h3_feed_forward, stream_h3_video_pixels
+    optimize_h3_convolutions(pipe); stream_h3_feed_forward(pipe); stream_h3_video_pixels(pipe)
+    if profile.get('video_sampler', 'res_multistep') == 'res_multistep':
+        from .local_h3_sampling import H3ResMultistepScheduler
+        pipe.scheduler = H3ResMultistepScheduler()
+        pipe.scheduler_audio = H3ResMultistepScheduler(audio=True)
+        progress('Sampler: RES multistep · simple schedule · guidance 1 · no Lightning LoRA')
+    encoder = pipe.text_encoder.model
+    for label, layers in (('vision', encoder.visual.blocks), ('prompt', encoder.language_model.layers)):
+        for index, layer in enumerate(layers):
+            layer.register_forward_pre_hook(lambda module, inputs, name=label, number=index + 1, total=len(layers):
+                progress(f'H3 {name} encoder · layer {number}/{total}'))
+    current_step = [0]
+    def denoiser_progress(number, total):
+        emit('log', message=f'H3 denoiser · block {number}/{total}')
+        steps = int(request.get('steps', profile.get('video_steps', 20)))
+        fraction = current_step[0] + (number - 1) / total
+        eta = (time.monotonic() - started[0]) / fraction * max(0, steps - fraction) if fraction >= 1 and started[0] else None
+        progress(f'Rendering video and audio · step {current_step[0] + 1}/{steps} · block {number}/{total}',
+                 fraction / steps * 94, eta)
+    for index, block in enumerate(pipe.dit.blocks):
+        block.register_forward_pre_hook(lambda module, inputs, number=index + 1, total=len(pipe.dit.blocks):
+            denoiser_progress(number, total))
+    sampling_finished = [False]
+    def trace_decode(method, label, percent):
+        def decode(*args, **kwargs):
+            if sampling_finished[0]: progress(label, percent)
+            else: emit('log', message=label)
+            return method(*args, **kwargs)
+        return decode
+    pipe.video_vae.decode_video = trace_decode(pipe.video_vae.decode_video, 'Decoding video latents…', 95)
+    pipe.audio_vae.decode_audio = trace_decode(pipe.audio_vae.decode_audio, 'Decoding audio latents…', 96)
+    run_unit = pipe.unit_runner
+    def unit_runner(unit, *args, **kwargs):
+        progress('H3 stage: ' + type(unit).__name__.replace('MiniMaxH3Unit_', ''))
+        return run_unit(unit, *args, **kwargs)
+    pipe.unit_runner = unit_runner
     references = []
     for ref in request.get('references', []):
         if ref.get('kind') == 'video':
             frames = read_reference_video(ref['path'], height=request['height'], width=request['width'],
                 start=ref.get('start', 0), duration=ref.get('duration', 15), fps=24)
             if len(frames) < 48: raise ValueError('H3 video references need at least two seconds of source footage.')
-            references.append({'type': 'video', 'video': frames})
+            reference = {'type': 'video', 'video': frames}
+            if ref.get('audio_path'):
+                audio, rate = read_reference_audio(ref['audio_path'], start=ref.get('start', 0), duration=ref.get('duration', 15))
+                if audio.shape[-1] / rate < 2: raise ValueError('H3 audio references need at least two seconds of source audio.')
+                reference.update(type='video_audio', audio=torch.from_numpy(audio), sample_rate=rate)
+            references.append(reference)
         elif ref.get('kind') == 'audio':
-            from diffsynth.utils.data.audio import read_audio
-            audio, rate = read_audio(ref['path'], duration=min(15, ref.get('duration', 15)), resample=True, resample_rate=32000)
+            audio, rate = read_reference_audio(ref['path'], start=ref.get('start', 0), duration=ref.get('duration', 15))
             if audio.shape[-1] / rate < 2: raise ValueError('H3 audio references need at least two seconds of source audio.')
-            references.append({'type': 'audio', 'audio': audio, 'sample_rate': rate})
+            references.append({'type': 'audio', 'audio': torch.from_numpy(audio), 'sample_rate': rate})
         else:
             image = _pil_reference(ref)
             if image is not None: references.append({'type': 'image', 'image': image})
-    steps = int(request.get('steps', 30)); every = max(1, int(profile.get('preview_every', 5)))
+    steps = int(request.get('steps', profile.get('video_steps', 20))); every = max(1, int(profile.get('preview_every', 5)))
+    diagnostic_steps = max(0, int(request.get('diagnostic_steps', 0)))
+    completed_steps = [0]
     root = Path(request['job_dir']); started = [None]
     last_video = [None]; original_step = pipe.step
     def step(scheduler, latents, progress_id, **kwargs):
@@ -247,11 +347,15 @@ def video_generation(request):
     def iterate(values):
         total = len(values); started[0] = time.monotonic()
         for index, value in enumerate(values):
+            current_step[0] = index
+            progress(f'Rendering video and audio · step {index + 1}/{total}', index / total * 94)
             yield value
             done = index + 1
+            completed_steps[0] = done
             eta = (time.monotonic() - started[0]) / done * max(0, total - done)
             progress('Rendering video and audio', done / total * 94, eta)
-            if last_video[0] is not None and (done % every == 0 or done == total):
+            diagnostic_end = diagnostic_steps and done >= diagnostic_steps
+            if last_video[0] is not None and (done % every == 0 or done == total or diagnostic_end):
                 pipe.load_models_to_device(['video_vae'])
                 count = min(last_video[0].shape[2], pipe.video_vae.tokens_chunk_size)
                 decoded = pipe.video_vae.decode_video(last_video[0][:, :, :count], dtype=dtype,
@@ -263,9 +367,18 @@ def video_generation(request):
                 emit('preview', path=str(path), media='video', draft=True)
                 del decoded, frames
                 pipe.load_models_to_device(pipe.in_iteration_models)
+            if diagnostic_end:
+                progress(f'Diagnostic check: decoding after {done}/{total} sampling steps. Output is unfinished.')
+                break
+        sampling_finished[0] = True
     count = align_h3_frames(request.get('duration', 5))
+    seed = resolve_video_seed(request.get('seed', profile.get('video_seed', -1)))
+    progress(f'MiniMax seed: {seed}')
     args = dict(prompt=request['prompt'], height=int(request['height']), width=int(request['width']),
-        num_frames=count, num_inference_steps=steps, seed=int(request.get('seed', 42)), progress_bar_cmd=iterate)
+        num_frames=count, num_inference_steps=steps, seed=seed, progress_bar_cmd=iterate,
+        ref_image_short_edge=min(768, int(request['height']), int(request['width'])),
+        ref_video_short_edge=min(480, int(request['height']), int(request['width'])),
+        ref_video_max_pixels=int(request['height']) * int(request['width']))
     if profile.get('video_variant', 'ref2va' if 'ref2va' in Path(profile['video_model']).name.lower() else 'fl2va') == 'ref2va':
         if not references: raise ValueError('The selected Ref2VA checkpoint requires reference media. Add references or select a pruned FL2VA checkpoint.')
         args['references'] = references
@@ -277,10 +390,12 @@ def video_generation(request):
     progress('Encoding finished video…', 97)
     path = root / 'video.mp4'
     write_video_audio(video=video, audio=audio, output_path=str(path), fps=24, audio_sample_rate=32000)
-    emit('result', path=str(path), media='video', duration=count / 24)
+    emit('result', path=str(path), media='video', duration=count / 24, seed=seed,
+         completed_steps=completed_steps[0], sampling_steps=steps, diagnostic=bool(diagnostic_steps))
 
 
 def text_generation(request):
+    progress('Starting native writing runtime…')
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer, TextIteratorStreamer
     import threading
@@ -305,7 +420,7 @@ def text_generation(request):
     def generate():
         try:
             with torch.inference_mode():
-                model.generate(**inputs, streamer=streamer, max_new_tokens=8192, do_sample=False,
+                model.generate(**inputs, streamer=streamer, max_new_tokens=min(8192, int(request.get('max_new_tokens', 8192))), do_sample=False,
                                pad_token_id=tokenizer.eos_token_id)
         except BaseException as error:
             failure.append(error); streamer.end()
@@ -323,6 +438,9 @@ def text_generation(request):
 
 def main():
     request = json.loads(Path(sys.argv[1]).read_text(encoding='utf-8'))
+    # Bound CPU threads so loading and format conversion do not starve the editor.
+    os.environ.setdefault('OMP_NUM_THREADS', '4')
+    os.environ.setdefault('MKL_NUM_THREADS', '4')
     with contextlib.redirect_stdout(sys.stderr):
         try:
             kind = request['kind']
@@ -345,6 +463,8 @@ def main():
                     torch = sys.modules.get('torch')
                     if torch is not None and torch.cuda.is_available(): torch.cuda.empty_cache()
         except Exception as error:
+            import traceback
+            traceback.print_exc(file=sys.stderr)
             message = str(error)[:1400]
             if request.get('hf_token'): message = message.replace(request['hf_token'], '[redacted]')
             emit('error', message=f'{type(error).__name__}: {message}')

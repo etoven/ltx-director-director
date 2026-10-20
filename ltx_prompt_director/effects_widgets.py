@@ -58,6 +58,9 @@ class EffectDialog(QDialog):
         self.thumbnail_preview.setAlignment(Qt.AlignmentFlag.AlignCenter); layout.addWidget(self.thumbnail_preview)
         self.status = QLabel('Choose the default image model in Settings.'); self.status.setWordWrap(True)
         layout.addWidget(self.status)
+        from .local_widgets import GenerationLog
+        self.log = GenerationLog(); self.log.output.setMaximumHeight(95)
+        self.log.hide(); layout.addWidget(self.log)
         self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
         self.buttons.accepted.connect(self.save); self.buttons.rejected.connect(self.reject)
         layout.addWidget(self.buttons)
@@ -81,17 +84,22 @@ class EffectDialog(QDialog):
         serial = self.job_serial
         self.generate.setEnabled(False)
         self.status.setText('Generating thumbnail…')
+        self.log.clear(); self.log.setVisible(tools[0].provider == 'local')
         def ready(result):
             if serial != self.job_serial: return
             self.generate.setEnabled(True)
             path = result.get('effect-thumbnail', '')
             self.thumbnail.setText(path)
+            if path:
+                self.thumbnail_preview.setPixmap(QPixmap(path).scaled(380, 140, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
             self.status.setText('Thumbnail ready.' if path else 'No image returned.')
         def failed(message):
             if serial == self.job_serial:
                 self.generate.setEnabled(True); self.status.setText(str(message)[:700])
+                self.log.receive_event({'kind': 'error', 'message': str(message)})
         def progress(event):
             if serial != self.job_serial: return
+            self.log.receive_event(event)
             if event.get('kind') == 'preview' and event.get('media') == 'image':
                 self.thumbnail_preview.setPixmap(QPixmap(event['path']).scaled(380, 140, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
             elif event.get('kind') == 'progress':

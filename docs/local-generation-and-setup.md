@@ -24,10 +24,10 @@ The default image source is used for segment artwork, image edits and **Add your
 
 ## Prepare local models
 
-1. Choose **Prepare local engine**. Director creates a private inference environment under its application data folder. The first installation downloads several GB of Python libraries and CUDA PyTorch. It does not alter your running ComfyUI instance or require a ComfyUI server.
+1. Choose **Prepare local engine**. Director creates a private inference environment under its application data folder. The first installation downloads several GB of Python libraries and CUDA PyTorch. Its dependencies and download cache stay in the managed `local-generation/engine` venv; no separate package installation is required. It does not alter your running ComfyUI instance or require a ComfyUI server. Use **Check engine** to verify actual library imports, dependency consistency and CUDA execution. If preparation was interrupted, run **Prepare local engine** again.
 2. Use **Find my model files** to scan your chosen model folder. The initial folder suggestion is `~/Programs/ComfyUI/models`, but any folder is allowed. Scanning reads filenames in a background worker and leaves model files in place.
 3. For images, choose **Klein Base 4B** or **9B**. The scan suggests 4B on smaller GPUs and 9B when at least 20 GB VRAM is detected. This is a starting recommendation, rather than a guarantee: system RAM, canvas size and other running apps matter too. Pair 4B with its Qwen 4B encoder, or 9B with its Qwen 8B encoder, and select the Flux 2 VAE.
-4. For video, select a **pruned H3** checkpoint, a supported H3 text encoder, video VAE and audio VAE. Choose Ref2VA for reference media, or FL2VA for text and first/last frames. The native backend supports the INT8 ConvRot encoder. If an existing NVFP4/AWQ encoder is discovered, setup explains that it needs an INT8 replacement for this engine. No Lightning or Turbo LoRA is loaded.
+4. For video, select a **pruned H3** checkpoint, a supported H3 text encoder, video VAE and audio VAE. Choose Ref2VA for reference media, or FL2VA for text and first/last frames. The native backend accepts INT8 ConvRot and the 14 GB NVFP4/AWQ encoder. NVFP4 weights remain packed on disk and are expanded per layer for computation; older NVIDIA GPUs do not need NVFP4 tensor cores. No Lightning or Turbo LoRA is loaded.
 5. Select **Image models** or **Video models**, then **Get configuration files**. This downloads tokenizer, processor and model configuration files needed alongside your weights. It does not download the model weights.
 6. If weights are missing, choose **Download model set**. Review the approximate size before downloading. Matching files already selected in the dialog are reused. Gated repositories may require accepting the model's terms on Hugging Face and entering a token in the dialog; that token is kept only for that dialog.
 7. Save Settings or finish the wizard. Its final page lists incomplete setup so you can return later. You can also choose **Set up later** and keep using the editor.
@@ -38,7 +38,15 @@ FP8 image checkpoints are expanded into a derived BF16 compatibility cache one t
 
 ![Local controls in Video Preview](images/local-video-controls.png)
 
-Open **Video Preview → Generate locally**. Review the prompt, duration, canvas and sampling steps. Check the timeline references you want to attach; video references are silent. H3 aligns duration to its frame grid. Small canvases reduce memory and render time.
+Choose **Settings → Local models → Video** to set the canvas, length, sampling steps, sampler and seed. The initial settings are **16:9 at 0.5 MP (960 × 544), 15 seconds, 20 steps**. H3 aligns 15 seconds to **362 frames at 24 fps**, producing about 15.08 seconds. Choose **RES multistep with a simple schedule** or the native Euler sampler. Lightning/Turbo LoRAs are not loaded. Canvas, duration and references affect memory use and render time.
+
+In Settings, choose **Random for each render** for a fresh variation each time, or turn it off and enter a static seed, including a full 64-bit seed from a workflow. The generation output lists the actual seed used. Seeds make native runs repeatable with the same inputs and settings; different engines and devices can produce different results.
+
+![Local video Settings page with canvas, duration, sampler and a static seed](images/local-video-settings.png)
+
+Click **Video Preview → Generate locally** to render the current **unified production output** with the files in the **Reference media panel**. Edit the prompt in its unified editor and manage references in their existing panel. Reference videos include their paired audio when available; the audio-only option uses just the extracted sound.
+
+**Verbose output** in the generation panel streams loading messages, sampling details and error tracebacks. Use **Copy output** to share a failure report. Credentials are redacted, and raw job requests and diagnostics are not saved to disk.
 
 During rendering, the player shows draft samples decoded from the current video latents. The pill at the bottom right shows sampling percentage and an estimated remaining time once measured steps are available. Loading and preparation show a stage message until an estimate is meaningful. Draft samples can be noisy and show only the opening chunk; the finished video contains the full generated duration and audio.
 

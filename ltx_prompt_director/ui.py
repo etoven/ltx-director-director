@@ -67,7 +67,7 @@ from .quick_fixes import QuickFixEditor, load_presets, preset_groups
 from .effects_library import MIME as EFFECT_MIME, load_effects, refinement
 from .effects_widgets import EffectsPanel
 from .local_generation import LOCAL_PROGRESS, LOCAL_CANCEL, load_profile, save_profile, run_request, validate_profile
-from .local_widgets import LocalModelsPanel, ImageGenerationPanel, ProgressPill, VideoGenerationDialog
+from .local_widgets import LocalModelsPanel, ImageGenerationPanel, ProgressPill, GenerationLog
 from .inline_cues import PromptTextEdit
 from .prompt_timecodes import retime_prompt
 from .prompt_sections import document_sections
@@ -2528,7 +2528,7 @@ class SettingsDialog(QDialog):
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
-        form.addRow(buttons)
+        outer.addWidget(buttons)
         geometry = settings.value("dialogs/settings_geometry")
         if geometry:
             self.restoreGeometry(geometry)
@@ -4265,14 +4265,17 @@ class MainWindow(QMainWindow):
         self.image_generation_dock.hide()
         panel = self.project_preview_panel
         row = QHBoxLayout()
-        self.local_video_generate = QPushButton("✦ Generate locally…")
+        self.local_video_generate = QPushButton("✦ Generate locally")
+        self.local_video_generate.setToolTip("Render unified output with the Reference panel and local video settings.")
         self.local_video_generate.clicked.connect(self.generate_local_video)
         self.local_video_cancel_button = QPushButton("Cancel generation")
         self.local_video_cancel_button.clicked.connect(self._local_video_cancel.set)
         self.local_video_cancel_button.hide()
         row.addWidget(self.local_video_generate); row.addWidget(self.local_video_cancel_button)
         panel.layout().insertLayout(1, row)
-        self.local_video_pill = ProgressPill(panel, bottom_margin=96)
+        self.local_video_pill = ProgressPill(panel, anchor=lambda: panel.empty if panel.video.isHidden() else panel.video)
+        self.local_video_log = GenerationLog()
+        panel.layout().addWidget(self.local_video_log)
 
     def generate_local_video(self):
         if self._local_video_busy: return
@@ -4281,18 +4284,17 @@ class MainWindow(QMainWindow):
         except ValueError as error:
             QMessageBox.information(self, "Local video setup", str(error))
             self.open_settings(); return
-        dialog = VideoGenerationDialog(self)
-        if not dialog.exec(): return
-        selected = {dialog.references.item(i).data(Qt.ItemDataRole.UserRole)
-                    for i in range(dialog.references.count())
-                    if dialog.references.item(i).checkState() == Qt.CheckState.Checked}
-        snapshots = copy.deepcopy([s for s in self.segments if s.id in selected])
-        extra_references = copy.deepcopy([r for index, r in enumerate(reference_slots(self.minimax_reference_images))
-                                         if r and f"refslot:{index}" in selected])
-        request = dict(kind="video", profile=profile, prompt=dialog.prompt.toPlainText(),
-            duration=dialog.duration.value(), width=dialog.width.value(), height=dialog.height.value(), steps=dialog.steps.value())
+        prompt = prompt_content(self.minimax_prompt_text, preserve_spacing=True)
+        if not prompt:
+            self.statusBar().showMessage("Write or generate the unified production prompt first.", 10000)
+            return
+        extra_references = copy.deepcopy([r for r in reference_slots(self.minimax_reference_images) if r])
+        request = dict(kind="video", profile=profile, prompt=prompt,
+            duration=profile["video_duration"], width=profile["video_width"], height=profile["video_height"], steps=profile["video_steps"],
+            seed=profile["video_seed"])
         workspace = (self.workspace_revision, self.current_project_id, self.project_type)
         previous_preview = getattr(self.project_preview_panel, "pending_preview_path", "")
+        self.local_video_log.clear()
         self._local_video_busy = True; self._local_video_cancel.clear()
         self.local_video_generate.setEnabled(False); self.local_video_cancel_button.show()
         self.project_preview_dock.show()
@@ -4300,6 +4302,7 @@ class MainWindow(QMainWindow):
         def current(): return workspace == (self.workspace_revision, self.current_project_id, self.project_type)
         def event(value):
             if not current(): return
+            self.local_video_log.receive_event(value)
             if value.get("kind") == "progress": self.local_video_pill.update_event(value)
             elif value.get("kind") == "preview":
                 panel = self.project_preview_panel
@@ -4316,11 +4319,6 @@ class MainWindow(QMainWindow):
                 panel.player.play()
         def operation():
             references = []
-            for segment in snapshots:
-                path = str(materialize_source(segment))
-                references.append({"path": path, "kind": segment.kind, "name": segment.name,
-                    "role": segment.role, "start": max(0, segment.trim_start or 0) / FPS,
-                    "duration": min(15, segment.duration)})
             for reference in extra_references:
                 if reference.get("audio_only"):
                     reference["kind"] = "audio"
@@ -4342,6 +4340,7 @@ class MainWindow(QMainWindow):
         def failed(message):
             finish()
             if current():
+                self.local_video_log.receive_event({"kind": "error", "message": str(message)})
                 self.project_preview_panel.set_project(self.current_project_name or "Video Preview", previous_preview)
                 self.statusBar().showMessage(str(message), 15000)
         self.start_disk_job(operation, (), ready, failed, progress=event)
@@ -9538,8 +9537,7 @@ class MainWindow(QMainWindow):
             ready({})
             if workspace != (self.workspace_revision, self.current_project_id, self.project_type): return
             if tool.provider == "local":
-                self.image_generation_panel.pill.hide()
-                self.image_generation_panel.cancel.setEnabled(False)
+                self.image_generation_panel.receive_event({"kind": "error", "message": str(message)})
             detail = str(message).strip()
             self.statusBar().showMessage(
                 f"Image failed ({tool.model}); details in prompt panel", 15000

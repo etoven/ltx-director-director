@@ -25,6 +25,6 @@ for filename in paths:
                     + '); sys.stdout.flush(); sys.stderr.flush(); os._exit(rc)')
             print(f'{index}/{len(selections)} {selection}', flush=True)
             result = subprocess.run([sys.executable, '-X', 'faulthandler', '-c', code],
-                                    env=env, timeout=120)
+                                    env=env, timeout=int(os.environ.get('DIRECTOR_NATIVE_TIMEOUT', '120')))
             if result.returncode:
                 raise SystemExit(result.returncode)

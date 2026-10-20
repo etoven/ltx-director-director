@@ -34,6 +34,10 @@ class UnifiedEditorTests(unittest.TestCase):
         from test_local_generation_ui import test_wizard_cancel_preserves_credentials_and_finish_separates_sources
         test_wizard_cancel_preserves_credentials_and_finish_separates_sources()
 
+    def test_local_existing_references_and_verbose_output(self):
+        from test_local_generation_ui import test_native_video_uses_unified_output_reference_panel_and_settings_directly
+        test_native_video_uses_unified_output_reference_panel_and_settings_directly()
+
     def test_local_stale_progress_and_settings(self):
         from test_local_generation_ui import test_local_progress_is_ignored_after_a_project_switch_and_no_paid_prompt
         test_local_progress_is_ignored_after_a_project_switch_and_no_paid_prompt()
