@@ -3,32 +3,32 @@ from pathlib import Path
 from PySide6.QtCore import Qt, Signal, QEvent, QRect
 from PySide6.QtGui import QColor, QPainter, QPixmap
 from PySide6.QtWidgets import (QWidget, QFrame, QLabel, QPushButton, QVBoxLayout,
-    QHBoxLayout, QProgressBar, QDialog, QRubberBand, QStackedWidget, QSizePolicy)
+    QHBoxLayout, QProgressBar, QDialog, QRubberBand, QStackedWidget, QSizePolicy, QAbstractSpinBox)
 
 ASSETS = Path(__file__).parent / 'assets' / 'onboarding'
 STYLE = '''
 QDialog#onboardingWizard, QWidget#onboardingSurface { background:#171a25; color:#d8dbe4; }
-QDialog#onboardingWizard QWidget { background:transparent; color:#d8dbe4; }
-QDialog#onboardingWizard QLabel { color:#d8dbe4; font-size:14px; background:transparent; }
+QDialog#onboardingWizard QWidget { background:transparent; color:#d8dbe4; font-family:"Roboto Condensed"; }
+QDialog#onboardingWizard QLabel { color:#d8dbe4; font-size:20px; background:transparent; }
 QDialog#onboardingWizard QLabel#muted { color:#a6adbc; }
 QDialog#onboardingWizard QFrame#onboardingRail { background:#171924; border-right:1px solid #303441; }
 QDialog#onboardingWizard QFrame#onboardingCard { background:#252934; border:1px solid #424754; border-radius:12px; }
 QDialog#onboardingWizard QFrame#onboardingCard[recommended="true"] { background:#252b35; border:1px solid #259cb3; }
-QDialog#onboardingWizard QLabel#cardTitle { font-size:20px; font-weight:600; }
-QDialog#onboardingWizard QLabel#pageTitle { font-size:28px; font-weight:650; }
-QDialog#onboardingWizard QPushButton { color:#dce0e7; background:#323641; border:1px solid #505562; border-radius:7px; padding:9px 14px; font-size:14px; }
+QDialog#onboardingWizard QLabel#cardTitle { font-size:24px; font-weight:bold; }
+QDialog#onboardingWizard QLabel#pageTitle { font-size:32px; font-weight:bold; }
+QDialog#onboardingWizard QPushButton { color:#dce0e7; background:#323641; border:1px solid #505562; border-radius:7px; padding:8px 15px; font-size:20px; }
 QDialog#onboardingWizard QPushButton:hover { background:#3a424d; border-color:#3bafc4; }
 QDialog#onboardingWizard QPushButton:disabled { color:#777f8c; background:#292d37; border-color:#383e49; }
 QDialog#onboardingWizard QPushButton[primary="true"] { background:#00849b; border:1px solid #0897af; color:white; }
 QDialog#onboardingWizard QPushButton[primary="true"]:hover { background:#009bb3; }
-QDialog#onboardingWizard QPushButton#navRow { text-align:left; border:0; border-left:4px solid transparent; background:transparent; border-radius:7px; padding:14px 9px; font-size:17px; }
+QDialog#onboardingWizard QPushButton#navRow { text-align:left; border:0; border-left:4px solid transparent; background:transparent; border-radius:7px; padding:14px 9px; font-size:19px; }
 QDialog#onboardingWizard QPushButton#navRow[active="true"] { background:#153d4d; border-left-color:#00a4c2; color:#f1f6f7; }
-QDialog#onboardingWizard QPushButton#navRow[substep="true"] { margin-left:18px; padding:7px 10px; border-radius:5px; font-size:16px; }
+QDialog#onboardingWizard QPushButton#navRow[substep="true"] { margin-left:18px; padding:7px 10px; border-radius:5px; font-size:18px; }
 QDialog#onboardingWizard QPushButton#navRow:hover { background:#263544; }
-QDialog#onboardingWizard QLineEdit, QDialog#onboardingWizard QComboBox, QDialog#onboardingWizard QSpinBox, QDialog#onboardingWizard QDoubleSpinBox, QDialog#onboardingWizard QAbstractSpinBox { color:#dce0e7; background:#343945; border:1px solid #505563; border-radius:6px; min-height:28px; padding:3px 7px; font-size:13px; }
+QDialog#onboardingWizard QLineEdit, QDialog#onboardingWizard QComboBox, QDialog#onboardingWizard QSpinBox, QDialog#onboardingWizard QDoubleSpinBox, QDialog#onboardingWizard QAbstractSpinBox { color:#dce0e7; background:#343945; border:1px solid #505563; border-radius:6px; min-height:28px; padding:3px 9px; font-size:20px; }
 QDialog#onboardingWizard QComboBox QAbstractItemView { background:#252934; color:#e0e5ec; selection-background-color:#145068; }
-QDialog#onboardingWizard QCheckBox { color:#ced3dd; font-size:13px; spacing:8px; }
-QDialog#onboardingWizard QCheckBox::indicator { width:16px; height:16px; border:1px solid #758292; border-radius:4px; background:#242a35; }
+QDialog#onboardingWizard QCheckBox { color:#ced3dd; font-size:19px; spacing:8px; }
+QDialog#onboardingWizard QCheckBox::indicator { width:20px; height:20px; border:1px solid #758292; border-radius:4px; background:#242a35; }
 QDialog#onboardingWizard QCheckBox::indicator:checked { background:#17879b; border-color:#4dc0d4; image:url(__CHECK__); }
 QDialog#onboardingWizard QScrollArea { border:0; background:transparent; }
 QDialog#onboardingWizard QWidget#localSubsteps { border-left:2px solid #323d50; margin-left:12px; }
@@ -55,10 +55,30 @@ def primary(button):
 
 def card(title='', body='', recommended=False):
     frame = QFrame(); frame.setObjectName('onboardingCard'); frame.setProperty('recommended', recommended)
-    layout = QVBoxLayout(frame); layout.setContentsMargins(20, 18, 20, 18); layout.setSpacing(12)
+    layout = QVBoxLayout(frame); layout.setContentsMargins(20, 18, 20, 18); layout.setSpacing(10)
+    layout.setAlignment(Qt.AlignmentFlag.AlignTop)
     if title: layout.addWidget(label(title, 'cardTitle'))
     if body: layout.addWidget(label(body, 'muted'))
     return frame, layout
+
+
+def stepper(spin, description):
+    frame=QFrame(); frame.setObjectName('wizardStepper'); frame.setFixedSize(126,40)
+    frame.setStyleSheet('QFrame#wizardStepper{background:#343944;border:1px solid #505562;border-radius:7px}'
+        'QSpinBox{border:0;border-radius:0;background:#171a25;padding:0}'
+        'QLineEdit{border:0;background:#171a25;padding:0;min-height:0}')
+    row=QHBoxLayout(frame);row.setContentsMargins(1,1,1,1);row.setSpacing(0)
+    minus=QPushButton('−');plus=QPushButton('+')
+    for button in (minus,plus):
+        button.setFixedSize(36,38);button.setStyleSheet('padding:0;border:0;border-radius:0;background:#343944;font-size:22px')
+    spin.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons);spin.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    spin.setFixedSize(52,38);spin.setAccessibleName(description)
+    minus.setAccessibleName('Decrease '+description);plus.setAccessibleName('Increase '+description)
+    minus.clicked.connect(spin.stepDown);plus.clicked.connect(spin.stepUp)
+    def limits():minus.setEnabled(spin.value()>spin.minimum());plus.setEnabled(spin.value()<spin.maximum())
+    spin.valueChanged.connect(limits);limits()
+    row.addWidget(minus);row.addWidget(spin);row.addWidget(plus)
+    return frame
 
 
 class GridSurface(QWidget):

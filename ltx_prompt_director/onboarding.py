@@ -1,7 +1,7 @@
 """A resumable first-run guide using the same account and model controls as Settings."""
 from pathlib import Path
 from PySide6.QtCore import Qt, QUrl
-from PySide6.QtGui import QPixmap, QDesktopServices
+from PySide6.QtGui import QPixmap, QDesktopServices, QFont, QFontDatabase
 from PySide6.QtWidgets import (QDialog, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QListWidget, QStackedWidget, QPushButton, QComboBox, QLineEdit, QCheckBox,
     QFormLayout, QScrollArea, QFrame, QProgressBar, QSizePolicy, QDialogButtonBox)
@@ -37,11 +37,13 @@ class OnboardingWizard(QDialog):
         self.owner = owner; self.settings = owner.settings
         self.setWindowTitle('Welcome to Director · setup and first steps')
         self.setObjectName('onboardingWizard'); self.setStyleSheet(STYLE)
+        QFontDatabase.addApplicationFont(str(ASSETS/'RobotoCondensed.ttf'))
+        self.setFont(QFont('Roboto Condensed'))
         self.resize(1280, 950); self.setMinimumSize(1000, 720)
         outer = QHBoxLayout(self); outer.setContentsMargins(0,0,0,0); outer.setSpacing(0)
         rail = QFrame(); rail.setObjectName('onboardingRail'); rail.setFixedWidth(248)
         left = QVBoxLayout(rail); left.setContentsMargins(14,18,14,24); left.setSpacing(20)
-        brand = label('workspace'); brand.setStyleSheet('font-size:23px;font-weight:650;color:#b9bdc9;padding-left:4px')
+        brand = label('workspace'); brand.setStyleSheet('font-size:26px;font-weight:bold;color:#b9bdc9;padding-left:4px')
         left.addWidget(brand)
         self.steps = WizardNavigation([name for name,_ in STEPS]); left.addWidget(self.steps,1)
         self.rail_progress = QProgressBar(); self.rail_progress.setRange(0,6); self.rail_progress.setTextVisible(False)
@@ -49,7 +51,7 @@ class OnboardingWizard(QDialog):
         left.addWidget(label('A few choices now…\nA whole sequence of possibilities.', 'muted'))
         outer.addWidget(rail)
         main = GridSurface(); right = QVBoxLayout(main); right.setContentsMargins(0,0,0,0); right.setSpacing(0)
-        heading = QWidget(); top = QVBoxLayout(heading); top.setContentsMargins(34,25,34,16); top.setSpacing(8)
+        heading = QWidget(); top = QVBoxLayout(heading); top.setContentsMargins(40,30,40,20); top.setSpacing(8)
         title_row = QHBoxLayout(); self.title = label('', 'pageTitle'); title_row.addWidget(self.title,1)
         self.donate = QPushButton('♥ Support & Donate'); self.donate.setEnabled(False)
         self.donate.setToolTip('The donation link will be added later.'); title_row.addWidget(self.donate)
@@ -73,7 +75,7 @@ class OnboardingWizard(QDialog):
         self.steps.setCurrentRow(0); self.update_readiness()
 
     def page(self):
-        page = QWidget(); page.setObjectName('onboardingPage'); layout = QVBoxLayout(page); layout.setContentsMargins(32,0,32,24); layout.setSpacing(16)
+        page = QWidget(); page.setObjectName('onboardingPage'); layout = QVBoxLayout(page); layout.setContentsMargins(40,0,40,24); layout.setSpacing(16)
         scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setFrameShape(QFrame.Shape.NoFrame); scroll.setWidget(page)
         self.pages.addWidget(scroll)
         return layout
@@ -215,19 +217,24 @@ class OnboardingWizard(QDialog):
     def build_getting_started(self):
         layout = self.page(); frame, content = card('Getting started',
             'Let’s get you familiar with Director’s tools. Choose where you want to begin, or browse the guide.')
+        content.setContentsMargins(40,33,40,20);content.setSpacing(14)
+        content.itemAt(1).widget().setContentsMargins(0,0,0,12)
         row = QHBoxLayout(); row.setSpacing(16); self.start_cards = []; self.guide_buttons = []
         choices = [
-            ('Highly Recommended','Interactive Quick Start','Try a guided tour of your workspace. We will show you the exact controls to use.',
+            ('Highly Recommended','Interactive Quick Start','Try out a guided tour to set up your first project. We will show you the exact buttons to press.',
              'Start Onboarding Tour','../help/images/aurora-startup.png',self.start_quick_start),
             ('Interactive Tutorial','Onboarding Tutorials','Explore short illustrated walkthroughs of setup, prompts, reference media and local generation.',
              'Interactive Tutorial','local.png',self.open_tutorials),
-            ('Manual Guide','Explore Features Manually','Go directly to your workspace. Explore files, generation settings and local models at your own pace.',
+            ('Manual Guide','Explore Features Manually','Go directly to your workspace. Explore files, view default generation parameters, or manage inference models on your own.',
              'Go to Workspace','../help/images/timeline-navigation.png',self.go_to_workspace)]
         for index,(badge,title,body,button_text,image,action) in enumerate(choices):
             tile, tile_layout = card(recommended=index==0); self.start_cards.append(tile)
-            tag = label(badge); tag.setWordWrap(False); tag.setMinimumHeight(30); tag.setStyleSheet('background:#214b59;border-radius:8px;padding:6px;font-size:13px')
+            tag = label(badge); tag.setWordWrap(False); tag.setMinimumHeight(30); tag.setStyleSheet('background:#214b59;border-radius:8px;padding:6px;font-size:18px')
             tile_layout.addWidget(tag,0,Qt.AlignmentFlag.AlignLeft)
-            tile_layout.addWidget(Artwork(ASSETS/image,145)); tile_layout.addWidget(label(title,'cardTitle'))
+            tile_layout.addWidget(Artwork(ASSETS/image,145 if index < 2 else 80))
+            heading=label(title,'cardTitle')
+            if index==2:heading.setStyleSheet('font-size:22px;font-weight:bold');heading.setWordWrap(False)
+            tile_layout.addWidget(heading)
             tile_layout.addWidget(label(body)); tile_layout.addStretch()
             button = QPushButton(button_text)
             if index==0:primary(button)
@@ -311,7 +318,7 @@ class OnboardingWizard(QDialog):
         self.header_source = QPixmap(str(ASSETS / (STEPS[row][1] + '.png'))); self.fit_header()
         self.back.setEnabled(row > 0); self.next.setText('Finish' if row == len(STEPS) - 1 else 'Continue')
         self.hint.setText(['Choose cloud and local sources independently.', 'Keep credentials in these controls; you never need to paste keys into a prompt.',
-            'Image generation uses its own model and billing choice.', 'Prepare the engine, find files, then get configuration files. Download weights only if needed.',
+            'Image generation uses its own model and billing choice.', 'Tip: Prepare the engine and find files first.',
             'Ready to go? Explore at your own pace.', 'We hope you enjoy your experience!'][row])
         self.update_readiness()
         if row == len(STEPS) - 1: self.update_summary()

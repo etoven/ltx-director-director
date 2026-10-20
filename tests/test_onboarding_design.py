@@ -2,7 +2,7 @@
 from pathlib import Path
 import sys
 from unittest.mock import patch
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QPushButton
 from ltx_prompt_director.onboarding import OnboardingWizard
 from test_local_generation_ui import window
 
@@ -17,6 +17,12 @@ def test_nested_navigation_status_and_stale_engine_verification():
         assert wizard.steps.currentRow()==3 and panel.tabs.currentIndex()==2
         assert 'Images · Flux' in wizard.title.text()
         assert panel.readiness()[0][0]=='pending'
+        for spin in (panel.steps,panel.every):
+            minus,plus=spin.parentWidget().findChildren(QPushButton)
+            spin.setValue(spin.minimum());assert not minus.isEnabled()
+            plus.click();assert spin.value()==spin.minimum()+spin.singleStep()
+            spin.setValue(spin.maximum());assert not plus.isEnabled()
+            minus.click();assert spin.value()==spin.maximum()-spin.singleStep()
         jobs=[]
         with patch.object(w,'start_disk_job',side_effect=lambda op,args,ready,fail,**kw:jobs.append((args,ready,fail))):
             panel.setup('probe')

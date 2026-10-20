@@ -2,10 +2,10 @@
 from pathlib import Path
 import sys
 from PySide6.QtCore import Signal, QTimer
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QPushButton, QStyle
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QPushButton, QStyle, QFrame
 from .local_widgets import LocalModelsPanel, progress_text
 from .local_generation import scan_models, recommended_variant, recommended_writer, data_root, run_request, validate_profile
-from .onboarding_design import card, label, primary
+from .onboarding_design import card, label, primary, stepper
 
 
 def discover_local_models(profile, cancel):
@@ -33,8 +33,9 @@ class WizardLocalModelsPanel(LocalModelsPanel):
         while layout.count():
             item = layout.takeAt(0)
             if item.widget() and item.widget() not in (self.tabs,self.hf_token,self.status,self.log,self.stop,self.links): item.widget().deleteLater()
-        layout.setContentsMargins(0,0,0,0); layout.setSpacing(16)
-        form = self.tabs.widget(0).layout()
+        layout.setContentsMargins(0,0,0,0); layout.setSpacing(12)
+        for i in range(self.tabs.count()):self.tabs.widget(i).layout().setVerticalSpacing(6)
+        form = self.tabs.widget(0).layout();form.setContentsMargins(0,0,0,0)
         path_rows = [form.takeRow(0),form.takeRow(0)]
         while form.rowCount():
             removed = form.takeRow(0)
@@ -44,23 +45,37 @@ class WizardLocalModelsPanel(LocalModelsPanel):
             form.addRow(text,removed.fieldItem.layout())
         model_row = form.itemAt(1,form.ItemRole.FieldRole).layout()
         model_row.insertWidget(model_row.count()-1,self.scan_button)
-        compute = QHBoxLayout();compute.addWidget(self.device);compute.addWidget(self.offload)
+        compute = QHBoxLayout();self.device.setFixedWidth(250);compute.addWidget(self.device);compute.addWidget(self.offload)
         form.addRow('Compute on',compute)
-        steps = QHBoxLayout();steps.addWidget(self.steps);steps.addWidget(label('Image preview every N steps'));steps.addWidget(self.every)
-        form.addRow('Image sampling steps',steps)
+        steps = QHBoxLayout();steps.addStretch();steps.addWidget(stepper(self.steps,'image sampling steps'));steps.addSpacing(24)
+        steps.addWidget(label('Preview every N steps'));steps.addStretch();steps.addWidget(stepper(self.every,'image preview interval'))
+        self.steps.setToolTip('Default image sampling steps. Video has its own sampling settings.')
+        form.addRow('Default sampling steps',steps)
+        form.setHorizontalSpacing(12)
+        for i in range(form.rowCount()):
+            item=form.itemAt(i,form.ItemRole.LabelRole)
+            if item and item.widget():item.widget().setFixedWidth(180)
         for button in self.tabs.findChildren(QPushButton):
             if button.text()=='…':
-                button.setText('');button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DirOpenIcon));button.setStyleSheet('padding:3px');button.setFixedWidth(34)
+                button.setText('');button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DirOpenIcon));button.setStyleSheet('padding:3px');button.setFixedSize(36,36)
 
-        self.auto_card, content = card('Option A: Automatic Configuration (Recommended)',
+        self.auto_card, content = card('Option A: Automatic Configuration <span style="color:#2e9eb4">(Recommended)</span>',
             'Let us find your files and configure your local engines in one click.', True)
+        content.setContentsMargins(16,12,16,12)
         self.auto = primary(QPushButton('✦  Automatically configure all local engines'))
-        self.auto.setProperty('primary',False); self.auto.setStyleSheet('background:#343b46;border:1px solid #259cb3;padding:12px')
+        self.auto.setProperty('primary',False); self.auto.setStyleSheet('background:#343b46;border:1px solid #259cb3;padding:9px;font-size:22px')
+        self.auto.setFixedHeight(46)
         self.auto.clicked.connect(self.automatic_setup); content.addWidget(self.auto)
-        content.addWidget(label('Scans standard paths, prepares the private environment and gets configurations for your selected sources. Model weights are downloaded only with Download model set.', 'muted'))
+        content.addWidget(label('Scans standard paths and sets up necessary environments automatically.', 'muted'))
         layout.addWidget(self.auto_card)
-        self.or_label = label('────────────────────────  OR  ────────────────────────', 'muted'); layout.addWidget(self.or_label)
+        self.or_label=QWidget(); divider=QHBoxLayout(self.or_label);divider.setContentsMargins(0,0,0,0);divider.setSpacing(12)
+        for i in range(2):
+            line=QFrame();line.setFixedHeight(1);line.setStyleSheet('background:#606675;border:0');divider.addWidget(line,1)
+            if i==0:divider.addWidget(label('OR','muted'))
+        layout.addWidget(self.or_label)
         self.manual_card, manual = card('Option B: Manual Setup', 'Local Paths')
+        manual.setContentsMargins(16,14,16,14);manual.setSpacing(4)
+        manual.itemAt(1).widget().setStyleSheet('font-size:18px')
         self.tabs.tabBar().hide(); manual.addWidget(self.tabs); layout.addWidget(self.manual_card)
         self.engine_card, engine = card('3. Engine & Download')
         self.engine_status = label('Local Engine Status: Not checked', 'muted')
@@ -86,7 +101,7 @@ class WizardLocalModelsPanel(LocalModelsPanel):
     def section_changed(self, index):
         self.auto_card.setVisible(index == 0); self.or_label.setVisible(index == 0)
         self.manual_card.layout().itemAt(0).widget().setText('Option B: Manual Setup' if index == 0 else ('Video · H3','Images · Flux','Writing · local')[index - 1])
-        self.tabs.setFixedHeight(self.tabs.widget(index).layout().sizeHint().height()+20)
+        self.tabs.setFixedHeight(self.tabs.widget(index).layout().sizeHint().height()+2)
         if index: self.task.setCurrentIndex(self.task.findData(('','video','image','text')[index]))
 
     def engine_identity(self):return self.fields['python'].text().strip(), self.device.currentData()
