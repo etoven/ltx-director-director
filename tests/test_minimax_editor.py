@@ -66,6 +66,25 @@ class UnifiedEditorTests(unittest.TestCase):
         from test_local_generation_ui import test_loras_are_settings_only_persistent_and_cancel_safe
         test_loras_are_settings_only_persistent_and_cancel_safe()
 
+    def test_local_flux_output_canvas(self):
+        from test_local_generation_ui import test_flux_canvas_tracks_current_output_for_both_model_sizes
+        test_flux_canvas_tracks_current_output_for_both_model_sizes()
+
+    def test_download_popup_anchor(self):
+        import tempfile
+        from test_download_tray import (test_download_tray_remains_below_and_right_aligned_when_window_moves,
+                                        test_download_focus_sweep_and_thumbnails)
+        with tempfile.TemporaryDirectory() as folder:
+            test_download_tray_remains_below_and_right_aligned_when_window_moves(Path(folder))
+            test_download_focus_sweep_and_thumbnails(Path(folder))
+
+    def test_desktop_file_picker_routing(self):
+        from test_file_dialogs import (test_kde_open_save_folder_multiple_and_cancel,
+            test_qt_and_zenity_fallbacks_keep_filters_and_selection, test_all_file_pickers_share_desktop_routing)
+        test_kde_open_save_folder_multiple_and_cancel()
+        test_qt_and_zenity_fallbacks_keep_filters_and_selection()
+        test_all_file_pickers_share_desktop_routing()
+
     def test_local_existing_references_and_verbose_output(self):
         from test_local_generation_ui import test_native_video_uses_unified_output_reference_panel_and_settings_directly
         test_native_video_uses_unified_output_reference_panel_and_settings_directly()

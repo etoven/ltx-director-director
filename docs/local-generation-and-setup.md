@@ -68,7 +68,7 @@ The default **Live noisy latent** preview updates as sampling advances, using an
 
 ## Generate artwork and effect thumbnails
 
-Choose **Local · Flux 2 Klein** as the default image source. Use a segment's **Generate Artwork** or **Render requested artwork** action. The **Image generation** panel shows draft images, sampling percentage and estimated time. Final artwork follows the existing segment review workflow; source media is retained.
+Choose **Local · Flux 2 Klein** as the default image source. Use a segment's **Generate Artwork** or **Render requested artwork** action. The **Image generation** panel shows draft images, sampling percentage and estimated time. Flux 4B and 9B use the main toolbar’s **Output resolution** for their canvas, rounded to the nearest supported 16-pixel size (ties use the smaller size). For example, **1280 × 704** renders at exactly that size instead of a square. This also applies to locally generated Effects thumbnails. Final artwork follows the existing segment review workflow; source media is retained.
 
 In **Effects Library → Add your own**, write the effect instruction and choose **Generate thumbnail**. The dialog uses the same image source and shows local draft previews and progress. Save to keep the custom effect. Cancel leaves the effect entry unchanged.
 

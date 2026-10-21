@@ -15,11 +15,13 @@ Director brings prompts, source media and portable projects into your production
 | Attached workflow JSON | Export in Project Files | The selected attachment |
 | Custom workspace setup | Export in Settings → Workspaces | Reusable workspace-definition JSON |
 
+On Linux with **KDialog** installed, file and folder pickers use KDE’s desktop dialog throughout the app, including model/LoRA selection, references, Effects media, completed shots, catalog imports, workspace imports and setup backups. Other desktops retain their available Zenity or Qt picker.
+
 ## One folder. A visible handoff.
 
 Set **Download folder** in project Properties for a project-specific destination. Leave it blank to use **Settings → Application → Default download folder**. Exports receive descriptive automatic names; repeated names get numbered suffixes so an earlier output remains available.
 
-The download button signals completion with a pulse and badge. Click it for **Recent exports**. Open a file with a double-click, use the context menu for **Open folder**, or drag selected files into another application. Click inside the app outside the tray to dismiss it; switching to another window keeps it open. Use the broom to clear history. History remains available after restarting the app; moved or deleted files are marked unavailable.
+The download button signals completion with a pulse and badge. Click it for **Recent exports**. The panel stays directly below the download button with their right edges aligned, including when you move or resize the window. Open a file with a double-click, use the context menu for **Open folder**, or drag selected files into another application. Click inside the app outside the tray to dismiss it; switching to another window keeps it open. Use the broom to clear history. History remains available after restarting the app; moved or deleted files are marked unavailable.
 
 ![Recent exports grouped in a native tray with direct folder access](images/export-history.png)
 

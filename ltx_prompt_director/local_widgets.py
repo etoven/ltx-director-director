@@ -1,5 +1,6 @@
 """Local model setup and generation previews, with no ML imports on Qt's thread."""
 from __future__ import annotations
+from .file_dialogs import choose_document_open, choose_directory
 import copy
 from pathlib import Path
 import sys
@@ -7,7 +8,7 @@ import threading
 from PySide6.QtCore import Qt, Signal, QEvent
 from PySide6.QtGui import QPixmap, QValidator
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QLabel,
-    QLineEdit, QComboBox, QPushButton, QCheckBox, QSpinBox, QTabWidget, QFileDialog,
+    QLineEdit, QComboBox, QPushButton, QCheckBox, QSpinBox, QTabWidget,
     QMessageBox, QDoubleSpinBox, QPlainTextEdit, QAbstractSpinBox, QScrollArea, QSizePolicy)
 from .local_generation import (load_profile, scan_models, recommended_variant, recommended_writer, run_request)
 
@@ -138,7 +139,7 @@ class LoraList(QWidget):
         row.path = QLineEdit(value.get('path', '')); row.path.setPlaceholderText('Compatible .safetensors LoRA'); row.path.setAccessibleName('LoRA file')
         browse = QPushButton('…'); browse.setFixedWidth(30); browse.setToolTip('Choose LoRA file')
         def choose():
-            path, _ = QFileDialog.getOpenFileName(self, 'Choose ' + self.kind + ' LoRA', row.path.text(), 'LoRA weights (*.safetensors)')
+            path = choose_document_open(self, 'Choose ' + self.kind + ' LoRA', row.path.text(), 'LoRA weights (*.safetensors)')
             if path: row.path.setText(path)
         browse.clicked.connect(choose)
         remove = QPushButton('×'); remove.setFixedWidth(30); remove.setToolTip('Remove LoRA')
@@ -298,9 +299,9 @@ class LocalModelsPanel(QWidget):
 
     def browse(self, key):
         if key in ('models_root', 'video_assets', 'image_assets', 'llm_model'):
-            path = QFileDialog.getExistingDirectory(self, 'Choose folder', self.fields[key].text())
+            path = choose_directory(self, 'Choose folder', self.fields[key].text())
         else:
-            path, _ = QFileDialog.getOpenFileName(self, 'Choose model file' if key != 'python' else 'Choose Python interpreter', self.fields[key].text())
+            path = choose_document_open(self, 'Choose model file' if key != 'python' else 'Choose Python interpreter', self.fields[key].text())
         if path: self.fields[key].setText(path)
 
     def scan(self):

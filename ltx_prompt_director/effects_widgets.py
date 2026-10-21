@@ -1,5 +1,6 @@
 """Native dockable effect browser with a single shared preview decoder."""
 from __future__ import annotations
+from .file_dialogs import choose_document_open, choose_document_save
 import json
 from pathlib import Path
 from uuid import uuid4
@@ -10,7 +11,7 @@ from PySide6.QtCore import QPoint
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer, QVideoSink
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLineEdit,
     QComboBox, QPushButton, QListWidget, QListWidgetItem, QLabel, QDialog,
-    QFormLayout, QTextEdit, QCheckBox, QDialogButtonBox, QFileDialog,
+    QFormLayout, QTextEdit, QCheckBox, QDialogButtonBox,
     QMessageBox, QSpinBox, QToolButton)
 from .effects_library import (MIME, ROOT, catalog, media_path, load_effects,
                               save_effect, remove_effect, refinement)
@@ -69,7 +70,7 @@ class EffectDialog(QDialog):
         self.job_serial = 0
 
     def choose(self, field, filt):
-        path, _ = QFileDialog.getOpenFileName(self, 'Choose media', '', filt)
+        path = choose_document_open(self, 'Choose media', '', filt)
         if path: field.setText(path)
 
     def generate_thumbnail(self):
@@ -378,7 +379,7 @@ class EffectsPanel(QWidget):
         import shutil
         path = media_path(self.media.currentData())
         if not path: return
-        dest, _ = QFileDialog.getSaveFileName(self, 'Save sample', Path(path).name)
+        dest = choose_document_save(self, 'Save sample', Path(path).name)
         if dest:
             try: shutil.copyfile(path, dest)
             except OSError as error: QMessageBox.warning(self, 'Save sample', str(error))

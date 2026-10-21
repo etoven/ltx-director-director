@@ -110,7 +110,7 @@ class WorkspaceConformanceTests(unittest.TestCase):
         exported = w.export_directory() / 'Renamed.workspace.json'
         self.assertTrue(exported.exists())
         w.workspace_store.delete('custom_ref')
-        with patch('ltx_prompt_director.workspace_editor.QFileDialog.getOpenFileName', return_value=(str(exported), '')):
+        with patch('ltx_prompt_director.workspace_editor.choose_document_open', return_value=str(exported)):
             editor.import_definition()
         self.assertIn('custom_ref', w.workspace_definitions)
         editor.restore()

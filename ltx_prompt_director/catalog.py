@@ -1,5 +1,6 @@
 """Application-wide media catalog with native file URL interchange."""
 from __future__ import annotations
+from .file_dialogs import choose_files
 
 import json
 import shutil
@@ -11,7 +12,7 @@ from PySide6.QtCore import QEvent, Qt, QSize, QMimeData, QUrl, Signal, QObject, 
 from PySide6.QtGui import QDrag, QIcon, QDesktopServices, QPixmap, QPainter, QColor
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton,
     QTreeWidget, QTreeWidgetItem, QListWidget, QListWidgetItem, QAbstractItemView,
-    QSplitter, QMenu, QInputDialog, QFileDialog, QDialog, QFormLayout, QTextEdit,
+    QSplitter, QMenu, QInputDialog, QDialog, QFormLayout, QTextEdit,
     QDialogButtonBox, QMessageBox, QStyle, QLabel, QSizePolicy)
 from .media import prepare_media, TIMELINE_VIDEO_SUFFIXES
 from .media_labels import add_thumbnail_labels
@@ -416,7 +417,7 @@ class MediaCatalog(QWidget):
         self.description.setPlainText(selected[0].data(ROLE)['description'] if len(selected) == 1 else f'{len(selected)} items selected' if selected else '')
 
     def import_media(self):
-        paths, _ = QFileDialog.getOpenFileNames(self, 'Import catalog media', '', 'Images and videos (*.png *.jpg *.jpeg *.webp *.bmp *.tif *.tiff *.mp4 *.webm)')
+        paths = choose_files(self, 'Import catalog media', '', 'Images and videos (*.png *.jpg *.jpeg *.webp *.bmp *.tif *.tiff *.mp4 *.webm)')
         if paths:
             self.import_paths(paths, self.current_folder or '')
 

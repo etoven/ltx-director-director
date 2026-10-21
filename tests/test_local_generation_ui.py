@@ -11,6 +11,28 @@ from ltx_prompt_director.local_generation import PROFILE_KEY
 APP = QApplication.instance() or QApplication([])
 
 
+def test_flux_canvas_tracks_current_output_for_both_model_sizes():
+    from ltx_prompt_director.artwork_tools import render_artwork
+    from ltx_prompt_director import local_generation as local
+    with window() as w, tempfile.TemporaryDirectory() as folder:
+        w.settings.setValue('artwork/default_model', 'local:flux2')
+        result = Path(folder) / 'result.png'; result.write_bytes(b'fake worker output')
+        with patch.object(local, 'validate_profile'), patch.object(local, 'run_request', return_value={'path': str(result)}) as run:
+            for variant in ('4b', '9b'):
+                local.save_profile(w.settings, {'image_variant': variant})
+                for width, height, expected in ((1280,704,(1280,704)), (704,1280,(704,1280)), (1000,777,(992,784)), (1001,777,(1008,784)), (1024,1024,(1024,1024))):
+                    w.output_width.setValue(width); w.output_height.setValue(height)
+                    tool = w._available_artwork_tools()[0]
+                    images = render_artwork([{'id':'canvas', 'artworkPrompt':'A lighthouse.', 'sourceImage':'/source.png',
+                                              'referenceImages':[{'path':'/reference.png'}]}], tool)
+                    request = run.call_args.args[0]
+                    assert (request['width'], request['height']) == expected
+                    assert request['profile']['image_variant'] == variant
+                    assert request['source'] == '/source.png' and request['references'][0]['path'] == '/reference.png'
+                    assert Path(images['canvas']).read_bytes() == result.read_bytes()
+                assert 'image_width' not in local.load_profile(w.settings)
+
+
 def test_loras_are_settings_only_persistent_and_cancel_safe():
     from ltx_prompt_director.local_generation import load_profile
     from ltx_prompt_director.local_widgets import LoraList

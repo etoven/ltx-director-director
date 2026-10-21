@@ -1,5 +1,6 @@
 """Settings page for portable workspace definitions."""
 from __future__ import annotations
+from .file_dialogs import choose_document_open
 
 import copy
 import json
@@ -10,7 +11,7 @@ from uuid import uuid4
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QFormLayout, QListWidget,
                               QLineEdit, QComboBox, QCheckBox, QTextEdit, QPushButton,
-                              QFileDialog, QMessageBox, QLabel, QSpinBox, QDoubleSpinBox)
+                              QMessageBox, QLabel, QSpinBox, QDoubleSpinBox)
 
 from .workspaces import WorkspaceStore, KINDS, validate_definition
 from .spellcheck import install_spellcheck
@@ -210,7 +211,7 @@ class WorkspaceEditor(QWidget):
         self.status.setText("Stock workspaces restored. Other custom definitions were preserved.")
 
     def import_definition(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Import workspace definition", "", "Workspace JSON (*.json)")
+        path = choose_document_open(self, "Import workspace definition", "", "Workspace JSON (*.json)")
         if path:
             try:
                 value = validate_definition(json.loads(Path(path).read_text(encoding="utf-8")))

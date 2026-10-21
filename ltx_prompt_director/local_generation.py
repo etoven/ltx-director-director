@@ -276,10 +276,16 @@ def run_request(request, on_event=None, cancel=None, timeout=None):
         shutil.rmtree(runtime, ignore_errors=True)
 
 
+def flux_image_size(width, height):
+    """Nearest Klein packed-latent size (16 px); ties use the smaller canvas."""
+    return tuple(max(16, ((int(value) + 7) // 16) * 16) for value in (width, height))
+
+
 def generate_image(prompt, profile, source='', references=None):
     validate_profile(profile, 'image')
+    width, height = flux_image_size(profile.get('image_width', 1024), profile.get('image_height', 1024))
     event = run_request({'kind': 'image', 'profile': profile, 'prompt': prompt, 'source': source,
-                         'references': references or [], 'width': 1024, 'height': 1024,
+                         'references': references or [], 'width': width, 'height': height,
                          'steps': int(profile.get('steps', 30))}, on_event=LOCAL_PROGRESS.get(), cancel=LOCAL_CANCEL.get())
     return Path(event['path']).read_bytes()
 

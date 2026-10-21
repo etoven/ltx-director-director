@@ -66,6 +66,7 @@ from .prompt_tags import prompt_content, consume_global_refinements, install_pro
 from .quick_fixes import QuickFixEditor, load_presets, preset_groups
 from .effects_library import MIME as EFFECT_MIME, load_effects, refinement
 from .effects_widgets import EffectsPanel
+from .file_dialogs import choose_media_files, choose_document_open, choose_document_save, choose_directory
 from .local_generation import LOCAL_PROGRESS, LOCAL_CANCEL, load_profile, save_profile, run_request, validate_profile
 from .local_widgets import LocalModelsPanel, ImageGenerationPanel, ProgressPill, GenerationLog
 from .inline_cues import PromptTextEdit
@@ -169,63 +170,6 @@ def segment_kind_label(segment: Segment) -> str:
     return container if container in {"WEBM", "MP4"} else "VIDEO"
 
 
-def choose_media_files(parent: QWidget, multiple: bool, initial: str) -> list[str]:
-    """Prefer the desktop's actual file picker, then fall back to QFileDialog."""
-    media_filter = "Supported Media (*.png *.jpg *.jpeg *.webp *.gif *.webm *.mp4)"
-    if sys.platform.startswith("linux") and shutil.which("kdialog"):
-        command = ["kdialog", "--title", "Choose images or video files"]
-        if multiple:
-            command.extend(["--multiple", "--separate-output"])
-        command.extend(["--getopenfilename", initial or ":ltxPromptDirectorMedia", media_filter])
-        result = subprocess.run(command, capture_output=True, text=True, check=False)
-        if result.returncode == 0:
-            return [line.strip() for line in result.stdout.splitlines() if line.strip()]
-        return []
-    if sys.platform.startswith("linux") and shutil.which("zenity"):
-        command = ["zenity", "--file-selection", "--title=Choose images or video files", f"--filename={initial.rstrip('/')}/", "--file-filter=Supported media | *.png *.jpg *.jpeg *.webp *.gif *.webm *.mp4"]
-        if multiple:
-            command.extend(["--multiple", "--separator=\n"])
-        result = subprocess.run(command, capture_output=True, text=True, check=False)
-        if result.returncode == 0:
-            return [line.strip() for line in result.stdout.splitlines() if line.strip()]
-        return []
-    if multiple:
-        files, _ = QFileDialog.getOpenFileNames(parent, "Add images or video", initial, media_filter)
-        return files
-    file, _ = QFileDialog.getOpenFileName(parent, "Replace media", initial, media_filter)
-    return [file] if file else []
-
-
-def choose_document_open(parent: QWidget, title: str, initial: str, name_filter: str) -> str:
-    if sys.platform.startswith("linux") and shutil.which("kdialog"):
-        result = subprocess.run(["kdialog", "--title", title, "--getopenfilename", initial, name_filter], capture_output=True, text=True, check=False)
-        return result.stdout.strip() if result.returncode == 0 else ""
-    if sys.platform.startswith("linux") and shutil.which("zenity"):
-        result = subprocess.run(["zenity", "--file-selection", f"--title={title}", f"--filename={initial.rstrip('/')}/", f"--file-filter={name_filter}"], capture_output=True, text=True, check=False)
-        return result.stdout.strip() if result.returncode == 0 else ""
-    file, _ = QFileDialog.getOpenFileName(parent, title, initial, name_filter)
-    return file
-
-
-def choose_document_save(parent: QWidget, title: str, suggested: str, name_filter: str) -> str:
-    if sys.platform.startswith("linux") and shutil.which("kdialog"):
-        result = subprocess.run(["kdialog", "--title", title, "--getsavefilename", suggested, name_filter], capture_output=True, text=True, check=False)
-        return result.stdout.strip() if result.returncode == 0 else ""
-    if sys.platform.startswith("linux") and shutil.which("zenity"):
-        result = subprocess.run(["zenity", "--file-selection", "--save", "--confirm-overwrite", f"--title={title}", f"--filename={suggested}", f"--file-filter={name_filter}"], capture_output=True, text=True, check=False)
-        return result.stdout.strip() if result.returncode == 0 else ""
-    file, _ = QFileDialog.getSaveFileName(parent, title, suggested, name_filter)
-    return file
-
-
-def choose_directory(parent: QWidget, title: str, initial: str) -> str:
-    if sys.platform.startswith("linux") and shutil.which("kdialog"):
-        result = subprocess.run(["kdialog", "--title", title, "--getexistingdirectory", initial], capture_output=True, text=True, check=False)
-        return result.stdout.strip() if result.returncode == 0 else ""
-    if sys.platform.startswith("linux") and shutil.which("zenity"):
-        result = subprocess.run(["zenity", "--file-selection", "--directory", f"--title={title}", f"--filename={initial.rstrip('/')}/"], capture_output=True, text=True, check=False)
-        return result.stdout.strip() if result.returncode == 0 else ""
-    return QFileDialog.getExistingDirectory(parent, title, initial)
 
 
 class WorkerSignals(QObject):
@@ -9023,7 +8967,8 @@ class MainWindow(QMainWindow):
             )
             for provider in ("gemini", "openai")
         }
-        keys["local"] = load_profile(self.settings)
+        keys["local"] = {**load_profile(self.settings),
+                         "image_width": self.output_width.value(), "image_height": self.output_height.value()}
         return available_artwork_tools(
             keys,
             preferred=str(self.settings.value("provider", "gemini")),
@@ -10229,12 +10174,6 @@ class MainWindow(QMainWindow):
             self.download_tray.hide()
             return
         self.download_tray.refresh()
-        position = self.downloads_button.mapToGlobal(self.downloads_button.rect().bottomRight())
-        position.setX(position.x() - self.download_tray.width())
-        screen = self.screen().availableGeometry()
-        position.setX(max(screen.left(), min(position.x(), screen.right() - self.download_tray.width())))
-        position.setY(min(position.y(), screen.bottom() - self.download_tray.height()))
-        self.download_tray.move(position)
         self.download_tray.show()
         self.downloads_button.setText("")
 

@@ -5,7 +5,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QEvent, QMimeData, QUrl, QSize, QThreadPool
+from PySide6.QtCore import Qt, QEvent, QMimeData, QUrl, QSize, QThreadPool, QPoint, QTimer
 from PySide6.QtGui import QDesktopServices, QDrag, QColor, QFont, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
                               QApplication, QWidget, QListWidget, QListWidgetItem, QAbstractItemView, QMenu)
@@ -51,6 +51,9 @@ class DownloadTray(QFrame):
         super().__init__(parent, Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint)
         self.settings = settings
         self.previews, self.pending = {}, set()
+        self.anchor_timer = QTimer(self)
+        self.anchor_timer.setSingleShot(True)
+        self.anchor_timer.timeout.connect(self.anchor_to_button)
         self.setObjectName("downloadTray")
         self.setFixedSize(430, 470)
         self.setStyleSheet("#downloadTray {background:#20272b; border:1px solid #52636d; border-radius:10px;} QListWidget {border:0; background:transparent;} QListWidget::item {padding:12px; border-radius:6px;} QListWidget::item:selected {background:#354954;}")
@@ -91,8 +94,11 @@ class DownloadTray(QFrame):
         super().showEvent(event)
         QApplication.instance().installEventFilter(self)
         self.refresh()
+        self.anchor_to_button()
+        self.anchor_timer.start(0)
 
     def hideEvent(self, event):
+        self.anchor_timer.stop()
         QApplication.instance().removeEventFilter(self)
         super().hideEvent(event)
 
@@ -101,6 +107,12 @@ class DownloadTray(QFrame):
         if self.isVisible() and owner is not None:
             if watched is owner and event.type() in {QEvent.Type.Hide, QEvent.Type.Close}:
                 self.hide()
+            elif event.type() in {QEvent.Type.Move, QEvent.Type.Resize, QEvent.Type.LayoutRequest,
+                                  QEvent.Type.Show, QEvent.Type.WindowStateChange,
+                                  QEvent.Type.ScreenChangeInternal} and isinstance(watched, QWidget):
+                toggle = getattr(owner, "downloads_button", None)
+                if watched is owner or watched is toggle or (toggle is not None and watched.isAncestorOf(toggle)):
+                    self.anchor_timer.start(0)
             elif event.type() == QEvent.Type.MouseButtonPress and isinstance(watched, QWidget):
                 inside_tray = watched is self or self.isAncestorOf(watched)
                 toggle = getattr(owner, "downloads_button", None)
@@ -108,6 +120,16 @@ class DownloadTray(QFrame):
                 if not inside_tray and not on_toggle and (watched is owner or owner.isAncestorOf(watched)):
                     self.hide()
         return super().eventFilter(watched, event)
+
+    def anchor_to_button(self):
+        owner = self.parentWidget()
+        button = getattr(owner, 'downloads_button', None)
+        if not self.isVisible() or button is None:
+            return
+        if not button.isVisible():
+            self.hide()
+            return
+        self.move(button.mapToGlobal(QPoint(button.width() - self.width(), button.height() + 6)))
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_Escape:

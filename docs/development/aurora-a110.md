@@ -1,0 +1,13 @@
+# Aurora a110: Flux output canvas and anchored Downloads
+
+Local Flux 4B and 9B requests snapshot the main toolbar output width/height instead of always using 1024 × 1024. Each dimension is rounded to the nearest supported 16-pixel packed-latent size, with ties rounded down. 1280 × 704 remains exact. Dimensions are transient request configuration, preserving saved model settings, authored prompts, references and source images. Both segment artwork and local Effects thumbnails share this path.
+
+Downloads / Recent exports stays 6 px below its toolbar button with matching right edges. It follows window movement/resizing and toolbar layout/screen changes, and reanchors when reopened. It never flips above the button or shifts horizontally to a different anchor. Outside-click dismissal, switching applications, thumbnail loading, file dragging and history clearing keep their existing behavior. The private style guide records this placement rule.
+
+Validation uses mocked inference requests for both model sizes at landscape, portrait, square and non-aligned sizes, plus native Qt move/resize/reopen, thumbnail and dismissal checks. The installed wheel and release CI are checked before delivery. No GPU queries, runtime probes or generation tests are required or performed for this change.
+
+The alignment follows the installed Diffusers Klein pipeline's VAE factor × 2 packing rule (8 × 2 for the supplied 4B/9B VAE configurations): https://github.com/huggingface/diffusers/blob/main/src/diffusers/pipelines/flux2/pipeline_flux2_klein.py
+
+All file/folder pickers now use the shared desktop-dialog module extracted from the existing media-input helpers. The remaining direct Qt calls in local models/LoRAs, references, Effects, shot import, catalog, storage and workspace import were migrated. KDE remains preferred when KDialog is available; Zenity/Qt fallback and cancellation behavior are preserved. Mocked routing checks cover open/save/folder/multiple selection, filenames with spaces and cancellation, with an AST audit preventing bypasses.
+
+Completed local checks: both native Downloads groups; the Flux 4B/9B request matrix; three shared-picker checks plus the existing media-filter regression; and workspace export/import preservation passed. The installed a110 wheel passed prompt/reference/seed wiring, LoRA persistence, wizard preservation, both Flux canvas requests and actual main-window Downloads alignment during movement. The offscreen integration check preserves a desktop-sized viewport so its artificial 800 px screen does not hide the toolbar button in overflow. Packaged source/help match the checkout and pass ZIP integrity checks. GPU tests remain deferred.

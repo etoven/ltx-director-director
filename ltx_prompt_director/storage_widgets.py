@@ -1,8 +1,9 @@
 """Cache usage and complete setup backup controls for Application Settings."""
+from .file_dialogs import choose_document_open, choose_document_save
 from pathlib import Path
 from PySide6.QtCore import Qt,QTimer,QUrl
 from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import QWidget,QVBoxLayout,QHBoxLayout,QGroupBox,QLabel,QPushButton,QFileDialog,QMessageBox
+from PySide6.QtWidgets import QWidget,QVBoxLayout,QHBoxLayout,QGroupBox,QLabel,QPushButton,QMessageBox
 from .storage_management import (setup_roots,cache_roots,disk_usage,clear_cache,
                                  settings_snapshot,export_setup,stage_import,stage_reset)
 
@@ -87,7 +88,7 @@ class StorageSettingsPanel(QWidget):
 
     def export_all(self):
         if self.busy:return
-        path,_=QFileDialog.getSaveFileName(self,'Export complete Prompt Director setup','Prompt-Director-Setup.zip','ZIP backup (*.zip)')
+        path = choose_document_save(self,'Export complete Prompt Director setup','Prompt-Director-Setup.zip','ZIP backup (*.zip)')
         if not path:return
         if not path.lower().endswith('.zip'):path+='.zip'
         self.set_busy(True);self.message.setText('Saving open projects and preparing the ZIP backup…')
@@ -105,7 +106,7 @@ class StorageSettingsPanel(QWidget):
 
     def import_all(self):
         if self.busy:return
-        path,_=QFileDialog.getOpenFileName(self,'Import complete Prompt Director setup','','ZIP backup (*.zip)')
+        path = choose_document_open(self,'Import complete Prompt Director setup','','ZIP backup (*.zip)')
         if not path:return
         self.set_busy(True);self.message.setText('Checking and preparing the backup…')
         def ready(_):

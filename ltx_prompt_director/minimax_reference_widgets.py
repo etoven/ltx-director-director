@@ -1,5 +1,6 @@
 """Portable mixed reference-media drop targets for the MiniMax editor."""
 from __future__ import annotations
+from .file_dialogs import choose_document_open
 
 import base64
 import hashlib
@@ -7,7 +8,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QBuffer, QEvent, QIODevice, QMimeData, QStandardPaths, QUrl, Qt, Signal
 from PySide6.QtGui import QAction, QDrag, QImage, QPixmap, QIcon
-from PySide6.QtWidgets import QApplication, QCheckBox, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton, QVBoxLayout
+from PySide6.QtWidgets import QApplication, QCheckBox, QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton, QVBoxLayout
 
 from .minimax_reference import REFERENCE_ROLES
 from .reference_media import AUDIO_SUFFIXES, import_reference
@@ -187,7 +188,7 @@ class MiniMaxReferenceSlot(QFrame):
         return True
 
     def browse(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "Choose reference media", "", "Media (*.png *.jpg *.jpeg *.webp *.bmp *.tif *.tiff *.mp4 *.webm *.mov *.mkv *.wav *.mp3 *.flac *.ogg *.m4a *.aac *.opus)")
+        path = choose_document_open(self, "Choose reference media", "", "Media (*.png *.jpg *.jpeg *.webp *.bmp *.tif *.tiff *.mp4 *.webm *.mov *.mkv *.wav *.mp3 *.flac *.ogg *.m4a *.aac *.opus)")
         if path:
             self.load_path(path)
 

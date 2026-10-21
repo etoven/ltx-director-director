@@ -1,5 +1,6 @@
 """Completed-shot ordering and rendering controls, using Director's existing player."""
 from __future__ import annotations
+from .file_dialogs import choose_files
 import copy
 import hashlib
 import shutil
@@ -13,7 +14,7 @@ from PySide6.QtMultimedia import QMediaPlayer
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (QWidget,QVBoxLayout,QHBoxLayout,QLabel,QPushButton,QComboBox,
                               QDoubleSpinBox,QSpinBox,QListWidget,QListWidgetItem,QAbstractItemView,
-                              QSplitter,QFileDialog,QMessageBox,QProgressBar)
+                              QSplitter,QMessageBox,QProgressBar)
 from .models import Segment
 from .media import prepare_media, safe_media_filename, TIMELINE_VIDEO_SUFFIXES
 from .project_archive import materialize_source
@@ -299,7 +300,7 @@ class ShotSequencePanel(QWidget):
         self.refresh();self.owner.mark_dirty()
 
     def choose(self):
-        paths,_=QFileDialog.getOpenFileNames(self,'Add completed shots','', 'Movies (*.mp4 *.webm *.mov *.mkv *.avi *.m4v)')
+        paths = choose_files(self,'Add completed shots','', 'Movies (*.mp4 *.webm *.mov *.mkv *.avi *.m4v)')
         if paths:self.add_paths(paths)
 
     def add_collection_movies(self):
