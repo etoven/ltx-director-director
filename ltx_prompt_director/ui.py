@@ -2410,20 +2410,23 @@ class SettingsDialog(QDialog):
         self.settings = settings
         self.setWindowTitle("Application Settings")
         outer = QVBoxLayout(self)
-        tabs = QTabWidget()
-        outer.addWidget(tabs)
+        outer.setContentsMargins(0, 0, 0, 0)
+        tabs = QTabWidget(); self.tabs = tabs
         general = QWidget()
         form = QFormLayout(general)
-        tabs.addTab(general, "Application")
+        general_scroll = QScrollArea(); general_scroll.setWidgetResizable(True); general_scroll.setWidget(general)
+        tabs.addTab(general_scroll, "Application")
         self.local_models = LocalModelsPanel(parent)
         local_scroll = QScrollArea(); local_scroll.setWidgetResizable(True); local_scroll.setWidget(self.local_models)
         tabs.addTab(local_scroll, "Local models")
-        tabs.addTab(ChatGPTSettingsPanel(parent.chatgpt_auth, settings, tabs), "ChatGPT plan")
-        tabs.addTab(WorkspaceEditor(parent.workspace_store, parent, tabs), "Workspaces")
+        def scroll_page(widget, title):
+            scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setWidget(widget); tabs.addTab(scroll, title)
+        scroll_page(ChatGPTSettingsPanel(parent.chatgpt_auth, settings, tabs), "ChatGPT plan")
+        scroll_page(WorkspaceEditor(parent.workspace_store, parent, tabs), "Workspaces")
         from .storage_widgets import StorageSettingsPanel
         self.storage_panel=StorageSettingsPanel(parent,tabs)
-        tabs.addTab(self.storage_panel,"Storage and backups")
-        self.resize(850, 760)
+        scroll_page(self.storage_panel,"Storage and backups")
+        self.resize(1280, 956); self.setMinimumSize(1040, 680)
         self.provider = QComboBox()
         self.provider.addItems(["gemini", "openai", "chatgpt", "local"])
         self.provider.setCurrentText(settings.value("provider", "gemini"))
@@ -2529,10 +2532,15 @@ class SettingsDialog(QDialog):
         form.addRow("Status tags (choose one)", self.project_status_tags)
         form.addRow("Other tags (choose many)", self.project_other_tags)
         form.addRow("", self.remember)
+        from .settings_design import SettingsSurface
+        scale = max(.75, min(2, text_scale / 100))
+        self.surface = SettingsSurface(self, tabs, self.local_models, scale)
+        outer.addWidget(self.surface)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
+        self.buttons = buttons
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
-        outer.addWidget(buttons)
+        self.surface.attach_buttons(buttons)
         geometry = settings.value("dialogs/settings_geometry")
         if geometry:
             self.restoreGeometry(geometry)
@@ -2573,6 +2581,7 @@ class SettingsDialog(QDialog):
         super().accept()
 
     def done(self, result):
+        self.surface.dispose()
         self.local_models.dispose()
         super().done(result)
 

@@ -4,6 +4,14 @@
 
 Open **Help → Setup wizard** for a guided start, or **Settings → Local models** to change an existing setup. A new installation opens the guide automatically. Writing, images and video have separate sources: you can use Gemini to refine prompts while Flux makes artwork and H3 renders video on your computer.
 
+## Find settings
+
+Settings uses one searchable sidebar for **Application**, **Local models**, **ChatGPT plan**, **Workspaces**, and **Storage and backups**. Search by a setting name, such as **seed**, **LoRA**, or **backup**, to open its section. Clearing search restores the full sidebar and keeps your edits.
+
+Local models expands into **Engine**, **Video · H3**, **Images · Flux**, and **Writing · local**. Hover the readiness icon for details: a green file section means its files are configured; a green Engine icon follows an explicit successful **Check engine** or **Prepare local engine** operation. Opening Settings does not start a generation or engine check. Long pages scroll inside the content card, while **Save** and **Cancel** stay below it. Support & Donate will become available when its link is provided.
+
+![Settings sidebar and native engine controls](images/settings-local-engine.png)
+
 ## Choose a writing companion
 
 **Gemini** is the recommended starting point when its free text tier suits your account and region. Open [Google AI Studio](https://aistudio.google.com/api-keys), sign in, choose or create a project and create an API key. Paste it into the wizard, choose an available text model and review [current model limits and pricing](https://ai.google.dev/gemini-api/docs/pricing).

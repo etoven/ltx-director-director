@@ -41,8 +41,8 @@ def capture_thanks():
 def capture_preview():
     w.local_video_pill.update_event({'kind': 'progress', 'percent': 42, 'eta_seconds': 80})
     w.project_preview_dock.grab().save(str(out / 'local-video-controls.png'))
-    dialog = SettingsDialog(w.settings, w); dialog.resize(1000, 1060)
-    dialog.layout().itemAt(0).widget().setCurrentIndex(1)
+    dialog = SettingsDialog(w.settings, w); dialog.resize(1280, 1060)
+    dialog.tabs.setCurrentIndex(1)
     panel = dialog.local_models; panel.tabs.setCurrentIndex(1)
     for key, name in {'video_model': 'minimax_h3_ref2va_pruned_int8_convrot.safetensors',
                       'video_encoder': 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors',

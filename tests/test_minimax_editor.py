@@ -42,6 +42,22 @@ class UnifiedEditorTests(unittest.TestCase):
         test_setup_errors_cancellation_and_closed_wizard_discard_callbacks()
         test_guides_carousel_and_existing_setup_choices_are_preserved()
 
+    def test_settings_sidebar_design(self):
+        from test_settings_design import test_settings_sidebar_search_preserves_pages_and_edits
+        test_settings_sidebar_search_preserves_pages_and_edits()
+
+    def test_settings_large_text(self):
+        from test_settings_design import test_settings_large_text_keeps_navigation_and_footer_accessible
+        test_settings_large_text_keeps_navigation_and_footer_accessible()
+
+    def test_settings_readiness(self):
+        from test_settings_design import (test_settings_readiness_discards_stale_results_and_requires_explicit_engine_check,
+            test_settings_model_file_readiness_never_probes_runtime)
+        test_settings_readiness_discards_stale_results_and_requires_explicit_engine_check()
+        import tempfile
+        with tempfile.TemporaryDirectory() as folder:
+            test_settings_model_file_readiness_never_probes_runtime(Path(folder))
+
     def test_local_setup_and_credential_scope(self):
         from test_local_generation_ui import test_wizard_cancel_preserves_credentials_and_finish_separates_sources
         test_wizard_cancel_preserves_credentials_and_finish_separates_sources()

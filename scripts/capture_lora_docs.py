@@ -12,8 +12,8 @@ from ltx_prompt_director.ui import MainWindow, SettingsDialog
 app = QApplication([])
 with patch.object(MainWindow, 'restore_startup_workspace'): window = MainWindow()
 window._close_saves_queued = True
-dialog = SettingsDialog(window.settings, window); dialog.resize(1000, 940)
-dialog.layout().itemAt(0).widget().setCurrentIndex(1)
+dialog = SettingsDialog(window.settings, window); dialog.resize(1280, 956)
+dialog.tabs.setCurrentIndex(1)
 panel = dialog.local_models; panel.tabs.setCurrentIndex(2)
 for key, value in dict(image_model='flux-2-klein-base-4b-fp8.safetensors', image_encoder='qwen_3_4b.safetensors', image_vae='flux2-vae.safetensors').items():
     panel.fields[key].setText('~/Models/' + value)

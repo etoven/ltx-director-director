@@ -112,8 +112,8 @@ def test_local_progress_is_ignored_after_a_project_switch_and_no_paid_prompt():
         assert dialog.provider.findText('local') >= 0
         assert 'video_encoder' in dialog.local_models.fields
         from PySide6.QtWidgets import QDialogButtonBox
-        buttons = dialog.layout().itemAt(1).widget()
-        assert isinstance(buttons, QDialogButtonBox) and buttons.parentWidget() is dialog
+        buttons = dialog.buttons
+        assert isinstance(buttons, QDialogButtonBox) and dialog.isAncestorOf(buttons)
         dialog.local_models.video_random_seed.setChecked(False)
         dialog.local_models.video_seed.setValue(931351171509952)
         dialog.accept()

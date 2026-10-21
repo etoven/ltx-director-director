@@ -111,12 +111,14 @@ class GenerationLog(QWidget):
 
 class LoraList(QWidget):
     """Settings-only adapter stack; no checkpoint reads on the GUI thread."""
+    changed = Signal()
     def __init__(self, rows, kind):
         super().__init__(); self.rows = []; self.kind = kind
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         layout = QVBoxLayout(self); layout.setContentsMargins(0, 0, 0, 0); layout.setSpacing(6)
         layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        header = QHBoxLayout(); header.addWidget(QLabel('LoRAs · ' + ('H3 video' if kind == 'video' else 'Flux Klein images'))); header.addStretch()
+        header = QHBoxLayout(); self.heading = QLabel('LoRAs · ' + ('H3 video' if kind == 'video' else 'Flux Klein images'))
+        header.addWidget(self.heading); header.addStretch()
         self.add_button = QPushButton('+'); self.add_button.setFixedWidth(30)
         self.add_button.setToolTip('Add another LoRA'); self.add_button.setAccessibleName('Add ' + kind + ' LoRA')
         self.add_button.clicked.connect(lambda: self.add_row()); header.addWidget(self.add_button); layout.addLayout(header)
@@ -149,12 +151,15 @@ class LoraList(QWidget):
         row.weight.setValue(float(value.get('weight', 1))); row.weight.setAccessibleName('LoRA weight')
         row.weight.setToolTip('0 disables this adapter and its trigger words; 1 uses full strength.')
         bottom.addWidget(row.weight); form.addLayout(bottom)
+        for signal in (row.path.textChanged, row.trigger.textChanged, row.weight.valueChanged, row.enabled.toggled):
+            signal.connect(lambda *_: self.changed.emit())
         self.rows.append(row); self.row_layout.addWidget(row); self.update_visibility()
         self.scroll.ensureWidgetVisible(row)
+        self.changed.emit()
         return row
 
     def remove_row(self, row):
-        self.rows.remove(row); self.row_layout.removeWidget(row); row.deleteLater(); self.update_visibility()
+        self.rows.remove(row); self.row_layout.removeWidget(row); row.deleteLater(); self.update_visibility(); self.changed.emit()
 
     def update_visibility(self):
         self.empty.setVisible(not self.rows); self.scroll.setVisible(bool(self.rows))
@@ -168,15 +173,16 @@ class LoraList(QWidget):
 
 
 class LocalModelsPanel(QWidget):
+    stateChanged = Signal()
     def __init__(self, owner, profile=None, *, include_loras=True):
         super().__init__()
         self.owner = owner
         self.profile = copy.deepcopy(profile or load_profile(owner.settings))
-        self.serial = 0; self.cancel = threading.Event(); self.busy = False
+        self.serial = 0; self.cancel = threading.Event(); self.busy = False; self.disposed = False; self.verified_engine = None
         layout = QVBoxLayout(self)
         note = QLabel('Choose your own files or download a matching set. Generation runs inside Director’s private Python worker. '
                       'Model weights, configurations and the inference engine are separate setup steps.')
-        note.setWordWrap(True); layout.addWidget(note)
+        note.setWordWrap(True); layout.addWidget(note); self.note = note
         self.tabs = QTabWidget(); layout.addWidget(self.tabs)
         self.fields = {}
         sections = [
@@ -298,7 +304,7 @@ class LocalModelsPanel(QWidget):
         if path: self.fields[key].setText(path)
 
     def scan(self):
-        if self.busy: return
+        if self.busy or self.disposed: return
         self.serial += 1; serial = self.serial
         self.scan_button.setEnabled(False); self.status.setText('Finding model files…')
         def ready(result):
@@ -318,8 +324,10 @@ class LocalModelsPanel(QWidget):
             if 'fl2va' in self.fields['video_model'].text().lower():
                 self.video_variant.setCurrentIndex(self.video_variant.findData('fl2va'))
             self.status.setText(message)
-        self.owner.start_disk_job(scan_models, (self.fields['models_root'].text(),), ready,
-                                   lambda message: (self.scan_button.setEnabled(True), self.status.setText(message)))
+        def failed(message):
+            if self.disposed or serial != self.serial: return
+            self.scan_button.setEnabled(True); self.status.setText(message)
+        self.owner.start_disk_job(scan_models, (self.fields['models_root'].text(),), ready, failed)
 
     def confirm_download(self):
         task = self.task.currentData()
@@ -332,30 +340,42 @@ class LocalModelsPanel(QWidget):
         if answer == QMessageBox.StandardButton.Yes: self.setup('download')
 
     def setup(self, kind):
-        if self.busy: return
-        profile = self.value()
+        if self.busy or self.disposed: return
+        profile = self.value(); identity = self.runtime_identity()
+        fields_before = {key: field.text() for key, field in self.fields.items()}
+        self.serial += 1; serial = self.serial
         if kind == 'install': profile['python'] = sys.executable
         self.busy = True; self.cancel = threading.Event(); self.stop.show()
         for button in (self.prepare, self.assets, self.download, self.scan_button, self.check): button.setEnabled(False)
-        self.status.setText('Preparing…'); self.log.clear()
+        self.status.setText('Preparing…'); self.log.clear(); self.stateChanged.emit()
+        def current(): return not self.disposed and serial == self.serial
         def event(value):
+            if not current(): return
             self.log.receive_event(value)
             if value.get('kind') == 'progress': self.status.setText(progress_text(value) + '\n' + value.get('message', ''))
         def ready(value):
+            if not current(): return
             for key, path in value.get('profile_changes', {}).items():
-                if key in self.fields: self.fields[key].setText(path)
+                if key in self.fields and self.fields[key].text() == fields_before[key]: self.fields[key].setText(path)
+            expected = (value.get('profile_changes', {}).get('python', identity[0]), profile['device'])
+            if kind in ('install', 'probe') and expected == self.runtime_identity(): self.verified_engine = expected
             self.status.setText(value.get('message', 'Ready.')); finish()
         def fail(message):
+            if not current(): return
+            if kind in ('install', 'probe'): self.verified_engine = None
             self.status.setText(str(message)); self.log.receive_event({'kind': 'error', 'message': str(message)}); finish()
         def finish():
             self.busy = False; self.stop.hide()
             for button in (self.prepare, self.assets, self.download, self.scan_button, self.check): button.setEnabled(True)
+            self.stateChanged.emit()
         request = {'kind': kind, 'profile': profile, 'task': self.task.currentData(),
                    'video_variant': self.video_variant.currentData(), 'hf_token': self.hf_token.text().strip()}
         self.owner.start_disk_job(run_request, (request, None, self.cancel), ready, fail, progress=event)
 
+    def runtime_identity(self): return self.fields['python'].text().strip(), self.device.currentData()
+
     def dispose(self):
-        self.serial += 1; self.cancel.set()
+        self.disposed = True; self.serial += 1; self.cancel.set()
 
 
 class ImageGenerationPanel(QWidget):
