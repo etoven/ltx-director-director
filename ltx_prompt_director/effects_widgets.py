@@ -2,19 +2,21 @@
 from __future__ import annotations
 from .file_dialogs import choose_document_open, choose_document_save
 import json
+import threading
 from pathlib import Path
 from uuid import uuid4
 
-from PySide6.QtCore import Qt, QSize, QMimeData, QUrl, Signal, QTimer
+from PySide6.QtCore import Qt, QSize, QMimeData, QUrl, Signal, QTimer, QStandardPaths
 from PySide6.QtGui import QDrag, QIcon, QPixmap, QDesktopServices, QPainter, QColor, QPolygon
 from PySide6.QtCore import QPoint
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer, QVideoSink
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLineEdit,
     QComboBox, QPushButton, QListWidget, QListWidgetItem, QLabel, QDialog,
     QFormLayout, QTextEdit, QCheckBox, QDialogButtonBox,
-    QMessageBox, QSpinBox, QToolButton)
+    QMessageBox, QSpinBox, QToolButton, QMenu)
 from .effects_library import (MIME, ROOT, catalog, media_path, load_effects,
-                              save_effect, remove_effect, refinement)
+                              save_effect, remove_effect, refinement, preview_sources, AUDIO_SUFFIXES)
+from .effects_media import prepare_effect_media
 from .quick_fixes import TARGETS
 
 
@@ -46,7 +48,7 @@ class EffectDialog(QDialog):
         form.addRow('', self.menu)
         form.addRow('Refinement instruction', self.prompt)
         for label, field, filt in [('Thumbnail', self.thumbnail, 'Images (*.png *.jpg *.webp *.gif)'),
-                                   ('Preview / sound', self.preview, 'Media (*.mp4 *.webm *.mov *.gif *.wav *.mp3 *.ogg)')]:
+                                   ('Preview / sound', self.preview, 'Media (*.mp4 *.webm *.mov *.mkv *.gif *.wav *.mp3 *.ogg *.flac *.m4a *.aac *.opus)')]:
             row = QHBoxLayout(); row.addWidget(field)
             choose = QPushButton('Browse…')
             choose.clicked.connect(lambda _, f=field, fl=filt: self.choose(f, fl))
@@ -122,7 +124,7 @@ class EffectDialog(QDialog):
         self.entry.update(name=self.name.text().strip(), category=self.category.text().strip() or 'General',
             target=self.target.currentData(), show_in_menu=self.menu.isChecked(),
             prompt=self.prompt.toPlainText().strip(), thumbnail=self.thumbnail.text().strip(), preview=preview)
-        if Path(preview).suffix.lower() in {'.wav', '.mp3', '.ogg'}:
+        if Path(preview).suffix.lower() in AUDIO_SUFFIXES:
             self.entry['audio'] = preview
         else:
             self.entry.pop('audio', None)
@@ -147,6 +149,9 @@ class EffectsPanel(QWidget):
     def __init__(self, owner):
         super().__init__()
         self.owner = owner
+        self.media_cache = {}; self.preview_choices = []; self.preview_index = 0
+        self.audit_serial = 0; self.audit_cancel = threading.Event(); self.audit_started = False; self.disposed = False
+        self.audit_timer = QTimer(self); self.audit_timer.setSingleShot(True); self.audit_timer.timeout.connect(self.audit_media)
         self.setObjectName('effectsPanel')
         try:self.favorites=set(json.loads(owner.settings.value('effects/favorites','[]')))
         except (ValueError,TypeError):self.favorites=set()
@@ -187,12 +192,8 @@ class EffectsPanel(QWidget):
         self.details = QLabel('Drag an effect onto a segment or prompt editor, or select one and Apply.')
         self.details.setWordWrap(True); self.details.setTextFormat(Qt.TextFormat.PlainText)
         self.details.setMaximumHeight(150); layout.addWidget(self.details)
-        self.media = QComboBox(); layout.addWidget(self.media)
-        row = QHBoxLayout()
-        self.play = QPushButton('▶ Play sound')
-        self.play.clicked.connect(self.play_sound); row.addWidget(self.play)
-        self.export = QPushButton('Save sample…'); self.export.clicked.connect(self.save_sample); row.addWidget(self.export)
-        layout.addLayout(row)
+        self.media_status = QLabel(); self.media_status.setWordWrap(True); self.media_status.hide(); layout.addWidget(self.media_status)
+        self.export = QPushButton('Save sample…'); self.export.clicked.connect(self.save_sample); layout.addWidget(self.export)
         self.apply = QPushButton('Apply and refine'); self.apply.clicked.connect(self.apply_current)
         self.apply.setObjectName('effectApply');layout.addWidget(self.apply)
         row = QHBoxLayout()
@@ -215,9 +216,10 @@ class EffectsPanel(QWidget):
         self.tiles.currentItemChanged.connect(self.select)
         self.tiles.itemDoubleClicked.connect(lambda *_: self.apply_current())
         self.tiles.itemClicked.connect(self.tile_clicked)
+        self.tiles.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.tiles.customContextMenuRequested.connect(self.preview_menu)
         self.size.valueChanged.connect(self.resize_tiles)
         self.reflow=QTimer(self);self.reflow.setSingleShot(True);self.reflow.timeout.connect(self.resize_tiles)
-        self.media.currentIndexChanged.connect(self.preview_media)
         self.availability = QTimer(self); self.availability.setInterval(400)
         self.availability.timeout.connect(self.update_available); self.availability.start()
         self.reload(); self.resize_tiles()
@@ -229,6 +231,7 @@ class EffectsPanel(QWidget):
         self.category.addItems(sorted({e['category'] for e in self.entries}))
         self.category.setCurrentIndex(max(0, self.category.findText(category))); self.category.blockSignals(False)
         self.filter()
+        if self.audit_started:self.schedule_media_audit(force=True)
 
     def filter(self, *_):
         self.stop_preview(); self.tiles.clear()
@@ -239,15 +242,7 @@ class EffectsPanel(QWidget):
             searchable = {key: e.get(key, '') for key in ('id', 'name', 'category', 'anatomy', 'stage', 'species', 'prompt', 'match_instruction', 'description')}
             if query and query not in json.dumps(searchable, ensure_ascii=False).casefold(): continue
             label = ('▶ ' if e.get('audio') else '') + e['name']
-            icon = self.tile_icon(e)
-            if e.get('audio') or e.get('source_audio_ids') and e.get('category') == 'Sound':
-                pix = icon.pixmap(192, 120)
-                if not pix.isNull():
-                    painter = QPainter(pix); center = pix.rect().center()
-                    painter.setPen(Qt.PenStyle.NoPen); painter.setBrush(QColor(12, 20, 28, 210))
-                    painter.drawEllipse(center, 21, 21); painter.setBrush(QColor('white'))
-                    painter.drawPolygon(QPolygon([center + QPoint(-5, -10), center + QPoint(-5, 10), center + QPoint(11, 0)]))
-                    painter.end(); icon = QIcon(pix)
+            icon = self.entry_icon(e)
             item = QListWidgetItem(icon, label)
             item.setData(Qt.ItemDataRole.UserRole, e)
             item.setToolTip(e.get('thumbnail_note', '') + '\n' + e.get('prompt', e.get('description', '')))
@@ -278,7 +273,7 @@ class EffectsPanel(QWidget):
         if hasattr(self,'reflow'):self.reflow.start(0)
 
     def tile_icon(self,entry):
-        icon=QIcon(media_path(entry.get('thumbnail')))
+        icon=QIcon(self.media_cache.get(entry['id'], {}).get('thumbnail') or media_path(entry.get('thumbnail')))
         if not icon.isNull():
             original=icon.pixmap(192,120)
             pix=QPixmap(192,120);pix.fill(QColor('#222631'))
@@ -295,6 +290,15 @@ class EffectsPanel(QWidget):
         painter.end()
         return QIcon(pix)
 
+    def entry_icon(self, entry):
+        icon = self.tile_icon(entry)
+        if entry.get('audio') or entry.get('category') == 'Sound' and any(c['kind']=='audio' for c in preview_sources(entry)):
+            pix = icon.pixmap(192,120); painter = QPainter(pix); center = pix.rect().center()
+            painter.setPen(Qt.PenStyle.NoPen); painter.setBrush(QColor(12,20,28,210)); painter.drawEllipse(center,21,21)
+            painter.setBrush(QColor('white')); painter.drawPolygon(QPolygon([center+QPoint(-5,-10), center+QPoint(-5,10), center+QPoint(11,0)]))
+            painter.end(); return QIcon(pix)
+        return icon
+
     def toggle_favorite(self):
         entry=self.current()
         if not entry:return
@@ -309,80 +313,109 @@ class EffectsPanel(QWidget):
         return item.data(Qt.ItemDataRole.UserRole) if item else None
 
     def select(self, item, *_):
-        self.stop_preview(); self.media.blockSignals(True); self.media.clear()
-        e = self.current()
-        self.favorite.setEnabled(bool(e));self.favorite.setChecked(bool(e and e['id'] in self.favorites))
+        self.stop_preview()
+        e = self.current(); self.preview_choices = preview_sources(e) if e else []; self.preview_index = 0
+        self.favorite.setEnabled(bool(e)); self.favorite.setChecked(bool(e and e['id'] in self.favorites))
+        self.export.setVisible(bool(self.preview_choices))
         if not e:
-            self.details.setText('No matching effects.'); self.media.blockSignals(False); self.update_available(); return
+            self.details.setText('No matching effects.'); self.update_available(); return
         details = [e['name'], e.get('origin', ''), e.get('thumbnail_note', ''), e.get('usage_note', '')]
-        if e.get('category') == 'Sound' and not e.get('source_audio_ids'):
+        if e.get('category') == 'Sound' and not any(c['kind']=='audio' for c in self.preview_choices):
             details.append('Written sound recipe · no recording supplied for this entry.')
-        self.media.addItem('Still thumbnail', '')
-        clips = {c['id']: c for c in catalog()['clips']}
-        for cid in e.get('reference_clip_ids', []):
-            c = clips.get(cid)
-            if c: self.media.addItem(c['title'] + ' · ' + c['kind'], c['path'])
-        if e.get('preview') and not e.get('audio'): self.media.addItem('Custom preview', e['preview'])
-        samples = {a['id']: a for a in catalog()['audio']}
-        if e.get('audio'): self.media.addItem('Mixed source soundtrack' if e['id'].startswith('SRC') else 'Custom sound', e['audio'])
-        for aid in e.get('source_audio_ids', []):
-            if aid in samples: self.media.addItem('♫ ' + samples[aid]['title'] + ' · mixed soundtrack', samples[aid]['path'])
         details.extend(m['evidence_kind'] + ': ' + m['scope'] for m in e.get('reference_matches', []))
+        if len(self.preview_choices)>1:details.append('Right-click the tile for alternate previews and original sample exports.')
         self.details.setText('\n'.join(filter(None, details)))
-        self.media.blockSignals(False)
-        if self.media.count() > 1 and e.get('category') != 'Sound':
-            self.media.setCurrentIndex(1)  # Video previews automatically, audio always manual.
-        self.preview_media()
-        self.update_available()
+        preferred = 'audio' if e.get('audio') or e.get('category')=='Sound' else 'video'
+        self.preview_index = next((i for i,c in enumerate(self.preview_choices) if c['kind']==preferred),0)
+        self.preview_media(); self.update_available()
 
     def stop_preview(self):
         self.player.stop()
         if self.active_item is not None:
-            self.active_item.setIcon(self.tile_icon(self.active_item.data(Qt.ItemDataRole.UserRole)))
+            self.active_item.setIcon(self.entry_icon(self.active_item.data(Qt.ItemDataRole.UserRole)))
         self.active_item = None
 
-    def preview_media(self, *_):
+    def preview_media(self, index=None, *, play_audio=False):
         self.stop_preview()
-        self.player.setLoops(QMediaPlayer.Loops.Infinite)
-        path = media_path(self.media.currentData())
-        sound = Path(path).suffix.lower() in {'.wav', '.mp3', '.ogg'}
-        self.play.setVisible(sound); self.export.setVisible(sound)
-        if path and not sound and self.isVisible():
-            self.active_item = self.tiles.currentItem()
-            self.owner.project_preview_panel.player.pause()
-            self.audio.setMuted(True); self.player.setSource(QUrl.fromLocalFile(path)); self.player.play()
+        if index is not None:self.preview_index = index
+        if not self.preview_choices or not self.current():return
+        choice = self.preview_choices[self.preview_index]
+        self.export.setText('Save sample…' if choice['kind']=='audio' else 'Save original preview…')
+        if not self.isVisible():return
+        path = (media_path(choice['path']) if choice['kind']=='audio' else
+                self.media_cache.get(self.current()['id'],{}).get('videos',{}).get(choice['path'],''))
+        if not path or choice['kind']=='audio' and not play_audio:return
+        self.owner.project_preview_panel.player.pause()
+        if choice['kind']=='video':self.active_item = self.tiles.currentItem()
+        self.audio.setMuted(choice['kind']=='video')
+        self.player.setLoops(QMediaPlayer.Loops.Infinite if choice['kind']=='video' else QMediaPlayer.Loops.Once)
+        self.player.setSource(QUrl.fromLocalFile(path)); self.player.play()
 
     def frame(self, frame):
         if self.active_item and frame.isValid():
             img = frame.toImage()
-            if not img.isNull(): self.active_item.setIcon(QIcon(QPixmap.fromImage(img).scaled(
+            if not img.isNull():self.active_item.setIcon(QIcon(QPixmap.fromImage(img).scaled(
                 self.tiles.iconSize(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)))
 
-    def play_sound(self):
-        path = media_path(self.media.currentData())
-        if Path(path).suffix.lower() not in {'.wav', '.mp3', '.ogg'}: return
-        playing = self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState
-        self.stop_preview()
-        if not playing:
-            self.owner.project_preview_panel.player.pause()
-            self.audio.setMuted(False); self.player.setLoops(QMediaPlayer.Loops.Once)
-            self.player.setSource(QUrl.fromLocalFile(path)); self.player.play()
-
     def tile_clicked(self, item):
-        entry = self.current()
-        if entry and (entry.get('audio') or entry.get('category') == 'Sound'):
-            for i in range(self.media.count()):
-                if Path(str(self.media.itemData(i))).suffix.lower() in {'.wav', '.mp3', '.ogg'}:
-                    self.media.setCurrentIndex(i); self.play_sound(); break
+        if not self.preview_choices:return
+        if self.preview_choices[self.preview_index]['kind']=='audio':
+            if self.player.playbackState()==QMediaPlayer.PlaybackState.PlayingState:self.stop_preview()
+            else:self.preview_media(play_audio=True)
 
-    def save_sample(self):
+    def preview_menu(self, point):
+        item = self.tiles.itemAt(point)
+        if not item:return
+        self.tiles.setCurrentItem(item)
+        menu = QMenu(self.tiles); exports = menu.addMenu('Save original sample / preview')
+        for index,choice in enumerate(self.preview_choices):
+            menu.addAction(('Play ' if choice['kind']=='audio' else 'Preview ')+choice['title'],
+                           lambda _,i=index:self.preview_media(i,play_audio=True))
+            exports.addAction(choice['title'],lambda _,p=choice['path']:self.save_sample(p))
+        if self.preview_choices:menu.exec(self.tiles.viewport().mapToGlobal(point))
+
+    def save_sample(self, path=None):
         import shutil
-        path = media_path(self.media.currentData())
-        if not path: return
+        if not isinstance(path,str):
+            path = self.preview_choices[self.preview_index]['path'] if self.preview_choices else ''
+        path = media_path(path)
+        if not path:return
         dest = choose_document_save(self, 'Save sample', Path(path).name)
         if dest:
-            try: shutil.copyfile(path, dest)
-            except OSError as error: QMessageBox.warning(self, 'Save sample', str(error))
+            try:shutil.copyfile(path,dest)
+            except OSError as error:QMessageBox.warning(self,'Save sample',str(error))
+
+    def schedule_media_audit(self, delay=0, *, force=False):
+        if self.disposed or self.audit_started and not force:return
+        self.audit_started = True; self.audit_serial += 1; self.audit_cancel.set()
+        self.audit_cancel = threading.Event(); self.audit_timer.start(delay)
+
+    def audit_media(self):
+        if self.disposed:return
+        serial = self.audit_serial
+        self.media_status.setText('Checking library thumbnails…'); self.media_status.show()
+        cache = Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.CacheLocation))/'effects-previews'
+        def ready(result):
+            if self.disposed or serial != self.audit_serial:return
+            playing_sound = not self.audio.isMuted() and self.player.playbackState()==QMediaPlayer.PlaybackState.PlayingState
+            if not playing_sound:self.stop_preview()
+            self.media_cache = result['entries']
+            for index in range(self.tiles.count()):
+                item = self.tiles.item(index); item.setIcon(self.entry_icon(item.data(Qt.ItemDataRole.UserRole)))
+            issues = result['issues']; repaired = result['repaired']
+            self.media_status.setText(f"{repaired} thumbnails repaired" + (f" · {len(issues)} unavailable" if issues else ''))
+            self.media_status.setToolTip('\n'.join(issues)); self.media_status.setVisible(bool(issues or repaired))
+            if not playing_sound and self.owner.project_preview_panel.player.playbackState()!=QMediaPlayer.PlaybackState.PlayingState:
+                self.preview_media()
+        def failed(message):
+            if not self.disposed and serial == self.audit_serial:
+                self.media_status.setText('Thumbnail check could not finish. Reopen the library to retry.')
+                self.media_status.setToolTip(str(message)); self.audit_started = False
+        self.owner.start_disk_job(prepare_effect_media,(list(self.entries),str(cache),self.audit_cancel),ready,failed)
+
+    def dispose(self):
+        self.disposed = True; self.audit_serial += 1; self.audit_cancel.set()
+        self.audit_timer.stop(); self.availability.stop(); self.stop_preview()
 
     def update_available(self):
         e = self.current(); scope = self.scope.currentData()
@@ -411,4 +444,4 @@ class EffectsPanel(QWidget):
         self.stop_preview(); super().hideEvent(event)
 
     def showEvent(self, event):
-        super().showEvent(event); self.player.setLoops(QMediaPlayer.Loops.Infinite); self.preview_media()
+        super().showEvent(event); self.schedule_media_audit(); self.preview_media()

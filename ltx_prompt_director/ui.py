@@ -5908,6 +5908,7 @@ class MainWindow(QMainWindow):
             self.update_closing_progress()
         if getattr(self, "_local_video_busy", False): self._local_video_cancel.set()
         if hasattr(self, "_local_artwork_cancel"): self.cancel_local_artwork()
+        if hasattr(self, "effects_panel"): self.effects_panel.dispose()
         if self._pending_disk_jobs:
             self._close_after_jobs = True
             self.statusBar().showMessage("Finishing background project saves before closing…")
@@ -5947,6 +5948,7 @@ class MainWindow(QMainWindow):
     def showEvent(self,event) -> None:
         super().showEvent(event)
         self._viewport_timer.start()
+        if hasattr(self,"effects_panel"):self.effects_panel.schedule_media_audit(1000)
         handle=self.windowHandle()
         if handle and not getattr(self,'_screen_connected',False):
             handle.screenChanged.connect(lambda *_:self._viewport_timer.start())

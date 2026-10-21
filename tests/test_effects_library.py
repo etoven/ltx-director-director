@@ -16,7 +16,7 @@ def test_migration_menu_defaults_and_round_trip_preserve_edits():
         settings = settings_at(folder)
         save_presets(settings, [{'name': 'My old fix', 'prompt': 'Keep this.', 'category': 'Camera', 'target': 'both'}])
         entries = load_effects(settings)
-        assert len(entries) == 118
+        assert len(entries) == 135
         assert [e['name'] for e in entries if e['show_in_menu']] == ['My old fix']
         old = entries[0]
         save_effect(settings, {**old, 'name': 'Edited', 'show_in_menu': False})
@@ -54,3 +54,21 @@ def test_all_catalog_artwork_and_related_media_resolve_and_no_audio_is_implied()
             assert 'No reference media is attached' in prompt
         assert media_path('../../secrets.txt') == ''
         assert not any(e['show_in_menu'] for e in effects)
+
+
+def test_source_sounds_and_videos_have_editable_refinement_prompts():
+    from ltx_prompt_director.effects_library import OVERRIDES_KEY, preview_sources
+    with tempfile.TemporaryDirectory() as folder:
+        settings = settings_at(folder)
+        settings.setValue(OVERRIDES_KEY, json.dumps({'SRC001':{'prompt':''}, 'SRC002':{'prompt':'Keep my authored sound.'}}))
+        entries = load_effects(settings)
+        sounds = [e for e in entries if e['id'].startswith('SRC')]
+        videos = [e for e in entries if e['id'].startswith('CLIP')]
+        assert len(sounds)==17 and len(videos)==17
+        assert all(e.get('prompt','').strip() for e in entries)
+        assert all(not e['show_in_menu'] for e in sounds+videos)
+        assert next(e for e in sounds if e['id']=='SRC002')['prompt']=='Keep my authored sound.'
+        assert 'sound design' in next(e for e in sounds if e['id']=='SRC001')['prompt']
+        assert all(preview_sources(e) for e in sounds+videos)
+        assert all(c['kind']=='video' and Path(media_path(c['path'])).is_file() for e in videos for c in preview_sources(e))
+        assert all('no reference media is attached' in e['prompt'].lower() for e in videos)

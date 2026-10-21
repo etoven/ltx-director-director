@@ -113,6 +113,21 @@ class UnifiedEditorTests(unittest.TestCase):
         from test_effects_ui import test_effect_drop_acceptance_matches_scope_and_busy_state
         test_effect_drop_acceptance_matches_scope_and_busy_state()
 
+    def test_effects_media_prompts_and_startup(self):
+        from test_effects_library import test_source_sounds_and_videos_have_editable_refinement_prompts
+        from test_effects_ui import test_effect_preview_tiles_and_stale_startup_audit
+        test_source_sounds_and_videos_have_editable_refinement_prompts()
+        test_effect_preview_tiles_and_stale_startup_audit()
+
+    def test_effects_thumbnail_integrity_and_repair(self):
+        import tempfile
+        from test_effects_media import (test_shipped_thumbnail_videos_are_small_silent_and_valid,
+            test_startup_repairs_bad_posters_and_corrupted_video_cache, test_missing_media_does_not_abort_other_thumbnail_checks)
+        test_shipped_thumbnail_videos_are_small_silent_and_valid()
+        with tempfile.TemporaryDirectory() as folder:
+            test_startup_repairs_bad_posters_and_corrupted_video_cache(Path(folder))
+            test_missing_media_does_not_abort_other_thumbnail_checks(Path(folder))
+
     def test_quick_fix_buttons_menu_and_preset_editor(self):
         from ltx_prompt_director.effects_library import load_effects, USER_KEY, save_effect
         from ltx_prompt_director.effects_widgets import EffectDialog
