@@ -61,5 +61,32 @@ def workspace_style(theme, scale):
     #effectsPanel #effectApply{{background:#2e5962;border-color:#3f6a73;min-height:{size(24)}px;color:#e7f2f2}}
     #effectsPanel #effectSecondary,#effectsPanel #effectDelete{{background:transparent;border-radius:{size(16)}px}}
     #effectsPanel #effectDelete{{color:#d78288;border-color:#815157}}
+    #mainToolbar{{background:qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #18232d,stop:1 #131b24);border-bottom:1px solid #293b48}}
+    #workspaceBrand QLabel{{font:{size(15)}px "Roboto Condensed";color:#d0e3f1}}
+    #workspaceBrand{{background:transparent}}
+    #projectLibrarySurface{{background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #101a23,stop:1 #121b24)}}
+    #projectLibrarySurface QToolButton{{background:#17232f;border:1px solid #2a3b4a;border-radius:{size(4)}px;padding:{size(3)}px {size(5)}px;font-size:{size(13)}px}}
+    #projectLibrarySurface QToolButton:hover{{background:#253b4b;border-color:#4e8b9b}}
+    #projectLibrarySurface QToolButton:checked{{background:#264153;border-color:#4495aa}}
+    #projectMore::menu-indicator{{image:none;width:0;height:0}}
+    #projectLibrarySurface QComboBox{{background:#17232f;border:1px solid #304352;border-radius:{size(4)}px;padding:{size(4)}px;font-size:{size(13)}px}}
+    #projectBrowser{{background:#101920;border:1px solid #2c3c49;border-radius:{size(5)}px}}
+    #projectSearch{{background:#121e28;border:1px solid #304453;border-radius:{size(4)}px;padding:{size(5)}px;font-size:{size(14)}px}}
+    #projectList{{background:transparent;border:0;padding:0}}
+    #projectList::item,#projectList::item:hover,#projectList::item:selected{{background:transparent;border:0;margin:0;padding:0}}
+    #unifiedPromptSurface{{background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #17222d,stop:1 #121b25);border:1px solid #2d3c4a;border-radius:{size(6)}px}}
+    #promptSurfaceContent{{background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #071c25,stop:1 #081a22);border:1px solid #24404d;border-radius:{size(4)}px}}
+    #surfacePromptEditor{{background:transparent;border:0;padding:{size(7)}px;color:#e5e9e9;font:{size(15)}px "Roboto Condensed"}}
+    #surfacePromptEditor QWidget,#surfaceEditorStack{{background:transparent;border:0}}
+    #promptSurfaceBody{{background:transparent;border:0}}
+    #promptActionRail,#promptActionRail QWidget{{background:transparent;border:0}}
+    #promptActionRail QPushButton,#promptActionRail QComboBox{{font:{size(13)}px "Roboto Condensed";padding:{size(1)}px {size(5)}px;min-height:0;min-width:0;border:1px solid #344d5c;border-radius:{size(5)}px;background:#20313f;color:#eff5f7}}
+    #promptActionRail #surfaceGenerate{{background:#165b48;border-color:#26785a}}
+    #promptActionRail QPushButton:hover{{background:#2c4a59;border-color:#65a7ad}}
+    #surfacePromptCount{{font-size:{size(11)}px;color:#8ca8b8;background:transparent}}
+    #surfaceCollapse{{background:transparent;border:0;padding:0;margin:0;min-width:0;min-height:0}}
+    QMainWindow QTabBar::tab{{background:#121b24;color:#c0cfda;border:0;border-bottom:2px solid transparent;padding:{size(4)}px {size(7)}px;font-size:{size(13)}px}}
+    QMainWindow QTabBar::tab:selected{{border-bottom-color:#38bbd0;color:#e1f3f5}}
+    #libraryDockTabs::tab{{min-width:{size(130)}px}}
     '''
     return theme

@@ -27,7 +27,10 @@ class UnifiedEditorTests(unittest.TestCase):
                            Segment('Second', '', '', kind='text', prompt='Second action', duration=3)]
         window.refresh_timeline(0)
         window.set_project_type(project_type)
-        self.addCleanup(window.close)
+        # A completed asynchronous close can delete its native window before
+        # unittest runs cleanup, especially when a test opens several windows.
+        from shiboken6 import isValid
+        self.addCleanup(lambda: window.close() if isValid(window) else None)
         return window
 
     def test_onboarding_navigation_readiness_and_guides(self):
@@ -45,6 +48,32 @@ class UnifiedEditorTests(unittest.TestCase):
     def test_settings_sidebar_design(self):
         from test_settings_design import test_settings_sidebar_search_preserves_pages_and_edits
         test_settings_sidebar_search_preserves_pages_and_edits()
+
+    def test_panel_scope_documents(self):
+        from test_panel_design import test_one_surface_keeps_documents_and_scope_actions_across_workspaces
+        test_one_surface_keeps_documents_and_scope_actions_across_workspaces()
+
+    def test_panel_ltx_unified(self):
+        from test_panel_design import test_ltx_unified_generation_preserves_segments_and_uses_shared_export_prompt
+        test_ltx_unified_generation_preserves_segments_and_uses_shared_export_prompt()
+
+    def test_panel_timing_overview(self):
+        from test_panel_design import test_prompt_only_scope_and_timing_overview_remain_available
+        test_prompt_only_scope_and_timing_overview_remain_available()
+
+    def test_panel_library_browser(self):
+        from test_panel_design import test_project_browser_filters_navigation_and_view_preserve_selection
+        test_project_browser_filters_navigation_and_view_preserve_selection()
+
+    def test_panel_compact_layout(self):
+        from test_panel_design import test_panel_controls_fit_reference_and_narrow_layouts
+        test_panel_controls_fit_reference_and_narrow_layouts()
+
+    def test_panel_desktop_icon_upgrade(self):
+        import tempfile
+        from test_panel_design import test_desktop_upgrade_refreshes_the_existing_launcher_icon
+        with tempfile.TemporaryDirectory() as folder:
+            test_desktop_upgrade_refreshes_the_existing_launcher_icon(Path(folder))
 
     def test_settings_large_text(self):
         from test_settings_design import test_settings_large_text_keeps_navigation_and_footer_accessible
@@ -103,7 +132,8 @@ class UnifiedEditorTests(unittest.TestCase):
         import subprocess, sys, os
         code = "import os,sys,pytest; rc=pytest.main(['-q','tests/test_local_generation.py','tests/test_local_lora.py']); sys.stdout.flush(); sys.stderr.flush(); os._exit(rc)"
         env = dict(os.environ, PYTEST_DISABLE_PLUGIN_AUTOLOAD='1', QT_QPA_PLATFORM='offscreen')
-        subprocess.run([sys.executable, '-c', code], env=env, check=True, timeout=20)
+        timeout=max(20,int(os.environ.get('DIRECTOR_NATIVE_TIMEOUT','25'))-5)
+        subprocess.run([sys.executable, '-c', code], env=env, check=True, timeout=timeout)
 
     def test_effects_catalog_and_dock(self):
         from test_effects_ui import test_effects_dock_search_artwork_and_menu_migration
@@ -391,8 +421,10 @@ class UnifiedEditorTests(unittest.TestCase):
         self.assertGreaterEqual(w.minimax_panel.header.indexOf(w.combined_generate_button), 0)
         self.assertGreaterEqual(w.minimax_panel.header.indexOf(w.combined_refine_button), 0)
         self.assertNotEqual(w.magic_button, w.combined_generate_button)
-        self.assertFalse(w.combined_generate_button.isHidden())
-        self.assertFalse(w.combined_refine_button.isHidden())
+        self.assertTrue(w.combined_generate_button.isHidden())
+        self.assertFalse(w.prompt_surface.generate.isHidden())
+        self.assertTrue(w.combined_refine_button.isHidden())
+        self.assertFalse(w.prompt_surface.refine.isHidden())
         self.assertEqual(w.magic_button.text(), "Generate")
         self.assertEqual(w.prompt_refine_button.text(), "Refine")
         w.set_project_type("minimax_prompt_refinement")
@@ -481,7 +513,7 @@ class UnifiedEditorTests(unittest.TestCase):
                             pos=w.timeline.visualItemRect(item).center())
             self.assertEqual(w.prompt_scope.currentData(), "segment")
             self.assertEqual(w.intent_segment_prompt.toPlainText(), w.segments[row].prompt)
-            self.assertEqual(w.director_intent_stack.currentIndex(), 1)
+            self.assertIs(w.prompt_surface.editors.currentWidget(), w.intent_segment_prompt)
         self.assertEqual([segment.to_dict() for segment in w.segments], before)
         self.assertEqual(w.intent.toPlainText(), "Keep the whole-sequence direction")
         self.assertEqual(w.global_prompt.toPlainText(), "Keep the global prompt")
@@ -642,10 +674,11 @@ class UnifiedEditorTests(unittest.TestCase):
         w = self.make_window('minimax_frames')
         w.intent.setPlainText("Original director's intent")
         w.unified_prompt.setPlainText("My unified production prompt")
-        self.assertIs(w.director_intent_stack.currentWidget(), w.intent)
+        w.prompt_surface.select('global')
+        self.assertIs(w.prompt_surface.editors.currentWidget(), w.intent)
         self.assertEqual(w.prompt_scope.currentData(), "global")
         w.prompt_scope.setCurrentIndex(1)
-        self.assertIs(w.director_intent_stack.currentWidget(), w.intent_segment_prompt)
+        self.assertIs(w.prompt_surface.editors.currentWidget(), w.intent_segment_prompt)
         self.assertEqual(w.intent_segment_prompt.toPlainText(), "First action")
         self.assertTrue(w.segment_panel.isHidden())
         self.assertEqual(w.director_intent_label.text(), "SEGMENT PROMPT")
@@ -660,7 +693,8 @@ class UnifiedEditorTests(unittest.TestCase):
         w.timeline.setCurrentRow(0)
         self.assertIn("/refine", w.intent_segment_prompt.toPlainText())
         w.prompt_scope.setCurrentIndex(0)
-        self.assertIs(w.director_intent_stack.currentWidget(), w.intent)
+        w.prompt_surface.select('global')
+        self.assertIs(w.prompt_surface.editors.currentWidget(), w.intent)
         self.assertEqual(w.intent.toPlainText(), "Original director's intent")
         self.assertEqual(w.unified_prompt.toPlainText(), "My unified production prompt")
         self.assertEqual(w.combined_focus if hasattr(w, "combined_focus") else "all", "all")
@@ -701,12 +735,12 @@ class UnifiedEditorTests(unittest.TestCase):
         self.app.processEvents()
         w.set_director_intent_expanded(True)
         self.app.processEvents()
-        panel = w.director_panel
-        stack = w.director_intent_stack
+        panel = w.prompt_surface.content
+        stack = w.prompt_surface.editors
         label = w.director_intent_label
-        selector = w.prompt_scope
+        selector = w.prompt_surface.scope
         self.assertGreaterEqual(stack.geometry().top(), 0)
-        self.assertGreaterEqual(stack.width(), panel.width() - 24)
+        self.assertGreaterEqual(stack.width(), panel.width() - w.prompt_surface.rail.width() - 32)
         self.assertTrue(label.isHidden())  # Picker already identifies the editor.
         self.assertFalse(selector.isHidden())
         options = [w.options_row.itemAt(i).widget()
@@ -755,7 +789,7 @@ class UnifiedEditorTests(unittest.TestCase):
         self.assertGreaterEqual(w.conditioning_guide.height(), 96)
         self.assertEqual(w.start_button.text(), "Start")
         self.assertEqual(w.end_button.text(), "End")
-        self.assertEqual(w.director_controls.count(), 3)
+        self.assertIs(w.prompt_surface.editors.currentWidget().parent(), w.prompt_surface.editors)
         self.assertIn("chars", w.unified_count.text())
         self.assertEqual(w.minimax_panel.header.indexOf(w.unified_count),
                          w.minimax_panel.header.indexOf(w.minimax_panel.prompt_label) + 1)
@@ -925,6 +959,7 @@ class UnifiedEditorTests(unittest.TestCase):
         after = "Opening revised.\n\nUnchanged center.\n\nEnding revised."
         w.minimax_prompt_text = before
         w.unified_prompt.setPlainText(before)
+        w.prompt_surface.select('unified')
         w.inline_typing.start(w.unified_prompt, before, "unified")
         w.ai_request_workspace = (
             w.workspace_revision, w.current_project_id, w.project_type
@@ -1055,9 +1090,10 @@ class UnifiedEditorTests(unittest.TestCase):
             self.assertTrue(w.refine_timing_button.isHidden())
             self.assertIsNone(w.magic_button.menu())
             self.assertFalse(w.requested_length.isHidden())
-            self.assertFalse(w.prompt_scope.isHidden())
+            self.assertFalse(w.prompt_surface.scope.isHidden())
             self.assertTrue(w.segment_panel.isHidden())
-            self.assertFalse(w.unified_panel.isHidden())
+            self.assertTrue(w.unified_panel.isHidden())
+            self.assertFalse(w.prompt_surface.isHidden())
             self.assertFalse(hasattr(w, "copy_image_prompt"))
             self.assertFalse(w.references_button.isHidden())
             w.show_reference_images()
@@ -1255,7 +1291,8 @@ class UnifiedEditorTests(unittest.TestCase):
         from PySide6.QtWidgets import QPushButton
         w = self.make_window('minimax_frames')
         self.assertTrue(w.segment_panel.isHidden())
-        self.assertFalse(w.unified_panel.isHidden())
+        self.assertTrue(w.unified_panel.isHidden())
+        self.assertFalse(w.prompt_surface.isHidden())
         self.assertTrue(w.director_intent_row.indexOf(w.magic_button) >= 0)
         self.assertTrue(w.director_intent_row.indexOf(w.prompt_refine_button) >= 0)
         self.assertTrue(w.director_intent_row.indexOf(w.prompt_scope) >= 0)
@@ -1426,7 +1463,7 @@ class UnifiedEditorTests(unittest.TestCase):
         w.resize(1280, 820)
         w.show()
         self.app.processEvents()
-        self.assertIs(w.segment_ai_marquee.parent(), w.segment_panel)
+        self.assertIs(w.segment_ai_marquee.parent(), w.prompt_surface.body)
         w.set_ai_controls_enabled(False)
         self.app.processEvents()
         self.assertFalse(w.segment_ai_marquee.isHidden())

@@ -1,8 +1,8 @@
 # Direct every segment. Keep the full prompt in view.
 
-All timeline workspaces use the same segment editor. The Prompt Refinement workspace provides a standalone annotated text editor. Select a timeline card to edit its prompt, change its frame role or refine its wording and duration. **Magic Build** develops the segment prompts and shared global direction.
+All timeline workspaces use one **Unified Prompt** panel. Its scope selector switches between **Segment**, **Global** and **Unified**, keeping each document separate. Select a timeline card to edit that segment, change its frame role or refine its wording and duration. The Prompt Refinement workspace opens its standalone draft in Unified scope.
 
-![The shared segment editor above an independently editable MiniMax production prompt](images/ltx-director-director-overview.png)
+![One prompt surface with scope controls beside the timeline and timing overview](images/panel-overhaul.png)
 
 | Workspace | Production format |
 | --- | --- |
@@ -14,7 +14,7 @@ All timeline workspaces use the same segment editor. The Prompt Refinement works
 
 ## Refine a prompt on its own
 
-Choose **MiniMax · Refine** from Project Type. Write or paste a production prompt, then click **Refine Prompt**. No media or segments are required. The editor fills the workspace; timeline, conditioning, segment timing, reference media and Director’s Intent controls are hidden.
+Choose **MiniMax · Refine** from Project Type. Write or paste a production prompt, then click **Refine**. No media or segments are required. The editor fills the workspace; timeline, conditioning, segment timing, reference media and Director’s Intent controls are hidden.
 
 Type `/` and use the existing annotation suggestions: `/refine` edits a nearby passage, `/refine-global` applies across the prompt, `/keep` protects a detail, `/avoid` excludes a detail and `/focus` adds emphasis. These remain editable note boxes, with the same completion and spelling features as the other prompt editors. A leading `/refine` note before the scene applies to the full prompt unless it identifies a narrower target. Completed global refinement notes are removed after a successful revision; other annotations remain. If the model returns the production text unchanged, the editor keeps your draft and annotations and reports **no text changes**.
 
@@ -24,9 +24,21 @@ Refinement uses only your current prompt and its inline annotations. It preserve
 
 ## Edit the beats, then develop the full prompt
 
-MiniMax adds an editable **Unified Prompt** below the segment editor. Write or paste the production draft directly. Use its **Generate** button to rebuild it from the current segments, reference roles and creative direction using the selected template. Segment refinement and timing remain in the upper controls.
+Choose a scope from the compact controls inside the prompt panel:
 
-The two editors retain separate text. Pasting or editing the unified prompt does not change the timeline. Manual timing edits update recognized timecodes locally. Segment wording reaches the unified draft through the local review below or an explicit Generate/Refine action.
+| Scope | What you edit and generate |
+| --- | --- |
+| Segment | The selected timeline beat only |
+| Global | Director's Intent for the entire sequence; Generate/Refine acts on all beats and then rebuilds the MiniMax production draft |
+| Unified | The independent production text; MiniMax uses the selected template, while LTX uses its shared global production prompt |
+
+The same Quick Fix, Generate and Refine controls follow the selected scope. Unified Generate rebuilds from all current segments and reference roles. Unified Refine changes the production text without rewriting the timeline. **Copy** copies the active document. The timing overview and its resize handle remain above the panel.
+
+The header chevron hides or reopens the prompt body. That view preference is remembered, while the timing overview remains available.
+
+Switching scope preserves your drafts. Pasting or editing Unified text does not change the timeline. Manual timing edits update recognized MiniMax timecodes locally. Segment wording reaches the production draft through an explicit Generate/Refine or synchronization action.
+
+![The compact scope selector and actions inside the prompt panel](images/prompt-scope-panel.png)
 
 MiniMax gives each recognized shot passage a soft highlight. Its boundary starts
 at the timecode (or the first shot's untimed text) and ends before the next
@@ -49,7 +61,7 @@ run locally without an AI request.
 
 ![A live red/green review confined to the selected MiniMax shot, with Approve and Reject controls](images/segment-prompt-live-review.png)
 
-The lower **Generate** button rebuilds the production brief from every current
+The **Generate** button in **Unified** scope rebuilds the production brief from every current
 timeline segment, including newly split or inserted beats. Current segment
 actions, order and timing take precedence over conflicting older global notes;
 beats that share an image still retain their separate action progression.
@@ -66,11 +78,11 @@ authorizes that change.
 If the timeline changes while generation is running, the app keeps your draft
 and asks you to generate again from the updated sequence.
 
-![A selected segment prompt with the full production draft below](images/shared-segment-editors.png)
+![Segment scope keeps the selected beat separate from the saved production draft](images/prompt-scope-panel.png)
 
 ## Apply a saved Quick Fix
 
-Use **Quick Fix** immediately before Generate in either prompt header. A preset's
+Use **Quick Fix** beside Generate inside the active prompt panel. A preset's
 **Show in** setting controls menu availability: **Segment** lists it in the
 segment menu, **Unified** lists it in the unified menu, and **Both** lists it in
 both. Selecting a preset always refines only the editor whose button you used.
@@ -92,21 +104,21 @@ Existing presets without a category use **General**. New installations include
 
 ![Quick Fix actions grouped by category](images/quick-fix-categories.png)
 
-![Quick Fix controls in both prompt headers](images/quick-fixes.png)
+![Quick Fix follows the active prompt scope](images/prompt-scope-panel.png)
 
 ![Editing the name, target and instruction of a Quick Fix preset](images/quick-fix-presets.png)
 
 ## Apply a production brief to the timeline
 
-The lower **Generate** and **Refine** buttons edit only the combined production text. To apply that text to your sequence, click **Rewrite timeline from combined prompt** in the timeline’s right-hand rail, below **＋** and **T＋**. It aligns segment wording and timing to the complete brief and presents the timeline changes for review. Your combined prompt stays unchanged.
+In **Unified** scope, **Generate** and **Refine** edit only the production text. To apply a MiniMax brief to your sequence, click **Rewrite timeline from combined prompt** in the timeline’s right-hand rail, below **＋** and **T＋**. It aligns segment wording and timing to the complete brief and presents the timeline changes for review. Your combined prompt stays unchanged.
 
 ![Timeline controls, including the separate rewrite action beneath the add buttons](images/timeline-navigation.png)
 
 ## Adjust timing through the shared editor
 
-**Refine** above the segment editor improves the selected beat and can resize that segment when its action or dialogue needs a different duration. **Refine Timing** changes its duration while preserving its wording. Other segments and the combined production text remain unchanged.
+**Refine** in **Segment** scope improves the selected beat and can resize that segment when its action or dialogue needs a different duration. **Refine Timing** changes its duration while preserving its wording. Other segments and the combined production text remain unchanged.
 
-Select **Global** in the segment editor to edit shared direction. Add an instruction such as `/refine-global Resize the segments proportionally to 15 seconds`, then choose **Refine Prompt**. Director scales the current segment durations to the requested total while preserving their proportions and individual prompt text. Other explicit global timing edits can change multiple segment durations. In MiniMax, the unified production prompt is then generated from the updated sequence. Manual segment edits preserve the draft's prose; recognized timecodes follow manual timing and Start/End frame-mode changes locally. Clicking a segment highlights its code and places the unified cursor immediately after it. See [live timecodes](media-and-timeline.md#make-timing-tangible) for supported formats and incomplete drafts.
+Select **Global** in the prompt panel to edit shared direction. Add an instruction such as `/refine-global Resize the segments proportionally to 15 seconds`, then choose **Refine**. Director scales the current segment durations to the requested total while preserving their proportions and individual prompt text. Other explicit global timing edits can change multiple segment durations. In MiniMax, the unified production prompt is then generated from the updated sequence. Manual segment edits preserve the draft's prose; recognized timecodes follow manual timing and Start/End frame-mode changes locally. Clicking a segment highlights its code and places the unified cursor immediately after it. See [live timecodes](media-and-timeline.md#make-timing-tangible) for supported formats and incomplete drafts.
 
 ## Direct motion through frame anchors
 
@@ -123,13 +135,13 @@ retain their selected roles rather than becoming timeline endpoints.
 
 The strip under the MiniMax timeline shows large image previews, with each shot’s timeline **Start** and **End** times together in a shaded bottom row. Video tiles show their timeline range too; source trim ranges and MiniMaxCondFrame values remain in tooltips. Untimed references show their roles. Drag the dotted handle below the strip to resize it, or double-click to hide and reopen it. The previews expand with the panel. The strip flags an opening that needs to move to zero or an ending that needs to reach the sequence total. It describes your setup; it does not move media automatically.
 
-![Compact conditioning frame and timing guide](images/conditioning-guide.png)
+![The retained conditioning and timing overview](images/panel-timing-overview.png)
 
 Both MiniMax templates receive `${workflow_name}` and `${workflow_direction}` from the current asset setup, including I2V, FL2V and last-frame L2V. Asset labels, subjects and speakers remain distinct. Dialogue requests can add original spoken lines when none are supplied.
 
 ## Keep your direction and drafts
 
-**Director’s Intent**, prompt options and inline refinement notes remain available across timeline workspaces. Prompt Refinement uses only its standalone prompt and annotations. The native splitter below it uses the same handle as the split between the segment and unified prompts. Drag up to collapse and down to reopen; its height and collapsed state persist. Switching workspaces does not submit an AI request. Projects retain segment prompts, global direction and each workspace’s unified draft.
+**Director’s Intent** is available in **Global** scope. Prompt options and inline refinement notes remain available across timeline workspaces. Prompt Refinement uses only its standalone prompt and annotations. Switching scope or workspace does not submit an AI request. Projects retain segment prompts, global direction and each workspace’s production draft. Existing review, copy, synchronization and media tools remain available.
 
 **Continue:** [Reference images](minimax-references.md) · [Custom workspaces and exports](workspace-definitions-and-exports.md) · [Complete feature guide](../usage.md)
 

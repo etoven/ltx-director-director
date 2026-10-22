@@ -4,7 +4,7 @@
 
 Your project is more than a prompt. It includes the reference media, the timing, the creative intent and the decisions that make the sequence yours. Director’s local library keeps that context together in a gallery you can browse, organize and reopen.
 
-![Saved projects with colored status cards and a docked Properties panel](images/project-properties.png)
+![Project cards with independent colors, status pills and compact browser controls](images/project-browser.png)
 
 ## Save it with a name and a cover
 
@@ -15,19 +15,23 @@ Choose **Save to Library** to save its content; later saves update that same
 project. In project details, choose a segment frame as its cover or upload a
 custom thumbnail. A recognizable cover helps you find the right plan as the library grows.
 
-Open **Projects** from the toolbar. Select a saved project to return to it, or use its context menu to open it or edit the details. Search matches project names and descriptions. The **Icons** menu chooses small, medium or large cards.
+Open **Projects** from the toolbar. Select a saved project to return to it, or use its context menu to open it or edit the details. Search matches names, descriptions, statuses, tags and notes. Use the grid/list buttons beside search to choose a view. The **…** menu retains sorting, thumbnail sizes, duplication, details and archive controls. **New**, **Rename**, **Delete** and **Catalog** stay in the compact action row.
 
-![The native project gallery with search, sorting, status filters and thumbnail cards](images/project-library.png)
+![The native library with search, view buttons and color/status filters](images/project-browser.png)
 
 ## Arrange the library around your work
 
-Assign a **Collection** to group related projects. Collections appear as their own gallery tiles, with covers assembled from member thumbnails. Open a collection to browse its projects and use **UP** to return.
+Assign a **Collection** to group related projects. Collections appear as gallery tiles, with covers assembled from member thumbnails. Open a collection or choose it from the breadcrumb menu. **Back**, **Forward** and **Home** navigate the library without opening or changing a project.
 
 Choose **Title A–Z**, **Title Z–A** or **Custom** sorting. Dragging a project or collection establishes a custom order. Status and label filters help narrow the gallery; the app remembers your selected filter choices.
 
 ## Make progress visible
 
-A project has one **Status** and can have several additional **Tags**. Status colors identify the project’s stage, and thumbnail pills show its labels. The stock status choices include Done, Consider and Re-shoot; customize names and colors in **Settings → Application**.
+A project has one **Status** and can have several additional **Tags**. Its status appears as a colored pill under the cover and description. The stock choices include Draft, In progress, Ready, Needs review, Completed and Failed. Older Done, Consider and Re-shoot statuses remain available. Customize definitions in **Settings → Application**.
+
+Right-click a project or collection and choose **Card color** to set an independent color for its border and top strip. **Use status color** restores the previous status-based appearance. The **Color** filter selects explicitly assigned colors; **No color** includes cards using their status color. **Status** provides checkboxes that stay open while you select multiple statuses. **More filters** retains no-status, legacy-status, additional-tag and archive choices. The reset-filter button clears search and restores the active-project filters.
+
+![Multiple status choices with matching checkboxes and colored dots](images/project-status-filter.png)
 
 Archive a project when it should move out of the active flow while remaining available. Collection context actions can apply status, labels and archive choices to their members. Deletion is a separate confirmed action that removes the selected saved project.
 

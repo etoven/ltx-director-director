@@ -60,7 +60,8 @@ from .shot_sequence_widgets import ShotSequencePanel
 from .models import Segment, order_segments_by_ids, split_segment, split_segment_parts, roll_segment_boundary, text_segment_from_ltx
 from .segment_split import divide_segment_prompt
 from .timeline_timing import TIMING_FIELDS, plan_sequence_timing, retimed_segments
-from .project_data import ARCHIVE_COLOR, load_other_tags, load_project_tags, new_note, normalize_notes, normalize_project_labels
+from .project_data import ARCHIVE_COLOR, DEFAULT_PROJECT_TAGS, load_other_tags, load_project_tags, new_note, normalize_notes, normalize_project_labels
+from .ai import refine_shared_production_prompt
 from .spellcheck import install_spellcheck
 from .prompt_tags import prompt_content, consume_global_refinements, install_prompt_tags, render_prompt_notes, insert_note
 from .quick_fixes import QuickFixEditor, load_presets, preset_groups
@@ -360,7 +361,7 @@ def _duplicate_library_project_files(source_meta: dict, root: Path, new_id: str)
             payload = json.loads(archive_path.read_text(encoding="utf-8"))
             payload["library"] = {
                 key: clone.get(key, "") for key in
-                ("id", "name", "description", "collection", "savedAt", "status", "tags",
+                ("id", "name", "description", "collection", "savedAt", "status", "color", "tags",
                  "tag", "archived", "notes", "previewVideoPath", "previewVideoName",
                  "projectFiles", "workflowFiles", "downloadDirectory")
             }
@@ -404,13 +405,13 @@ def _persist_library_archive(meta: dict, metadata_path: Path) -> None:
     if project_path.is_file() and zipfile.is_zipfile(project_path):
         with zipfile.ZipFile(project_path, "a") as archive:
             payload = json.loads(archive.read("project.json"))
-            payload["library"] = {key: meta.get(key, "") for key in ("id", "name", "description", "collection", "savedAt", "status", "tags", "tag", "archived", "notes", "previewVideoPath", "previewVideoName", "projectFiles", "workflowFiles", "downloadDirectory")}
+            payload["library"] = {key: meta.get(key, "") for key in ("id", "name", "description", "collection", "savedAt", "status", "color", "tags", "tag", "archived", "notes", "previewVideoPath", "previewVideoName", "projectFiles", "workflowFiles", "downloadDirectory")}
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", UserWarning)
                 archive.writestr("project.json", json.dumps(payload, separators=(",", ":")), compress_type=zipfile.ZIP_DEFLATED, compresslevel=6)
     elif project_path.is_file() and project_path.stat().st_size < 1024 * 1024:
         payload = json.loads(project_path.read_text(encoding="utf-8"))
-        payload["library"] = {key: meta.get(key, "") for key in ("id", "name", "description", "collection", "savedAt", "status", "tags", "tag", "archived", "notes", "previewVideoPath", "previewVideoName", "projectFiles", "workflowFiles", "downloadDirectory")}
+        payload["library"] = {key: meta.get(key, "") for key in ("id", "name", "description", "collection", "savedAt", "status", "color", "tags", "tag", "archived", "notes", "previewVideoPath", "previewVideoName", "projectFiles", "workflowFiles", "downloadDirectory")}
         project_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
@@ -674,6 +675,12 @@ class ProjectListWidget(QListWidget):
     def _scroll_finished(self) -> None:
         self._scroll_animation = None
         self._scroll_target = self.verticalScrollBar().value()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        surface=getattr(getattr(self,'panel_owner',None),'library_surface',None)
+        if surface:
+            surface.layout_cards()
 
     def mousePressEvent(self, event) -> None:
         self._press_position = event.position().toPoint()
@@ -2456,8 +2463,7 @@ class SettingsDialog(QDialog):
         comfy_directory_layout.setContentsMargins(0, 0, 0, 0)
         comfy_directory_layout.addWidget(self.comfy_root_dir, 1)
         comfy_directory_layout.addWidget(self.comfy_root_browse)
-        status_value = settings.value("project_status_tags", settings.value("project_tags", ""))
-        self.project_status_tags = TagEditor(load_project_tags(status_value))
+        self.project_status_tags = TagEditor(parent.project_status_tags())
         self.project_status_tags.setToolTip("A project can have one status. Its status controls the project card color.")
         self.project_other_tags = TagEditor(load_other_tags(settings.value("project_other_tags", "")), allow_empty=True)
         self.project_other_tags.setToolTip("A project can have any number of these labels. They appear as thumbnail pills.")
@@ -3386,7 +3392,7 @@ class MainWindow(QMainWindow):
         self._restoring_layout = True
         self.project_panel_width = max(180, self.settings.value("project_panel_width", 330, int))
         self.project_panel_height = max(160, self.settings.value("project_panel_height", 300, int))
-        saved_icon_size = self.settings.value("project_icon_size", 230, int)
+        saved_icon_size = self.settings.value("project_icon_size", 96, int)
         self.project_icon_size = min((96, 156, 230), key=lambda size: abs(size - saved_icon_size))
         self.pixels_per_second = 65
         self._timeline_fit_timer = QTimer(self)
@@ -3398,7 +3404,7 @@ class MainWindow(QMainWindow):
         self._project_open_timer.setInterval(90)
         self._project_open_timer.timeout.connect(self.open_pending_library_project)
         self._pending_project_id: str | None = None
-        self.timeline_height = max(184, min(430, self.settings.value("timeline_panel_height", 420, int)))
+        self.timeline_height = max(184, min(430, self.settings.value("timeline_panel_height", 184, int)))
         self.thread_pool = QThreadPool.globalInstance()
         self.disk_pool = QThreadPool(self)
         self.disk_pool.setMaxThreadCount(1)
@@ -3425,6 +3431,8 @@ class MainWindow(QMainWindow):
             self.segment_prompt.viewport(): "segment",
             self.intent_segment_prompt.viewport(): "segment",
             self.unified_prompt.viewport(): "unified",
+            self.global_prompt.viewport(): "unified",
+            self.intent.viewport(): "global",
         }
         for viewport in self._effect_drop_targets:
             viewport.installEventFilter(self)
@@ -3450,10 +3458,26 @@ class MainWindow(QMainWindow):
             self.restoreGeometry(geometry)
         if state:
             self.restoreState(state)
+        else:
+            self.tabifyDockWidget(self.effects_dock, self.project_dock)
+            self.effects_dock.show()
+            self.project_dock.show()
+            self.project_dock.raise_()
+            QTimer.singleShot(0, self.project_dock.raise_)
+        QTimer.singleShot(0, self.style_library_tabs)
         self.sync_reference_panel_visibility()
         self.tabifiedDockWidgetActivated.connect(lambda *_: self.queue_project_panel_width_restore())
         QTimer.singleShot(0, self.restore_startup_workspace)
         self.update_window_title()
+
+    def style_library_tabs(self) -> None:
+        for bar in self.findChildren(QTabBar):
+            labels={bar.tabText(index).replace('&','') for index in range(bar.count())}
+            if labels=={'Effects Library','PROJECT LIBRARY'}:
+                bar.setObjectName('libraryDockTabs')
+                bar.setElideMode(Qt.TextElideMode.ElideNone)
+                bar.setExpanding(False)
+                bar.style().unpolish(bar);bar.style().polish(bar)
 
     def open_catalog_viewer(self, entry):
         entries = [self.media_catalog.tiles.item(i).data(Qt.ItemDataRole.UserRole)
@@ -3488,7 +3512,7 @@ class MainWindow(QMainWindow):
         brand_row=QHBoxLayout(self.toolbar_brand);brand_row.setContentsMargins(8,0,18,0);brand_row.setSpacing(8)
         brand_icon=QLabel();brand_icon.setPixmap(QPixmap(str(files('ltx_prompt_director').joinpath('assets/icon.png'))).scaled(24,24,Qt.AspectRatioMode.KeepAspectRatio,Qt.TransformationMode.SmoothTransformation))
         brand_row.addWidget(brand_icon)
-        brand_row.addWidget(QLabel(f'PROMPT DIRECTOR <span style="color:#808b9d;font-size:12px">{__version__}</span>'))
+        brand_row.addWidget(QLabel(f'PROMPT DIRECTOR <span style="color:#808b9d;font-size:12px">v{__version__}</span>'))
         self.toolbar_brand_action=toolbar.addWidget(self.toolbar_brand)
         projects_action = self.project_dock.toggleViewAction()
         projects_action.setText("Projects")
@@ -4198,6 +4222,10 @@ class MainWindow(QMainWindow):
         self.intent_prompt_splitter.handle(1).setToolTip("Drag to resize Director's Intent; drag up to collapse, down to reopen")
         self.intent_prompt_splitter.handle(1).setAccessibleName("Resize or collapse Director's Intent")
         self.intent_prompt_splitter.splitterMoved.connect(self.director_intent_splitter_moved)
+        from .panel_design import PromptSurface
+        self.prompt_surface = PromptSurface(self)
+        self.intent_prompt_splitter.addWidget(self.prompt_surface)
+        self.intent_prompt_splitter.setStretchFactor(2, 1)
         outer.addWidget(self.intent_prompt_splitter, 1)
         self.restore_director_intent_splitter()
         QTimer.singleShot(0, self.restore_director_intent_splitter)
@@ -4248,7 +4276,8 @@ class MainWindow(QMainWindow):
         except ValueError as error:
             QMessageBox.information(self, "Local video setup", str(error))
             self.open_settings(); return
-        prompt = prompt_content(self.minimax_prompt_text, preserve_spacing=True)
+        production = self.minimax_prompt_text if self.unified_workspace else self.global_prompt.toPlainText()
+        prompt = prompt_content(production, preserve_spacing=True)
         if not prompt:
             self.statusBar().showMessage("Write or generate the unified production prompt first.", 10000)
             return
@@ -4547,6 +4576,8 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.project_list, 1)
 
         self.update_project_icon_controls()
+        from .panel_design import ProjectLibrarySurface
+        self.library_surface = ProjectLibrarySurface(self, panel, layout, library_controls)
         self.project_dock.setWidget(panel)
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.project_dock)
         self.project_dock.visibilityChanged.connect(self.project_dock_visibility_changed)
@@ -4556,7 +4587,13 @@ class MainWindow(QMainWindow):
         self.refresh_project_library()
 
     def project_status_tags(self) -> list[dict[str, str]]:
-        return load_project_tags(self.settings.value("project_status_tags", self.settings.value("project_tags", "")))
+        tags = load_project_tags(self.settings.value("project_status_tags", self.settings.value("project_tags", "")))
+        if not self.settings.value('project_status_defaults_v2', False, bool):
+            self.settings.setValue('project_status_defaults_v2', True)
+            if tags == DEFAULT_PROJECT_TAGS[-3:]:
+                tags = [dict(tag) for tag in DEFAULT_PROJECT_TAGS]
+                self.settings.setValue('project_status_tags', json.dumps(tags))
+        return tags
 
     def project_other_tags(self) -> list[dict[str, str]]:
         return load_other_tags(self.settings.value("project_other_tags", ""))
@@ -4571,6 +4608,8 @@ class MainWindow(QMainWindow):
         return {"__untagged__", *(f"status:{tag['name']}" for tag in self.project_status_tags())}
 
     def rebuild_project_filter_buttons(self) -> None:
+        for old_button in self.project_filter_buttons.values():
+            old_button.deleteLater()
         while self.project_filter_layout.count():
             item = self.project_filter_layout.takeAt(0)
             if item.widget():
@@ -4586,15 +4625,16 @@ class MainWindow(QMainWindow):
             ("__archive__", "Archive", ARCHIVE_COLOR),
         ]
         for key, label, color in definitions:
-            button = QPushButton(label)
+            button = QPushButton(label, self.project_filter_box)
             button.setObjectName("projectFilterButton")
             button.setCheckable(True)
             button.setChecked(key in selected)
             button.setStyleSheet(f"QPushButton:checked{{background:{color};border-color:{color};color:white}}")
             button.toggled.connect(self.project_filter_changed)
-            self.project_filter_layout.addWidget(button)
+            button.hide()
             self.project_filter_buttons[key] = button
-        self.project_filter_layout.addStretch(1)
+        if hasattr(self, 'library_surface'):
+            self.library_surface.rebuild_filters()
 
     def project_filter_changed(self, *_args) -> None:
         selected = [key for key, button in self.project_filter_buttons.items() if button.isChecked()]
@@ -4693,6 +4733,9 @@ class MainWindow(QMainWindow):
         card_height = self.project_icon_size + 76
         self.project_list.setIconSize(QSize(self.project_icon_size, self.project_icon_size))
         self.project_list.setGridSize(QSize(card_width, card_height))
+        if hasattr(self, 'library_surface'):
+            size = self.library_surface.card_size()
+            self.project_list.setGridSize(size if self.project_list.viewMode() == QListWidget.ViewMode.IconMode else QSize())
 
     def set_project_icon_size(self, size: int) -> None:
         size = min((96, 156, 230), key=lambda value: abs(value - int(size)))
@@ -4915,6 +4958,12 @@ class MainWindow(QMainWindow):
             self.timeline_loading.set_scale(scale)
         if hasattr(self, "magic_overlay"):
             self.magic_overlay.set_scale(scale)
+        if hasattr(self, 'prompt_surface'):
+            self.prompt_surface.rail.setFixedWidth(metric(76))
+            self.prompt_surface.collapse.setFixedSize(metric(24),metric(22))
+            self.prompt_surface.setMinimumHeight(metric(210))
+            for control in (self.prompt_surface.quick,self.prompt_surface.generate,self.prompt_surface.refine,self.prompt_surface.scope):
+                control.setFixedHeight(max(metric(23),control.fontMetrics().height()+metric(5)))
 
     def refresh_project_library(self, select_id: str | None = None, preserve_scroll: bool = True) -> None:
         self._refreshing_project_library = True
@@ -4927,6 +4976,8 @@ class MainWindow(QMainWindow):
         self.project_list.clear()
         records = self.library_records()
         records.extend(ensure_collection_sequences(project_library_path(), records))
+        if hasattr(self, 'library_surface'):
+            self.library_surface.refresh(records)
         self.collection_up.setVisible(bool(self.current_collection))
         self.project_library_title.setText(self.current_collection or "Saved projects")
         visible_records = [record for record in records if record.get("collection", "") == (self.current_collection or "")]
@@ -4971,6 +5022,8 @@ class MainWindow(QMainWindow):
             item.setBackground(QColor("#22282b"))
             item.setData(Qt.ItemDataRole.UserRole, {**meta, "kind": "project"})
             item.setToolTip(f"{name}\n\n{meta.get('description', '')}")
+            labels_text=', '.join(str(tag) for tag in meta.get('tags', []))
+            item.setToolTip(item.toolTip()+f"\n\nStatus: {meta.get('status') or 'No status'}"+(f"\nTags: {labels_text}" if labels_text else ''))
             item.setSizeHint(QSize(self.project_icon_size + 28, self.project_icon_size + 76))
             cover = cover_path(str(meta.get("thumbnailData", ""))) if meta.get("thumbnailData") else None
             pixmap = QPixmap(str(cover)) if cover and cover.is_file() else pixmap_from_data_url(str(meta.get("thumbnailData", "")))
@@ -4978,16 +5031,13 @@ class MainWindow(QMainWindow):
                 pixmap = QPixmap(self.project_icon_size, self.project_icon_size)
                 pixmap.fill(QColor("#171a1b"))
             else:
-                pixmap = self.square_pixmap(pixmap, self.project_icon_size)
+                pixmap = pixmap.scaled(480, 320, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
             tile_color = self.project_state_color(meta)
             if tile_color:
                 item.setData(PROJECT_CARD_COLOR_ROLE, tile_color)
             labels = []
             status_colors = {tag["name"].casefold(): tag["color"] for tag in self.project_status_tags()}
             other_colors = {tag["name"].casefold(): tag["color"] for tag in self.project_other_tags()}
-            status = str(meta.get("status", ""))
-            if status:
-                labels.append((status, status_colors.get(status.casefold(), "#56616a")))
             for label in meta.get("tags", []):
                 labels.append((str(label), other_colors.get(str(label).casefold(), "#56616a")))
             if meta.get("archived"):
@@ -5000,6 +5050,9 @@ class MainWindow(QMainWindow):
             self.project_list.addItem(item)
             if meta.get("id") == selected:
                 selected_item = item
+        if hasattr(self, 'library_surface'):
+            for row in range(self.project_list.count()):
+                self.project_list.item(row).setSizeHint(self.library_surface.card_size())
         if selected_item:
             self.project_list.setCurrentItem(selected_item)
         self.filter_projects(self.project_search.text())
@@ -5025,6 +5078,8 @@ class MainWindow(QMainWindow):
     def project_state_color(self, meta: dict) -> str | None:
         if meta.get("archived"):
             return ARCHIVE_COLOR
+        if QColor(str(meta.get('color', ''))).isValid():
+            return str(meta['color'])
         colors = {tag["name"].casefold(): tag["color"] for tag in self.project_status_tags()}
         return colors.get(str(meta.get("status", meta.get("tag", ""))).casefold())
 
@@ -5148,6 +5203,8 @@ class MainWindow(QMainWindow):
         selected_other = {key.removeprefix("tag:").casefold() for key in selected if key.startswith("tag:")}
 
         def visible(meta: dict) -> bool:
+            if hasattr(self, 'library_surface') and not self.library_surface.accepts_color(meta):
+                return False
             notes = " ".join(str(note.get("text", "")) for note in meta.get("notes", []) if isinstance(note, dict))
             haystack = f"{meta.get('name', '')} {meta.get('description', '')} {meta.get('status', '')} {' '.join(meta.get('tags', []))} {notes}".casefold()
             if not all(term in haystack for term in terms):
@@ -5168,6 +5225,8 @@ class MainWindow(QMainWindow):
                 item.setHidden(not any(visible(member) for member in meta.get("members", [])))
             else:
                 item.setHidden(not visible(meta))
+        if hasattr(self,'library_surface'):
+            self.library_surface.refresh_selection()
 
     def selected_library_project(self) -> dict | None:
         item = self.project_list.currentItem()
@@ -5338,6 +5397,12 @@ class MainWindow(QMainWindow):
         self.project_list.setCurrentItem(item)
         meta = item.data(Qt.ItemDataRole.UserRole) or {}
         menu = QMenu(self)
+        from .panel_design import COLORS, dot_icon
+        colors_menu = menu.addMenu('Card color')
+        colors_menu.addAction('Use status color', lambda: self.set_selected_project_color(''))
+        for label, color in COLORS:
+            action = colors_menu.addAction(dot_icon(color), label)
+            action.triggered.connect(lambda checked=False, value=color: self.set_selected_project_color(value))
         is_collection = meta.get("kind") == "collection"
         members = meta.get("members", []) if is_collection else [meta]
         state_menu = menu.addMenu("Set group status" if is_collection else "Set status")
@@ -5433,6 +5498,15 @@ class MainWindow(QMainWindow):
         self.refresh_project_library(str(meta.get("id", "")) or None)
         subject = f"group {meta.get('name', 'Collection')} ({len(members)} projects)" if meta.get("kind") == "collection" else f"project {meta.get('name', 'Untitled project')}"
         self.statusBar().showMessage(f"Status set to {name or 'No status'} for {subject}")
+
+    def set_selected_project_color(self, color: str) -> None:
+        meta, members = self.selected_project_members()
+        if not meta:
+            return
+        for member in members:
+            member['color'] = color
+            self.persist_library_metadata(member)
+        self.refresh_project_library(str(meta.get('id', '')) or None)
 
     def set_selected_project_label(self, name: str, enabled: bool) -> None:
         meta, members = self.selected_project_members()
@@ -5551,6 +5625,9 @@ class MainWindow(QMainWindow):
         self.queue_project_panel_width_restore()
 
     def leave_collection(self) -> None:
+        if hasattr(self, 'library_surface'):
+            self.library_surface.navigate(None)
+            return
         self.current_collection = None
         self.refresh_project_library(preserve_scroll=False)
 
@@ -5620,7 +5697,7 @@ class MainWindow(QMainWindow):
             meta["thumbnailData"] = data_url(visual.preview_path, max_edge=360, quality=84) if visual else ""
         payload = self.project_payload(include_media=False)
         normalize_project_labels(meta)
-        payload["library"] = {key: meta.get(key, "") for key in ("id", "name", "description", "collection", "savedAt", "status", "tags", "tag", "archived", "notes", "previewVideoPath", "previewVideoName", "projectFiles", "workflowFiles", "downloadDirectory")}
+        payload["library"] = {key: meta.get(key, "") for key in ("id", "name", "description", "collection", "savedAt", "status", "color", "tags", "tag", "archived", "notes", "previewVideoPath", "previewVideoName", "projectFiles", "workflowFiles", "downloadDirectory")}
         project_id = str(meta["id"])
         save_id = uuid4().hex
         self._latest_save_id[project_id] = save_id
@@ -5671,6 +5748,9 @@ class MainWindow(QMainWindow):
             return
         if meta.get("kind") == "collection":
             self._open_serial += 1
+            if hasattr(self, 'library_surface'):
+                self.library_surface.navigate(str(meta['name']))
+                return
             self.current_collection = str(meta["name"])
             self.project_search.clear()
             self.refresh_project_library(preserve_scroll=False)
@@ -5989,14 +6069,22 @@ class MainWindow(QMainWindow):
                                and self.workspace_engine != "shot_sequence" and 0 <= row < len(self.segments)
                                and bool(self.segments[row].prompt.strip()))
                     editor = "segment"
+                elif editor == 'global':
+                    allowed = (not self.ai_busy and not self.prompt_only_workspace
+                               and self.workspace_engine != 'shot_sequence' and bool(self.segments))
                 else:
                     allowed = self.quick_fix_available(editor)
-                allowed = bool(allowed and entry and entry.get("prompt") and entry.get("target") in (editor, "both"))
+                target_scope = 'segment' if editor == 'global' else editor
+                allowed = bool(allowed and entry and entry.get("prompt") and entry.get("target") in (target_scope, "both"))
                 if kind == QEvent.Type.Drop:
                     watched.setStyleSheet("")
                     if allowed:
                         if row >= 0: self.timeline.setCurrentRow(row)
-                        self.apply_library_effect(entry, editor)
+                        if editor == 'global':
+                            self.prompt_surface.select('global')
+                            self.prompt_surface.global_quick_fix({**entry, 'prompt': refinement(entry)})
+                        else:
+                            self.apply_library_effect(entry, editor)
                 else:
                     watched.setStyleSheet("border:2px solid " + ("#56cda3" if allowed else "#d47777") + ";")
                 if allowed: event.acceptProposedAction()
@@ -6494,6 +6582,8 @@ class MainWindow(QMainWindow):
             return
         if self.unified_workspace and not self.prompt_only_workspace:
             self.prompt_scope.setCurrentIndex(self.prompt_scope.findData("segment"))
+        if hasattr(self, 'prompt_surface') and not self.prompt_only_workspace:
+            self.prompt_surface.select('segment')
         self.refresh_segment_prompt_box(row)
         self.highlight_selected_prompt_timecode(scroll=True)
 
@@ -7172,7 +7262,8 @@ class MainWindow(QMainWindow):
             segment = self.current_segment()
             return not self.prompt_only_workspace and segment is not None and bool(segment.prompt.strip())
         if editor == "unified":
-            return self.unified_workspace and bool(self.minimax_prompt_text.strip()) and (bool(self.segments) or self.prompt_only_workspace)
+            text = self.minimax_prompt_text if self.unified_workspace else self.global_prompt.toPlainText()
+            return bool(text.strip()) and (bool(self.segments) or self.prompt_only_workspace)
         return False
 
     def populate_quick_fix_menu(self, menu: QMenu, editor: str) -> None:
@@ -7196,6 +7287,8 @@ class MainWindow(QMainWindow):
         self.open_effects_library("segment")
 
     def apply_library_effect(self, entry, editor):
+        if hasattr(self, 'prompt_surface'):
+            self.prompt_surface.select(editor)
         self.apply_quick_fix({**entry, "prompt": refinement(entry)}, editor)
 
     def open_effects_library(self, editor="segment"):
@@ -7214,7 +7307,7 @@ class MainWindow(QMainWindow):
             self.prompt_scope.setCurrentIndex(self.prompt_scope.findData("segment"))
             target = self.intent_segment_prompt if self.unified_workspace else self.segment_prompt
         else:
-            target = self.unified_prompt
+            target = self.unified_prompt if self.unified_workspace else self.global_prompt
         baseline = target.toPlainText()
         cursor = QTextCursor(target.document())
         cursor.movePosition(QTextCursor.MoveOperation.End if editor == "segment" else QTextCursor.MoveOperation.Start)
@@ -7224,7 +7317,10 @@ class MainWindow(QMainWindow):
         if editor == "segment":
             self.refine_selected_prompt()
         else:
-            self.refine_minimax_prompt()
+            if self.unified_workspace:
+                self.refine_minimax_prompt()
+            else:
+                self.prompt_surface.run_shared_production(True)
         if self.ai_busy:
             # Review the prose change, not deletion of the injected instruction.
             self.ai_review_baseline = baseline
@@ -7283,21 +7379,31 @@ class MainWindow(QMainWindow):
 
     def ai_editor_target(self, operation):
         """Choose the editor that owns streaming, progress, and final approvals."""
+        if (hasattr(self, 'prompt_surface') and not self.unified_workspace
+                and self.prompt_surface.scope.currentData() == 'unified'
+                and operation in {generate_global_direction, refine_shared_production_prompt}):
+            return self.global_prompt, 'unified', 0
         if operation in {
             generate_combined, sync_combined_from_timeline,
             build_minimax_h3_prompt, build_minimax_h3_reference_prompt,
             refine_minimax_h3_prompt, refine_minimax_h3_reference_prompt,
             refine_minimax_text_prompt, build_generic_prompt, refine_generic_prompt,
         } and self.unified_workspace:
+            if hasattr(self, 'prompt_surface'):
+                self.prompt_surface.select('unified')
             return self.unified_prompt, "unified", 0
         if operation in {refine_segment_prompt, generate_segment_prompt, refine_generic_segment, refine_timing, divide_segment_prompt}:
             if self.unified_workspace:
                 self.prompt_scope.setCurrentIndex(self.prompt_scope.findData("segment"))
+            if hasattr(self, 'prompt_surface'):
+                self.prompt_surface.select('segment')
             return (self.intent_segment_prompt if self.unified_workspace else self.segment_prompt), "segment", 0
         if operation in {refine_global_prompt, generate_global_direction, refine_sequence_prompts,
                          build_prompts, build_generic_segments}:
             kind = "global" if self.prompt_scope.currentData() == "global" else "segment"
             target = (self.intent if kind == "global" else self.intent_segment_prompt) if self.unified_workspace else self.segment_prompt
+            if hasattr(self, 'prompt_surface') and kind == 'global':
+                target = self.intent
             return target, kind, max(0, self.timeline.currentRow()) if kind == "segment" else 0
         return None, "unified", 0
 
@@ -7962,6 +8068,8 @@ class MainWindow(QMainWindow):
                 self.workflow_label.setText("Completed shots · RAM playback · source audio")
             else:
                 self.shot_sequence_panel.deactivate()
+        if hasattr(self, 'prompt_surface'):
+            self.prompt_surface.sync_workspace()
 
     def update_conditioning_guide(self) -> None:
         if not hasattr(self, "conditioning_guide"):
@@ -8080,6 +8188,11 @@ class MainWindow(QMainWindow):
         self.settings.setValue("conditioning_panel_last_height", self.conditioning_height_handle.last_height)
 
     def restore_director_intent_splitter(self) -> None:
+        if hasattr(self, 'prompt_surface'):
+            self.director_panel.hide()
+            self.prompt_splitter.hide()
+            self.intent_prompt_splitter.setSizes([0, 0, max(100, self.intent_prompt_splitter.height())])
+            return
         self.set_director_intent_expanded(self.settings.value("director_intent_expanded", True, bool), persist=False)
         if not self.unified_panel.isHidden() and not self.segment_panel.isHidden():
             total=max(1,sum(self.prompt_splitter.sizes()))
@@ -8087,6 +8200,10 @@ class MainWindow(QMainWindow):
             self.prompt_splitter.setSizes([round(total*fraction),round(total*(1-fraction))])
 
     def set_director_intent_expanded(self, expanded: bool, *, persist: bool = True) -> None:
+        if hasattr(self, 'prompt_surface'):
+            collapsed=not expanded if persist else self.settings.value('prompt_surface_collapsed',False,bool)
+            self.prompt_surface.collapse.setChecked(collapsed)
+            return
         if self.prompt_only_workspace:
             return
         sizes = self.intent_prompt_splitter.sizes()
@@ -8114,6 +8231,8 @@ class MainWindow(QMainWindow):
             self.queue_settings_sync()
 
     def director_intent_splitter_moved(self, *_args) -> None:
+        if hasattr(self, 'prompt_surface'):
+            return
         if self.prompt_only_workspace:
             return
         height = self.intent_prompt_splitter.sizes()[0]
@@ -8170,6 +8289,8 @@ class MainWindow(QMainWindow):
                 render_prompt_notes(self.intent_segment_prompt)
                 self.intent_segment_prompt.blockSignals(False)
             self.intent_segment_prompt.setReadOnly(self.ai_busy or current is None)
+        if hasattr(self, 'prompt_surface') and not self.prompt_surface.updating:
+            self.prompt_surface.refresh_editor()
 
     def update_refine_prompt_enabled(self) -> None:
         text = self.unified_prompt.toPlainText() if self.prompt_only_workspace else self.segment_prompt.toPlainText()
@@ -8185,7 +8306,7 @@ class MainWindow(QMainWindow):
         # editor's live diff projection and later restore the wrong document.
         if hasattr(self, "inline_typing") and self.inline_typing.active:
             self.inline_typing.suspend()
-        if self.prompt_scope.currentData() == "global":
+        if self.prompt_scope.currentData() == "global" and not hasattr(self, 'prompt_surface'):
             value = self.global_prompt.toPlainText()
         else:
             segment = self.current_segment()
@@ -8492,6 +8613,9 @@ class MainWindow(QMainWindow):
             and (bool(self.segments) or self.prompt_only_workspace))
         self.update_sync_timeline_enabled()
 
+        if hasattr(self, 'prompt_surface'):
+            self.prompt_surface.refresh_actions()
+
     def generate_upper_prompt(self) -> None:
         """Global runs Magic Build for all segments; Segment targets one tile."""
         if self.ai_busy or self.prompt_only_workspace or not self.segments:
@@ -8625,6 +8749,8 @@ class MainWindow(QMainWindow):
         if not self.unified_workspace:
             self.set_project_type("minimax_" + self.minimax_prompt_mode)
         self.sync_minimax_panel(cache_state)
+        if hasattr(self, 'prompt_surface'):
+            self.prompt_surface.select('unified')
         self.minimax_panel.focus_prompt_editor()
         return self.minimax_panel
 

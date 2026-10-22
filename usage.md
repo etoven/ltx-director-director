@@ -4,13 +4,13 @@
 
 Start with an image, a video clip or a written beat. Arrange the sequence, describe the motion you want, and turn the plan into a prompt you can shape. Director keeps the timing, media and words together as your idea develops.
 
-![The Aurora workspace with Effects Library and Reference Media](docs/images/aurora-workspace.png)
+![The Aurora workspace with Effects Library and Reference Media](docs/images/panel-overhaul.png)
 
 *The examples use locally authored demonstration projects. Open Help for the searchable offline manual and guided setup.*
 
 ## Refine an existing MiniMax prompt
 
-Choose **MiniMax · Prompt Refinement · Annotations Only** for a prompt-only workspace. Paste your text, use `/` to insert editable refinement and constraint notes, and choose **Refine Prompt**. The model receives only that text and its annotations. You can save the draft as a project and copy the result without creating timeline segments or importing media.
+Choose **MiniMax · Prompt Refinement · Annotations Only** for a prompt-only workspace. Paste your text, use `/` to insert editable refinement and constraint notes, and choose **Refine**. The model receives only that text and its annotations. You can save the draft as a project and copy the result without creating timeline segments or importing media.
 
 ![A full-size annotated MiniMax prompt editor](docs/images/minimax-prompt-refinement.png)
 
@@ -23,8 +23,8 @@ Add up to four mixed references through **Reference media**. Video samples offer
 1. Open **Help → Setup wizard** to choose Gemini, ChatGPT, OpenAI API or a local writing model. You can edit and organize projects before configuring AI.
 2. Choose **LTX Video**, **MiniMax Standard / Keyframes** or **MiniMax Full Reference** from **Project type**.
 3. Use **Add media** or drop supported images, MP4 or WebM clips onto the timeline. Use **Add text** for a beat described in words.
-4. Arrange the segments and set their durations. Expand **Director’s Intent**, describe the sequence, and choose a total length or Auto.
-5. Select **Magic Build** to develop segment prompts. In MiniMax, edit the unified draft below the shared segment editor. Use the lower editor’s **Generate** control when you want to rebuild the combined production draft from the full timeline.
+4. Arrange the segments and set their durations. Choose **Global** scope, describe the sequence, and choose a total length or Auto.
+5. Use **Generate** in Global scope to develop all segment prompts. Choose **Segment** to work on one beat, or **Unified** to generate or refine the production draft independently.
 6. Use **Save to Library** to name and retain the project. Copy the MiniMax brief or use **Export** for LTX timeline JSON.
 
 AI generation is an explicit action. Switching workspaces and adding media let you prepare the plan before submitting a request.
@@ -52,7 +52,7 @@ AI generation is an explicit action. Switching workspaces and adding media let y
 | HDR | Add quality direction | Enable HDR; it adds prompt guidance, rather than changing the source media |
 | Reduce Music | Favor scene-specific ambience | Enable Reduce Music for ambient-sound direction |
 | Magic Build | Develop the entire LTX plan | Generate segment prompts and global direction from the ordered timeline |
-| LTX global prompt | Establish shared continuity | Select Global from the prompt-scope control |
+| LTX global prompt | Establish shared continuity | Select Unified to edit the shared LTX production prompt; Global edits Director’s Intent |
 | Refine Prompt | Improve wording and pacing | Segment changes only the selected beat; Global acts on the sequence and rebuilds the combined prompt |
 | Refine Timing | Adjust a beat’s duration | Select the segment and choose Refine Timing; inspect its updated duration |
 | Inline notes | Keep edit requests near their subject | Type `/`, choose a note and press Tab |
@@ -111,7 +111,7 @@ Import files or drop files and folders from your file manager. Browse large prev
 
 Imports copy full-resolution images and videos into Prompt Director’s working folder. Catalog tiles and timeline drags use these managed copies, so moving or deleting the original source does not break your imported media. Same-named files remain separate. Removing a catalog entry or folder keeps the media on disk.
 
-The app ships with **LTX Video**, **MiniMax Standard / Keyframes** and **MiniMax Full Reference**. The guide-based MiniMax templates replace the old MiniMax default. Two additional **Official Skill** workflows provide Standard / Keyframes and Full Reference versions adapted from the supplied prompt-writing skill files. LTX generation and refinement return video prompts and timing without requiring a separate still-image prompt. Drag the splitter below **Director’s Intent** to resize it or collapse it upward. Drag it downward to reopen. Its height and collapsed state persist across workspaces and restarts. The segment and unified prompt divider also resizes both editors and remembers their proportions. Controls wrap within the available width, and panels shrink within the window without an outer editor scrollbar.
+The app ships with **LTX Video**, **MiniMax Standard / Keyframes** and **MiniMax Full Reference**. The guide-based MiniMax templates replace the old MiniMax default. Two additional **Official Skill** workflows provide Standard / Keyframes and Full Reference versions adapted from the supplied prompt-writing skill files. LTX generation and refinement return video prompts and timing without requiring a separate still-image prompt. One prompt panel switches between Segment, Global and Unified while preserving their separate drafts. Compact actions sit inside the panel. The timing overview retains its own resize and hide/reopen handle. Panels shrink within the window and prompt text scrolls within its editor.
 
 Media tags appear as pills on each thumbnail, matching the project cards. Press **F2** to rename a selected tile directly below its image; Enter saves and Escape cancels. Press **Delete** to remove selected catalog entries after confirmation. The managed media files remain available on disk.
 
@@ -127,7 +127,7 @@ Recent exports show small image and video previews. Use the broom button to clea
 
 ![Catalog video viewer with playback and frame tools](docs/images/catalog-video-viewer.png)
 
-Global timing instructions such as `/refine-global Resize the segments proportionally to 15 seconds` work through **Global → Refine Prompt** in LTX and MiniMax. Segment refinement can resize the selected card. Segment refinement stays on that beat. Global refinement acts on the full sequence and rebuilds the unified production prompt. Ordinary manual segment edits keep the existing unified draft until generation is requested. The compact MiniMax conditioning strip shows frame times, source trims and setup fixes; unified text edits never retime the timeline.
+Global timing instructions such as `/refine-global Resize the segments proportionally to 15 seconds` work through **Global → Refine** in LTX and MiniMax. Segment refinement can resize the selected card. Segment refinement stays on that beat. Global refinement acts on the full sequence and rebuilds the unified production prompt. Ordinary manual segment edits keep the existing unified draft until generation is requested. The compact MiniMax conditioning strip shows frame times, source trims and setup fixes; unified text edits never retime the timeline.
 
 ## Workspace sequence limits
 

@@ -7,6 +7,12 @@ from uuid import uuid4
 
 
 DEFAULT_PROJECT_TAGS = [
+    {"name": "Draft", "color": "#91999e"},
+    {"name": "In progress", "color": "#168cff"},
+    {"name": "Ready", "color": "#2ed05d"},
+    {"name": "Needs review", "color": "#ffbf00"},
+    {"name": "Completed", "color": "#51beee"},
+    {"name": "Failed", "color": "#ff5964"},
     {"name": "Done", "color": "#367d4a"},
     {"name": "Consider", "color": "#8a742f"},
     {"name": "Re-shoot", "color": "#934545"},

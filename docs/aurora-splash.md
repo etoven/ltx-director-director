@@ -10,11 +10,11 @@ The startup screen shows progress while Director prepares the panels, text tools
 
 ## Keep the important things in view
 
-Your timeline shows the sequence. The shared editor shows the selected LTX prompt or the full MiniMax brief. Director’s Intent expands when you need to establish the creative throughline and collapses when you want more room to write.
+Your timeline shows the sequence. One prompt panel switches between Segment, Global and Unified across LTX and MiniMax workspaces. Global holds Director’s Intent; Unified holds the production draft. The timing overview stays above the prompt panel.
 
-![The Aurora workspace with visual beats and shared segment and unified prompt editing](images/ltx-director-director-overview.png)
+![The Aurora workspace with visual beats and shared segment and unified prompt editing](images/panel-overhaul.png)
 
-Use the toolbar text-scale control to make the interface comfortable on your screen. Your panel arrangement, timeline view and intent-panel state are retained across sessions.
+Use the toolbar text-scale control to make the interface comfortable on your screen. Your panel arrangement, timeline view and prompt-scope selection are retained across sessions.
 
 ## Write the revision where it belongs
 

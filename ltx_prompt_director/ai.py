@@ -182,6 +182,25 @@ def build_minimax_h3_reference_prompt(segments: list[Segment], provider: str, mo
     return _extract_minimax_h3_prompt(raw, segments)
 
 
+def refine_shared_production_prompt(provider: str, model: str, api_key: str, current_prompt: str, timeout: int = 400) -> str:
+    """Refine shared production text without rewriting timeline records or format."""
+    if not current_prompt.strip():
+        raise ValueError("Write a shared production prompt before refining it.")
+    from .prompt_tags import prompt_annotations, consume_global_refinements
+    rules = (
+        "Refine only the supplied shared video production prompt. Preserve its "
+        "existing plain-text structure, subjects, continuity, camera, sound and "
+        "timing unless the author's annotations request a change. Apply all /refine "
+        "and /refine-global instructions; preserve /keep details and honor /avoid "
+        "and /focus. Remove completed refinement instructions. Do not introduce a "
+        "different model's prompt format, segment JSON, timeline changes or commentary. "
+        'Return strict JSON with one nonempty "prompt" string.\n\nCURRENT TEXT:\n'
+        + current_prompt + '\n\nANNOTATION REQUESTS:\n' + prompt_annotations(current_prompt)
+    )
+    raw = _structured_raw([], provider, model, api_key, rules, timeout, schema=response_schemas.PROMPT)
+    return consume_global_refinements(_extract_minimax_h3_prompt(raw))
+
+
 def refine_minimax_text_prompt(provider: str, model: str, api_key: str, current_prompt: str, timeout: int = 400) -> str:
     """Refine annotated text without receiving any timeline or media context."""
     if not current_prompt.strip():

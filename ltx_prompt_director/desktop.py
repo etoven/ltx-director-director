@@ -50,16 +50,18 @@ def install_desktop_entry(force: bool = False) -> Path | None:
         return None
     target = desktop_path()
     contents = desktop_contents()
+    icon = icon_path()
+    artwork = files("ltx_prompt_director").joinpath("assets/icon.png").read_bytes()
+    icon_changed = not icon.exists() or icon.read_bytes() != artwork
     for legacy in legacy_paths():
         if legacy.exists():
             legacy.unlink()
-    if force or not target.exists() or not icon_path().exists() or target.read_text(encoding="utf-8", errors="ignore") != contents:
+    if force or not target.exists() or icon_changed or target.read_text(encoding="utf-8", errors="ignore") != contents:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(contents, encoding="utf-8")
         target.chmod(0o755)
-        icon = icon_path()
         icon.parent.mkdir(parents=True, exist_ok=True)
-        icon.write_bytes(files("ltx_prompt_director").joinpath("assets/icon.png").read_bytes())
+        icon.write_bytes(artwork)
         updater = shutil.which("update-desktop-database")
         if updater:
             subprocess.run([updater, str(target.parent)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
