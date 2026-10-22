@@ -34,7 +34,7 @@ Choose a scope from the prompt panel header. The heading identifies the document
 
 The same Quick Fix, Generate and Refine controls follow the selected scope. Unified Generate rebuilds from all current segments and reference roles. Unified Refine changes the production text without rewriting the timeline. **Copy** copies the active document. The timing overview and its resize handle remain above the panel.
 
-The header chevron hides or reopens the prompt body. That view preference is remembered, while the timing overview remains available.
+Right-click the scope header and toggle **Collapse prompt editor** to hide or reopen the prompt body. That view preference is remembered, while the timing overview remains available.
 
 Switching scope preserves your drafts. Pasting or editing Unified text does not change the timeline. Manual timing edits update recognized MiniMax timecodes locally. Segment wording reaches the production draft through an explicit Generate/Refine or synchronization action.
 

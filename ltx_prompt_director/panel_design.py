@@ -381,9 +381,9 @@ class PromptSurface(QFrame):
         self.scope.setToolTip('Segment edits one beat. Global directs the whole sequence. Unified edits the production draft.')
         self.scope.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Fixed)
         header.addWidget(self.scope,1)
-        self.collapse=QToolButton();self.collapse.setText('⌄');self.collapse.setCheckable(True)
-        self.collapse.setObjectName('surfaceCollapse')
-        self.collapse.setAccessibleName('Collapse prompt editor');header.addWidget(self.collapse)
+        self.collapse=QAction('Collapse prompt editor',self.scope);self.collapse.setCheckable(True)
+        self.scope.addAction(self.collapse)
+        self.scope.setContextMenuPolicy(Qt.ContextMenuPolicy.ActionsContextMenu)
         layout.addLayout(header)
         self.body=QWidget();self.body.setObjectName('promptSurfaceBody')
         body=QVBoxLayout(self.body);body.setContentsMargins(0,0,0,0);body.setSpacing(3)
@@ -424,7 +424,7 @@ class PromptSurface(QFrame):
         self.collapse.setChecked(owner.settings.value('prompt_surface_collapsed',False,bool))
 
     def set_collapsed(self,collapsed):
-        self.body.setVisible(not collapsed);self.collapse.setText('›' if collapsed else '⌄')
+        self.body.setVisible(not collapsed)
         self.owner.settings.setValue('prompt_surface_collapsed',bool(collapsed))
         self.owner.queue_settings_sync()
 

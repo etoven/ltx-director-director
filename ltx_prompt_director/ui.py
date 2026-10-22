@@ -4960,7 +4960,6 @@ class MainWindow(QMainWindow):
             self.magic_overlay.set_scale(scale)
         if hasattr(self, 'prompt_surface'):
             self.prompt_surface.rail.setFixedWidth(metric(76))
-            self.prompt_surface.collapse.setFixedSize(metric(24),metric(22))
             self.prompt_surface.setMinimumHeight(metric(210))
             for control in (self.prompt_surface.quick,self.prompt_surface.generate,self.prompt_surface.refine,self.prompt_surface.scope):
                 control.setFixedHeight(max(metric(23),control.fontMetrics().height()+metric(5)))

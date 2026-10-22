@@ -183,7 +183,8 @@ def test_panel_controls_fit_reference_and_narrow_layouts():
                 assert control.height()>=control.fontMetrics().height()
             assert surface.scope.parent() is surface
             assert surface.scope.geometry().bottom()<surface.body.geometry().top()
-            assert surface.scope.width()>=surface.width()-80*scale/100
+            assert surface.scope.width()>=surface.width()-24
+            assert surface.collapse in surface.scope.actions()
             for scope,label in [('segment','SEGMENT PROMPT'),('global','GLOBAL PROMPT'),('unified','UNIFIED PROMPT')]:
                 surface.select(scope)
                 assert surface.scope.currentText()==label
