@@ -12,8 +12,8 @@ from PySide6.QtWidgets import (QApplication, QAbstractItemView, QCheckBox, QComb
     QVBoxLayout, QWidget, QWidgetAction)
 
 
-COLORS = [('Green', '#2ed05d'), ('Blue', '#168cff'), ('Amber', '#ffbf00'),
-          ('Purple', '#893dff'), ('Red', '#ff5964'), ('Gray', '#89949f')]
+CARD_STATUSES = [('Ready', '#2ed05d'), ('In progress', '#168cff'), ('Needs review', '#ffbf00'),
+                 ('Completed', '#893dff'), ('Failed', '#ff5964'), ('Draft', '#89949f')]
 
 
 def dot_icon(color):
@@ -22,6 +22,16 @@ def dot_icon(color):
     painter.setPen(Qt.PenStyle.NoPen); painter.setBrush(QColor(color))
     painter.drawEllipse(3, 3, 10, 10); painter.end()
     return QIcon(pixmap)
+
+
+def status_preview_icon(colors):
+    colors=[color or '#89949f' for color in colors]
+    if len(colors)<=1:return dot_icon(colors[0] if colors else '#56616a')
+    pixmap=QPixmap(16,16);pixmap.fill(Qt.GlobalColor.transparent)
+    painter=QPainter(pixmap);painter.setPen(Qt.PenStyle.NoPen)
+    for index,color in enumerate(colors[:6]):
+        painter.setBrush(QColor(color));painter.drawRect(1+(index%3)*5,3+(index//3)*6,4,5)
+    painter.end();return QIcon(pixmap)
 
 
 class CheckMenu(QMenu):
@@ -33,6 +43,8 @@ class CheckMenu(QMenu):
         check.setStyleSheet('QCheckBox{background:transparent;border:0;padding:0;spacing:0} QCheckBox::indicator{width:14px;height:14px;border:1px solid #60758c;border-radius:3px;background:#16232e} QCheckBox::indicator:checked{background:#168cff;border-color:#62a9f5;image:url("'+str(Path(__file__).parent/'assets/panel-check.svg')+'")}')
         layout.addWidget(check)
         if color:
+            action.setIcon(dot_icon(color))
+            action.setIconVisibleInMenu(True)
             dot=QLabel();dot.setPixmap(dot_icon(color).pixmap(16,16));layout.addWidget(dot)
         label=QLabel(text);label.setStyleSheet('background:transparent;border:0');layout.addWidget(label,1)
         action.setDefaultWidget(row);action.setChecked(checked)
@@ -186,8 +198,8 @@ class ProjectLibrarySurface:
         for button in (self.grid,self.list):button.setCheckable(True)
         browser.addLayout(search)
         self.filters = QHBoxLayout(); self.filters.setSpacing(5)
-        self.color = self.button('Color: All', 'Filter project card colors', None,self.filters,'color')
-        self.status = self.button('Status: All', 'Filter project statuses and tags',None,self.filters)
+        self.color = self.button('Status: All', 'Filter project status colors', None,self.filters,'color')
+        self.status = self.button('Tags: All', 'Filter project tags',None,self.filters)
         self.status.setIcon(dot_icon('#2ed05d'))
         self.status.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.color.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Fixed)
@@ -195,12 +207,12 @@ class ProjectLibrarySurface:
         self.filters.setStretch(0,1);self.filters.setStretch(1,1)
         self.reset = self.button('', 'Clear search and reset filters', self.clear_filters,self.filters,'reset-filter')
         self.color_menu = CheckMenu(self.color); self.color_actions={}
-        all_colors=self.color_menu.add_check('All colors')
+        all_colors=self.color_menu.add_check('All statuses')
         self.all_colors=all_colors;all_colors.triggered.connect(self.select_all_colors)
         saved=owner.settings.value('project_color_filters',None)
         try:chosen=json.loads(saved) if isinstance(saved,str) else None
         except ValueError:chosen=None
-        for name,color in [('No color',''),*COLORS]:
+        for name,color in [('Use status color',''),*CARD_STATUSES]:
             action=self.color_menu.add_check(name,color or '#89949f',chosen is None or color in chosen)
             action.toggled.connect(self.color_changed);self.color_actions[color]=action
         self.color.setMenu(self.color_menu);self.color.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
@@ -294,7 +306,7 @@ class ProjectLibrarySurface:
         self.archive_action.setEnabled(visible)
 
     def rebuild_filters(self):
-        menu=CheckMenu(self.status);all_statuses=menu.add_check('All statuses')
+        menu=CheckMenu(self.status);all_statuses=menu.add_check('All tags')
         keys=[key for key in self.owner.project_filter_buttons if key!='__archive__' and not key.startswith('tag:')]
         def toggle_all(yes):
             for key in keys:self.owner.project_filter_buttons[key].setChecked(yes)
@@ -304,7 +316,8 @@ class ProjectLibrarySurface:
         for key,button in self.owner.project_filter_buttons.items():
             tag=next((t for t in self.owner.project_status_tags()+self.owner.project_other_tags() if t['name']==button.text()),None)
             target=extras if key in ('__untagged__','__archive__') or key.startswith('tag:') or button.text() in {'Done','Consider','Re-shoot'} else menu
-            action=target.add_check(button.text(),tag['color'] if tag else '#89949f',button.isChecked())
+            label='No tags' if key=='__untagged__' else button.text()
+            action=target.add_check(label,tag['color'] if tag else '#89949f',button.isChecked())
             action.toggled.connect(button.setChecked);button.toggled.connect(action.setChecked)
             button.toggled.connect(lambda *_:self.update_status_label())
             self.status_actions[key]=action
@@ -317,7 +330,7 @@ class ProjectLibrarySurface:
         buttons=self.owner.project_filter_buttons
         count=sum(buttons[key].isChecked() for key in self.status_keys)
         self.all_statuses.setChecked(count==len(self.status_keys))
-        self.status.setText('Status: All' if count==len(self.status_keys) else f'Status: {count}')
+        self.status.setText('Tags: All' if count==len(self.status_keys) else f'Tags: {count}')
 
     def select_all_colors(self,yes):
         for action in self.color_actions.values():action.setChecked(yes)
@@ -326,7 +339,8 @@ class ProjectLibrarySurface:
         if not hasattr(self,'color_actions'):return
         chosen=[color for color,action in self.color_actions.items() if action.isChecked()]
         all_selected=len(chosen)==len(self.color_actions)
-        self.all_colors.setChecked(all_selected);self.color.setText('Color: All' if all_selected else f'Color: {len(chosen)}')
+        self.all_colors.setChecked(all_selected);self.color.setText('Status: All' if all_selected else f'Status: {len(chosen)}')
+        self.color.setIcon(status_preview_icon(chosen))
         self.owner.settings.setValue('project_color_filters',json.dumps(chosen))
         if hasattr(self.owner,'project_list'):self.owner.filter_projects(self.owner.project_search.text())
 
@@ -439,6 +453,9 @@ class PromptSurface(QFrame):
 
     def scope_changed(self,*_):
         if self.updating:return
+        if not self.scope.model().item(self.scope.currentIndex()).isEnabled():
+            self.select('unified' if self.owner.prompt_only_workspace else 'segment')
+            return
         self.updating=True;owner=self.owner;scope=self.scope.currentData()
         owner.finish_prompt_reviews()
         if hasattr(owner,'inline_typing') and owner.inline_typing.active:owner.inline_typing.suspend()
@@ -453,10 +470,16 @@ class PromptSurface(QFrame):
         changed=self.workspace!=owner.project_type;self.workspace=owner.project_type
         self.updating=True
         for index in range(self.scope.count()):
-            self.scope.model().item(index).setEnabled(not owner.prompt_only_workspace or self.scope.itemData(index)=='unified')
-        if changed:
+            key=self.scope.itemData(index)
+            allowed=(key=='unified' if owner.prompt_only_workspace else key!='unified' or owner.unified_workspace)
+            self.scope.model().item(index).setEnabled(allowed)
+            self.scope.view().setRowHidden(index,not allowed)
+        if changed or not self.scope.model().item(self.scope.currentIndex()).isEnabled():
             scope='unified' if owner.prompt_only_workspace else str(owner.settings.value('prompt_surface_scope/'+owner.project_type,'segment'))
-            self.scope.setCurrentIndex(max(0,self.scope.findData(scope)))
+            index=self.scope.findData(scope)
+            if index<0 or not self.scope.model().item(index).isEnabled():
+                index=self.scope.findData('unified' if owner.prompt_only_workspace else 'segment')
+            self.scope.setCurrentIndex(index)
         self.updating=False
         for panel in (owner.director_panel,owner.segment_panel,owner.unified_panel,owner.prompt_splitter):panel.hide()
         owner.prompt_scope.hide()
@@ -496,7 +519,7 @@ class PromptSurface(QFrame):
 
     def run(self,refine):
         owner=self.owner;scope=self.scope.currentData()
-        if owner.ai_busy:return
+        if owner.ai_busy or scope=='unified' and not owner.unified_workspace:return
         if scope in ('global','segment') and owner.prompt_scope.currentData()!=scope:
             owner.prompt_scope.setCurrentIndex(owner.prompt_scope.findData(scope))
         if scope=='unified':

@@ -190,12 +190,64 @@ def test_unsaved_local_video_can_be_exported():
             assert target.read_bytes() == b'generated video'
 
 
+def test_native_video_excludes_saved_references_in_conditioning_only_workspaces():
+    import base64
+    import copy
+    from io import BytesIO
+    from PIL import Image
+    from ltx_prompt_director.models import Segment
+    from PySide6.QtCore import Qt
+    with window() as w:
+        image=BytesIO();Image.new('RGB',(16,16),'navy').save(image,'PNG')
+        stored=[dict(name='Other-mode identity',role='identity',notes='Full workspace only',
+            image='data:image/png;base64,'+base64.b64encode(image.getvalue()).decode()),None,None,None]
+        w.minimax_reference_images=copy.deepcopy(stored)
+        w.segments=[Segment('Opening','/source/opening.png','',duration=15)]
+        original=copy.deepcopy(w.workspace_definitions['minimax_references']['references'])
+        w.set_project_type('minimax_references')
+        dock=w.minimax_panel.reference_dock
+        w.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea,dock)
+        w.show_reference_images()
+        for mode,options,count in [('minimax_frames',original,0),('minimax_references',original,1),
+                                  ('minimax_references',{**original,'enabled':False},0),
+                                  ('minimax_references',{**original,'untimed_slots':0},0)]:
+            w.workspace_definitions[mode]['references']=copy.deepcopy(options)
+            w.set_project_type(mode);w.apply_project_type_ui()
+            w.unified_prompt.setPlainText('A continuous shot from the opening composition.')
+            assert bool(any(w.active_reference_images()))==bool(count)
+            assert w.references_button.isHidden()==(count==0)
+            assert dock.isHidden()==(count==0)
+            assert w.settings.value('reference_panel_open',False,bool)
+            if not count:assert not w._artwork_reference_inputs(w.segments[0].id)
+            jobs=[]
+            with patch('ltx_prompt_director.ui.validate_profile'),patch.object(w,'start_disk_job',
+                    side_effect=lambda op,args,ready,failed,**kw:jobs.append((op,args,failed))):
+                w.generate_local_video()
+            assert len(jobs)==1
+            operation,args,failed=jobs[0]
+            with patch('ltx_prompt_director.ui.run_request',return_value={'path':'/result.mp4'}) as run:
+                operation(*args)
+            references=run.call_args.args[0]['references']
+            assert len(references)==1+count and references[0]['name']=='Opening'
+            assert ('Other-mode identity' in [ref['name'] for ref in references])==bool(count)
+            assert w.minimax_reference_images==stored
+            failed('Request check finished.')
+        w.workspace_definitions['minimax_references']['references']=original
+        w.apply_project_type_ui()
+        assert w.active_reference_images()[0]['name']=='Other-mode identity'
+        assert not dock.isHidden() and w.dockWidgetArea(dock)==Qt.DockWidgetArea.LeftDockWidgetArea
+        w.set_reference_panel_open(False)
+        w.set_project_type('minimax_frames');w.set_project_type('minimax_references')
+        assert dock.isHidden() and not w.settings.value('reference_panel_open',True,bool)
+
+
 def test_native_video_uses_unified_output_reference_panel_and_settings_directly():
     from ltx_prompt_director.local_widgets import LocalModelsPanel, GenerationLog
     from ltx_prompt_director.local_generation import save_profile
     from ltx_prompt_director.models import Segment
     with window() as w:
         w.set_project_type('minimax_references')
+        w.workspace_definition['references']['untimed_slots']=4
         w.segments=[Segment('Opening','/source/opening.png','',duration=3),
                     Segment('Timeline video','/source/timeline.mp4','',kind='video',duration=4,trim_start=48),
                     Segment('Ending','/source/ending.png','',role='end',duration=3)]

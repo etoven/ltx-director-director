@@ -28,18 +28,35 @@ def test_out_of_range_conditioning_is_not_silently_discarded():
         video_references([Segment('Ending','/last.png','',role='end',duration=15)],[],5)
 
 
-def test_video_conditioning_uses_bounded_tiles_and_valid_short_guide_lengths():
+def test_video_conditioning_keeps_every_frame_and_uses_bounded_tiles():
     from unittest.mock import Mock
     from ltx_prompt_director.local_conditioning import configure_video_conditioning_encoder
     encode=Mock();encoder=type('MiniMaxH3Unit_ReferenceEncoder',(),{})()
+    encode_ref=Mock(side_effect=lambda pipe,frames,*args:('rows',7,2,2,frames))
+    encoder._encode_video_ref=encode_ref
     pipe=SimpleNamespace(video_vae=SimpleNamespace(encode_video=encode),units=[encoder])
     configure_video_conditioning_encoder(pipe,[dict(kind='video',timeline_time=0)])
     pipe.video_vae.encode_video('video',dtype='bf16',process_image=False)
     encode.assert_called_with('video',dtype='bf16',process_image=False,tiled=True,tile_size=128,tile_overlap=64)
     pipe.video_vae.encode_video('image',dtype='bf16',process_image=True)
     encode.assert_called_with('image',dtype='bf16',process_image=True)
-    assert [encoder._trim_reference_video_length(pipe,n) for n in (5,23,48,56)]==[5,22,39,56]
-    with pytest.raises(ValueError,match='five'):encoder._trim_reference_video_length(pipe,4)
+    frames=list(range(23))
+    result=encoder._encode_video_ref(pipe,frames,22,32,1024)
+    padded=encode_ref.call_args.args[1]
+    assert padded[:23]==frames and len(padded)==39 and padded[23:]==[22]*16
+    assert encode_ref.call_args.args[2]==39
+    assert result[4]==frames
+    assert encoder._trim_reference_video_length(pipe,39)==39
+    with pytest.raises(ValueError,match='padded'):encoder._trim_reference_video_length(pipe,23)
+
+
+@pytest.mark.parametrize('count',[1,4,5,22,23,24,35,48,360])
+def test_video_padding_never_discards_source_frames(count):
+    from ltx_prompt_director.local_conditioning import pad_video_conditioning_frames
+    frames=list(range(count));padded=pad_video_conditioning_frames(frames)
+    assert padded[:count]==frames and frames==list(range(count))
+    assert len(padded)>=max(5,count) and len(padded)%17==5
+    assert all(frame==frames[-1] for frame in padded[count:])
 
 
 def test_memory_allowance_counts_video_temporal_rows():
@@ -70,21 +87,66 @@ def test_ref2va_timeline_coordinates_match_target_grid_and_preserve_panel_refs()
     pipe=SimpleNamespace(units=[builder],device='cpu')
     video=torch.zeros(1,24,12,4,6);audio=torch.zeros(2,32,82)
     blocks=[dict(kind='image',latent_t=1,latent_h=4,latent_w=6),
-            dict(kind='video',latent_t=7,latent_h=4,latent_w=6,ref_audio_t=0),
+            dict(kind='video',latent_t=7,latent_h=4,latent_w=6,ref_audio_t=0,prepared_frames=list(range(12))),
             dict(kind='image',latent_t=1,latent_h=4,latent_w=6)]
     kwargs=dict(ref_blocks=blocks,text_token_tags=torch.ones(11,dtype=torch.long))
     baseline=builder.process(pipe,torch.zeros(11,8),video,audio,**kwargs)['packed']
     events=[]
-    install_timeline_positions(pipe,[dict(name='End',timeline_time=2),dict(name='Clip',timeline_time=.5),dict(name='Style')],
+    install_timeline_positions(pipe,[dict(name='End',timeline_time=1.5),dict(name='Clip',timeline_time=.5),dict(name='Style')],
         lambda kind,**data:events.append(data))
     result=builder.process(pipe,torch.zeros(11,8),video,audio,**kwargs)['packed']
     positions=result['img_position_ids'];ids=result['img_pos'];target_rows=12*6
     origin=positions[0,ids[-target_rows],0]
-    assert torch.all(positions[0,ids[:6],0]==origin+48*builder._FRAME_RESCALE)
-    expected=origin+12*builder._FRAME_RESCALE+builder._video_t_grid(7,0).repeat_interleave(6)
+    assert torch.all(positions[0,ids[:6],0]==origin+36*builder._FRAME_RESCALE)
+    expected=origin+12*builder._FRAME_RESCALE+builder._video_t_grid(7,0).clamp(max=11*builder._FRAME_RESCALE).repeat_interleave(6)
     assert torch.equal(positions[0,ids[6:48],0],expected)
     assert torch.equal(positions[0,ids[48:54]],baseline['img_position_ids'][0,ids[48:54]])
     assert torch.equal(positions[0,ids[-target_rows:]],baseline['img_position_ids'][0,ids[-target_rows:]])
     for key in ('img_pos','audio_pos','token_tags','cu_seqlens'):
         assert torch.equal(result[key],baseline[key])
     assert len(events)==2
+
+
+@pytest.mark.skipif(os.environ.get('DIRECTOR_TEST_ML')!='1',reason='Private ML runtime CPU test')
+def test_native_video_encoder_receives_tail_frames_instead_of_truncating_them():
+    import torch
+    from PIL import Image
+    from diffsynth.pipelines.minimax_h3_audio_video import MiniMaxH3Unit_ReferenceEncoder
+    from ltx_prompt_director.local_conditioning import configure_video_conditioning_encoder
+    received=[]
+    def encode(pixels,**kwargs):
+        received.append(pixels[0,0,:,0,0].tolist())
+        temporal=(pixels.shape[2]-5)//17*5+2
+        return torch.zeros(1,24,temporal,2,2)
+    encoder=MiniMaxH3Unit_ReferenceEncoder()
+    pipe=SimpleNamespace(video_vae=SimpleNamespace(encode_video=encode),units=[encoder],
+        width_division_factor=32,height_division_factor=32,device='cpu',torch_dtype=torch.float32)
+    def preprocess(frames,**kwargs):
+        return torch.tensor([f.getpixel((0,0))[0] for f in frames]).view(1,1,-1,1,1).expand(1,3,-1,32,32).float()
+    pipe.preprocess_video=preprocess
+    configure_video_conditioning_encoder(pipe,[dict(kind='video',timeline_time=0)])
+    frames=[Image.new('RGB',(32,32),(i,0,0)) for i in range(24)]
+    rows,temporal,h,w,prepared=encoder._encode_video_ref(pipe,frames,124,32,1024)
+    assert received[0][:24]==list(range(24)) and received[0][24:]==[23]*15
+    assert temporal==12 and len(prepared)==24
+    assert [f.getpixel((0,0))[0] for f in prepared]==list(range(24))
+
+
+@pytest.mark.skipif(os.environ.get('DIRECTOR_TEST_ML')!='1',reason='Private ML runtime CPU test')
+@pytest.mark.parametrize('indices',[[0],[-1],[-1,0]])
+def test_native_first_last_toggle_positions_do_not_depend_on_image_order(indices):
+    import torch
+    from diffsynth.pipelines.minimax_h3_audio_video import MiniMaxH3Unit_PackedSequenceBuilder
+    from ltx_prompt_director.local_generation import align_h3_frames
+    builder=MiniMaxH3Unit_PackedSequenceBuilder()
+    count=align_h3_frames(15);temporal=(count-5)//17*5+2
+    pipe=SimpleNamespace(device='cpu',dit=SimpleNamespace(vdn_enabled=False))
+    packed=builder.process(pipe,torch.zeros(11,8),torch.zeros(1,24,temporal,4,6),torch.zeros(2,32,604),
+        text_token_tags=torch.ones(11,dtype=torch.long),keyframe_cond_anchor=torch.zeros(len(indices)*6,96),
+        keyframe_indices=indices)['packed']
+    target=packed['img_pos'][len(indices)*6:]
+    origin=packed['img_position_ids'][0,target[0],0]
+    for index,role in enumerate(indices):
+        frame=0 if role==0 else count-1
+        condition=packed['img_pos'][index*6:(index+1)*6]
+        torch.testing.assert_close(packed['img_position_ids'][0,condition,0],(origin+frame*builder._FRAME_RESCALE).expand(6))

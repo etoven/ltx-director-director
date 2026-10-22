@@ -1,6 +1,6 @@
 # Direct every segment. Keep the full prompt in view.
 
-All timeline workspaces use one prompt panel. Its header selector switches between **Segment**, **Global** and **Unified**, keeping each document separate. Select a timeline card to edit that segment, change its frame role or refine its wording and duration. The Prompt Refinement workspace opens its standalone draft in Unified scope.
+All timeline workspaces use one prompt panel. Its header selector offers the scopes supported by the workspace: **Segment** and **Global** for segmented LTX and Generic workflows, plus **Unified** for MiniMax production workflows. Each document stays separate. Select a timeline card to edit that segment, change its frame role or refine its wording and duration. The Prompt Refinement workspace opens its standalone draft in Unified scope.
 
 ![One prompt surface with scope controls beside the timeline and timing overview](images/panel-overhaul.png)
 
@@ -30,7 +30,7 @@ Choose a scope from the prompt panel header. The heading identifies the document
 | --- | --- |
 | Segment | The selected timeline beat only |
 | Global | Director's Intent for the entire sequence; Generate/Refine acts on all beats and then rebuilds the MiniMax production draft |
-| Unified | The independent production text; MiniMax uses the selected template, while LTX uses its shared global production prompt |
+| Unified | The independent production text in workspaces that support a unified production draft; MiniMax uses the selected template |
 
 The same Quick Fix, Generate and Refine controls follow the selected scope. Unified Generate rebuilds from all current segments and reference roles. Unified Refine changes the production text without rewriting the timeline. **Copy** copies the active document. The timing overview and its resize handle remain above the panel.
 

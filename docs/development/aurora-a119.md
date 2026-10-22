@@ -1,0 +1,13 @@
+# Aurora a119: workspace capabilities and complete video guides
+
+Conditioning-only MiniMax now excludes saved untimed references throughout prompt preparation, native video requests, artwork and export. A central workspace capability check requires a supported engine, enabled references and usable slots; individual slots still honor their allowed roles. Project payloads retain saved media for returning to a supported workspace.
+
+The Reference dock hides when unavailable without changing the user's open preference or reconstructing the dock. Returning restores its dock position and visibility. Explicitly closing it remains respected across workspace changes. Segmented LTX and Generic workspaces offer Segment and Global scopes only; a stale saved Unified selection falls back safely without deleting stored drafts.
+
+The Project Library's left filter is labeled Status and uses the same Ready/In progress/Needs review/Completed/Failed/Draft names as its context menu. Each entry retains a color swatch, and the button previews the selected colors. The former Status filter is labeled Tags and retains existing custom labels and selections. Saved fields, assignments and filter behavior are unchanged.
+
+H3 video guides retain all frames decoded from the trimmed source at the native 24 fps cadence. The reference encoder previously truncated clips down to a 17n+5 boundary. It now pads upward with the final frame, preserves real source frames for visual/text preparation, and clamps padded latent coordinates to the source endpoint. Token budgeting includes the padded temporal extent. Bounded 128-pixel VAE tiles remain unchanged.
+
+Start/End placement was audited and remains unchanged: timed images use their existing timeline endpoints, and native FL2VA maps opening/final anchors to its first/last frame. The installed desktop icon, packaged icon and supplied new artwork match byte for byte; local KDE and icon caches were refreshed.
+
+Validation: 19 private-runtime CPU conditioning checks passed, including actual native reference encoding and first/last-frame builder behavior. The pure conditioning/generation suite passed 30 checks with 11 optional skips. Eight isolated native local-generation tests passed, including saved-reference exclusion, dock placement restoration, explicit close persistence and current four-slot native requests. All seven panel checks passed, including the corrected Status/Tags filters, swatch pixels and preservation of a custom label. The clean-installed wheel passed the app smoke check and capability/restore checks using the shipping workspace definitions; all 450 packaged source/asset files matched the checkout. The release core suite passed 240 checks and 12 subtests. No GPU render was performed for this release.

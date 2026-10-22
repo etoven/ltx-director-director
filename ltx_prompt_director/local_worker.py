@@ -340,9 +340,9 @@ def video_generation(request):
         if ref.get('kind') == 'video':
             frames = read_reference_video(ref['path'], height=request['height'], width=request['width'],
                 start=ref.get('start', 0), duration=ref.get('duration', 15), fps=24)
-            minimum=5 if 'timeline_time' in ref else 48
+            minimum=1 if 'timeline_time' in ref else 48
             if len(frames)<minimum:
-                raise ValueError('A timeline video guide needs at least five source frames.' if minimum==5 else 'H3 video references need at least two seconds of source footage.')
+                raise ValueError('Video conditioning has no frames in the selected trim.' if minimum==1 else 'H3 video references need at least two seconds of source footage.')
             progress(f'Video conditioning: {ref.get("name","video")} · {len(frames)} frames · source trim {ref.get("start",0):g}s')
             reference = {'type': 'video', 'video': frames}
             if ref.get('audio_path'):

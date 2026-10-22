@@ -4,6 +4,8 @@
 
 Use a picture to guide a face, wardrobe, atmosphere, prop or composition without placing that picture at a particular second. MiniMax’s four mixed reference slots keep images, videos and sound samples beside the timeline and production brief. Each reference carries its own role and notes.
 
+Reference media is available in **MiniMax Full** and Generic workspaces with reference slots enabled. Conditioning-only MiniMax workspaces use timeline conditioning media only. Saved references from another workspace remain in the project but are excluded from generation, artwork requests and exports while unsupported. When references are unavailable, the panel hides. Returning to a supported workspace restores its previous dock position and open state; a panel you explicitly closed stays closed.
+
 ![A visual-style reference with notes in the MiniMax References workspace](images/minimax-references.png)
 
 ## Add the image. Define the role.

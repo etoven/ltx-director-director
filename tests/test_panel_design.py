@@ -42,13 +42,14 @@ def test_one_surface_keeps_documents_and_scope_actions_across_workspaces():
             surface.select('global')
             assert surface.editors.currentWidget() is w.intent
             surface.select('unified')
-            production = surface.editors.currentWidget()
+            production = surface.editors.currentWidget() if w.unified_workspace else w.global_prompt
+            assert (surface.scope.currentData()=='unified')==w.unified_workspace
             production.setPlainText('Independent production draft')
             surface.select('segment')
             assert surface.editors.currentWidget() is editor
             assert w.segments[0].prompt == 'Authored first beat'
             surface.select('unified')
-            assert surface.editors.currentWidget() is production
+            if w.unified_workspace:assert surface.editors.currentWidget() is production
             assert production.toPlainText() == 'Independent production draft'
             assert w.intent.toPlainText() == 'Direct the whole sequence'
             assert all(p.isHidden() for p in (w.director_panel,w.segment_panel,w.unified_panel))
@@ -72,37 +73,35 @@ def test_one_surface_keeps_documents_and_scope_actions_across_workspaces():
         w.project_dirty=False;w.close()
 
 
-def test_ltx_unified_generation_preserves_segments_and_uses_shared_export_prompt():
+def test_segmented_workflows_hide_unified_and_preserve_stored_production():
     w=window()
     try:
-        w.set_project_type('ltx');w.prompt_surface.select('unified')
-        before=copy.deepcopy([s.to_dict() for s in w.segments])
-        with patch.object(w,'ai_credentials',return_value=('gemini','test','unused')),patch.object(w,'start_ai_worker') as worker:
-            w.prompt_surface.run(False)
-        assert worker.call_args.args[0] is ui.generate_global_direction
-        worker.call_args.args[3]({'globalPrompt':'Shared production direction'})
-        assert w.global_prompt.toPlainText()=='Shared production direction'
-        assert [s.to_dict() for s in w.segments]==before
-        from ltx_prompt_director import ai
-        with patch.object(ai,'_structured_raw',return_value='{"prompt":"LTX production text"}') as provider:
-            assert ai.refine_shared_production_prompt('gemini','test','unused','Shared LTX prose')=='LTX production text'
-        assert provider.call_args.args[0]==[]
-        assert 'Shared LTX prose' in provider.call_args.args[4]
-        assert 'MiniMax' not in provider.call_args.args[4]
-        with patch.object(w,'ai_credentials',return_value=('gemini','test','unused')),patch.object(w,'start_ai_worker') as worker:
-            w.prompt_surface.run(True)
-        assert worker.call_args.args[0] is ui.refine_shared_production_prompt
-        assert 'Shared production direction' in worker.call_args.args[1]
-        worker.call_args.args[3]('Refined production direction')
-        assert w.global_prompt.toPlainText()=='Refined production direction'
-        assert [s.to_dict() for s in w.segments]==before
-        jobs=[]
-        with patch.object(ui,'validate_profile'),patch.object(w,'start_disk_job',side_effect=lambda op,args,ready,failed,**kw:jobs.append((op,args,failed))):
-            w.generate_local_video()
-        with patch.object(ui,'run_request',return_value={'path':'/stand-in.mp4'}) as request:
-            jobs[0][0](*jobs[0][1])
-        assert request.call_args.args[0]['prompt']=='Refined production direction'
-        jobs[0][2]('Request verification finished')
+        surface=w.prompt_surface
+        w.global_prompt.setPlainText('Preserve stored production text')
+        w.settings.setValue('prompt_surface_scope/ltx','unified')
+        for mode in ['minimax_frames','ltx']:
+            w.set_project_type(mode)
+        index=surface.scope.findData('unified')
+        assert not surface.scope.model().item(index).isEnabled()
+        assert surface.scope.view().isRowHidden(index)
+        assert surface.scope.currentData()=='segment'
+        surface.select('unified')
+        assert surface.scope.currentData()=='segment'
+        surface.scope.setCurrentIndex(index)
+        assert surface.scope.currentData()=='segment'
+        for scope in ['global','segment']:
+            surface.select(scope);assert surface.scope.currentData()==scope
+        assert w.global_prompt.toPlainText()=='Preserve stored production text'
+        generic=copy.deepcopy(w.workspace_definitions['ltx'])
+        generic.update(id='panel_segmented',engine='generic',prompt_mode='segmented')
+        w.workspace_definitions[generic['id']]=generic
+        w.project_type_combo.addItem('Segmented',generic['id'])
+        w.set_project_type(generic['id'])
+        assert surface.scope.view().isRowHidden(index)
+        w.set_project_type('minimax_frames')
+        assert surface.scope.model().item(index).isEnabled()
+        assert not surface.scope.view().isRowHidden(index)
+        surface.select('unified');assert surface.scope.currentData()=='unified'
     finally:
         w.project_dirty=False;w.close()
 
@@ -140,6 +139,12 @@ def test_project_browser_filters_navigation_and_view_preserve_selection():
         with patch.object(ui,'ensure_collection_sequences',return_value=[]):
             w.refresh_project_library('a')
             surface=w.library_surface
+            assert surface.color.text()=='Status: All'
+            assert surface.status.text()=='Tags: All'
+            assert [action.text() for action in surface.color_actions.values()]==[
+                'Use status color','Ready','In progress','Needs review','Completed','Failed','Draft']
+            assert all(not action.icon().isNull() for action in surface.color_actions.values())
+            assert surface.all_statuses.text()=='All tags'
             surface.set_view('grid')
             w.resize(1400,900);w.show();w.project_dock.raise_();QTest.qWait(80)
             surface.layout_cards();QTest.qWait(30)
@@ -149,6 +154,8 @@ def test_project_browser_filters_navigation_and_view_preserve_selection():
             assert first.left()!=second.left()
             assert w.selected_library_project()['id']=='a'
             for color,action in surface.color_actions.items():action.setChecked(color=='#2ed05d')
+            assert surface.color.text()=='Status: 1'
+            assert surface.color.icon().pixmap(16,16).toImage().pixelColor(8,8).name()=='#2ed05d'
             visible=[w.project_list.item(i).data(Qt.ItemDataRole.UserRole)['name'] for i in range(w.project_list.count()) if not w.project_list.item(i).isHidden()]
             assert visible==['Journey','Opening']
             w.project_search.setText('Cool mountain')
@@ -167,6 +174,10 @@ def test_project_browser_filters_navigation_and_view_preserve_selection():
                 w.set_selected_project_color('#893dff')
             assert save.call_args.args[0]['color']=='#893dff'
             assert save.call_args.args[0]['status']=='Draft'
+            w.settings.setValue('project_status_tags','[{"name":"Redo Color grade Issues","color":"#c96e7b"}]')
+            w.rebuild_project_filter_buttons()
+            assert surface.status_actions['status:Redo Color grade Issues'].text()=='Redo Color grade Issues'
+            assert surface.color_actions['#2ed05d'].text()=='Ready'
     finally:
         w.project_dirty=False;w.close()
 

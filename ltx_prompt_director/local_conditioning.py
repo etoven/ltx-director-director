@@ -5,6 +5,14 @@ import copy
 import math
 
 
+def pad_video_conditioning_frames(frames):
+    """Keep every input frame; repeat only the tail to reach H3's 17n+5 grid."""
+    frames=list(frames)
+    if not frames:raise ValueError('Video conditioning has no frames in the selected trim.')
+    count=max(5,len(frames));count+=(5-count)%17
+    return frames+[frames[-1]]*(count-len(frames))
+
+
 def video_references(segments, references, duration):
     result=[];cursor=0.0
     for index,segment in enumerate(segments):
@@ -33,12 +41,19 @@ def configure_video_conditioning_encoder(pipe, references):
             kwargs.update(tiled=True,tile_size=128,tile_overlap=64)
         return original(video,*args,**kwargs)
     pipe.video_vae.encode_video=encode
-    if any(ref.get('kind')=='video' and 'timeline_time' in ref for ref in references):
-        encoder=next(unit for unit in pipe.units if type(unit).__name__=='MiniMaxH3Unit_ReferenceEncoder')
-        def trim(pipe,count):
-            if count<5:raise ValueError('A timeline video guide needs at least five source frames.')
-            return 5+(int(count)-5)//17*17
-        encoder._trim_reference_video_length=trim
+    encoder=next(unit for unit in pipe.units if type(unit).__name__=='MiniMaxH3Unit_ReferenceEncoder')
+    encode_ref=encoder._encode_video_ref
+    def encode_reference(pipe,frames,target_frame_count,short_edge,max_pixels):
+        padded=pad_video_conditioning_frames(frames)
+        result=encode_ref(pipe,padded,max(target_frame_count,len(padded)),short_edge,max_pixels)
+        # The VAE sees the padded full clip. Vision/text preparation sees only
+        # real frames, and timed guide positions can clamp the artificial tail.
+        return (*result[:4],result[4][:len(frames)])
+    encoder._encode_video_ref=encode_reference
+    def trim(pipe,count):
+        if count<5 or count%17!=5:raise ValueError('Video conditioning must be padded to the H3 frame grid.')
+        return count
+    encoder._trim_reference_video_length=trim
 
 
 def reference_token_budget(references,width,height,output_frames):
@@ -49,8 +64,9 @@ def reference_token_budget(references,width,height,output_frames):
     for ref in references:
         tokens=4096
         if ref.get('kind')=='video':
-            frames=min(output_frames,max(5,math.ceil(min(15,float(ref.get('duration',15)))*24)))
-            temporal=((frames-5)//17)*5+2
+            frames=max(5,math.ceil(min(15,float(ref.get('duration',15)))*24))
+            if 'timeline_time' in ref:frames=min(output_frames,frames)
+            temporal=math.ceil((frames-5)/17)*5+2
             tokens=max(tokens,temporal*rows)
         total+=tokens
     return total
@@ -82,6 +98,8 @@ def install_timeline_positions(pipe, references, emit):
                 indices=packed['img_pos'][visual_cursor:visual_cursor+count]
                 frame_index=round(float(ref['timeline_time'])*24)
                 times=builder._video_t_grid(temporal,0).to(positions)
+                if block['kind'] in ('video','video_audio') and block.get('prepared_frames'):
+                    times.clamp_(max=(len(block['prepared_frames'])-1)*builder._FRAME_RESCALE)
                 positions[0,indices,0]=origin+frame_index*builder._FRAME_RESCALE+times.repeat_interleave(frame_rows)
                 emit('log',message=f'Timeline conditioning: {ref.get("name", "media")} · frame {frame_index} · {count} encoded visual rows')
             visual_cursor+=count

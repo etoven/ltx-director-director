@@ -3227,7 +3227,7 @@ class MiniMaxPromptPanel(QFrame):
         layout.addWidget(self.message_panel)
         self.clear_message()
 
-        # Untimed project references can accompany either MiniMax workflow.
+        # Keep one dock; workspace capability changes only its visibility.
         self.reference_dock = ReferenceImageDock("REFERENCE MEDIA", owner)
         self.reference_dock.setObjectName("minimaxReferenceDock")
         self.reference_dock.setMinimumWidth(200)
@@ -4281,7 +4281,7 @@ class MainWindow(QMainWindow):
         if not prompt:
             self.statusBar().showMessage("Write or generate the unified production prompt first.", 10000)
             return
-        extra_references = copy.deepcopy([r for r in reference_slots(self.minimax_reference_images) if r])
+        extra_references = copy.deepcopy([r for r in self.active_reference_images() if r])
         conditioning_segments = copy.deepcopy(self.segments)
         request = dict(kind="video", profile=profile, prompt=prompt,
             duration=profile["video_duration"], width=profile["video_width"], height=profile["video_height"], steps=profile["video_steps"],
@@ -5397,13 +5397,12 @@ class MainWindow(QMainWindow):
         meta = item.data(Qt.ItemDataRole.UserRole) or {}
         menu = QMenu(self)
         menu.addAction(self.library_surface.rename_action)
-        from .panel_design import COLORS, dot_icon
+        from .panel_design import CARD_STATUSES, dot_icon
         colors_menu = menu.addMenu('Status')
         colors_menu.addAction('Use status color', lambda: self.set_selected_project_color(''))
-        status_labels = {'Green': 'Ready', 'Blue': 'In progress', 'Amber': 'Needs review',
-                         'Purple': 'Completed', 'Red': 'Failed', 'Gray': 'Draft'}
-        for label, color in COLORS:
-            action = colors_menu.addAction(dot_icon(color), status_labels[label])
+        for label, color in CARD_STATUSES:
+            action = colors_menu.addAction(dot_icon(color), label)
+            action.setIconVisibleInMenu(True)
             action.triggered.connect(lambda checked=False, value=color: self.set_selected_project_color(value))
         is_collection = meta.get("kind") == "collection"
         members = meta.get("members", []) if is_collection else [meta]
@@ -7893,6 +7892,12 @@ class MainWindow(QMainWindow):
         return self.workspace_definition.get("prompt_mode") == "prompt_only"
 
     @property
+    def supports_untimed_references(self) -> bool:
+        references=self.workspace_definition.get('references',{})
+        return (self.workspace_engine in {'minimax_references','generic'}
+                and bool(references.get('enabled')) and references.get('untimed_slots',0)>0)
+
+    @property
     def has_project_content(self) -> bool:
         return self.workspace_engine == "shot_sequence" or bool(self.segments) or (self.prompt_only_workspace and bool(self.minimax_prompt_text.strip()))
 
@@ -7953,8 +7958,7 @@ class MainWindow(QMainWindow):
                 self.refresh_timeline(self.timeline.currentRow())
         prompt_only = self.prompt_only_workspace
         ltx = not self.unified_workspace
-        references = self.workspace_definition.get("references", {})
-        refs = (not ltx or self.workspace_engine == "generic") and references.get("enabled", False) and references.get("untimed_slots", 0) > 0
+        refs = self.supports_untimed_references
         self.project_type_combo.blockSignals(True)
         self.project_type_combo.setCurrentIndex(self.project_type_combo.findData(self.project_type))
         self.project_type_combo.blockSignals(False)
@@ -8037,7 +8041,7 @@ class MainWindow(QMainWindow):
         self.minimax_panel.refresh_references()
         reference_options = self.workspace_definition.get("references", {})
         for index, target in enumerate(self.minimax_panel.reference_targets):
-            target.setVisible(reference_options.get("enabled", False) and index < reference_options.get("untimed_slots", 0))
+            target.setVisible(self.supports_untimed_references and index < reference_options.get("untimed_slots", 0))
             for row in range(target.role.count()):
                 target.role.model().item(row).setEnabled(target.role.itemData(row) in reference_options.get("kinds", []))
         self.refresh_shared_editor()
@@ -8351,8 +8355,7 @@ class MainWindow(QMainWindow):
         self.sync_reference_panel_visibility()
 
     def sync_reference_panel_visibility(self) -> None:
-        references = self.workspace_definition.get("references", {})
-        available = (self.unified_workspace or self.workspace_engine == "generic") and references.get("enabled", False) and references.get("untimed_slots", 0) > 0
+        available = self.supports_untimed_references
         opened = self.settings.value("reference_panel_open", False, bool)
         dock = self.minimax_panel.reference_dock
         if dock.isHidden() == bool(available and opened):
@@ -8857,7 +8860,7 @@ class MainWindow(QMainWindow):
 
     def active_reference_images(self) -> list:
         options = self.workspace_definition.get("references", {})
-        if not options.get("enabled"):
+        if not self.supports_untimed_references:
             return [None] * 4
         count = options.get("untimed_slots", 0)
         kinds = options.get("kinds", [])
@@ -9537,7 +9540,7 @@ class MainWindow(QMainWindow):
         """
         references = []
         seen_paths = set()
-        for slot, reference in enumerate(reference_slots(self.minimax_reference_images), 1):
+        for slot, reference in enumerate(self.active_reference_images(), 1):
             if not reference or reference.get("kind", "image") != "image":
                 continue
             data = str(reference.get("image") or "")

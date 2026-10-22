@@ -53,9 +53,9 @@ class UnifiedEditorTests(unittest.TestCase):
         from test_panel_design import test_one_surface_keeps_documents_and_scope_actions_across_workspaces
         test_one_surface_keeps_documents_and_scope_actions_across_workspaces()
 
-    def test_panel_ltx_unified(self):
-        from test_panel_design import test_ltx_unified_generation_preserves_segments_and_uses_shared_export_prompt
-        test_ltx_unified_generation_preserves_segments_and_uses_shared_export_prompt()
+    def test_panel_segmented_scopes(self):
+        from test_panel_design import test_segmented_workflows_hide_unified_and_preserve_stored_production
+        test_segmented_workflows_hide_unified_and_preserve_stored_production()
 
     def test_panel_timing_overview(self):
         from test_panel_design import test_prompt_only_scope_and_timing_overview_remain_available
@@ -119,8 +119,10 @@ class UnifiedEditorTests(unittest.TestCase):
         test_all_file_pickers_share_desktop_routing()
 
     def test_local_existing_references_and_verbose_output(self):
-        from test_local_generation_ui import test_native_video_uses_unified_output_reference_panel_and_settings_directly
+        from test_local_generation_ui import (test_native_video_uses_unified_output_reference_panel_and_settings_directly,
+            test_native_video_excludes_saved_references_in_conditioning_only_workspaces)
         test_native_video_uses_unified_output_reference_panel_and_settings_directly()
+        test_native_video_excludes_saved_references_in_conditioning_only_workspaces()
 
     def test_local_stale_progress_and_settings(self):
         from test_local_generation_ui import test_local_progress_is_ignored_after_a_project_switch_and_no_paid_prompt
@@ -729,7 +731,7 @@ class UnifiedEditorTests(unittest.TestCase):
         self.assertEqual(w.project_type, 'ltx')
         self.assertNotEqual(before, w.project_type)
         w.set_project_type('minimax_frames')
-        self.assertFalse(w.references_button.isHidden())
+        self.assertTrue(w.references_button.isHidden())
 
     def test_full_width_segment_prompt_layout_and_compact_options(self):
         from PySide6.QtWidgets import QPushButton, QLabel
@@ -1103,8 +1105,8 @@ class UnifiedEditorTests(unittest.TestCase):
             w.show_reference_images()
             self.assertFalse(w.minimax_panel.reference_dock.isHidden())
             w.project_type_combo.setCurrentIndex(1)
-            self.assertFalse(w.minimax_panel.reference_dock.isHidden())
-            self.assertFalse(w.references_button.isHidden())
+            self.assertTrue(w.minimax_panel.reference_dock.isHidden())
+            self.assertTrue(w.references_button.isHidden())
             self.assertEqual(w.minimax_panel.workflow_label.text(), 'Conditioning frames')
             w.project_type_combo.setCurrentIndex(0)
             self.assertTrue(w.minimax_panel.reference_dock.isHidden())
@@ -1588,7 +1590,9 @@ class UnifiedEditorTests(unittest.TestCase):
         from io import BytesIO
         scratch = TemporaryDirectory()
         self.addCleanup(scratch.cleanup)
-        w = self.make_window('minimax_frames')
+        w = self.make_window('minimax_references')
+        # The legacy test definition predates Full's wardrobe role.
+        w.workspace_definition['references']['kinds'].append('wardrobe')
         tmp = scratch.name
         source = Path(tmp) / "frame.png"
         neighbor = Path(tmp) / "next.png"

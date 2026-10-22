@@ -15,9 +15,11 @@ with tempfile.TemporaryDirectory(prefix='director-wheel-') as folder:
 import os, sys
 from pathlib import Path
 from unittest.mock import patch
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 import ltx_prompt_director
 from ltx_prompt_director.effects_library import catalog, ROOT, media_path
+from ltx_prompt_director.media import data_url
 assert str(Path(ltx_prompt_director.__file__).resolve()).startswith(os.environ['PYTHONPATH'])
 assert len(catalog()['effects']) == 100
 for entry in catalog()['effects']:
@@ -32,6 +34,28 @@ panel = w.effects_panel
 assert panel.tiles.count() == len(panel.entries)
 bundled_ids = {entry['id'] for group in ('effects', 'clips', 'audio') for entry in catalog()[group]}
 assert bundled_ids <= {entry['id'] for entry in panel.entries}
+w.set_project_type('ltx')
+scope = w.prompt_surface.scope
+assert scope.view().isRowHidden(scope.findData('unified'))
+assert w.library_surface.color.text() == 'Status: All'
+assert w.library_surface.status.text() == 'Tags: All'
+assert w.library_surface.color_actions['#2ed05d'].text() == 'Ready'
+w.set_project_type('minimax_official_skill_reference')
+dock = w.minimax_panel.reference_dock
+w.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, dock)
+w.show_reference_images()
+w.minimax_reference_images = [dict(name='Saved identity', role='identity', image=data_url(str(Path(ltx_prompt_director.__file__).parent / 'assets/icon.png'))), None, None, None]
+assert w.supports_untimed_references and w.active_reference_images()[0]
+w.set_project_type('minimax_official_skill_base')
+assert not w.supports_untimed_references and not any(w.active_reference_images())
+assert dock.isHidden() and w.settings.value('reference_panel_open', False, bool)
+w.set_project_type('minimax_official_skill_reference')
+assert not dock.isHidden() and w.dockWidgetArea(dock) == Qt.DockWidgetArea.LeftDockWidgetArea
+assert w.active_reference_images()[0]['name'] == 'Saved identity'
+w.set_reference_panel_open(False)
+w.set_project_type('minimax_official_skill_base')
+w.set_project_type('minimax_official_skill_reference')
+assert dock.isHidden()
 if (Path(ltx_prompt_director.__file__).parent / 'onboarding.py').is_file():
     from ltx_prompt_director.onboarding import OnboardingWizard
     wizard = OnboardingWizard(w)
