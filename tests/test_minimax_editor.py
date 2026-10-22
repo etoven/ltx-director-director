@@ -1704,6 +1704,30 @@ class UnifiedEditorTests(unittest.TestCase):
         self.assertEqual(w.minimax_prompt_text, 'Validated production prompt')
         self.assertIn('Validated production prompt', w.unified_prompt.toPlainText())
 
+    def test_reference_changes_preserve_draft_during_generate_and_refine(self):
+        for refine in (False, True):
+            w = self.make_window('minimax_references')
+            w.unified_prompt.setPlainText('Keep the authored draft')
+            with (patch.object(w, 'ai_credentials', return_value=('chatgpt', 'gpt-6', 'unused')),
+                  patch.object(w, 'start_ai_worker')):
+                if refine:
+                    w.refine_minimax_prompt()
+                else:
+                    w.generate_minimax_prompt_references()
+            w.set_minimax_reference_image(0, {'name': 'New reference', 'role': 'identity',
+                                             'image': 'data:image/png;base64,eA=='})
+            w.minimax_h3_finished('Outdated result')
+            self.assertEqual(w.minimax_prompt_text, 'Keep the authored draft')
+            self.assertEqual(w.unified_prompt.toPlainText(), 'Keep the authored draft')
+            self.assertEqual(w.pending_minimax_result, 'Outdated result')
+            self.assertIn('references changed', w.minimax_panel.message_banner.text())
+            # A fresh operation after the edit accepts its own unchanged snapshot.
+            with (patch.object(w, 'ai_credentials', return_value=('chatgpt', 'gpt-6', 'unused')),
+                  patch.object(w, 'start_ai_worker')):
+                w.generate_minimax_prompt_references()
+            w.minimax_h3_finished('Current result')
+            self.assertEqual(w.minimax_prompt_text, 'Current result')
+
     def test_refine_uses_edited_prompt_and_notes_for_selected_mode(self):
         for kind in ('minimax_frames', 'minimax_references'):
             w = self.make_window(kind)

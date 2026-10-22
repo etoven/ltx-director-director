@@ -10,6 +10,8 @@ Use a picture to guide a face, wardrobe, atmosphere, prop or composition without
 
 Open **Reference media** in a MiniMax timeline workspace. Drop an image, video or audio file into any of the four slots, click **Browse**, or use **Paste** for clipboard image pixels or a local media file. Choose the role and add notes describing exactly what to use.
 
+If you change a reference while Unified Prompt **Generate** or **Refine** is running, Director keeps your existing draft and holds the outdated response for review. Run the action again to use the updated reference.
+
 | Role | Guide the generation toward |
 | --- | --- |
 | Identity | A subject’s recognizable features |

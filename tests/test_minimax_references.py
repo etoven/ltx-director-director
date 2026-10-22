@@ -201,7 +201,9 @@ class MiniMaxReferenceTests(unittest.TestCase):
         window = self.make_window()
         ref = self.add_reference(window)
         before = window.current_minimax_cache_key()
-        window.minimax_operation_signature = before
+        window.minimax_prompt_text = "Keep this"
+        with patch.object(window, "ai_credentials", return_value=("gemini", "test", "unused")), patch.object(window, "start_ai_worker"):
+            window.generate_minimax_prompt_references()
         window.minimax_prompt_text = "Keep this"
         window.set_minimax_reference_image(0, {**ref, "notes": "Background only"})
         self.assertNotEqual(before, window.current_minimax_cache_key())

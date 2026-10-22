@@ -9609,6 +9609,7 @@ class MainWindow(QMainWindow):
         self.minimax_operation_provider_model = (provider, model)
         self.minimax_operation_kind = f"generate_{mode}"
         self.combined_generation_source = self.combined_generation_source_key()
+        self.minimax_operation_references = copy.deepcopy(self.active_reference_images())
         self.minimax_operation_editor_snapshot = (
             self.minimax_prompt_text,
             self.minimax_refinement_instructions,
@@ -9637,7 +9638,19 @@ class MainWindow(QMainWindow):
         # The unified editor and timeline are locked while AI is running.
         # Project/workspace identity is checked once by ai_result_received().
         # Legacy editor-change fingerprint checks caused completed output loss.
+        # References remain editable, so compare only the request's reference
+        # snapshot rather than the entire editor/model cache fingerprint.
         operation = str(getattr(self, "minimax_operation_kind", "generate_frames"))
+        references = self.__dict__.pop("minimax_operation_references", None)
+        if references is not None and references != self.active_reference_images():
+            self.pending_minimax_result = prompt
+            self.combined_generation_source = None
+            self.set_ai_controls_enabled(True)
+            self.magic_overlay.hide_overlay()
+            self.minimax_panel.show_message(
+                "The references changed while the request was running. The existing "
+                "draft was kept; try again to use the latest references.", "warning")
+            return
         source = getattr(self, "combined_generation_source", None)
         self.combined_generation_source = None
         if (operation.startswith("generate_") and source is not None
@@ -9730,6 +9743,8 @@ class MainWindow(QMainWindow):
         self.minimax_operation_provider_model = (provider, model)
         reference_mode = self.minimax_prompt_mode == "references"
         self.minimax_operation_kind = "refine_references" if reference_mode else "refine_frames"
+        self.minimax_operation_references = (None if self.prompt_only_workspace else
+                                             copy.deepcopy(self.active_reference_images()))
         self.minimax_operation_editor_snapshot = (
             self.minimax_prompt_text,
             self.minimax_refinement_instructions,
