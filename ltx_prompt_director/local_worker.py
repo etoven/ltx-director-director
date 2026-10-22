@@ -147,6 +147,9 @@ def image_generation(request):
     width = int(request.get('width', 1024)); height = int(request.get('height', 1024))
     steps = int(request.get('steps', 30)); every = max(1, int(profile.get('preview_every', 5)))
     root = Path(request['job_dir']); started = [None]
+    from .local_previews import FluxImagePreview
+    preview = FluxImagePreview(pipe, root, width, height, steps, every, emit)
+    progress(f'Preview: clean image estimate · every {every} steps · reuses sampler prediction')
     def sampling_started(*_):
         if started[0] is None:started[0]=time.monotonic()
     transformer.register_forward_pre_hook(sampling_started)
@@ -155,19 +158,7 @@ def image_generation(request):
         eta = ((time.monotonic() - started[0]) / done * max(0, steps - done)
                if started[0] is not None else None)
         progress('Rendering image', done / steps * 95, eta)
-        if done % every == 0 or done == steps:
-            # Decode actual current latents. The preview is explicitly a draft.
-            latents = kwargs['latents'].detach()
-            ph = height // (pipeline.vae_scale_factor * 2); pw = width // (pipeline.vae_scale_factor * 2)
-            latents = latents.transpose(1, 2).reshape(1, -1, ph, pw)
-            mean = pipeline.vae.bn.running_mean.view(1, -1, 1, 1).to(latents)
-            std = (pipeline.vae.bn.running_var.view(1, -1, 1, 1) + pipeline.vae.config.batch_norm_eps).sqrt().to(latents)
-            latents = pipeline._unpatchify_latents(latents * std + mean)
-            preview = pipeline.vae.decode(latents, return_dict=False)[0]
-            image = pipeline.image_processor.postprocess(preview, output_type='pil')[0]
-            path = root / f'preview-{done}.png'; image.save(path)
-            emit('preview', path=str(path), media='image', draft=True)
-            del preview, latents, image
+        preview.finish_step(done)
         return kwargs
     images = []
     if request.get('source'): images.append(Image.open(request['source']).convert('RGB'))

@@ -1,5 +1,51 @@
-"""Cheap live latent views and explicitly requested H3 clean-estimate previews."""
+"""Sampling previews derived from existing H3 and Flux model predictions."""
 from pathlib import Path
+
+
+class FluxImagePreview:
+    """Decode Klein's existing clean prediction without changing sampling."""
+    def __init__(self, pipe, root, width, height, total, every, emit):
+        self.pipe, self.root = pipe, Path(root)
+        self.width, self.height, self.total = width, height, total
+        self.every, self.emit = max(1, every), emit
+        self.clean = None
+        self.done = None
+        scheduler = pipe.scheduler
+        original_step = scheduler.step
+
+        def step(model_output, timestep, sample, *args, **kwargs):
+            self.clean = None
+            result = original_step(model_output, timestep, sample, *args, **kwargs)
+            # Euler advances its index in step(). Use the sigma and inputs for
+            # the step just completed, including Klein's combined CFG velocity.
+            done = scheduler.step_index
+            if 0 < done < self.total and done % self.every == 0:
+                sigma = scheduler.sigmas[done - 1].to(device=sample.device)
+                self.clean = sample.detach().float() - sigma * model_output.detach().float()
+                self.done = done
+            return result
+
+        scheduler.step = step
+
+    def finish_step(self, done):
+        clean, self.clean = self.clean, None
+        if clean is None or done != self.done: return
+        from diffusers.utils.torch_utils import get_module_execution_device
+        pipe = self.pipe
+        ph = self.height // (pipe.vae_scale_factor * 2)
+        pw = self.width // (pipe.vae_scale_factor * 2)
+        latents = clean.transpose(1, 2).reshape(clean.shape[0], -1, ph, pw)
+        mean = pipe.vae.bn.running_mean.view(1, -1, 1, 1).to(latents)
+        std = (pipe.vae.bn.running_var.view(1, -1, 1, 1) + pipe.vae.config.batch_norm_eps).sqrt().to(latents)
+        latents = pipe._unpatchify_latents(latents * std + mean)
+        latents = latents.to(device=get_module_execution_device(pipe.vae), dtype=pipe.vae.dtype)
+        decoded = pipe.vae.decode(latents, return_dict=False)[0]
+        image = pipe.image_processor.postprocess(decoded, output_type='pil')[0]
+        path = self.root / f'preview-{done}.png'
+        image.save(path)
+        self.emit('preview', path=str(path), media='image', draft=True,
+                  latent_source='predicted_clean', step=done, sampling_steps=self.total)
+
 
 # Fixed H3 latent-to-RGB projection coefficients. This is an approximate color
 # view of predicted clean latents, not a VAE reconstruction.

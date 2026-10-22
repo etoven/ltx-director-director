@@ -388,7 +388,7 @@ class ImageGenerationPanel(QWidget):
         self.image.setAlignment(Qt.AlignmentFlag.AlignCenter); self.image.setMinimumSize(240, 180)
         self.image.setWordWrap(True); layout.addWidget(self.image, 1)
         self.pill = ProgressPill(self.image)
-        self.caption = QLabel('Draft samples show the current denoising state.'); self.caption.setWordWrap(True); layout.addWidget(self.caption)
+        self.caption = QLabel('Draft previews show the current clean-image estimate.'); self.caption.setWordWrap(True); layout.addWidget(self.caption)
         self.cancel = QPushButton('Cancel image generation'); self.cancel.clicked.connect(self.cancel_requested)
         self.cancel.setEnabled(False)
         layout.addWidget(self.cancel)
@@ -405,7 +405,7 @@ class ImageGenerationPanel(QWidget):
         self.log.receive_event(event)
         if event.get('kind') == 'preview' and event.get('media') == 'image':
             self.pixmap = QPixmap(event['path']); self.fit()
-            self.caption.setText('Local image · draft sample')
+            self.caption.setText('Local image · clean draft estimate')
         elif event.get('kind') == 'progress':
             self.pill.update_event(event); self.cancel.setEnabled(True)
             self.caption.setText(event.get('message', 'Rendering image…'))
