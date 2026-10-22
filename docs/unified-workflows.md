@@ -1,6 +1,6 @@
 # Direct every segment. Keep the full prompt in view.
 
-All timeline workspaces use one **Unified Prompt** panel. Its scope selector switches between **Segment**, **Global** and **Unified**, keeping each document separate. Select a timeline card to edit that segment, change its frame role or refine its wording and duration. The Prompt Refinement workspace opens its standalone draft in Unified scope.
+All timeline workspaces use one prompt panel. Its header selector switches between **Segment**, **Global** and **Unified**, keeping each document separate. Select a timeline card to edit that segment, change its frame role or refine its wording and duration. The Prompt Refinement workspace opens its standalone draft in Unified scope.
 
 ![One prompt surface with scope controls beside the timeline and timing overview](images/panel-overhaul.png)
 
@@ -24,7 +24,7 @@ Refinement uses only your current prompt and its inline annotations. It preserve
 
 ## Edit the beats, then develop the full prompt
 
-Choose a scope from the compact controls inside the prompt panel:
+Choose a scope from the prompt panel header. The heading identifies the document you are editing:
 
 | Scope | What you edit and generate |
 | --- | --- |
@@ -38,7 +38,7 @@ The header chevron hides or reopens the prompt body. That view preference is rem
 
 Switching scope preserves your drafts. Pasting or editing Unified text does not change the timeline. Manual timing edits update recognized MiniMax timecodes locally. Segment wording reaches the production draft through an explicit Generate/Refine or synchronization action.
 
-![The compact scope selector and actions inside the prompt panel](images/prompt-scope-panel.png)
+![The scope selector in the header and compact actions beside the editor](images/prompt-scope-panel.png)
 
 MiniMax gives each recognized shot passage a soft highlight. Its boundary starts
 at the timecode (or the first shot's untimed text) and ends before the next

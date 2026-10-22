@@ -177,9 +177,15 @@ def test_panel_controls_fit_reference_and_narrow_layouts():
         for scale,width,height in [(100,1400,900),(100,1080,800),(120,1400,1000)]:
             w.settings.setValue('ui_text_scale',scale);w._apply_theme();w.resize(width,height);w.show();QTest.qWait(60)
             surface=w.prompt_surface
-            for control in (surface.quick,surface.generate,surface.refine,surface.scope):
+            for control in (surface.quick,surface.generate,surface.refine):
                 assert surface.rail.rect().contains(control.geometry())
                 assert control.height()>=control.fontMetrics().height()
+            assert surface.scope.parent() is surface
+            assert surface.scope.geometry().bottom()<surface.body.geometry().top()
+            assert surface.scope.width()>=surface.width()-80*scale/100
+            for scope,label in [('segment','SEGMENT PROMPT'),('global','GLOBAL PROMPT'),('unified','UNIFIED PROMPT')]:
+                surface.select(scope)
+                assert surface.scope.currentText()==label
             assert surface.width()<=w.editor_root.width()
             assert surface.editors.width()>150
             assert not w.conditioning_guide.isHidden()

@@ -85,6 +85,7 @@ def workspace_style(theme, scale):
     #promptActionRail QPushButton:hover{{background:#2c4a59;border-color:#65a7ad}}
     #surfacePromptCount{{font-size:{size(11)}px;color:#8ca8b8;background:transparent}}
     #surfaceCollapse{{background:transparent;border:0;padding:0;margin:0;min-width:0;min-height:0}}
+    #surfaceScope{{background:#172630;border:1px solid #344d5c;border-radius:{size(4)}px;padding:{size(1)}px {size(6)}px;color:#d0e3f1;font:{size(13)}px "Roboto Condensed";min-width:0;min-height:0}}
     QMainWindow QTabBar::tab{{background:#121b24;color:#c0cfda;border:0;border-bottom:2px solid transparent;padding:{size(4)}px {size(7)}px;font-size:{size(13)}px}}
     QMainWindow QTabBar::tab:selected{{border-bottom-color:#38bbd0;color:#e1f3f5}}
     #libraryDockTabs::tab{{min-width:{size(130)}px}}

@@ -29,7 +29,7 @@ Choose **Title A–Z**, **Title Z–A** or **Custom** sorting. Dragging a projec
 
 A project has one **Status** and can have several additional **Tags**. Its status appears as a colored pill under the cover and description. The stock choices include Draft, In progress, Ready, Needs review, Completed and Failed. Older Done, Consider and Re-shoot statuses remain available. Customize definitions in **Settings → Application**.
 
-Right-click a project or collection and choose **Card color** to set an independent color for its border and top strip. **Use status color** restores the previous status-based appearance. The **Color** filter selects explicitly assigned colors; **No color** includes cards using their status color. **Status** provides checkboxes that stay open while you select multiple statuses. **More filters** retains no-status, legacy-status, additional-tag and archive choices. The reset-filter button clears search and restores the active-project filters.
+Right-click a project or collection and choose **Status** for the card appearance presets: Ready, In progress, Needs review, Completed, Failed and Draft. **Use status color** restores the appearance from the project's saved status. **Set status** edits that saved status. The **Color** filter selects explicitly assigned colors; **No color** includes cards using their saved status color. The **Status** filter provides checkboxes that stay open while you select multiple statuses. **More filters** retains no-status, legacy-status, additional-tag and archive choices. The reset-filter button clears search and restores the active-project filters.
 
 ![Multiple status choices with matching checkboxes and colored dots](images/project-status-filter.png)
 

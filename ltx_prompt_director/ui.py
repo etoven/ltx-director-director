@@ -5398,10 +5398,12 @@ class MainWindow(QMainWindow):
         meta = item.data(Qt.ItemDataRole.UserRole) or {}
         menu = QMenu(self)
         from .panel_design import COLORS, dot_icon
-        colors_menu = menu.addMenu('Card color')
+        colors_menu = menu.addMenu('Status')
         colors_menu.addAction('Use status color', lambda: self.set_selected_project_color(''))
+        status_labels = {'Green': 'Ready', 'Blue': 'In progress', 'Amber': 'Needs review',
+                         'Purple': 'Completed', 'Red': 'Failed', 'Gray': 'Draft'}
         for label, color in COLORS:
-            action = colors_menu.addAction(dot_icon(color), label)
+            action = colors_menu.addAction(dot_icon(color), status_labels[label])
             action.triggered.connect(lambda checked=False, value=color: self.set_selected_project_color(value))
         is_collection = meta.get("kind") == "collection"
         members = meta.get("members", []) if is_collection else [meta]
