@@ -6,7 +6,7 @@ from unittest.mock import Mock, patch
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QListWidget
+from PySide6.QtWidgets import QApplication, QLineEdit, QListWidget
 
 from ltx_prompt_director import ui
 from ltx_prompt_director.models import Segment
@@ -192,6 +192,56 @@ def test_panel_controls_fit_reference_and_narrow_layouts():
         image=QImage(str(Path(ui.__file__).parent/'assets/icon.png'))
         assert image.hasAlphaChannel() and image.pixelColor(0,0).alpha()==0
         assert not w.windowIcon().isNull()
+    finally:
+        w.project_dirty=False;w.close()
+
+
+def test_project_inline_rename_f2_menu_enter_and_escape():
+    w=window()
+    try:
+        records=[dict(id='rename-a',name='Opening',description='Keep description',status='Ready',tags=['Keep tag'],collection=''),
+                 dict(id='rename-b',name='Ending',description='Second beat',status='Draft',tags=[],collection='Journey')]
+        w.library_records=Mock(return_value=records)
+        w.current_project_id='rename-a';w.current_project_name='Opening'
+        def persist(meta):
+            next(record for record in records if record['id']==meta['id']).update(meta)
+        with patch.object(ui,'ensure_collection_sequences',return_value=[]),patch.object(w,'persist_library_metadata',side_effect=persist) as save:
+            w.refresh_project_library('rename-a');w._project_open_timer.stop()
+            w.resize(1400,900);w.show();w.project_dock.raise_();w.activateWindow();QTest.qWait(60)
+            for mode,name in [('grid','Opening renamed'),('list','Opening renamed again')]:
+                w.library_surface.set_view(mode);w.project_list.setFocus();QTest.qWait(10)
+                QTest.keyClick(w.project_list,Qt.Key.Key_F2);QTest.qWait(10)
+                editor=next(e for e in w.project_list.findChildren(QLineEdit,'projectNameEditor') if e.isVisible())
+                assert w.project_list.visualItemRect(w.project_list.currentItem()).contains(editor.geometry().center())
+                editor.setText(name);QTest.keyClick(editor,Qt.Key.Key_Return);QTest.qWait(30)
+                assert records[0]['name']==name and w.current_project_name==name
+                assert records[0]['status']=='Ready' and records[0]['tags']==['Keep tag']
+                assert records[0]['description']=='Keep description'
+                assert not w._project_open_timer.isActive()
+            save.reset_mock();w.library_surface.rename.click();QTest.qWait(10)
+            editor=next(e for e in w.project_list.findChildren(QLineEdit,'projectNameEditor') if e.isVisible())
+            editor.setText('Cancelled');QTest.keyClick(editor,Qt.Key.Key_Escape);QTest.qWait(20)
+            save.assert_not_called();assert records[0]['name']=='Opening renamed again'
+            captured=[];BaseMenu=ui.QMenu
+            class CapturedMenu(BaseMenu):
+                def exec(self,*args):captured.append(self)
+            with patch.object(ui,'QMenu',CapturedMenu):
+                w.project_library_menu(w.project_list.visualItemRect(w.project_list.currentItem()).center())
+            action=next(a for a in captured[0].actions() if a.text()=='Rename')
+            assert action is w.library_surface.rename_action and action.shortcut().toString()=='F2'
+            action.trigger();QTest.qWait(10)
+            editor=next(e for e in w.project_list.findChildren(QLineEdit,'projectNameEditor') if e.isVisible())
+            editor.setText('From context menu');QTest.keyClick(editor,Qt.Key.Key_Return);QTest.qWait(30)
+            assert records[0]['name']=='From context menu'
+            collection=next(w.project_list.item(i) for i in range(w.project_list.count())
+                            if w.project_list.item(i).data(Qt.ItemDataRole.UserRole).get('kind')=='collection')
+            w.project_list.setCurrentItem(collection);w.project_list.setFocus()
+            QTest.keyClick(w.project_list,Qt.Key.Key_F2);QTest.qWait(10)
+            editor=next(e for e in w.project_list.findChildren(QLineEdit,'projectNameEditor') if e.isVisible())
+            assert editor.text()=='Journey'
+            editor.setText('Travel');QTest.keyClick(editor,Qt.Key.Key_Return);QTest.qWait(30)
+            assert records[1]['collection']=='Travel' and records[1]['name']=='Ending'
+            assert w.selected_library_project()['name']=='Travel'
     finally:
         w.project_dirty=False;w.close()
 

@@ -4,10 +4,10 @@ from __future__ import annotations
 import copy
 import json
 from pathlib import Path
-from PySide6.QtCore import Qt, QSize, QRect, QRectF
-from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPen, QPixmap, QLinearGradient
+from PySide6.QtCore import Qt, QSize, QRect, QRectF, QTimer
+from PySide6.QtGui import QAction, QColor, QIcon, QKeySequence, QPainter, QPen, QPixmap, QLinearGradient
 from PySide6.QtWidgets import (QApplication, QAbstractItemView, QCheckBox, QComboBox, QFrame,
-    QHBoxLayout, QInputDialog, QLabel, QListWidget, QMenu, QMessageBox, QPushButton,
+    QHBoxLayout, QLabel, QLineEdit, QListWidget, QMenu, QMessageBox, QPushButton,
     QSizePolicy, QStackedWidget, QStyle, QStyledItemDelegate, QToolButton,
     QVBoxLayout, QWidget, QWidgetAction)
 
@@ -52,6 +52,34 @@ class CheckMenu(QMenu):
 class ProjectCardDelegate(QStyledItemDelegate):
     def __init__(self, owner, parent):
         super().__init__(parent); self.owner = owner
+
+    def createEditor(self, parent, option, index):
+        editor=QLineEdit(parent);editor.setObjectName('projectNameEditor')
+        editor.setAccessibleName('Project or collection name')
+        return editor
+
+    def setEditorData(self, editor, index):
+        editor.setText(str((index.data(Qt.ItemDataRole.UserRole) or {}).get('name','')))
+        editor.selectAll()
+
+    def updateEditorGeometry(self, editor, option, index):
+        scale=self.owner.settings.value('ui_text_scale',100,int)/100
+        s=lambda n:max(1,round(n*scale))
+        card=option.rect.adjusted(3,3,-3,-3)
+        if self.parent().viewMode()==QListWidget.ViewMode.ListMode:
+            area=card.adjusted(s(98),s(11),-s(8),-s(6))
+        else:
+            image=QRect(card.x()+s(8),card.y()+s(16),card.width()-s(16),max(s(28),card.height()-s(84)))
+            area=card.adjusted(s(9),image.bottom()-card.top()+s(7),-s(7),-s(6))
+        font=option.font;font.setPixelSize(s(14));editor.setFont(font)
+        editor.setGeometry(area.x(),area.y()-s(2),area.width(),max(s(24),editor.sizeHint().height()))
+
+    def setModelData(self, editor, model, index):
+        meta=dict(index.data(Qt.ItemDataRole.UserRole) or {})
+        name=editor.text().strip()
+        if name and name!=str(meta.get('name','')):
+            # Refreshing the cards destroys the editor; defer until Qt closes it.
+            QTimer.singleShot(0,self.owner,lambda:self.owner.library_surface.rename_to(meta,name))
 
     def paint(self, painter, option, index):
         meta = index.data(Qt.ItemDataRole.UserRole) or {}
@@ -131,6 +159,12 @@ class ProjectLibrarySurface:
         menu = QMenu(self.new); menu.addAction('New project',owner.new_project); menu.addAction('Open project…',owner.open_project)
         self.new.setMenu(menu); self.new.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self.rename = self.button('Rename', 'Rename selected project or collection', self.rename_selected, actions, 'rename')
+        self.rename_action=QAction('Rename',owner.project_list)
+        self.rename_action.setShortcut(QKeySequence('F2'))
+        self.rename_action.setShortcutContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self.rename_action.triggered.connect(self.rename_selected)
+        owner.project_list.addAction(self.rename_action)
+        owner.project_list.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.delete = self.button('Delete', 'Delete selected project', owner.delete_library_project, actions, 'delete')
         self.catalog = self.button('Catalog', 'Open media catalog', lambda: (owner.catalog_dock.show(),owner.catalog_dock.raise_()), actions,'library-catalog')
         self.more = self.button('…', 'More project actions', None, actions)
@@ -216,11 +250,16 @@ class ProjectLibrarySurface:
     def location_changed(self,index):self.navigate(self.location.itemData(index))
 
     def rename_selected(self):
-        meta=self.owner.selected_library_project()
-        if not meta:return
-        name,ok=QInputDialog.getText(self.owner,'Rename collection' if meta.get('kind')=='collection' else 'Rename project','Name',text=str(meta.get('name','')))
-        if not ok or not name.strip():return
+        item=self.owner.project_list.currentItem()
+        if item is None or item.isHidden():return
+        self.owner._project_open_timer.stop();self.owner._pending_project_id=None
+        item.setFlags(item.flags()|Qt.ItemFlag.ItemIsEditable)
+        self.owner.project_list.setFocus()
+        self.owner.project_list.editItem(item)
+
+    def rename_to(self,meta,name):
         name=name.strip()
+        if not name or name==str(meta.get('name','')):return
         if meta.get('kind')=='collection' and name.casefold()!=str(meta.get('name','')).casefold():
             existing={str(self.location.itemData(i) or '').casefold() for i in range(self.location.count())}
             if name.casefold() in existing:
@@ -237,13 +276,20 @@ class ProjectLibrarySurface:
                 self.owner.project_sessions[self.owner.current_project_id]['name']=name
             self.owner.update_window_title()
         self.owner.refresh_project_library(str(meta.get('id','')) or None)
+        if meta.get('kind')=='collection':
+            for row in range(self.owner.project_list.count()):
+                item=self.owner.project_list.item(row)
+                value=item.data(Qt.ItemDataRole.UserRole) or {}
+                if value.get('kind')=='collection' and value.get('name')==name:
+                    self.owner.project_list.setCurrentItem(item)
+                    break
 
     def refresh_selection(self):
         item=self.owner.project_list.currentItem()
         visible=item is not None and not item.isHidden()
         meta=item.data(Qt.ItemDataRole.UserRole) if item else {}
         project=visible and meta.get('kind')=='project'
-        self.rename.setEnabled(visible);self.delete.setEnabled(project)
+        self.rename.setEnabled(visible);self.rename_action.setEnabled(visible);self.delete.setEnabled(project)
         self.duplicate_action.setEnabled(project);self.details_action.setEnabled(project)
         self.archive_action.setEnabled(visible)
 

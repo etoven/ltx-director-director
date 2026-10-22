@@ -23,6 +23,8 @@ Open **Projects** from the toolbar. Select a saved project to return to it, or u
 
 Assign a **Collection** to group related projects. Collections appear as gallery tiles, with covers assembled from member thumbnails. Open a collection or choose it from the breadcrumb menu. **Back**, **Forward** and **Home** navigate the library without opening or changing a project.
 
+Select a project or collection and press **F2**, click **Rename**, or choose **Rename** from its right-click menu to edit the name directly on the card. Press **Enter** to save or **Escape** to cancel.
+
 Choose **Title A–Z**, **Title Z–A** or **Custom** sorting. Dragging a project or collection establishes a custom order. Status and label filters help narrow the gallery; the app remembers your selected filter choices.
 
 ## Make progress visible

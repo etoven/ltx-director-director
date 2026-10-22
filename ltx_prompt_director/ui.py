@@ -5397,6 +5397,7 @@ class MainWindow(QMainWindow):
         self.project_list.setCurrentItem(item)
         meta = item.data(Qt.ItemDataRole.UserRole) or {}
         menu = QMenu(self)
+        menu.addAction(self.library_surface.rename_action)
         from .panel_design import COLORS, dot_icon
         colors_menu = menu.addMenu('Status')
         colors_menu.addAction('Use status color', lambda: self.set_selected_project_color(''))

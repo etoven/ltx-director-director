@@ -75,6 +75,10 @@ class UnifiedEditorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             test_desktop_upgrade_refreshes_the_existing_launcher_icon(Path(folder))
 
+    def test_panel_inline_project_rename(self):
+        from test_panel_design import test_project_inline_rename_f2_menu_enter_and_escape
+        test_project_inline_rename_f2_menu_enter_and_escape()
+
     def test_settings_large_text(self):
         from test_settings_design import test_settings_large_text_keeps_navigation_and_footer_accessible
         test_settings_large_text_keeps_navigation_and_footer_accessible()
