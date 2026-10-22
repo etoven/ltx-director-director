@@ -1467,7 +1467,8 @@ class UnifiedEditorTests(unittest.TestCase):
         w.set_ai_controls_enabled(False)
         self.app.processEvents()
         self.assertFalse(w.segment_ai_marquee.isHidden())
-        self.assertGreater(w.segment_ai_marquee.width(), 300)
+        self.assertGreater(w.segment_ai_marquee.width(), 100)
+        self.assertGreaterEqual(w.segment_ai_marquee.width(), w.prompt_surface.body.width() - 20)
         w.set_ai_controls_enabled(True)
         self.assertTrue(w.segment_ai_marquee.isHidden())
 
