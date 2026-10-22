@@ -134,7 +134,7 @@ class UnifiedEditorTests(unittest.TestCase):
 
     def test_local_generation_transport_and_media_contracts(self):
         import subprocess, sys, os
-        code = "import os,sys,pytest; rc=pytest.main(['-q','tests/test_local_generation.py','tests/test_local_lora.py']); sys.stdout.flush(); sys.stderr.flush(); os._exit(rc)"
+        code = "import os,sys,pytest; rc=pytest.main(['-q','tests/test_local_generation.py','tests/test_local_lora.py','tests/test_local_conditioning.py']); sys.stdout.flush(); sys.stderr.flush(); os._exit(rc)"
         env = dict(os.environ, PYTEST_DISABLE_PLUGIN_AUTOLOAD='1', QT_QPA_PLATFORM='offscreen')
         timeout=max(20,int(os.environ.get('DIRECTOR_NATIVE_TIMEOUT','25'))-5)
         subprocess.run([sys.executable, '-c', code], env=env, check=True, timeout=timeout)

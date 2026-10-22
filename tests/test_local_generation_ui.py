@@ -193,8 +193,13 @@ def test_unsaved_local_video_can_be_exported():
 def test_native_video_uses_unified_output_reference_panel_and_settings_directly():
     from ltx_prompt_director.local_widgets import LocalModelsPanel, GenerationLog
     from ltx_prompt_director.local_generation import save_profile
+    from ltx_prompt_director.models import Segment
     with window() as w:
         w.set_project_type('minimax_references')
+        w.segments=[Segment('Opening','/source/opening.png','',duration=3),
+                    Segment('Timeline video','/source/timeline.mp4','',kind='video',duration=4,trim_start=48),
+                    Segment('Ending','/source/ending.png','',role='end',duration=3)]
+        w.refresh_timeline(0)
         production = 'summary\nA single continuous shot.\n\ndetailed_description\n[Shot 1] At 00:00.00, steam rises.\n\noverall_soundscape\nQuiet room.\n\nnon_diegetic_music\nN/A'
         authored = production + '\n/refine Do not send this editing instruction.'
         w.unified_prompt.setPlainText(authored)
@@ -223,15 +228,23 @@ def test_native_video_uses_unified_output_reference_panel_and_settings_directly(
         assert len(jobs) == 1
         operation, args, ready, failed, callbacks = jobs[0]
         w.minimax_reference_images[0]['name'] = 'Edited after start'
-        with patch('ltx_prompt_director.ui.run_request', return_value={'path': '/result.mp4'}) as run:
+        w.segments[0].media_path='/changed-after-start.png'
+        def materialize(segment):
+            assert all(segment is not original for original in w.segments)
+            if segment.name=='Opening':segment.media_path='/cache/archived-opening.png'
+        with patch('ltx_prompt_director.project_archive.materialize_source',side_effect=materialize) as load, patch('ltx_prompt_director.ui.run_request', return_value={'path': '/result.mp4'}) as run:
             operation(*args)
+        assert load.call_count==3 and w.segments[0].media_path=='/changed-after-start.png'
         request = run.call_args.args[0]
         assert request['prompt'] == production
         assert (request['width'], request['height'], request['duration'], request['steps'], request['seed']) == (960, 544, 15, 20, 931351171509952)
-        assert len(request['references']) == 3
-        assert request['references'][0]['name'] == 'Existing character'
-        assert request['references'][1]['audio_path'] == '/source/paired.wav'
-        assert request['references'][2]['kind'] == 'audio' and request['references'][2]['path'] == '/source/only.wav'
+        assert len(request['references']) == 6
+        assert [r['path'] for r in request['references'][:3]]==['/cache/archived-opening.png','/source/timeline.mp4','/source/ending.png']
+        assert [r['timeline_time'] for r in request['references'][:3]]==[0,3,10]
+        assert request['references'][1]['start']==2 and request['references'][1]['duration']==4
+        assert request['references'][3]['name'] == 'Existing character'
+        assert request['references'][4]['audio_path'] == '/source/paired.wav'
+        assert request['references'][5]['kind'] == 'audio' and request['references'][5]['path'] == '/source/only.wav'
         assert w.unified_prompt.toPlainText() == authored
         assert w.minimax_reference_images[3]['kind'] == 'video'
         # Live frames use the existing video surface without attaching a PNG

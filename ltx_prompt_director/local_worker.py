@@ -253,8 +253,18 @@ def video_generation(request):
         roles = [-1 if r.get('role') == 'end' else 0 for r in refs]
         if len(roles) != len(set(roles)):
             raise ValueError('FL2VA keyframes need one Start and one End role.')
+        for ref in refs:
+            expected=float(request.get('duration',15)) if ref.get('role')=='end' else 0
+            if 'timeline_time' in ref and abs(float(ref['timeline_time'])-expected)>1/24:
+                raise ValueError('FL2VA supports only the opening and final frame. Use Ref2VA for intermediate timeline checkpoints.')
     elif not refs:
-        raise ValueError('Ref2VA requires reference media. Select references or use a pruned FL2VA checkpoint.')
+        raise ValueError('Ref2VA requires timeline conditioning media or Reference panel media. Add media or use a pruned FL2VA checkpoint.')
+    for number,ref in enumerate(refs,1):
+        embedded=ref.get('kind','image')=='image' and str(ref.get('image','')).startswith('data:image/')
+        if ref.get('path') and not Path(ref['path']).is_file() and not embedded:
+            raise ValueError(f'Conditioning source is missing: {ref.get("name") or Path(ref["path"]).name}')
+        source=f'timeline at {ref["timeline_time"]:g}s' if 'timeline_time' in ref else 'Reference panel'
+        progress(f'Conditioning {number}: {ref.get("kind","image")} · {ref.get("name","media")} · {source}')
     progress('Starting native video runtime…')
     import torch
     from PIL import Image
@@ -279,7 +289,9 @@ def video_generation(request):
     # VAE downsamples by 16, then DiT packs 2×2 spatial latent patches.
     tokens = (((count - 5) // 17) * 5 + 2) * (request['height'] // 32) * (request['width'] // 32)
     # Packed attention/QKV activations must fit alongside the cached weights.
-    reserve = max(3, (tokens + len(refs) * 4096 + 2048) * 21504 * 2 * 2.5 / 2**30)
+    from .local_conditioning import reference_token_budget
+    reference_tokens=reference_token_budget(refs,request['width'],request['height'],count)
+    reserve = max(3, (tokens + reference_tokens + 2048) * 21504 * 2 * 2.5 / 2**30)
     limit = max(1, torch.cuda.mem_get_info()[0] / 2**30 - reserve) if device == 'cuda' else None
     if device == 'cuda':
         free, total = torch.cuda.mem_get_info()
@@ -328,12 +340,19 @@ def video_generation(request):
         progress('H3 stage: ' + type(unit).__name__.replace('MiniMaxH3Unit_', ''))
         return run_unit(unit, *args, **kwargs)
     pipe.unit_runner = unit_runner
+    from .local_conditioning import install_timeline_positions, configure_video_conditioning_encoder
+    configure_video_conditioning_encoder(pipe,request.get('references',[]))
+    if profile.get('video_variant','ref2va')=='ref2va':
+        install_timeline_positions(pipe,request.get('references',[]),emit)
     references = []
     for ref in request.get('references', []):
         if ref.get('kind') == 'video':
             frames = read_reference_video(ref['path'], height=request['height'], width=request['width'],
                 start=ref.get('start', 0), duration=ref.get('duration', 15), fps=24)
-            if len(frames) < 48: raise ValueError('H3 video references need at least two seconds of source footage.')
+            minimum=5 if 'timeline_time' in ref else 48
+            if len(frames)<minimum:
+                raise ValueError('A timeline video guide needs at least five source frames.' if minimum==5 else 'H3 video references need at least two seconds of source footage.')
+            progress(f'Video conditioning: {ref.get("name","video")} · {len(frames)} frames · source trim {ref.get("start",0):g}s')
             reference = {'type': 'video', 'video': frames}
             if ref.get('audio_path'):
                 audio, rate = read_reference_audio(ref['audio_path'], start=ref.get('start', 0), duration=ref.get('duration', 15))
@@ -346,19 +365,20 @@ def video_generation(request):
             references.append({'type': 'audio', 'audio': torch.from_numpy(audio), 'sample_rate': rate})
         else:
             image = _pil_reference(ref)
-            if image is not None: references.append({'type': 'image', 'image': image})
+            if image is None:raise ValueError(f'Cannot load conditioning image: {ref.get("name","image")}')
+            if 'timeline_time' in ref:image=image.resize((int(request['width']),int(request['height'])),Image.Resampling.LANCZOS)
+            references.append({'type': 'image', 'image': image})
     steps = int(request.get('steps', profile.get('video_steps', 20)))
     diagnostic_steps = max(0, int(request.get('diagnostic_steps', 0)))
     completed_steps = [0]
     root = Path(request['job_dir']); started = [None]
     from .local_previews import H3VideoPreview
     preview = H3VideoPreview(pipe, profile, root, int(request['width']), int(request['height']), steps, dtype, emit)
-    progress('Preview: ' + ('live noisy latent · no VAE decoding during sampling' if profile.get('video_preview_mode', 'noisy') == 'noisy'
+    progress('Preview: ' + ('live predicted latent · reuses sampler prediction · no VAE decoding during sampling' if profile.get('video_preview_mode', 'noisy') == 'noisy'
                               else f'denoised estimate · every {profile.get("video_preview_every", 5)} steps'))
     last_video = [None]; original_step = pipe.step
     def step(scheduler, latents, progress_id, **kwargs):
         if scheduler is pipe.scheduler:
-            if progress_id == 0: preview.noisy(latents, 0)
             preview.capture_clean(scheduler, latents, progress_id, kwargs['noise_pred'],
                                   kwargs.get('input_latents'), kwargs.get('inpaint_mask'))
         output = original_step(scheduler, latents, progress_id, **kwargs)

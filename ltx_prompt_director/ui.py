@@ -4282,6 +4282,7 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("Write or generate the unified production prompt first.", 10000)
             return
         extra_references = copy.deepcopy([r for r in reference_slots(self.minimax_reference_images) if r])
+        conditioning_segments = copy.deepcopy(self.segments)
         request = dict(kind="video", profile=profile, prompt=prompt,
             duration=profile["video_duration"], width=profile["video_width"], height=profile["video_height"], steps=profile["video_steps"],
             seed=profile["video_seed"])
@@ -4322,19 +4323,18 @@ class MainWindow(QMainWindow):
                 panel._initial_media_pending = True
                 panel._initial_media_position = 0
                 panel._initial_media_autoplay = panel._generation_autoplay
-                panel.title.setText("Local video · live noisy latents · approximate colors" if value.get('preview_mode')=='noisy'
+                panel.title.setText("Local video · live latent estimate · approximate colors" if value.get('preview_mode')=='noisy'
                     else "Local video · denoised draft estimate")
                 panel.empty.hide(); panel.video.show()
                 panel.export.setEnabled(False)
                 panel.player.setSource(QUrl.fromLocalFile(value["path"]))
                 panel.player.setLoops(QMediaPlayer.Loops.Infinite)
         def operation():
-            references = []
-            for reference in extra_references:
-                if reference.get("audio_only"):
-                    reference["kind"] = "audio"
-                    reference["path"] = reference.get("audio_path") or reference.get("path")
-                references.append(reference)
+            from .local_conditioning import video_references
+            from .project_archive import materialize_source
+            for segment in conditioning_segments:
+                if segment.kind in ('image','video'):materialize_source(segment)
+            references = video_references(conditioning_segments, extra_references, request['duration'])
             return run_request({**request, "references": references}, cancel=self._local_video_cancel)
         def finish():
             self._local_video_busy = False; self.local_video_generate.setEnabled(True)

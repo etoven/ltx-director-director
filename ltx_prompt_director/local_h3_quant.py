@@ -115,12 +115,12 @@ def register_encoder(path):
 
 def video_vae_keys(state):
     from diffsynth.utils.state_dict_converters.minimax_h3_video_vae import MiniMaxH3VideoVAEStateDictConverter
-    return MiniMaxH3VideoVAEStateDictConverter({k: v for k, v in state.items() if k not in ('latents_mean', 'latents_std')})
+    return MiniMaxH3VideoVAEStateDictConverter({k: state[k] for k in state if k not in ('latents_mean', 'latents_std')})
 
 
 def audio_vae_keys(state):
     from diffsynth.utils.state_dict_converters.minimax_h3_audio_vae import MiniMaxH3AudioVAEStateDictConverter
-    return MiniMaxH3AudioVAEStateDictConverter({k: v for k, v in state.items() if k not in ('latents_mean', 'latents_std')})
+    return MiniMaxH3AudioVAEStateDictConverter({k: state[k] for k in state if k not in ('latents_mean', 'latents_std')})
 
 
 from diffsynth.models.minimax_h3_audio_vae import MiniMaxH3AudioVAE, WeightNormedConv1d, WeightNormedConvTranspose1d

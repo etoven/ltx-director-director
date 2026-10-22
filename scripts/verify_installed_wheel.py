@@ -28,7 +28,10 @@ from ltx_prompt_director.ui import MainWindow
 app = QApplication([])
 with patch.object(MainWindow, 'restore_startup_workspace'):
     w = MainWindow()
-assert w.effects_panel.tiles.count() == 119
+panel = w.effects_panel
+assert panel.tiles.count() == len(panel.entries)
+bundled_ids = {entry['id'] for group in ('effects', 'clips', 'audio') for entry in catalog()[group]}
+assert bundled_ids <= {entry['id'] for entry in panel.entries}
 if (Path(ltx_prompt_director.__file__).parent / 'onboarding.py').is_file():
     from ltx_prompt_director.onboarding import OnboardingWizard
     wizard = OnboardingWizard(w)

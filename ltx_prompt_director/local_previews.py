@@ -2,7 +2,7 @@
 from pathlib import Path
 
 # Fixed H3 latent-to-RGB projection coefficients. This is an approximate color
-# view of the current samples, not a VAE reconstruction or a clean prediction.
+# view of predicted clean latents, not a VAE reconstruction.
 H3_RGB = (
     (-.018555,.024344,-.017536),(.150164,.137244,.129221),(.027367,-.050369,-.208606),
     (-.000793,-.164622,-.323161),(-.048556,.013970,-.074286),(.011740,.014172,-.006906),
@@ -31,6 +31,8 @@ def noisy_latent_video(latents, path, width, height, fps=24):
     rgb = torch.nan_to_num(rgb+torch.tensor((.057426,-.022078,-.071449)))
     rgb = ((rgb.clamp(-1,1)+1)*127.5).numpy()
     count = max(1,((samples.shape[1]-2)//5)*17+5)
+    spans=np.array([1 if index%5==0 else 4 for index in range(len(rgb))])
+    times=np.concatenate(([0],np.cumsum(spans[:-1])))
     scale = min(1,640/max(width,height))
     size = tuple(max(2,round(v*scale/2)*2) for v in (width,height))
     target=Path(path);partial=target.with_suffix('.partial.mp4')
@@ -40,8 +42,9 @@ def noisy_latent_video(latents, path, width, height, fps=24):
             stream.width,stream.height=size;stream.pix_fmt='yuv420p'
             stream.options={'preset':'ultrafast','crf':'26'}
             for index in range(count):
-                position=index*(len(rgb)-1)/max(1,count-1)
-                low=int(position);high=min(low+1,len(rgb)-1);blend=position-low
+                low=max(0,int(np.searchsorted(times,index,side='right'))-1)
+                high=min(low+1,len(rgb)-1)
+                blend=0 if high==low else (index-times[low])/(times[high]-times[low])
                 pixels=(rgb[low]*(1-blend)+rgb[high]*blend).clip(0,255).astype(np.uint8)
                 image=Image.fromarray(pixels).resize(size,Image.Resampling.BILINEAR)
                 frame=av.VideoFrame.from_image(image);frame.pts=index
@@ -63,30 +66,38 @@ class H3VideoPreview:
         self.pipe, self.profile, self.root = pipe, profile, Path(root)
         self.width, self.height, self.total = width, height, total
         self.dtype, self.emit, self.clean = dtype, emit, None
+        self.fast = None
 
     def noisy(self, latents, done):
         if self.profile.get('video_preview_mode', 'noisy') != 'noisy': return
         path = self.root / f'latent-{done}.mp4'
         count=noisy_latent_video(latents,path,self.width,self.height)
         self.emit('preview', path=str(path), media='video', draft=True, frames=count,
-                  preview_mode='noisy', step=done, sampling_steps=self.total)
+                  preview_mode='noisy', latent_source='predicted_clean' if done else 'initial_noise',
+                  step=done, sampling_steps=self.total)
 
     def capture_clean(self, scheduler, latents, index, noise_pred, input_latents=None, inpaint_mask=None):
         self.clean = None
+        self.fast = None
         done = index + 1
-        if not denoised_preview_due(self.profile, done, self.total): return
+        fast = self.profile.get('video_preview_mode', 'noisy') == 'noisy'
+        if not fast and not denoised_preview_due(self.profile, done, self.total): return
         # Flow velocity already exists from this sampling pass. Estimate x0 for
         # the full clip; never run an extra denoiser forward pass.
         selection = (slice(None), slice(None), slice(None))
-        current = latents[selection].detach()
-        velocity = noise_pred[selection].detach()
-        self.clean = current - velocity * scheduler.sigmas[index].to(current)
+        current = latents[selection].detach().float()
+        velocity = noise_pred[selection].detach().float()
+        estimate = current - velocity * scheduler.sigmas[index].to(current)
         if inpaint_mask is not None:
-            mask = inpaint_mask[selection]
-            self.clean = self.clean * mask + input_latents[selection] * (1 - mask)
+            mask = inpaint_mask[selection].to(estimate)
+            estimate = estimate * mask + input_latents[selection].to(estimate) * (1 - mask)
+        if fast:self.fast = estimate.to('cpu')
+        else:self.clean = estimate
 
     def finish_step(self, latents, done):
-        self.noisy(latents, done)
+        if self.fast is not None:
+            self.noisy(self.fast, done)
+            self.fast = None
         if self.clean is None: return
         from diffsynth.utils.data import save_video
         self.emit('log', message=f'Denoised preview · VAE decode · step {done}/{self.total}')
