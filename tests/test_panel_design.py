@@ -140,6 +140,7 @@ def test_project_browser_filters_navigation_and_view_preserve_selection():
         with patch.object(ui,'ensure_collection_sequences',return_value=[]):
             w.refresh_project_library('a')
             surface=w.library_surface
+            surface.set_view('grid')
             w.resize(1400,900);w.show();w.project_dock.raise_();QTest.qWait(80)
             surface.layout_cards();QTest.qWait(30)
             first=w.project_list.visualItemRect(w.project_list.item(0))
