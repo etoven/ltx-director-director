@@ -8,7 +8,7 @@ Build a visual plan for AI video, turn it into a detailed production prompt, and
 
 ![The Aurora workspace: a visual timeline, creative direction and one continuous MiniMax production brief](docs/images/panel-overhaul.png)
 
-*Current release: Aurora 1.13.0a120 on `experimental`. Screenshots show the native app with an authored demonstration project.*
+*Current release: Aurora 1.13.0a121 on `experimental`. Screenshots show the native app with an authored demonstration project.*
 
 ## See the story before you generate
 
@@ -117,7 +117,7 @@ Customize the workspace itself in **Settings → Workspaces**: choose the editor
 Install the current experimental wheel:
 
 ```bash
-python3 -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a120-py3-none-any.whl'
+python3 -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a121-py3-none-any.whl'
 ltx-director-director
 ```
 

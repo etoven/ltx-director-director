@@ -3467,6 +3467,13 @@ class MainWindow(QMainWindow):
             self.project_dock.show()
             self.project_dock.raise_()
             QTimer.singleShot(0, self.project_dock.raise_)
+        # Restore the legacy native toolbar while it still belongs to the
+        # main-window layout. Only then move it into the integrated header;
+        # otherwise restoreState can reclaim or hide the embedded toolbar.
+        from .window_chrome import WindowChrome
+        self.chrome=WindowChrome(self,self.findChild(QToolBar,'mainToolbar'),
+                                 self.current_project_name or 'Untitled project')
+        self.chrome.update_metrics(max(75,min(200,self.settings.value('ui_text_scale',100,int)))/100)
         QTimer.singleShot(0, self.style_library_tabs)
         self.sync_reference_panel_visibility()
         from .dock_panels import PanelRails
@@ -4261,8 +4268,6 @@ class MainWindow(QMainWindow):
         self.statusBar().addPermanentWidget(self.ai_timeline_status)
         self.apply_project_type_ui()
         self.update_summary()
-        from .window_chrome import WindowChrome
-        self.chrome=WindowChrome(self,toolbar,self.current_project_name or 'Untitled project')
 
     def _build_local_generation_ui(self):
         import threading

@@ -57,6 +57,30 @@ def make_window():
     return w
 
 
+def test_legacy_toolbar_layout_cannot_hide_or_reclaim_header_commands():
+    from PySide6.QtCore import QSettings
+    settings=QSettings()
+    for visible in (True,False):
+        legacy=QMainWindow();legacy.resize(1600,950)
+        bar=QToolBar('Project',legacy);bar.setObjectName('mainToolbar')
+        legacy.addToolBar(bar);bar.addAction('Legacy command')
+        legacy.show();bar.setVisible(visible);QTest.qWait(10)
+        settings.setValue('window/state',legacy.saveState());legacy.close()
+        w=make_window()
+        try:
+            current=w.findChild(QToolBar,'mainToolbar')
+            assert w.toolBarArea(current)==Qt.ToolBarArea.NoToolBarArea
+            assert current.isVisible() and current.parent() is w.chrome.header
+            assert w.project_type_combo.isVisible() and w.provider_button.isVisible()
+            assert w.project_type_combo.height()>0
+            assert set(w.chrome.original_actions)==set(current.actions()+w.chrome.project_commands.actions()+w.chrome.utility_commands.actions())
+            for maximized in (True,False):
+                w.showMaximized() if maximized else w.showNormal()
+                QTest.qWait(20)
+                assert current.isVisible() and w.project_type_combo.isVisible()
+        finally:w.project_dirty=False;w.close()
+
+
 def test_native_dock_contents_survive_collapse_float_move_and_reference_capabilities():
     w=make_window()
     try:
