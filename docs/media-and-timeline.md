@@ -85,8 +85,9 @@ make the visual previews taller. Smooth horizontal scrolling helps you move
 through longer plans.
 
 The conditioning tiles beneath the timeline show larger previews, frame roles
-and timing values on separate lines. Scroll horizontally to see additional
-references. Drag the dotted handle beneath the tiles down to enlarge them, or
+and Start/End timing values. Text segments remain in the overview with their own
+prompts and time ranges; adding, resizing or removing a segment updates the strip.
+Scroll horizontally to see additional segments and references. Drag the dotted handle beneath the tiles down to enlarge them, or
 up to hide the strip completely. Double-click that handle to hide or reopen
 the strip. Its size and collapsed state are remembered.
 

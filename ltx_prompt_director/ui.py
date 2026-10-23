@@ -8158,14 +8158,22 @@ class MainWindow(QMainWindow):
                      tuple((s.id, s.name, s.kind, s.role, s.duration, s.preview_path, s.trim_start) for s in self.segments),
                      tuple(str(r) for r in self.active_reference_images()))
         if signature == getattr(self, '_conditioning_signature', None):
+            # Prompt edits update text previews without rebuilding media tiles.
+            for segment in self.segments:
+                preview=getattr(self,'_conditioning_text_previews',{}).get(segment.id)
+                if preview is not None:
+                    preview.setText(segment.prompt or 'Text-only segment')
             return
         self._conditioning_signature = signature
         self._conditioning_previews = []
+        self._conditioning_text_previews = {}
         while self.conditioning_row.count():
             item = self.conditioning_row.takeAt(0)
-            if item.widget():
-                item.widget().hide()
-                item.widget().deleteLater()
+            widget=item.widget()
+            if widget:
+                widget.hide()
+                widget.setParent(None)
+                widget.deleteLater()
         if not self.unified_workspace:
             return
         inventory = reference_inventory(self.segments, self.active_reference_images())
@@ -8186,7 +8194,8 @@ class MainWindow(QMainWindow):
         heading.setObjectName("conditioningHeading")
         self.conditioning_row.addWidget(heading)
         for record in inventory:
-            if not record['label']:
+            is_text=record['kind']=='text' and 'timeline_index' in record
+            if not record['label'] and not is_text:
                 continue
             tile = QFrame()
             tile.setObjectName("conditioningTile")
@@ -8194,19 +8203,30 @@ class MainWindow(QMainWindow):
             row = QVBoxLayout(tile)
             row.setContentsMargins(1, 1, 1, 1)
             row.setSpacing(0)
-            title = QLabel(record['label'])
+            title = QLabel(record['label'] or record['name'] or 'Text')
             title.setObjectName("conditioningTitle")
             row.addWidget(title)
-            if 'timeline_index' in record:
+            if is_text:
+                segment=self.segments[record['timeline_index']]
+                thumbnail=QLabel(segment.prompt or 'Text-only segment')
+                thumbnail.setObjectName('conditioningTextPreview')
+                thumbnail.setTextFormat(Qt.TextFormat.PlainText)
+                thumbnail.setWordWrap(True);thumbnail.setMargin(6)
+                thumbnail.setAlignment(Qt.AlignmentFlag.AlignLeft|Qt.AlignmentFlag.AlignTop)
+                thumbnail.setMinimumSize(1,1)
+                thumbnail.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Expanding)
+                self._conditioning_text_previews[segment.id]=thumbnail
+            elif 'timeline_index' in record:
                 segment = self.segments[record['timeline_index']]
                 preview = QPixmap(segment.preview_path)
             else:
                 reference = reference_slots(self.minimax_reference_images)[record['reference_slot']]
                 preview = pixmap_from_data_url(reference['image']) if reference.get('image') else QPixmap()
-            if preview.isNull():
-                preview = toolbar_icon('preview' if record['kind'] == 'video' else 'import').pixmap(64, 48)
-            thumbnail = ConditioningPreview(preview)
-            self._conditioning_previews.append((thumbnail, preview))
+            if not is_text:
+                if preview.isNull():
+                    preview = toolbar_icon('preview' if record['kind'] == 'video' else 'import').pixmap(64, 48)
+                thumbnail = ConditioningPreview(preview)
+                self._conditioning_previews.append((thumbnail, preview))
             row.addWidget(thumbnail, 1)
             fix = ''
             if 'checkpoint_time' in record:
@@ -8219,6 +8239,8 @@ class MainWindow(QMainWindow):
                     fix = f'Move ending to {total:.2f}s'
             elif record['kind'] == 'video' and 'timeline_index' in record:
                 detail = f"Source {record['source_start']:.2f}–{record['source_end']:.2f}s"
+            elif is_text:
+                detail = f"Text segment · {record['start_time']:.2f}–{record['end_time']:.2f}s"
             else:
                 detail = f"{record['role'].title()} · untimed"
             footer = QFrame()
@@ -8245,8 +8267,8 @@ class MainWindow(QMainWindow):
             self.conditioning_row.addWidget(tile)
             if fix:
                 self.conditioning_fixes.append(fix)
-        if not inventory or not any(record['label'] for record in inventory):
-            self.conditioning_row.addWidget(QLabel("Text only · no conditioning images" if self.segments else "Add a timeline segment to begin"))
+        if not inventory:
+            self.conditioning_row.addWidget(QLabel("Add a timeline segment to begin"))
         self.conditioning_row.addStretch()
 
     def set_conditioning_height(self, height: int):

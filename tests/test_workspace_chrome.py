@@ -161,6 +161,39 @@ def test_group_status_updates_every_member_and_clears_legacy_color():
     finally:w.project_dirty=False;w.close()
 
 
+def test_timing_overview_refreshes_when_text_segments_are_created_edited_and_removed():
+    from PySide6.QtWidgets import QFrame
+    from ltx_prompt_director.models import Segment
+    w=make_window()
+    try:
+        w.set_project_type('minimax_frames')
+        w.segments=[Segment('Opening','','','image','start','Opening view',3)]
+        w.refresh_timeline(0)
+        def tiles():
+            return [w.conditioning_row.itemAt(i).widget() for i in range(w.conditioning_row.count())
+                    if w.conditioning_row.itemAt(i).widget() and w.conditioning_row.itemAt(i).widget().objectName()=='conditioningTile']
+        def ranges():
+            return [[l.text() for l in tile.findChild(QFrame,'conditioningFooter').findChildren(QLabel)] for tile in tiles()]
+        w.add_text_tile.click();w.add_text_tile.click()
+        assert [tile.findChild(QLabel,'conditioningTitle').text() for tile in tiles()]==['Image1','Text 1','Text 2']
+        assert ranges()==[['Start 0.00s','End 3.00s'],['Start 3.00s','End 8.00s'],['Start 8.00s','End 13.00s']]
+        assert w.conditioning_row.itemAt(0).widget().text()=='I2V\n13.00s'
+        image_tile=tiles()[0]
+        w.segment_prompt.setPlainText('Continue the movement')
+        assert tiles()[0] is image_tile
+        assert tiles()[2].findChild(QLabel,'conditioningTextPreview').text()=='Continue the movement'
+        w.change_duration(w.segments[1].id,2)
+        assert ranges()==[['Start 0.00s','End 3.00s'],['Start 3.00s','End 5.00s'],['Start 5.00s','End 10.00s']]
+        assert [r['checkpoint_time'] for r in w.conditioning_records if 'checkpoint_time' in r]==[0]
+        assert [r['label'] for r in w.conditioning_records]==['Image1',None,None]
+        w.delete_selected()
+        assert len(tiles())==2 and ranges()[-1]==['Start 3.00s','End 5.00s']
+        w.segments=w.segments[1:];w.refresh_timeline(0)
+        assert len(tiles())==1 and ranges()==[['Start 0.00s','End 2.00s']]
+        assert w.conditioning_row.itemAt(0).widget().text()=='T2V\n2.00s'
+    finally:w.project_dirty=False;w.close()
+
+
 def test_native_dock_contents_survive_collapse_float_move_and_reference_capabilities():
     w=make_window()
     try:
