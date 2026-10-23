@@ -153,6 +153,28 @@ def test_native_notes_outside_the_passage_survive_approval(window, app):
     assert '/keep Protect 📽 at 00:59.00 and [Shot 9]' in editor.toPlainText()
 
 
+@pytest.mark.parametrize('approve',[True,False])
+def test_spelling_survives_local_diff_with_native_notes(window,app,approve):
+    from test_spellcheck_diff import Dictionary,assert_spelling
+    editor=window.unified_prompt
+    checker=editor._spell_highlighter
+    checker.dictionary=Dictionary();checker._known.clear()
+    editor.setPlainText(BRIEF.replace('Walk slowly.','Walk spelingg.').replace('Turn toward the light.','🙂 mispelingg.'))
+    insert_note(editor,QTextCursor(editor.document()),'/keep','Protect 📽 spelingg')
+    before=editor.toPlainText()
+    source=editor.document()
+    checker.rehighlight();assert_spelling(editor,app)
+    type_segment(window,app,'Run spelingg.')
+    review=window.segment_prompt_review
+    assert review.active
+    (review.approve if approve else review.reject)()
+    assert editor.document() is source and checker.document() is source
+    assert editor._spell_highlighter is checker
+    assert editor.toPlainText()==(before.replace('Walk spelingg.','Run spelingg.') if approve else before)
+    assert '/keep Protect 📽 spelingg' in editor.toPlainText()
+    assert_spelling(editor,app)
+
+
 def test_soft_sections_exclude_newline_gaps_and_scrolling_uses_shot_numbers(window, app):
     window.unified_prompt.setPlainText('[Shot 1] Untimed opening.\n\n[Shot 2] At 00:02.00, Turn.')
     window.timeline.setCurrentRow(1)

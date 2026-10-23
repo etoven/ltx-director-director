@@ -15,6 +15,7 @@ from PySide6.QtCore import QEvent, QObject, QSignalBlocker, QTimer
 from PySide6.QtGui import QColor, QTextCharFormat, QTextCursor, QTextDocument
 
 from .stream_json import live_fields
+from .spellcheck import refresh_spellcheck
 
 
 def select_streamed_text(raw: str, target: str = "unified", index: int = 0) -> str:
@@ -216,6 +217,7 @@ class LiveTypingPreview(QObject):
                 with QSignalBlocker(self.editor):
                     self.editor.setDocument(self.original_document)
                     self.original_document.setParent(self.editor)
+                    refresh_spellcheck(self.editor)
             finally:
                 self._busy_render = False
             if self.preview_document is not None:

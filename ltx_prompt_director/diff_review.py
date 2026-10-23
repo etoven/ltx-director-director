@@ -13,6 +13,7 @@ from html import escape
 import re
 
 from .ai_inline_diff import word_diff
+from .spellcheck import refresh_spellcheck
 
 from PySide6.QtCore import QEvent, QObject, QTimer, Qt, QSignalBlocker
 from PySide6.QtGui import QColor, QTextCharFormat, QTextCursor, QTextDocument
@@ -85,6 +86,7 @@ def reset_plain_review_text(editor: QTextEdit, text: str) -> None:
         cursor.setCharFormat(QTextCharFormat())
         editor.setCurrentCharFormat(QTextCharFormat())
         editor.setExtraSelections([])
+        refresh_spellcheck(editor)
     editor.verticalScrollBar().setValue(min(scroll, editor.verticalScrollBar().maximum()))
 
 
@@ -387,6 +389,8 @@ class ParagraphDiffReview(QObject):
         editor.setViewportMargins(0, 0, 0, 0)
         if plain:
             reset_plain_review_text(editor, reviewed_text(self.parts))
+        else:
+            refresh_spellcheck(editor)
         editor.viewport().update()
         self.removed_labels = []
         self.parts = []

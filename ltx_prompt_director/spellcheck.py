@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 from functools import lru_cache
 
-from PySide6.QtCore import QLocale, Qt
+from PySide6.QtCore import QLocale, QSignalBlocker, Qt
 from PySide6.QtGui import QAction, QColor, QSyntaxHighlighter, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import QTextEdit
 from .inline_cues import NOTE_TAG
@@ -35,6 +35,9 @@ def system_dictionary():
 class SpellHighlighter(QSyntaxHighlighter):
     def __init__(self, editor: QTextEdit, dictionary):
         super().__init__(editor.document())
+        # Review projections replace documents. The checker and its session
+        # dictionary belong to the editor, not a potentially discarded draft.
+        self.setParent(editor)
         self.editor = editor
         self.dictionary = dictionary
         self._known: dict[str, bool] = {}
@@ -53,13 +56,13 @@ class SpellHighlighter(QSyntaxHighlighter):
     def highlightBlock(self, text: str) -> None:
         for match in WORDS.finditer(text):
             if not any(tag.start() <= match.start() < tag.end() for tag in DIRECTIVES.finditer(text)) and self.misspelled(match.group()):
-                self.setFormat(match.start(), len(match.group()), self._format)
+                self.setFormat(utf16_length(text[:match.start()]), utf16_length(match.group()), self._format)
         pill = QTextCharFormat()
         pill.setForeground(QColor('#d0f3ff'))
         pill.setBackground(QColor('#245163'))
         pill.setFontWeight(700)
         for match in DIRECTIVES.finditer(text):
-            self.setFormat(match.start(), len(match.group()), pill)
+            self.setFormat(utf16_length(text[:match.start()]), utf16_length(match.group()), pill)
         if getattr(self.editor, 'highlight_timeline_timecodes', False):
             timing = QTextCharFormat()
             timing.setForeground(QColor('#d0f3ff'))
@@ -74,9 +77,21 @@ class SpellHighlighter(QSyntaxHighlighter):
         self.rehighlight()
 
 
+def refresh_spellcheck(editor: QTextEdit) -> None:
+    """Restore spelling after document swaps or review-format normalization."""
+    highlighter = getattr(editor, '_spell_highlighter', None)
+    if highlighter is None:
+        return
+    with QSignalBlocker(editor):
+        if highlighter.document() is not editor.document():
+            highlighter.setDocument(editor.document())
+        highlighter.rehighlight()
+
+
 def install_spellcheck(editor: QTextEdit) -> SpellHighlighter | None:
     """Decorate an existing text box; preserve Qt editing and the plain text."""
     if getattr(editor, '_spell_highlighter', None):
+        refresh_spellcheck(editor)
         return editor._spell_highlighter
     dictionary = system_dictionary()
     highlighter = SpellHighlighter(editor, dictionary)

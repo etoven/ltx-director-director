@@ -10,6 +10,14 @@ from ltx_prompt_director.diff_review import paragraph_changes, reviewed_text, re
 
 class LiveInlineDiffTests(unittest.TestCase):
 
+    def test_spelling_restores_after_diff_cleanup_and_document_replacement(self):
+        code = ("import os,sys,pytest; rc=pytest.main(['-q','tests/test_spellcheck_diff.py']); "
+                "sys.stdout.flush();sys.stderr.flush();os._exit(rc)")
+        process = subprocess.run([sys.executable,'-c',code],timeout=30,
+                                 stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,
+                                 env=dict(os.environ,QT_QPA_PLATFORM='offscreen'))
+        self.assertEqual(process.returncode,0,process.stdout+process.stderr)
+
     def test_paragraph_review_reject_keeps_other_paragraphs(self):
         before = "One original.\n\nTwo original.\n\nThree original."
         after = "One revised.\n\nTwo original.\n\nThree revised."

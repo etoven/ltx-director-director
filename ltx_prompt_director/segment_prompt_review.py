@@ -7,6 +7,7 @@ from PySide6.QtWidgets import QApplication, QToolButton, QWidget
 
 from .ai_inline_diff import word_diff
 from .prompt_sections import document_sections
+from .spellcheck import refresh_spellcheck
 
 
 class SegmentPromptReview(QObject):
@@ -169,6 +170,7 @@ class SegmentPromptReview(QObject):
             self.editor.setReadOnly(self.was_read_only)
             self.editor.setTextCursor(self.saved_cursor)
             self.editor.verticalScrollBar().setValue(min(scroll, self.editor.verticalScrollBar().maximum()))
+            refresh_spellcheck(self.editor)
         self.editor.setViewportMargins(0, 0, 0, 0)
         for button in self.buttons:
             button.hide()
