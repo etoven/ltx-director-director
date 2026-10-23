@@ -31,11 +31,13 @@ Choose **Title A–Z**, **Title Z–A** or **Custom** sorting. Dragging a projec
 
 A project has one **Status** and can have several additional **Tags**. Its status appears as a colored pill under the cover and description. The stock choices include Draft, In progress, Ready, Needs review, Completed and Failed. Older Done, Consider and Re-shoot statuses remain available. Customize definitions in **Settings → Application**.
 
-Right-click a project or collection and choose **Status** for the card appearance presets: Ready, In progress, Needs review, Completed, Failed and Draft. **Use status color** restores the appearance from the project's saved status. **Set status** edits that saved status. The left **Status** filter uses the same preset names with matching color swatches; **Use status color** includes cards using their saved status color. Its button previews the selected colors. The right **Tags** filter retains your configured labels, including existing custom names. Its checkboxes stay open while you select multiple labels. **More filters** retains unlabeled, legacy-label, additional-tag and archive choices. The reset-filter button clears search and restores the active-project filters. Existing saved labels and card assignments are preserved.
+Right-click a project and choose **Status**, or choose **Group status** on a collection to update all its members. The choices and color dots come from **Settings → Application**. Selecting a status updates both the saved status and the card color. Archived projects retain their status color and remain marked Archive. **No status** clears the status and returns the card to its neutral appearance.
 
-![Status presets with color previews](images/project-status-colors.png)
+The left **Status** filter lists your configured statuses with matching color previews. The right **Tags** filter lists your additional tags. Both menus stay open while you select multiple filters; **More filters → Archive** includes archived projects. The reset-filter button clears search and restores the active-project filters.
 
-![The Tags filter preserves configured labels and colored dots](images/project-status-filter.png)
+![Configured statuses with color previews](images/project-status-colors.png)
+
+![Configured tags with colored dots](images/project-status-filter.png)
 
 Archive a project when it should move out of the active flow while remaining available. Collection context actions can apply status, labels and archive choices to their members. Deletion is a separate confirmed action that removes the selected saved project.
 

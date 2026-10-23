@@ -5159,12 +5159,8 @@ class MainWindow(QMainWindow):
         return f"collection:{meta.get('name', '')}" if meta.get("kind") == "collection" else f"project:{meta.get('id', '')}"
 
     def project_state_color(self, meta: dict) -> str | None:
-        if meta.get("archived"):
-            return ARCHIVE_COLOR
-        if QColor(str(meta.get('color', ''))).isValid():
-            return str(meta['color'])
         colors = {tag["name"].casefold(): tag["color"] for tag in self.project_status_tags()}
-        return colors.get(str(meta.get("status", meta.get("tag", ""))).casefold())
+        return colors.get(str(meta.get("status", meta.get("tag", ""))).casefold()) or (ARCHIVE_COLOR if meta.get('archived') else None)
 
     @staticmethod
     def add_thumbnail_labels(pixmap: QPixmap, labels: list[tuple[str, str]]) -> QPixmap:
@@ -5286,8 +5282,6 @@ class MainWindow(QMainWindow):
         selected_other = {key.removeprefix("tag:").casefold() for key in selected if key.startswith("tag:")}
 
         def visible(meta: dict) -> bool:
-            if hasattr(self, 'library_surface') and not self.library_surface.accepts_color(meta):
-                return False
             notes = " ".join(str(note.get("text", "")) for note in meta.get("notes", []) if isinstance(note, dict))
             haystack = f"{meta.get('name', '')} {meta.get('description', '')} {meta.get('status', '')} {' '.join(meta.get('tags', []))} {notes}".casefold()
             if not all(term in haystack for term in terms):
@@ -5482,16 +5476,10 @@ class MainWindow(QMainWindow):
         meta = item.data(Qt.ItemDataRole.UserRole) or {}
         menu = QMenu(self)
         menu.addAction(self.library_surface.rename_action)
-        from .panel_design import CARD_STATUSES, dot_icon
-        colors_menu = menu.addMenu('Status')
-        colors_menu.addAction('Use status color', lambda: self.set_selected_project_color(''))
-        for label, color in CARD_STATUSES:
-            action = colors_menu.addAction(dot_icon(color), label)
-            action.setIconVisibleInMenu(True)
-            action.triggered.connect(lambda checked=False, value=color: self.set_selected_project_color(value))
+        from .panel_design import dot_icon
         is_collection = meta.get("kind") == "collection"
         members = meta.get("members", []) if is_collection else [meta]
-        state_menu = menu.addMenu("Set group status" if is_collection else "Set status")
+        state_menu = menu.addMenu("Group status" if is_collection else "Status")
         status_group = QActionGroup(state_menu)
         status_group.setExclusive(True)
         clear = state_menu.addAction("No status")
@@ -5500,7 +5488,8 @@ class MainWindow(QMainWindow):
         clear.setChecked(all(not member.get("status") for member in members))
         clear.triggered.connect(lambda: self.set_selected_project_status(""))
         for tag in self.project_status_tags():
-            action = state_menu.addAction(tag["name"])
+            action = state_menu.addAction(dot_icon(tag['color']),tag["name"])
+            action.setIconVisibleInMenu(True)
             action.setCheckable(True)
             status_group.addAction(action)
             action.setChecked(bool(members) and all(str(member.get("status", "")).casefold() == tag["name"].casefold() for member in members))
@@ -5580,19 +5569,11 @@ class MainWindow(QMainWindow):
         for member in members:
             member["status"] = name
             member["tag"] = name
+            member.pop('color',None)
             self.persist_library_metadata(member)
         self.refresh_project_library(str(meta.get("id", "")) or None)
         subject = f"group {meta.get('name', 'Collection')} ({len(members)} projects)" if meta.get("kind") == "collection" else f"project {meta.get('name', 'Untitled project')}"
         self.statusBar().showMessage(f"Status set to {name or 'No status'} for {subject}")
-
-    def set_selected_project_color(self, color: str) -> None:
-        meta, members = self.selected_project_members()
-        if not meta:
-            return
-        for member in members:
-            member['color'] = color
-            self.persist_library_metadata(member)
-        self.refresh_project_library(str(meta.get('id', '')) or None)
 
     def set_selected_project_label(self, name: str, enabled: bool) -> None:
         meta, members = self.selected_project_members()

@@ -5,7 +5,7 @@ import pytest
 from PySide6.QtCore import QPoint,Qt
 from PySide6.QtGui import QFont,QImage
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication,QLabel,QMainWindow,QStyleOptionViewItem,QToolBar,QWidget
+from PySide6.QtWidgets import QApplication,QLabel,QMainWindow,QMenu,QStyleOptionViewItem,QToolBar,QWidget
 from ltx_prompt_director.window_chrome import WindowChrome
 from ltx_prompt_director.render_queue import RenderQueue
 from ltx_prompt_director.render_widgets import RenderQueuePanel
@@ -79,6 +79,86 @@ def test_legacy_toolbar_layout_cannot_hide_or_reclaim_header_commands():
                 QTest.qWait(20)
                 assert current.isVisible() and w.project_type_combo.isVisible()
         finally:w.project_dirty=False;w.close()
+
+
+def test_project_status_menu_uses_settings_and_recolors_legacy_cards(tmp_path):
+    import json
+    from PySide6.QtCore import QSize
+    from PySide6.QtGui import QColor,QPainter,QPixmap
+    from PySide6.QtWidgets import QStyle
+    from ltx_prompt_director import ui
+    w=make_window()
+    try:
+        definitions=[{'name':'Review footage','color':'#ba63db'},
+                     {'name':'Approved cut','color':'#46b185'}]
+        w.settings.setValue('project_status_tags',json.dumps(definitions))
+        w.rebuild_project_filter_buttons()
+        w.library_surface.clear_filters()
+        meta={'id':'status-test','name':'A shot','status':'Review footage','tag':'Review footage',
+              'color':'#168cff','tags':[]}
+        path=tmp_path/'status-test.meta.json';path.write_text(json.dumps(meta))
+        w.library_records=lambda:[json.loads(path.read_text())]
+        with patch.object(ui,'ensure_collection_sequences',return_value=[]):
+            w.refresh_project_library(meta['id'])
+            item=w.project_list.currentItem();menus=[]
+            class CapturedMenu(ui.QMenu):
+                def exec(self,*_):menus.append(self)
+            with patch.object(ui,'QMenu',CapturedMenu):
+                w.project_library_menu(w.project_list.visualItemRect(item).center())
+            menu=menus[0]
+            assert [a.text() for a in menu.actions() if 'status' in a.text().casefold()]==['Status']
+            status=next(a.menu() for a in menu.actions() if a.text()=='Status')
+            assert [a.text() for a in status.actions()]==['No status','Review footage','Approved cut']
+            assert status.actions()[1].isChecked()
+            assert all(not a.icon().isNull() for a in status.actions()[1:])
+            with patch.object(ui,'project_library_path',return_value=tmp_path),patch.object(w,'start_disk_job'):
+                status.actions()[2].trigger()
+            saved=json.loads(path.read_text())
+            assert saved['status']==saved['tag']=='Approved cut'
+            assert w.project_state_color(saved)=='#46b185'
+            assert w.project_state_color({**saved,'archived':True})=='#46b185'
+            item=w.project_list.currentItem()
+            assert item.data(Qt.ItemDataRole.UserRole)['status']=='Approved cut'
+            pixmap=QPixmap(QSize(250,220));pixmap.fill(Qt.GlobalColor.transparent)
+            option=QStyleOptionViewItem();option.rect=pixmap.rect();option.state=QStyle.StateFlag.State_Enabled
+            painter=QPainter(pixmap)
+            w.project_list.itemDelegate().paint(painter,option,w.project_list.indexFromItem(item));painter.end()
+            assert pixmap.toImage().pixelColor(30,7)==QColor('#46b185')
+            # Settings changes recolor existing cards without rewriting projects.
+            w.settings.setValue('project_status_tags',json.dumps([{'name':'Approved cut','color':'#e39042'}]))
+            w.rebuild_project_filter_buttons()
+            assert w.project_state_color(saved)=='#e39042'
+            assert w.project_state_color({**saved,'status':'','tag':''}) is None
+    finally:w.project_dirty=False;w.close()
+
+
+def test_group_status_updates_every_member_and_clears_legacy_color():
+    import json
+    from ltx_prompt_director import ui
+    w=make_window()
+    try:
+        w.settings.setValue('project_status_tags',json.dumps([{'name':'Custom ready','color':'#35ac72'}]))
+        w.rebuild_project_filter_buttons();w.library_surface.clear_filters()
+        records=[{'id':str(i),'name':str(i),'collection':'Cuts','status':'','color':'#168cff','tags':[]} for i in range(2)]
+        w.library_records=lambda:copy.deepcopy(records)
+        with patch.object(ui,'ensure_collection_sequences',return_value=[]):
+            w.refresh_project_library()
+            item=next(w.project_list.item(i) for i in range(w.project_list.count()) if w.project_list.item(i).data(Qt.ItemDataRole.UserRole).get('kind')=='collection')
+            menus=[]
+            class CapturedMenu(ui.QMenu):
+                def exec(self,*_):menus.append(self)
+            with patch.object(ui,'QMenu',CapturedMenu):
+                w.project_library_menu(w.project_list.visualItemRect(item).center())
+            actions=[a for a in menus[0].actions() if 'status' in a.text().casefold()]
+            assert len(actions)==1 and actions[0].text()=='Group status'
+            with patch.object(w,'persist_library_metadata') as save:
+                actions[0].menu().actions()[1].trigger()
+            assert save.call_count==2
+            for call in save.call_args_list:
+                meta=call.args[0]
+                assert meta['status']==meta['tag']=='Custom ready' and 'color' not in meta
+                assert w.project_state_color(meta)=='#35ac72'
+    finally:w.project_dirty=False;w.close()
 
 
 def test_native_dock_contents_survive_collapse_float_move_and_reference_capabilities():

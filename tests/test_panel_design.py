@@ -142,7 +142,7 @@ def test_project_browser_filters_navigation_and_view_preserve_selection():
             assert surface.color.text()=='Status: All'
             assert surface.status.text()=='Tags: All'
             assert [action.text() for action in surface.color_actions.values()]==[
-                'Use status color','Ready','In progress','Needs review','Completed','Failed','Draft']
+                'No status',*[tag['name'] for tag in w.project_status_tags()]]
             assert all(not action.icon().isNull() for action in surface.color_actions.values())
             assert surface.all_statuses.text()=='All tags'
             surface.set_view('grid')
@@ -153,9 +153,9 @@ def test_project_browser_filters_navigation_and_view_preserve_selection():
             assert first.top()==second.top(), (first,second,w.project_list.gridSize(),w.project_list.viewport().size())
             assert first.left()!=second.left()
             assert w.selected_library_project()['id']=='a'
-            for color,action in surface.color_actions.items():action.setChecked(color=='#2ed05d')
+            for key,action in surface.color_actions.items():action.setChecked(key=='status:Draft')
             assert surface.color.text()=='Status: 1'
-            assert surface.color.icon().pixmap(16,16).toImage().pixelColor(8,8).name()=='#2ed05d'
+            assert surface.color.icon().pixmap(16,16).toImage().pixelColor(8,8).name()==next(tag['color'] for tag in w.project_status_tags() if tag['name']=='Draft')
             visible=[w.project_list.item(i).data(Qt.ItemDataRole.UserRole)['name'] for i in range(w.project_list.count()) if not w.project_list.item(i).isHidden()]
             assert visible==['Journey','Opening']
             w.project_search.setText('Cool mountain')
@@ -171,13 +171,16 @@ def test_project_browser_filters_navigation_and_view_preserve_selection():
             surface.navigate(None)
             w.refresh_project_library('a')
             with patch.object(w,'persist_library_metadata') as save:
-                w.set_selected_project_color('#893dff')
-            assert save.call_args.args[0]['color']=='#893dff'
-            assert save.call_args.args[0]['status']=='Draft'
+                w.set_selected_project_status('Ready')
+            assert 'color' not in save.call_args.args[0]
+            assert save.call_args.args[0]['status']=='Ready'
             w.settings.setValue('project_status_tags','[{"name":"Redo Color grade Issues","color":"#c96e7b"}]')
+            w.settings.setValue('project_other_tags','[{"name":"Day shoot","color":"#2ed05d"}]')
             w.rebuild_project_filter_buttons()
-            assert surface.status_actions['status:Redo Color grade Issues'].text()=='Redo Color grade Issues'
-            assert surface.color_actions['#2ed05d'].text()=='Ready'
+            assert surface.color_actions['status:Redo Color grade Issues'].text()=='Redo Color grade Issues'
+            assert set(surface.color_actions)=={'__untagged__','status:Redo Color grade Issues'}
+            assert surface.status_actions['tag:Day shoot'].text()=='Day shoot'
+            assert not any(key.startswith('status:') for key in surface.status_actions)
     finally:
         w.project_dirty=False;w.close()
 

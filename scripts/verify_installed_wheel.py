@@ -39,7 +39,8 @@ scope = w.prompt_surface.scope
 assert scope.view().isRowHidden(scope.findData('unified'))
 assert w.library_surface.color.text() == 'Status: All'
 assert w.library_surface.status.text() == 'Tags: All'
-assert w.library_surface.color_actions['#2ed05d'].text() == 'Ready'
+assert w.library_surface.color_actions['status:Ready'].text() == 'Ready'
+assert not any(key.startswith('status:') for key in w.library_surface.status_actions)
 w.set_project_type('minimax_official_skill_reference')
 dock = w.minimax_panel.reference_dock
 w.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, dock)

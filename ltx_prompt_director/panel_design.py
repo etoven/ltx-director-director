@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import copy
-import json
 from pathlib import Path
 from PySide6.QtCore import Qt, QSize, QRect, QRectF, QTimer
 from PySide6.QtGui import QAction, QColor, QFont, QIcon, QKeySequence, QPainter, QPen, QPixmap, QLinearGradient
@@ -10,10 +9,6 @@ from PySide6.QtWidgets import (QApplication, QAbstractItemView, QCheckBox, QComb
     QHBoxLayout, QLabel, QLineEdit, QListWidget, QMenu, QMessageBox, QPushButton,
     QSizePolicy, QStackedWidget, QStyle, QStyledItemDelegate, QToolButton,
     QVBoxLayout, QWidget, QWidgetAction)
-
-
-CARD_STATUSES = [('Ready', '#2ed05d'), ('In progress', '#168cff'), ('Needs review', '#ffbf00'),
-                 ('Completed', '#893dff'), ('Failed', '#ff5964'), ('Draft', '#89949f')]
 
 
 def dot_icon(color):
@@ -111,8 +106,7 @@ class ProjectCardDelegate(QStyledItemDelegate):
         scale = self.owner.settings.value('ui_text_scale', 100, int) / 100
         s = lambda n: max(1, round(n * scale))
         card = option.rect.adjusted(3, 3, -3, -3)
-        explicit=QColor(str(meta.get('color') or ''))
-        color = explicit if explicit.isValid() else QColor(self.owner.project_state_color(meta) or '#416679')
+        color = QColor(self.owner.project_state_color(meta) or '#416679')
         selected = bool(option.state & QStyle.StateFlag.State_Selected)
         hovered = bool(option.state & QStyle.StateFlag.State_MouseOver)
         painter.save(); painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -224,16 +218,7 @@ class ProjectLibrarySurface:
         self.status.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Fixed)
         self.filters.setStretch(0,1);self.filters.setStretch(1,1)
         self.reset = self.button('', 'Clear search and reset filters', self.clear_filters,self.filters,'reset-filter')
-        self.color_menu = CheckMenu(self.color); self.color_actions={}
-        all_colors=self.color_menu.add_check('All statuses')
-        self.all_colors=all_colors;all_colors.triggered.connect(self.select_all_colors)
-        saved=owner.settings.value('project_color_filters',None)
-        try:chosen=json.loads(saved) if isinstance(saved,str) else None
-        except ValueError:chosen=None
-        for name,color in [('Use status color',''),*CARD_STATUSES]:
-            action=self.color_menu.add_check(name,color or '#89949f',chosen is None or color in chosen)
-            action.toggled.connect(self.color_changed);self.color_actions[color]=action
-        self.color.setMenu(self.color_menu);self.color.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.color.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self.status.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         browser.addLayout(self.filters)
         layout.removeWidget(owner.project_list);browser.addWidget(owner.project_list,1)
@@ -241,7 +226,7 @@ class ProjectLibrarySurface:
         owner.project_list.panel_owner=owner
         owner.project_list.currentItemChanged.connect(lambda *_:self.refresh_selection())
         layout.addWidget(self.browser,1)
-        self.rebuild_filters();self.color_changed()
+        self.rebuild_filters()
         self.set_view(str(owner.settings.value('project_view_mode','grid')))
         self.refresh_selection()
 
@@ -324,53 +309,55 @@ class ProjectLibrarySurface:
         self.archive_action.setEnabled(visible)
 
     def rebuild_filters(self):
-        menu=CheckMenu(self.status);all_statuses=menu.add_check('All tags')
-        keys=[key for key in self.owner.project_filter_buttons if key!='__archive__' and not key.startswith('tag:')]
-        def toggle_all(yes):
-            for key in keys:self.owner.project_filter_buttons[key].setChecked(yes)
-        all_statuses.triggered.connect(toggle_all)
-        self.status_actions={}
-        extras=CheckMenu('More filters',menu)
+        # Both menus share the existing persisted filter buttons. Status names
+        # and color previews come from Settings; tags stay independent.
+        color_menu=CheckMenu(self.color);self.all_colors=color_menu.add_check('All statuses')
+        self.all_colors.triggered.connect(self.select_all_colors)
+        tag_menu=CheckMenu(self.status);self.all_statuses=tag_menu.add_check('All tags')
+        self.all_statuses.triggered.connect(self.select_all_tags)
+        self.color_actions={};self.status_actions={}
+        definitions={f"status:{t['name']}":t for t in self.owner.project_status_tags()}
+        definitions.update({f"tag:{t['name']}":t for t in self.owner.project_other_tags()})
+        extras=CheckMenu('More filters',tag_menu)
         for key,button in self.owner.project_filter_buttons.items():
-            tag=next((t for t in self.owner.project_status_tags()+self.owner.project_other_tags() if t['name']==button.text()),None)
-            target=extras if key in ('__untagged__','__archive__') or key.startswith('tag:') or button.text() in {'Done','Consider','Re-shoot'} else menu
-            label='No tags' if key=='__untagged__' else button.text()
-            action=target.add_check(label,tag['color'] if tag else '#89949f',button.isChecked())
+            is_status=key=='__untagged__' or key.startswith('status:')
+            target=color_menu if is_status else extras if key=='__archive__' else tag_menu
+            tag=definitions.get(key,{})
+            action=target.add_check(button.text(),tag.get('color','#89949f'),button.isChecked())
             action.toggled.connect(button.setChecked);button.toggled.connect(action.setChecked)
-            button.toggled.connect(lambda *_:self.update_status_label())
-            self.status_actions[key]=action
-        menu.addSeparator();menu.addMenu(extras)
-        previous=self.status.menu();self.status.setMenu(menu)
-        if previous:previous.deleteLater()
-        self.all_statuses=all_statuses;self.status_keys=keys;self.update_status_label()
+            button.toggled.connect(self.update_filter_labels)
+            (self.color_actions if is_status else self.status_actions)[key]=action
+        tag_menu.addSeparator();tag_menu.addMenu(extras)
+        for button,menu in ((self.color,color_menu),(self.status,tag_menu)):
+            previous=button.menu();button.setMenu(menu)
+            if previous:previous.deleteLater()
+        self.color_menu=color_menu
+        self.update_filter_labels()
 
-    def update_status_label(self):
-        buttons=self.owner.project_filter_buttons
-        count=sum(buttons[key].isChecked() for key in self.status_keys)
-        self.all_statuses.setChecked(count==len(self.status_keys))
-        self.status.setText('Tags: All' if count==len(self.status_keys) else f'Tags: {count}')
+    def update_filter_labels(self,*_):
+        chosen=[key for key,action in self.color_actions.items() if action.isChecked()]
+        all_selected=len(chosen)==len(self.color_actions)
+        self.all_colors.setChecked(all_selected)
+        self.color.setText('Status: All' if all_selected else f'Status: {len(chosen)}')
+        definitions={f"status:{t['name']}":t['color'] for t in self.owner.project_status_tags()}
+        self.color.setIcon(status_preview_icon([definitions.get(key,'#89949f') for key in chosen]))
+        tags=[action for key,action in self.status_actions.items() if key.startswith('tag:')]
+        selected=sum(action.isChecked() for action in tags)
+        all_tags=selected in (0,len(tags))
+        self.all_statuses.setChecked(all_tags)
+        self.status.setText('Tags: All' if all_tags else f'Tags: {selected}')
 
     def select_all_colors(self,yes):
         for action in self.color_actions.values():action.setChecked(yes)
 
-    def color_changed(self):
-        if not hasattr(self,'color_actions'):return
-        chosen=[color for color,action in self.color_actions.items() if action.isChecked()]
-        all_selected=len(chosen)==len(self.color_actions)
-        self.all_colors.setChecked(all_selected);self.color.setText('Status: All' if all_selected else f'Status: {len(chosen)}')
-        self.color.setIcon(status_preview_icon(chosen))
-        self.owner.settings.setValue('project_color_filters',json.dumps(chosen))
-        if hasattr(self.owner,'project_list'):self.owner.filter_projects(self.owner.project_search.text())
-
-    def accepts_color(self,meta):
-        if all(action.isChecked() for action in self.color_actions.values()):return True
-        color=str(meta.get('color') or '')
-        if not QColor(color).isValid():color=''
-        return bool(self.color_actions.get(color) and self.color_actions[color].isChecked())
+    def select_all_tags(self,yes):
+        for key,action in self.status_actions.items():
+            if key.startswith('tag:'):action.setChecked(yes)
 
     def clear_filters(self):
-        self.owner.project_search.clear();self.select_all_colors(True)
-        for key,button in self.owner.project_filter_buttons.items():button.setChecked(key!='__archive__' and not key.startswith('tag:'))
+        self.owner.project_search.clear()
+        for key,button in self.owner.project_filter_buttons.items():
+            button.setChecked(key!='__archive__' and not key.startswith('tag:'))
 
     def set_view(self,mode):
         owner=self.owner;grid=mode!='list'
