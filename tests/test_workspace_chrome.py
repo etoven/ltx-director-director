@@ -194,6 +194,37 @@ def test_timing_overview_refreshes_when_text_segments_are_created_edited_and_rem
     finally:w.project_dirty=False;w.close()
 
 
+def test_long_text_previews_fit_overview_and_keep_all_footers_visible(tmp_path):
+    from PySide6.QtWidgets import QFrame
+    from ltx_prompt_director.models import Segment
+    w=make_window()
+    try:
+        w.set_project_type('minimax_frames')
+        image=tmp_path/'preview.png';frame=QImage(320,180,QImage.Format.Format_RGB32);frame.fill(Qt.GlobalColor.darkBlue);frame.save(str(image))
+        text='A detailed description of camera movement and the surrounding landscape. '*100
+        w.segments=[Segment('Source','',str(image),'video','start','Source guide',3),
+                    Segment('Text 1','','','text','text',text,3),
+                    Segment('Text 2','','','text','text',text,3),
+                    Segment('Text 3','','','text','text',text,6)]
+        w.refresh_timeline(3)
+        for scale,height,width in ((100,96,1100),(100,144,1800),(100,220,1800),(150,144,1100),(200,220,1800),(100,144,1100)):
+            w.set_ui_text_scale(scale);w.resize(width,1100);w.set_conditioning_height(height);QTest.qWait(30)
+            viewport=w.conditioning_guide.viewport()
+            assert w.conditioning_content.height()<=viewport.height()
+            for i in range(1,5):
+                tile=w.conditioning_row.itemAt(i).widget()
+                footer=tile.findChild(QFrame,'conditioningFooter')
+                assert footer.isVisible()
+                y=footer.mapTo(viewport,QPoint()).y()
+                assert 0<=y and y+footer.height()<=viewport.height(),(scale,height,y,footer.height(),viewport.height())
+                assert tile.height()<=viewport.height()
+        # Editing an already-visible preview must not restore content-driven sizing.
+        w.segment_prompt.setPlainText(text*3);QTest.qWait(30)
+        assert w.conditioning_content.height()<=w.conditioning_guide.viewport().height()
+        w.conditioning_guide.grab().save(str(tmp_path/'overview-fitted.png'))
+    finally:w.project_dirty=False;w.close()
+
+
 def test_native_dock_contents_survive_collapse_float_move_and_reference_capabilities():
     w=make_window()
     try:

@@ -1886,7 +1886,22 @@ class TimelineHeightHandle(QFrame):
             event.accept()
 
 
-class ConditioningPreview(QLabel):
+class ConditioningTilePreview(QLabel):
+    """Fill the available tile space without enlarging the overview strip."""
+
+    def sizeHint(self):
+        return QSize(1, 1)
+
+    def minimumSizeHint(self):
+        return QSize(1, 1)
+
+    def heightForWidth(self, width):
+        # QLabel reinstates height-for-width after text/font changes. Keep its
+        # paragraph length out of the scroll area's minimum-height calculation.
+        return 1
+
+
+class ConditioningPreview(ConditioningTilePreview):
     """Fit the original preview into the space left by a tile's header/footer."""
 
     def __init__(self, pixmap: QPixmap):
@@ -8208,7 +8223,7 @@ class MainWindow(QMainWindow):
             row.addWidget(title)
             if is_text:
                 segment=self.segments[record['timeline_index']]
-                thumbnail=QLabel(segment.prompt or 'Text-only segment')
+                thumbnail=ConditioningTilePreview(segment.prompt or 'Text-only segment')
                 thumbnail.setObjectName('conditioningTextPreview')
                 thumbnail.setTextFormat(Qt.TextFormat.PlainText)
                 thumbnail.setWordWrap(True);thumbnail.setMargin(6)
