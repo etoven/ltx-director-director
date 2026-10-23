@@ -61,6 +61,6 @@ Timeline previews are kept separately from the original media to make navigation
 
 ## Arrange a workspace that stays comfortable
 
-Move, resize, show or hide the project library, Properties, Preview and Project Files docks. Supported docks can float; reference images stay docked inside the main window. Panel layout and sizes are remembered. Adjust toolbar text scale from **75% to 200%** to suit your screen.
+Click the outer icon rails to open or collapse panels. Move, resize, show or hide the project library, Properties, Preview and Project Files docks. The Render Queue keeps local video, local artwork and cloud image requests in order; its temporary cover indicators do not change saved project statuses. [See the illustrated queue and panel guide](render-queue-and-panels.md). Supported docks can float; reference images stay docked inside the main window. Panel layout and sizes are remembered. Adjust toolbar text scale from **75% to 200%** to suit your screen.
 
 **Continue:** [Video review](video-review-and-files.md) · [Portable exports](workspace-definitions-and-exports.md) · [Complete feature guide](../usage.md)

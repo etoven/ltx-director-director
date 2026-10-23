@@ -285,6 +285,9 @@ def render_artwork(records: list[dict], tool: ArtworkTool) -> dict[str, str]:
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
     output = {}
     for entry in records[:4]:
+        from .local_generation import LOCAL_CANCEL
+        cancel=LOCAL_CANCEL.get()
+        if cancel is not None and cancel.is_set():raise RuntimeError('Render cancelled')
         if not entry.get("artworkPrompt"):
             continue
         prompt = entry["artworkPrompt"]
@@ -300,6 +303,7 @@ def render_artwork(records: list[dict], tool: ArtworkTool) -> dict[str, str]:
         else:
             data = (_gemini_image(prompt, tool, source_path, references) if tool.provider == "gemini"
                     else _openai_image(prompt, tool, source_path, references))
+        if cancel is not None and cancel.is_set():raise RuntimeError('Render cancelled')
         path = root / (uuid4().hex + ".png")
         path.write_bytes(data)
         output[entry["id"]] = str(path)

@@ -245,8 +245,9 @@ class BackgroundWorker(QRunnable):
 
 
 class BackgroundCallbacks(QObject):
-    def __init__(self, owner, finished, failed, progress=None):
+    def __init__(self, owner, finished, failed, progress=None, allow_close_on_error=False):
         super().__init__(owner)
+        self.allow_close_on_error=allow_close_on_error
         self.owner = owner
         self.finished = finished
         self.failed = failed
@@ -262,7 +263,7 @@ class BackgroundCallbacks(QObject):
 
     @Slot(str)
     def on_failed(self, message):
-        self.owner._close_after_jobs = False
+        if not self.allow_close_on_error:self.owner._close_after_jobs = False
         self._complete(self.failed, message)
 
     def _complete(self, callback, result):
@@ -3425,6 +3426,8 @@ class MainWindow(QMainWindow):
         if splash:
             splash.set_status('Creating timeline and project panels…')
             QApplication.processEvents()
+        from .render_queue import RenderQueue
+        self.render_queue=RenderQueue(lambda *args,**kwargs:self.start_disk_job(*args,**kwargs,allow_close_on_error=True),self)
         self._build_ui()
         self._effect_drop_targets = {
             self.timeline.viewport(): "timeline",
@@ -3466,11 +3469,27 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(0, self.project_dock.raise_)
         QTimer.singleShot(0, self.style_library_tabs)
         self.sync_reference_panel_visibility()
+        from .dock_panels import PanelRails
+        from .render_widgets import render_icon
+        self.panel_rails=PanelRails(self,[
+            ('Projects',toolbar_icon('projects'),self.project_dock,'left'),
+            ('Effects Library',toolbar_icon('catalog'),self.effects_dock,'left'),
+            ('Media Catalog',toolbar_icon('library-catalog'),self.catalog_dock,'left'),
+            ('Reference Media',toolbar_icon('references'),self.minimax_panel.reference_dock,'right'),
+            ('Video Preview',toolbar_icon('preview'),self.project_preview_dock,'right'),
+            ('Image Generation',prompt_action_icon('action-generate'),self.image_generation_dock,'right'),
+            ('Project Files',toolbar_icon('project-files'),self.project_files_dock,'right'),
+            ('Properties',toolbar_icon('settings'),self.project_properties_dock,'right'),
+            ('Render Queue',render_icon('queue'),self.render_queue_dock,'right'),
+            ('AI Activity',prompt_action_icon('action-generate'),self.reasoning_dock,'right'),
+        ])
         self.tabifiedDockWidgetActivated.connect(lambda *_: self.queue_project_panel_width_restore())
         QTimer.singleShot(0, self.restore_startup_workspace)
         self.update_window_title()
 
     def style_library_tabs(self) -> None:
+        if hasattr(self,'panel_rails'):
+            self.panel_rails.schedule();return
         for bar in self.findChildren(QTabBar):
             labels={bar.tabText(index).replace('&','') for index in range(bar.count())}
             if labels=={'Effects Library','PROJECT LIBRARY'}:
@@ -4242,6 +4261,8 @@ class MainWindow(QMainWindow):
         self.statusBar().addPermanentWidget(self.ai_timeline_status)
         self.apply_project_type_ui()
         self.update_summary()
+        from .window_chrome import WindowChrome
+        self.chrome=WindowChrome(self,toolbar,self.current_project_name or 'Untitled project')
 
     def _build_local_generation_ui(self):
         import threading
@@ -4255,13 +4276,22 @@ class MainWindow(QMainWindow):
         self.image_generation_dock.setWidget(self.image_generation_panel)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.image_generation_dock)
         self.image_generation_dock.hide()
+        from .render_widgets import RenderQueuePanel
+        self.render_queue_dock=QDockWidget('RENDER QUEUE',self)
+        self.render_queue_dock.setObjectName('renderQueueDock')
+        self.render_queue_dock.setMinimumWidth(260)
+        self.render_queue_panel=RenderQueuePanel(self.render_queue)
+        self.render_queue_dock.setWidget(self.render_queue_panel)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea,self.render_queue_dock)
+        self.render_queue_dock.hide()
+        self.render_queue.changed.connect(self.update_render_controls)
         panel = self.project_preview_panel
         row = QHBoxLayout()
         self.local_video_generate = QPushButton("✦ Generate locally")
         self.local_video_generate.setToolTip("Render unified output with the Reference panel and local video settings.")
         self.local_video_generate.clicked.connect(self.generate_local_video)
         self.local_video_cancel_button = QPushButton("Cancel generation")
-        self.local_video_cancel_button.clicked.connect(self._local_video_cancel.set)
+        self.local_video_cancel_button.clicked.connect(self.cancel_queued_video)
         self.local_video_cancel_button.hide()
         row.addWidget(self.local_video_generate); row.addWidget(self.local_video_cancel_button)
         panel.layout().insertLayout(1, row)
@@ -4270,7 +4300,7 @@ class MainWindow(QMainWindow):
         panel.layout().addWidget(self.local_video_log)
 
     def generate_local_video(self):
-        if self._local_video_busy: return
+        if any(j.kind=='Video' and j.project_id==str(self.current_project_id or '') and j.state in {'Waiting','Rendering','Cancelling'} for j in self.render_queue.jobs):return
         profile = load_profile(self.settings)
         try: validate_profile(profile, "video")
         except ValueError as error:
@@ -4287,6 +4317,8 @@ class MainWindow(QMainWindow):
             duration=profile["video_duration"], width=profile["video_width"], height=profile["video_height"], steps=profile["video_steps"],
             seed=profile["video_seed"])
         workspace = (self.workspace_revision, self.current_project_id, self.project_type)
+        import threading
+        video_cancel=threading.Event()
         previous_preview = getattr(self.project_preview_panel, "pending_preview_path", "")
         self.local_video_log.clear()
         self.project_preview_panel._generation_autoplay = True
@@ -4294,7 +4326,7 @@ class MainWindow(QMainWindow):
         self.local_video_generate.setEnabled(False); self.local_video_cancel_button.show()
         self.project_preview_dock.show()
         self.statusBar().showMessage("Local video generation started")
-        def current(): return workspace == (self.workspace_revision, self.current_project_id, self.project_type)
+        def current(): return self.render_workspace_is_current(workspace)
         def event(value):
             if not current(): return
             self.local_video_log.receive_event(value)
@@ -4335,18 +4367,18 @@ class MainWindow(QMainWindow):
             for segment in conditioning_segments:
                 if segment.kind in ('image','video'):materialize_source(segment)
             references = video_references(conditioning_segments, extra_references, request['duration'])
-            return run_request({**request, "references": references}, cancel=self._local_video_cancel)
+            return run_request({**request, "references": references}, cancel=video_cancel)
         def finish():
             self._local_video_busy = False; self.local_video_generate.setEnabled(True)
             self.local_video_cancel_button.hide(); self.local_video_pill.hide()
             if current(): self.project_preview_panel.player.setLoops(QMediaPlayer.Loops.Once)
         def ready(result):
             finish()
+            if workspace[1]:self.attach_local_generated_video(result["path"],workspace)
             if not current():
-                self.statusBar().showMessage("Local video retained in the generation folder; the active project changed.", 8000); return
+                self.statusBar().showMessage("Queued video saved for its original project.", 8000); return
             self.project_preview_panel.set_project(self.current_project_name or "Generated video", result["path"])
             self._local_result_video = {"scope": workspace, "path": result["path"]}
-            if self.current_project_id: self.attach_local_generated_video(result["path"], workspace)
             self.statusBar().showMessage("Local video ready · " + result["path"], 12000)
         def failed(message):
             finish()
@@ -4354,13 +4386,55 @@ class MainWindow(QMainWindow):
                 self.local_video_log.receive_event({"kind": "error", "message": str(message)})
                 self.project_preview_panel.set_project(self.current_project_name or "Video Preview", previous_preview)
                 self.statusBar().showMessage(str(message), 15000)
-        self.start_disk_job(operation, (), ready, failed, progress=event)
+        def started():
+            if current():
+                self.local_video_log.clear();self.project_preview_dock.show()
+                self.project_preview_panel._generation_autoplay=True
+        self.start_render_job(operation,(),ready,failed,title=self.current_project_name or 'Untitled video',
+            source='local',model='MiniMax H3',kind='Video',
+            details=f"{request['width']} × {request['height']} · {request['duration']} s · {request['steps']} steps",
+            progress=event,cancel=video_cancel,started=started,cancelled=finish)
+
+    def render_workspace_is_current(self,workspace):
+        return (workspace[1]==self.current_project_id and workspace[2]==self.project_type
+                and (bool(workspace[1]) or workspace[0]==self.workspace_revision))
+
+    def render_target_segments(self,workspace):
+        if self.render_workspace_is_current(workspace):return self.segments
+        # Cached segments may share objects with this project's current mode.
+        # Never apply an old-mode render through that cached alias.
+        if workspace[1]==self.current_project_id:return []
+        session=self.project_sessions.get(workspace[1],{}) if workspace[1] else {}
+        state=session.get('state',{})
+        return state.get('segments',[]) if state.get('projectType')==workspace[2] else []
+
+    def start_render_job(self,operation,args,finished,failed,*,title,source,model,kind='Image',details='',progress=None,cancel=None,started=None,cancelled=None,project_id=None):
+        job=self.render_queue.enqueue(operation,args,finished,failed,title=title,
+            project_id=self.current_project_id if project_id is None else project_id,
+            source=source,model=model,kind=kind,details=details,progress=progress,cancel=cancel,
+            started=started,cancelled=cancelled)
+        self.render_queue_dock.show();self.render_queue_dock.raise_()
+        return job
+
+    def update_render_controls(self):
+        active=[j for j in self.render_queue.jobs if j.kind=='Video' and j.state in {'Waiting','Rendering','Cancelling'}]
+        self._local_video_busy=bool(active)
+        current=any(j.project_id==str(self.current_project_id or '') for j in active)
+        if hasattr(self,'local_video_generate'):
+            self.local_video_generate.setEnabled(not current);self.local_video_cancel_button.setVisible(current)
+        if hasattr(self,'project_list'):self.project_list.viewport().update()
+
+    def cancel_queued_video(self):
+        for job in tuple(self.render_queue.jobs):
+            if job.kind=='Video' and job.project_id==str(self.current_project_id or ''):self.render_queue.cancel_job(job.id)
 
     def cancel_local_artwork(self):
-        for event in self._local_artwork_cancel.values(): event.set()
+        for job in tuple(self.render_queue.jobs):
+            if job.kind=='Image' and job.source=='local':self.render_queue.cancel_job(job.id)
+        for event in tuple(self._local_artwork_cancel.values()):event.set()
 
     def local_image_progress(self, event, workspace):
-        if workspace != (self.workspace_revision, self.current_project_id, self.project_type): return
+        if not self.render_workspace_is_current(workspace): return
         self.image_generation_dock.show()
         self.image_generation_panel.receive_event(event)
 
@@ -4873,8 +4947,13 @@ class MainWindow(QMainWindow):
         for size in (15, 10, 9, 8):
             theme = theme.replace(f"font-size:{size}px", f"font-size:{scaled(size)}px")
         from .workspace_style import workspace_style
-        self.setStyleSheet(workspace_style(theme,scale))
+        from .window_chrome import chrome_style
+        from .dock_panels import panel_style
+        from .scope_style import scope_style
+        self.setStyleSheet(workspace_style(theme,scale)+chrome_style(scale)+panel_style(scale)+scope_style(scale))
         self.findChild(QToolBar,'mainToolbar').setIconSize(QSize(metric(24),metric(24)))
+        if hasattr(self,'chrome'):self.chrome.update_metrics(scale)
+        if hasattr(self,'panel_rails'):self.panel_rails.update_metrics(scale)
         self.minimax_panel.cache_state.setMinimumWidth(metric(90))
         for target in self.minimax_panel.reference_targets:target.preview.setFixedSize(metric(116),metric(112))
         self.timeline_scale.setFixedWidth(metric(98))
@@ -5264,22 +5343,23 @@ class MainWindow(QMainWindow):
             self.attach_project_video(path)
 
     def attach_local_generated_video(self, source_path, workspace):
-        meta = self.current_library_metadata()
-        if not meta: return
+        project_id=workspace[1]
+        metadata_path=project_library_path()/f'{project_id}.meta.json'
+        if not project_id or not metadata_path.is_file():return
         source = Path(source_path)
-        destination = project_library_path() / "previews" / f"{meta['id']}_{uuid4().hex}_generated.mp4"
+        destination = project_library_path() / "previews" / f"{project_id}_{uuid4().hex}_generated.mp4"
         def copy_render():
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, destination)
             return str(destination)
         def ready(path):
-            if workspace != (self.workspace_revision, self.current_project_id, self.project_type): return
-            latest = self.current_library_metadata()
-            if not latest: return
+            try:latest=json.loads(metadata_path.read_text(encoding='utf-8'))
+            except (OSError,ValueError):return
             latest["previewVideoPath"] = path
             latest["previewVideoName"] = "Generated video.mp4"
             self.persist_library_metadata(latest)
-            self.project_preview_panel.set_project(str(latest.get("name") or "Generated video"), path)
+            if self.render_workspace_is_current(workspace):
+                self.project_preview_panel.set_project(str(latest.get("name") or "Generated video"), path)
         self.start_disk_job(copy_render, (), ready,
             lambda message: self.statusBar().showMessage("Video remains in the generation folder: " + str(message), 12000), serialized=True)
 
@@ -5905,6 +5985,7 @@ class MainWindow(QMainWindow):
     def update_window_title(self) -> None:
         self.setWindowTitle(application_window_title(self.current_project_name))
         self.sync_minimax_panel()
+        self.update_render_controls()
 
     def queue_closing_projects(self) -> None:
         """Save every dirty workspace only after the user requests app close."""
@@ -5977,6 +6058,7 @@ class MainWindow(QMainWindow):
         QApplication.processEvents(QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents)
 
     def closeEvent(self, event) -> None:
+        if hasattr(self,'render_queue'):self.render_queue.shutdown()
         self.reject_segment_prompt_review()
         if hasattr(self, "shot_sequence_panel"):
             self.shot_sequence_panel.deactivate()
@@ -6013,6 +6095,7 @@ class MainWindow(QMainWindow):
             self.settings.setValue("last_project_id", self.current_project_id)
         else:
             self.settings.remove("last_project_id")
+        if hasattr(self,"panel_rails"):self.panel_rails.save()
         self.settings.setValue("window/geometry", self.saveGeometry())
         self.settings.setValue("window/state", self.saveState())
         self.settings.sync()
@@ -7482,11 +7565,11 @@ class MainWindow(QMainWindow):
         worker.signals.failed.connect(self.ai_failure_received)
         self.thread_pool.start(worker)
 
-    def start_disk_job(self, operation, args: tuple, finished, failed, *, serialized: bool = False, progress=None, cancel=None) -> None:
+    def start_disk_job(self, operation, args: tuple, finished, failed, *, serialized: bool = False, progress=None, cancel=None, allow_close_on_error=False) -> None:
         """Execute filesystem work without touching widgets outside the GUI thread."""
         worker = BackgroundWorker(operation, args, cancel)
         self._pending_disk_jobs += 1
-        callbacks = BackgroundCallbacks(self, finished, failed, progress)
+        callbacks = BackgroundCallbacks(self, finished, failed, progress, allow_close_on_error)
         worker.signals.finished.connect(callbacks.on_finished)
         worker.signals.failed.connect(callbacks.on_failed)
         worker.signals.local_event.connect(callbacks.on_local_event)
@@ -8056,7 +8139,7 @@ class MainWindow(QMainWindow):
             self.shot_sequence_panel.setVisible(sequence)
             for i in range(self.sequence_controls.count()):
                 widget=self.sequence_controls.itemAt(i).widget()
-                if widget:widget.setVisible(not sequence and not prompt_only)
+                if widget:widget.setVisible(not sequence and not prompt_only and (audio or widget not in (self.sfx,self.spoken_dialog,self.reduce_music,self.voice_options_button)))
             self.intent_prompt_splitter.setVisible(not sequence)
             if sequence:
                 self.segment_quick_fix_button.hide()
@@ -9590,93 +9673,85 @@ class MainWindow(QMainWindow):
 
     def _start_segment_artwork(self, segment_id, record, tool):
         import threading
-        cancel = threading.Event() if tool is not None and tool.provider == "local" else None
-        item = next((item for item in self.segments if item.id == segment_id), None)
-        if not item or tool is None or not item.artwork_prompt:
-            return
-        if cancel is not None: self._local_artwork_cancel[segment_id] = cancel
-        if cancel is not None:self.image_generation_panel.begin()
-        self._artwork_jobs = getattr(self, "_artwork_jobs", 0) + 1
-        self.minimax_panel.ai_marquee.begin("✦ Rendering image…")
-        item.artwork_status = "generating"
-        row = next((i for i, s in enumerate(self.segments) if s.id == segment_id), -1)
-        if row >= 0 and row < self.timeline.count():
-            card = self.timeline.itemWidget(self.timeline.item(row))
-            if isinstance(card, SegmentCard):
-                card.artwork_timer.start()
-                card._advance_artwork_shimmer()
-        workspace = (self.workspace_revision, self.current_project_id, self.project_type)
-        # Source comes from a real timeline segment, NEVER the AI JSON. For
-        # edits this stays the unmodified original until an image succeeds.
-        request = dict(record)
-        request["id"] = segment_id
-        request["referenceImages"] = self._artwork_reference_inputs(segment_id)
-        if item.kind == "image":
-            # Saved .LTXD projects may keep full-resolution originals inside
-            # their archive. Resolve the original lazily before image-to-image.
-            request["sourceImage"] = materialize_source(item)
-
-        def ready(images):
-            if self._local_artwork_cancel.get(segment_id) is cancel:
-                self._local_artwork_cancel.pop(segment_id, None)
-            self._artwork_jobs = max(0, getattr(self, "_artwork_jobs", 1) - 1)
+        item=next((item for item in self.segments if item.id==segment_id),None)
+        if not item or tool is None or not item.artwork_prompt:return
+        workspace=(self.workspace_revision,self.current_project_id,self.project_type)
+        key=(workspace[1] or workspace[0],workspace[2],segment_id)
+        jobs=getattr(self,'_segment_render_jobs',{})
+        if key in jobs and jobs[key].state in {'Waiting','Rendering','Cancelling'}:return
+        self._segment_render_jobs=jobs
+        cancel=threading.Event()
+        signature=(item.media_path,item.artwork_prompt,item.prompt)
+        request=copy.deepcopy(dict(record));request['id']=segment_id
+        request['referenceImages']=copy.deepcopy(self._artwork_reference_inputs(segment_id))
+        if item.kind=='image':request['sourceImage']=materialize_source(item)
+        tool=copy.deepcopy(tool)
+        if tool.provider=='local':self._local_artwork_cancel[segment_id]=cancel
+        self._artwork_jobs=getattr(self,'_artwork_jobs',0)+1
+        item.artwork_status='generating'
+        def current():return self.render_workspace_is_current(workspace)
+        def target():
+            segment=next((s for s in self.render_target_segments(workspace) if s.id==segment_id),None)
+            return segment if segment and (segment.media_path,segment.artwork_prompt,segment.prompt)==signature else None
+        def dirty(segment):
+            if current() or (workspace[1] and workspace[1]==self.current_project_id):
+                index=next((i for i,s in enumerate(self.segments) if s.id==segment_id),0)
+                self.refresh_timeline(index);self.mark_dirty()
+            elif workspace[1] in self.project_sessions:
+                self.project_sessions[workspace[1]]['dirty']=True
+                self.project_list.viewport().update()
+        def cleanup():
+            if self._local_artwork_cancel.get(segment_id) is cancel:self._local_artwork_cancel.pop(segment_id,None)
+            jobs.pop(key,None)
+            self._artwork_jobs=max(0,getattr(self,'_artwork_jobs',1)-1)
             if not self._artwork_jobs and not self.ai_busy:
-                self.minimax_panel.ai_marquee.finish()
-                self.ai_edit_feed.hide()
-            if workspace != (self.workspace_revision, self.current_project_id, self.project_type):
+                self.minimax_panel.ai_marquee.finish();self.ai_edit_feed.hide()
+        def release_changed_target():
+            if any(other_key[0]==key[0] and other_key[2]==segment_id and other_job.state in {'Waiting','Rendering','Cancelling'} for other_key,other_job in jobs.items()):return
+            segments=self.render_target_segments(workspace)
+            if workspace[1] and workspace[1]==self.current_project_id:segments=self.segments
+            candidate=next((s for s in segments if s.id==segment_id),None)
+            if candidate and candidate.artwork_status=='generating':
+                candidate.artwork_status='awaiting';dirty(candidate)
+        def ready(images):
+            cleanup();segment=target()
+            if segment is None:
+                release_changed_target()
+                job=self.render_queue.active
+                if job:job.message='Output retained; the target changed after submission.'
                 return
-            if segment_id in getattr(self, "_artwork_cancelled_segments", set()):
-                return  # A rejected image must never overwrite restored media.
-            segment = next((s for s in self.segments if s.id == segment_id), None)
-            if not segment:
-                return
-            path = images.get(segment_id)
+            if segment_id in getattr(self,'_artwork_cancelled_segments',set()) and current():return
+            path=images.get(segment_id)
             if path and Path(path).is_file():
-                original_kind = segment.kind
-                segment.kind = "image"
-                if original_kind == "text":
-                    segment.role = (segment.artwork_target_role
-                                    if segment.artwork_target_role in {"start", "end"}
-                                    else "start")
-                # Only the project reference changes; source file is untouched.
-                segment.media_path = segment.preview_path = path
-                clear_archived_source(segment)
-                segment.artwork_status = "complete"
-                self.statusBar().showMessage(
-                    f"✦ {'Edited frame' if original_kind == 'image' else 'New frame'} ready: {segment.name}",
-                    5500,
-                )
-            else:
-                segment.artwork_status = "failed"
-                self.statusBar().showMessage(
-                    f"Art generation failed for {segment.name}; right-click to retry", 7000
-                )
-            index = next(i for i, s in enumerate(self.segments) if s.id == segment_id)
-            self.refresh_timeline(index)
-            self.mark_dirty()
-
+                original_kind=segment.kind;segment.kind='image'
+                if original_kind=='text':segment.role=segment.artwork_target_role if segment.artwork_target_role in {'start','end'} else 'start'
+                segment.media_path=segment.preview_path=path;clear_archived_source(segment)
+                segment.artwork_status='complete'
+                self.statusBar().showMessage('Queued image ready: '+segment.name,5500)
+            else:segment.artwork_status='failed'
+            dirty(segment)
         def failed(message):
             ready({})
-            if workspace != (self.workspace_revision, self.current_project_id, self.project_type): return
-            if tool.provider == "local":
-                self.image_generation_panel.receive_event({"kind": "error", "message": str(message)})
-            detail = str(message).strip()
-            self.statusBar().showMessage(
-                f"Image failed ({tool.model}); details in prompt panel", 15000
-            )
-            # Persist the actionable API reason until dismissed, instead of
-            # losing the only useful error in a nine-second status bar.
-            self.minimax_panel.show_message(
-                "Image generation failed for " + segment_id
-                + " using " + tool.model + ": " + detail[:950],
-                "error",
-            )
-
-        self.start_disk_job(
-            render_artwork, ([request], tool),
-            ready, failed,
-            **({"progress": lambda event: self.local_image_progress(event, workspace), "cancel": cancel} if tool.provider == "local" else {}),
-        )
+            if not current():return
+            if tool.provider=='local':self.image_generation_panel.receive_event({'kind':'error','message':str(message)})
+            self.minimax_panel.show_message('Image generation failed for '+segment_id+' using '+tool.model+': '+str(message)[:950],'error')
+        def cancelled():
+            cleanup();release_changed_target()
+        def started():
+            if not current():return
+            self.minimax_panel.ai_marquee.begin('✦ Rendering image…')
+            if tool.provider=='local':self.image_generation_panel.begin()
+        job=self.start_render_job(render_artwork,([request],tool),ready,failed,
+            title=(self.current_project_name or 'Untitled project')+' · '+item.name,
+            source='local' if tool.provider=='local' else 'cloud',model=tool.model,kind='Image',
+            details=f"{self.output_width.value()} × {self.output_height.value()}",cancel=cancel,
+            progress=(lambda event:self.local_image_progress(event,workspace)) if tool.provider=='local' else None,
+            started=started,cancelled=cancelled)
+        jobs[key]=job
+        row=next((i for i,s in enumerate(self.segments) if s.id==segment_id),-1)
+        if 0<=row<self.timeline.count():
+            card=self.timeline.itemWidget(self.timeline.item(row))
+            if isinstance(card,SegmentCard):card.artwork_timer.start();card._advance_artwork_shimmer()
 
     def retry_selected_artwork(self):
         if self.ai_busy:

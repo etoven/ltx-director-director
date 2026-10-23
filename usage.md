@@ -29,6 +29,12 @@ Add up to four mixed references through **Reference media**. Video samples offer
 
 AI generation is an explicit action. Switching workspaces and adding media let you prepare the plan before submitting a request.
 
+## Queue renders and keep your panels close
+
+Local video, local artwork and cloud image requests share the **Render Queue** on the right icon rail. Render jobs run in order; pause waiting jobs or cancel an individual request. Project thumbnails show a spinner and Waiting or Rendering badge, with distinct local-chip and cloud icons. The project's saved status color stays unchanged.
+
+Click a panel's icon to open it; click again or use its heading arrow to collapse the column. Drag panel headings to rearrange supported docks. [Read the illustrated queue and panel guide](docs/render-queue-and-panels.md).
+
 ## Every creative tool, at a glance
 
 | Tool | What it helps you do | How to use it |

@@ -108,13 +108,17 @@ class EffectDialog(QDialog):
             elif event.get('kind') == 'progress':
                 from .local_widgets import progress_text
                 self.status.setText(progress_text(event))
-        self.owner.start_disk_job(render_artwork, ([{
+        self._thumbnail_render_job=self.owner.start_render_job(render_artwork, ([{
             'id': 'effect-thumbnail', 'artworkPrompt': 'Create an expressive effect library thumbnail: '
-            + self.name.text() + '. ' + self.prompt.toPlainText()}], tools[0]), ready, failed, progress=progress, cancel=self.cancel_generation)
+            + self.name.text() + '. ' + self.prompt.toPlainText()}], tools[0]), ready, failed, title='Effect thumbnail · '+self.name.text(),
+            source='local' if tools[0].provider=='local' else 'cloud',model=tools[0].model,project_id='',
+            progress=progress, cancel=self.cancel_generation,cancelled=lambda:failed('Thumbnail render cancelled.'))
 
     def done(self, result):
         self.cancel_generation.set()
         self.job_serial += 1
+        job=getattr(self,'_thumbnail_render_job',None)
+        if job:self.owner.render_queue.cancel_job(job.id)
         super().done(result)
 
     def save(self):

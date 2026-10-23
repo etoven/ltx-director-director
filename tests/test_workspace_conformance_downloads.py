@@ -29,7 +29,7 @@ class WorkspaceConformanceTests(unittest.TestCase):
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
         store = WorkspaceStore(Path(folder.name) / 'workspaces')
-        with patch.object(ui, 'WorkspaceStore', return_value=store), patch.object(ui.MainWindow, 'restore_startup_workspace'):
+        with patch.object(ui, 'WorkspaceStore', return_value=store), patch.object(ui.MainWindow, 'restore_startup_workspace'), patch.object(ui.MainWindow,'keep_window_on_screen'):
             window = ui.MainWindow()
         self.addCleanup(lambda: (setattr(window, '_close_saves_queued', True), setattr(window, 'project_dirty', False), window.close()))
         window.download_directory = str(Path(folder.name) / 'downloads')
@@ -139,6 +139,7 @@ class WorkspaceConformanceTests(unittest.TestCase):
         w.record_export(first)
         self.assertEqual(w.download_tray.history[0]['path'], str(first.resolve()))
         self.assertEqual(w.download_tray.list.item(0).data(Qt.ItemDataRole.UserRole), str(first.resolve()))
+        w.resize(1600,950);w.show();self.app.processEvents()
         w.toggle_downloads()
         self.assertTrue(w.download_tray.isVisible())
         w.toggle_downloads()
@@ -157,7 +158,7 @@ class WorkspaceConformanceTests(unittest.TestCase):
                 self.app.processEvents()
                 time.sleep(.01)
         self.assertEqual(w._pending_disk_jobs, 0)
-        path = w.export_directory() / 'Export Test.LTXD'
+        path = w.export_directory() / 'Export_Test.LTXD'
         self.assertTrue(path.is_file())
         self.assertEqual(w.download_tray.history[0]['path'], str(path.resolve()))
 

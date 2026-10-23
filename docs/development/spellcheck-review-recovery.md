@@ -8,4 +8,4 @@ The focused regressions check actual QTextLayout underline ranges, document repl
 
 Validation: the release-core suite passed 241 tests and 12 subtests. All five focused spelling cases passed. Fourteen isolated local segment-review groups passed, including both new approval/rejection cases with a native note. All ten existing background/spelling/inline-cue/close checks passed. The window-chrome proof separately passed its control, geometry and toolbar-overlap checks. No GPU generation was run.
 
-This patch is held for review with the panel and window-chrome proof. No release version or published wheel has been changed.
+The user approved the panel and window-chrome proof. This patch is included with the 1.13.0a120 integrated header, panel rails and render queue release.

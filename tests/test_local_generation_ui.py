@@ -143,7 +143,7 @@ def test_local_progress_is_ignored_after_a_project_switch_and_no_paid_prompt():
         assert load_profile(w.settings)['video_seed'] == 931351171509952
 
 
-def test_generated_video_attachment_preserves_previous_render_and_discards_stale_metadata():
+def test_generated_video_attachment_updates_origin_and_preserves_previous_render():
     import tempfile
     from pathlib import Path
     with window() as w, tempfile.TemporaryDirectory() as folder:
@@ -152,13 +152,15 @@ def test_generated_video_attachment_preserves_previous_render_and_discards_stale
         previous = root / 'old.mp4'; previous.write_bytes(b'original render')
         w.current_project_id = 'test-project'
         meta = {'id': w.current_project_id, 'name': 'Example', 'previewVideoPath': str(previous)}
+        import json
+        metadata=root/'test-project.meta.json';metadata.write_text(json.dumps(meta))
         scope = (w.workspace_revision, w.current_project_id, w.project_type)
         jobs = []
         with patch('ltx_prompt_director.ui.project_library_path', return_value=root), \
              patch.object(w, 'current_library_metadata', return_value=dict(meta)), \
              patch.object(w, 'start_disk_job', side_effect=lambda op, args, ready, fail, **kw: jobs.append((op, args, ready))), \
              patch.object(w, 'persist_library_metadata') as persist, \
-             patch.object(w.project_preview_panel, 'set_project'):
+             patch.object(w.project_preview_panel, 'set_project') as preview:
             w.attach_local_generated_video(str(source), scope)
             op, args, ready = jobs.pop(); path = op(*args); ready(path)
             assert persist.call_args.args[0]['previewVideoPath'] == path
@@ -166,8 +168,12 @@ def test_generated_video_attachment_preserves_previous_render_and_discards_stale
             assert Path(path).read_bytes() == b'new render'
             persist.reset_mock()
             w.attach_local_generated_video(str(source), scope)
-            op, args, ready = jobs.pop(); w.workspace_revision += 1
-            path = op(*args); ready(path)
+            op, args, ready = jobs.pop(); w.workspace_revision += 1;w.current_project_id='another-project'
+            preview.reset_mock();path = op(*args); ready(path)
+            assert persist.call_args.args[0]['id']=='test-project'
+            preview.assert_not_called()
+            persist.reset_mock();w.attach_local_generated_video(str(source),scope)
+            op,args,ready=jobs.pop();metadata.unlink();ready(op(*args))
             persist.assert_not_called()
             assert source.read_bytes() == b'new render'
             assert previous.read_bytes() == b'original render'

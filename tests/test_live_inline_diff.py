@@ -18,6 +18,19 @@ class LiveInlineDiffTests(unittest.TestCase):
                                  env=dict(os.environ,QT_QPA_PLATFORM='offscreen'))
         self.assertEqual(process.returncode,0,process.stdout+process.stderr)
 
+    def test_render_queue_scheduling_and_cancellation(self):
+        code=("import os,sys,pytest; rc=pytest.main(['-q','tests/test_render_queue.py']); "
+              "sys.stdout.flush();sys.stderr.flush();os._exit(rc)")
+        result=subprocess.run([sys.executable,'-c',code],timeout=30,capture_output=True,text=True,
+                              env=dict(os.environ,QT_QPA_PLATFORM='offscreen'))
+        self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+
+    def test_native_workspace_chrome_and_queue_regressions(self):
+        process=subprocess.run([sys.executable,'scripts/check_native_regressions.py','tests/test_workspace_chrome.py'],
+                               timeout=240,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,
+                               env=dict(os.environ,QT_QPA_PLATFORM='offscreen'))
+        self.assertEqual(process.returncode,0,process.stdout+process.stderr)
+
     def test_paragraph_review_reject_keeps_other_paragraphs(self):
         before = "One original.\n\nTwo original.\n\nThree original."
         after = "One revised.\n\nTwo original.\n\nThree revised."

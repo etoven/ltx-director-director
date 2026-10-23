@@ -5,7 +5,7 @@ import copy
 import json
 from pathlib import Path
 from PySide6.QtCore import Qt, QSize, QRect, QRectF, QTimer
-from PySide6.QtGui import QAction, QColor, QIcon, QKeySequence, QPainter, QPen, QPixmap, QLinearGradient
+from PySide6.QtGui import QAction, QColor, QFont, QIcon, QKeySequence, QPainter, QPen, QPixmap, QLinearGradient
 from PySide6.QtWidgets import (QApplication, QAbstractItemView, QCheckBox, QComboBox, QFrame,
     QHBoxLayout, QLabel, QLineEdit, QListWidget, QMenu, QMessageBox, QPushButton,
     QSizePolicy, QStackedWidget, QStyle, QStyledItemDelegate, QToolButton,
@@ -64,6 +64,19 @@ class CheckMenu(QMenu):
 class ProjectCardDelegate(QStyledItemDelegate):
     def __init__(self, owner, parent):
         super().__init__(parent); self.owner = owner
+        self.render_phase=0
+        self.render_timer=QTimer(self);self.render_timer.setInterval(80)
+        self.render_timer.timeout.connect(self.advance_render_spinner)
+        if hasattr(owner,'render_queue'):owner.render_queue.changed.connect(self.sync_render_spinner)
+
+    def advance_render_spinner(self):
+        self.render_phase=(self.render_phase+1)%12;self.parent().viewport().update()
+
+    def sync_render_spinner(self):
+        busy=any(j.state in {'Waiting','Rendering','Cancelling'} for j in self.owner.render_queue.jobs)
+        if busy and not self.render_timer.isActive():self.render_timer.start()
+        elif not busy:self.render_timer.stop()
+        self.parent().viewport().update()
 
     def createEditor(self, parent, option, index):
         editor=QLineEdit(parent);editor.setObjectName('projectNameEditor')
@@ -125,7 +138,12 @@ class ProjectCardDelegate(QStyledItemDelegate):
                 pixmap = pixmap.scaled(image.size(), Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation)
                 painter.save(); painter.setClipRect(image)
                 painter.drawPixmap(image.center()-pixmap.rect().center(), pixmap); painter.restore()
-        font = option.font; font.setPixelSize(s(14)); painter.setFont(font)
+        queue=getattr(self.owner,'render_queue',None)
+        job=queue.for_project(meta.get('id')) if queue else None
+        if job:
+            from .render_widgets import paint_render_overlay
+            paint_render_overlay(painter,image,job,queue.position(job),self.render_phase,option.font,scale)
+        font = QFont(option.font); font.setPixelSize(s(14)); painter.setFont(font)
         painter.setPen(QColor('#edf0ed'))
         fm = painter.fontMetrics(); line = max(s(17), fm.height())
         name = str(meta.get('name') or 'Untitled project')

@@ -179,23 +179,26 @@ class MiniMaxReferenceTests(unittest.TestCase):
             window.refine_minimax_prompt()
             self.assertEqual(worker.call_args.args[1][-1], window.minimax_reference_images)
 
-    def test_frames_dock_accepts_both_references_and_passes_snapshot_to_worker(self):
+    def test_frames_workspace_preserves_saved_references_but_omits_disabled_inputs(self):
         window = self.make_window()
-        window.set_project_type('minimax_frames')
-        window.show_reference_images()
         first = self.add_reference(window, 0)
         second = self.add_reference(window, 1)
-        self.assertFalse(window.references_button.isHidden())
-        self.assertFalse(window.minimax_panel.reference_dock.isHidden())
-        self.assertEqual(window.minimax_panel.workflow_label.text(), 'Frames + references')
+        window.set_project_type('minimax_frames')
+        window.show_reference_images()
+        self.assertTrue(window.references_button.isHidden())
+        self.assertTrue(window.minimax_panel.reference_dock.isHidden())
+        self.assertEqual(window.minimax_reference_images[:2], [first, second])
+        self.assertFalse(any(window.active_reference_images()))
         with patch.object(window, 'ai_credentials', return_value=('gemini', 'test', 'unused')), patch.object(window, 'start_ai_worker') as worker:
             window.generate_minimax_prompt_frames()
             self.assertIs(worker.call_args.args[0], ai.build_minimax_h3_prompt)
-            self.assertEqual(worker.call_args.args[1][-1], [first, second, None, None])
+            self.assertFalse(any(worker.call_args.args[1][-1]))
             window.minimax_panel.editor.setPlainText('[FRAME USE] Edited.')
             window.refine_minimax_prompt()
             self.assertIs(worker.call_args.args[0], ai.refine_minimax_h3_prompt)
-            self.assertEqual(worker.call_args.args[1][-1], [first, second, None, None])
+            self.assertFalse(any(worker.call_args.args[1][-1]))
+        window.set_project_type('minimax_references')
+        self.assertEqual(window.active_reference_images()[:2], [first, second])
 
     def test_reference_edits_invalidate_cache_and_reject_stale_worker_result(self):
         window = self.make_window()

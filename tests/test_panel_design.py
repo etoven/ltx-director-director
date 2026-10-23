@@ -226,7 +226,11 @@ def test_project_inline_rename_f2_menu_enter_and_escape():
                 QTest.keyClick(w.project_list,Qt.Key.Key_F2);QTest.qWait(10)
                 editor=next(e for e in w.project_list.findChildren(QLineEdit,'projectNameEditor') if e.isVisible())
                 assert w.project_list.visualItemRect(w.project_list.currentItem()).contains(editor.geometry().center())
-                editor.setText(name);QTest.keyClick(editor,Qt.Key.Key_Return);QTest.qWait(30)
+                editor.setText(name);QTest.keyClick(editor,Qt.Key.Key_Return)
+                import time
+                deadline=time.monotonic()+2
+                while records[0]['name']!=name and time.monotonic()<deadline:
+                    APP.processEvents();QTest.qWait(10)
                 assert records[0]['name']==name and w.current_project_name==name
                 assert records[0]['status']=='Ready' and records[0]['tags']==['Keep tag']
                 assert records[0]['description']=='Keep description'
@@ -244,7 +248,10 @@ def test_project_inline_rename_f2_menu_enter_and_escape():
             assert action is w.library_surface.rename_action and action.shortcut().toString()=='F2'
             action.trigger();QTest.qWait(10)
             editor=next(e for e in w.project_list.findChildren(QLineEdit,'projectNameEditor') if e.isVisible())
-            editor.setText('From context menu');QTest.keyClick(editor,Qt.Key.Key_Return);QTest.qWait(30)
+            editor.setText('From context menu');QTest.keyClick(editor,Qt.Key.Key_Return)
+            deadline=time.monotonic()+2
+            while records[0]['name']!='From context menu' and time.monotonic()<deadline:
+                APP.processEvents();QTest.qWait(10)
             assert records[0]['name']=='From context menu'
             collection=next(w.project_list.item(i) for i in range(w.project_list.count())
                             if w.project_list.item(i).data(Qt.ItemDataRole.UserRole).get('kind')=='collection')
@@ -252,7 +259,12 @@ def test_project_inline_rename_f2_menu_enter_and_escape():
             QTest.keyClick(w.project_list,Qt.Key.Key_F2);QTest.qWait(10)
             editor=next(e for e in w.project_list.findChildren(QLineEdit,'projectNameEditor') if e.isVisible())
             assert editor.text()=='Journey'
-            editor.setText('Travel');QTest.keyClick(editor,Qt.Key.Key_Return);QTest.qWait(30)
+            editor.setText('Travel');QTest.keyClick(editor,Qt.Key.Key_Return)
+            # Rename commits are deferred until Qt has closed the editor.
+            import time
+            deadline=time.monotonic()+2
+            while records[1]['collection']!='Travel' and time.monotonic()<deadline:
+                APP.processEvents();QTest.qWait(10)
             assert records[1]['collection']=='Travel' and records[1]['name']=='Ending'
             assert w.selected_library_project()['name']=='Travel'
     finally:

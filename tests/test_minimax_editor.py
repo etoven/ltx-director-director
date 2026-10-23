@@ -129,9 +129,9 @@ class UnifiedEditorTests(unittest.TestCase):
         test_local_progress_is_ignored_after_a_project_switch_and_no_paid_prompt()
 
     def test_local_render_media_preservation_and_export(self):
-        from test_local_generation_ui import (test_generated_video_attachment_preserves_previous_render_and_discards_stale_metadata,
+        from test_local_generation_ui import (test_generated_video_attachment_updates_origin_and_preserves_previous_render,
                                                test_unsaved_local_video_can_be_exported)
-        test_generated_video_attachment_preserves_previous_render_and_discards_stale_metadata()
+        test_generated_video_attachment_updates_origin_and_preserves_previous_render()
         test_unsaved_local_video_can_be_exported()
 
     def test_local_generation_transport_and_media_contracts(self):

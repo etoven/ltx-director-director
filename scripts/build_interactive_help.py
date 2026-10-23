@@ -11,6 +11,7 @@ OUT = ROOT / 'ltx_prompt_director/assets/help'
 chapters = [
  ('start', 'Start here', ROOT / 'usage.md'),
  ('setup', 'Setup and local generation', ROOT / 'docs/local-generation-and-setup.md'),
+ ('renders', 'Render queue and panels', ROOT / 'docs/render-queue-and-panels.md'),
  ('timeline', 'Media and timeline', ROOT / 'docs/media-and-timeline.md'),
  ('prompts', 'Prompt workflows', ROOT / 'docs/unified-workflows.md'),
  ('refinement', 'Refinement and audio', ROOT / 'docs/refinement-and-audio.md'),
