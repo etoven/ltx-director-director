@@ -26,4 +26,6 @@ Add timeline scrubbing after this video build has been reviewed and published. U
 
 The fitted one-box mix UI was approved by the user before release preparation. Source checks pass (43 focused tests; six optional tests skipped). Twelve original isolated native regressions passed, followed by the edge-fitting and original-block reuse regressions. The rebuilt installed wheel matches all 472 packaged source/assets and passes 20 extension/media/cache/portable-project regressions, including four isolated UI checks. The existing application smoke check and six installed conditioning-audio regressions also passed.
 
-Candidate wheel SHA-256: `6d662853119c3b219fe049ddf63743d28641d4a35faf873f78561228d107cdb3`. Publication and verification of the actual public artifact will be recorded after the experimental workflow finishes.
+Candidate wheel SHA-256: `f97839cf3ec70756a26acaccf7b0937df6919adf05f4e9ff57872575550a501a`. Publication and verification of the actual public artifact will be recorded after the experimental workflow finishes.
+
+The initial publication run caught a desktop-picker routing regression in the new job export action. The action now uses the shared native desktop picker; all six focused picker/file-action checks pass, and the rebuilt installed package passes its file-action checks. The approved layout is unchanged.

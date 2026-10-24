@@ -5,8 +5,9 @@ import sys
 from PySide6.QtCore import Qt, QRect, QSize, QTimer, QProcess, QMimeData, QUrl, Signal
 from PySide6.QtGui import QColor, QFont, QIcon, QPen, QDrag, QDesktopServices
 from PySide6.QtWidgets import (QApplication, QFrame, QHBoxLayout, QLabel, QListWidget, QListWidgetItem,
-    QPushButton, QSizePolicy, QStyledItemDelegate, QStyle, QVBoxLayout, QWidget, QFileDialog, QMessageBox)
+    QPushButton, QSizePolicy, QStyledItemDelegate, QStyle, QVBoxLayout, QWidget, QMessageBox)
 from .render_queue import ACTIVE_STATES, RenderJob
+from .file_dialogs import choose_document_save
 
 
 def render_icon(name):
@@ -256,7 +257,7 @@ class RenderQueuePanel(QWidget):
             except ImportError:pass
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(path.parent)))
             return
-        target,_=QFileDialog.getSaveFileName(self,'Export rendered video',path.name,'Video files (*'+path.suffix+');;All files (*)')
+        target=choose_document_save(self,'Export rendered video',path.name,'Video files (*'+path.suffix+');;All files (*)')
         if not target or Path(target).resolve()==path.resolve():return
         def export():
             import os,shutil,tempfile
