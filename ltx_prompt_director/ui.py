@@ -74,6 +74,8 @@ from .inline_cues import PromptTextEdit
 from .prompt_timecodes import retime_prompt
 from .prompt_sections import document_sections
 from .segment_prompt_review import SegmentPromptReview
+from .audio_timeline import AudioTimelinePanel
+from .audio_tracks import audio_export_records
 
 FPS = 24
 MIN_DURATION = 0.01
@@ -417,7 +419,7 @@ def _persist_library_archive(meta: dict, metadata_path: Path) -> None:
 
 
 def _export_ltx_snapshot(segments: list[Segment], global_prompt: str, output_width: int, output_height: int,
-                         media_directory: Path, path: str) -> None:
+                         media_directory: Path, path: str, conditioning_audio=None) -> None:
     """Prepare full-resolution ComfyUI media and JSON away from the GUI thread."""
     media_directory.mkdir(parents=True, exist_ok=True)
     cursor = 0
@@ -464,6 +466,9 @@ def _export_ltx_snapshot(segments: list[Segment], global_prompt: str, output_wid
                         })
         timeline.append(record)
         cursor += length
+    if conditioning_audio:
+        audio_timeline.extend(audio_export_records(conditioning_audio, media_directory, used_media_names))
+        cursor = max(cursor, max((r['start'] + r['length'] for r in audio_timeline), default=0))
     payload = {"version": 1, "settings": {"start_second": 0, "end_second": cursor / FPS, "duration_seconds": cursor / FPS, "start_frame": 0, "end_frame": cursor, "duration_frames": cursor, "epsilon": .99, "use_custom_audio": bool(audio_timeline), "use_custom_motion": False, "inpaint_audio": True, "frame_rate": FPS, "display_mode": "seconds", "custom_width": output_width, "custom_height": output_height, "resize_method": "crop", "divisible_by": 32, "img_compression": 0, "override_audio": False}, "global_prompt": global_prompt, "retake_global_prompt": "", "timeline": {"mainTrackEnabled": True, "audioTrackEnabled": bool(audio_timeline), "motionTrackEnabled": False, "showFilenames": True, "overrideAudio": False, "inpaint_audio": True, "propHeight": 163, "globalPropHeight": 124, "global_prompt": global_prompt, "retake_global_prompt": "", "retakeMode": False, "retakeStart": 0, "retakeLength": 0, "retakePrompt": "", "retakeStrength": 1, "retakeVideo": None, "normalStartFrame": 0, "normalDurationFrames": cursor, "segments": timeline, "motionSegments": [], "audioSegments": audio_timeline}}
     temporary_fd, temporary_name = tempfile.mkstemp(prefix=f".{Path(path).name}.", suffix=".tmp", dir=Path(path).parent)
     try:
@@ -1722,6 +1727,7 @@ class TimelineRuler(QWidget):
         super().__init__()
         self.offset = 0
         self.scale = 65
+        self.playhead = None
         self.setFixedHeight(28)
 
     def set_offset(self, value: int) -> None:
@@ -1750,6 +1756,10 @@ class TimelineRuler(QWidget):
             painter.drawLine(x, 12, x, 24)
             painter.setPen(QColor("#ff5757") if second == 0 else QColor("#788186"))
             painter.drawText(x + 4, 16, "0" if second == 0 else f"{second}.00")
+        if self.playhead is not None:
+            x = round(self.playhead * scale - self.offset)
+            painter.setPen(QPen(QColor('#ffce75'), 2))
+            painter.drawLine(x, 0, x, self.height())
 
 
 class ResizeHandle(QFrame):
@@ -3846,6 +3856,12 @@ class MainWindow(QMainWindow):
         self.timeline_height_handle.finished.connect(self.finish_timeline_height_resize)
         timeline_layout.addWidget(self.timeline_height_handle)
         outer.addWidget(timeline_shell)
+        self.audio_panel = AudioTimelinePanel(self)
+        self.audio_panel.changed.connect(self.mark_dirty)
+        self.audio_panel.seek_requested.connect(self.seek_conditioning_audio)
+        self.audio_panel.transport.position_changed.connect(self.show_audio_playhead)
+        self.audio_main_layout = outer
+        outer.addWidget(self.audio_panel)
         self.conditioning_guide = QScrollArea()
         self.conditioning_guide.setObjectName("conditioningGuide")
         self.conditioning_guide.setWidgetResizable(True)
@@ -4271,6 +4287,10 @@ class MainWindow(QMainWindow):
         self.restore_director_intent_splitter()
         QTimer.singleShot(0, self.restore_director_intent_splitter)
         self.shot_sequence_panel = ShotSequencePanel(self, ProjectPreviewPanel, root)
+        self.shot_sequence_panel.shots.view_changed.connect(self.sync_audio_timeline)
+        self.shot_sequence_panel.shots.horizontalScrollBar().valueChanged.connect(self.audio_scroll_from_sequence)
+        self.timeline.horizontalScrollBar().valueChanged.connect(self.audio_scroll_from_sequence)
+        self.audio_panel.scroll.horizontalScrollBar().valueChanged.connect(self.sequence_scroll_from_audio)
         outer.addWidget(self.shot_sequence_panel, 1)
         self.shot_sequence_panel.hide()
         self.editor_root=root
@@ -5630,6 +5650,7 @@ class MainWindow(QMainWindow):
             "downloadDirectory": self.download_directory,
             "minimaxDrafts": {key: dict(value) for key, value in self.minimax_drafts.items()},
             "segments": self.segments,
+            "conditioningAudio": {'enabled': self.audio_panel.enabled.isChecked(), 'clips': self.audio_panel.records()},
             "globalPrompt": self.global_prompt.toPlainText(),
             "directorIntent": self.intent.toPlainText(),
             "requestedLength": self.requested_length.value(),
@@ -5667,6 +5688,8 @@ class MainWindow(QMainWindow):
         self._loading = True
         self.workspace_revision += 1
         self.segments = state.get("segments", [])
+        audio = state.get('conditioningAudio', {})
+        self.audio_panel.set_project(audio.get('clips', []), audio.get('enabled', True))
         self.download_directory = str(state.get("downloadDirectory", ""))
         self.global_prompt.setPlainText(str(state.get("globalPrompt", "")))
         self.intent.setPlainText(str(state.get("directorIntent", "")))
@@ -6059,6 +6082,7 @@ class MainWindow(QMainWindow):
         QApplication.processEvents(QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents)
 
     def closeEvent(self, event) -> None:
+        self.audio_panel.transport.pause()
         if hasattr(self,'render_queue'):self.render_queue.shutdown()
         self.reject_segment_prompt_review()
         if hasattr(self, "shot_sequence_panel"):
@@ -6226,6 +6250,7 @@ class MainWindow(QMainWindow):
         self.download_directory = ""
         self._loading = True
         self.segments = []
+        self.audio_panel.set_project([])
         self.current_project_id = None
         self.current_project_name = "Untitled"
         self.update_project_preview()
@@ -6843,6 +6868,7 @@ class MainWindow(QMainWindow):
             f"Boundary {boundary:.2f}s · {left.duration:.2f}s / {right.duration:.2f}s · total length preserved")
 
     def update_summary(self) -> None:
+        self.sync_audio_timeline()
         if self.workspace_engine == "shot_sequence":
             self.workflow_label.setText("Completed shots · RAM playback · source audio")
             self.magic_button.hide()
@@ -7983,7 +8009,7 @@ class MainWindow(QMainWindow):
 
     @property
     def has_project_content(self) -> bool:
-        return self.workspace_engine == "shot_sequence" or bool(self.segments) or (self.prompt_only_workspace and bool(self.minimax_prompt_text.strip()))
+        return bool(self.audio_panel.clips) or self.workspace_engine == "shot_sequence" or bool(self.segments) or (self.prompt_only_workspace and bool(self.minimax_prompt_text.strip()))
 
     @property
     def workspace_draft_key(self) -> str:
@@ -8021,6 +8047,7 @@ class MainWindow(QMainWindow):
         if getattr(self, "duration_animation", None):
             self.duration_animation.stop()
         was_sequence = self.workspace_engine == "shot_sequence"
+        self.audio_panel.transport.pause()
         self.store_minimax_draft()
         self.project_type = project_type
         self.workspace_revision += 1
@@ -8160,6 +8187,47 @@ class MainWindow(QMainWindow):
                 self.shot_sequence_panel.deactivate()
         if hasattr(self, 'prompt_surface'):
             self.prompt_surface.sync_workspace()
+        if hasattr(self, 'audio_panel'):
+            self.audio_main_layout.removeWidget(self.audio_panel)
+            self.shot_sequence_panel.audio_layout.removeWidget(self.audio_panel)
+            if self.workspace_engine == 'shot_sequence':
+                self.shot_sequence_panel.audio_layout.addWidget(self.audio_panel)
+            else:
+                self.audio_main_layout.insertWidget(self.audio_main_layout.indexOf(self.timeline_shell) + 1, self.audio_panel)
+            self.audio_panel.show()
+            self.sync_audio_timeline()
+
+    def sync_audio_timeline(self):
+        if not hasattr(self, 'audio_panel'):
+            return
+        if self.workspace_engine == 'shot_sequence' and hasattr(self, 'shot_sequence_panel'):
+            shots = self.shot_sequence_panel.shots
+            self.audio_panel.set_timeline(shots.total, shots.scale, shots.LEFT)
+        else:
+            self.audio_panel.set_timeline(self.total_duration(), self.pixels_per_second)
+
+    def audio_scroll_from_sequence(self, offset):
+        if not getattr(self, '_syncing_audio_scroll', False):
+            self._syncing_audio_scroll = True
+            self.audio_panel.scroll.horizontalScrollBar().setValue(offset)
+            self._syncing_audio_scroll = False
+
+    def sequence_scroll_from_audio(self, offset):
+        if not getattr(self, '_syncing_audio_scroll', False):
+            self._syncing_audio_scroll = True
+            timeline = self.shot_sequence_panel.shots if self.workspace_engine == 'shot_sequence' else self.timeline
+            timeline.horizontalScrollBar().setValue(offset)
+            self._syncing_audio_scroll = False
+
+    def seek_conditioning_audio(self, milliseconds, audible):
+        if self.workspace_engine == 'shot_sequence':
+            self.shot_sequence_panel.seek_sequence(milliseconds, audible=audible)
+
+    def show_audio_playhead(self, milliseconds):
+        self.ruler.playhead = milliseconds / 1000
+        self.ruler.update()
+        if hasattr(self, 'shot_sequence_panel') and self.workspace_engine == 'shot_sequence':
+            self.shot_sequence_panel.shots.set_playhead(milliseconds)
 
     def update_conditioning_guide(self) -> None:
         if not hasattr(self, "conditioning_guide"):
@@ -10120,7 +10188,8 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Exporting LTX timeline JSON in background: {path}…")
         self.start_disk_job(_export_ltx_snapshot,
                             (copy.deepcopy(self.segments), self.global_prompt.toPlainText(),
-                             self.output_width.value(), self.output_height.value(), comfy_root / "input" / "whatdreamscost", path),
+                             self.output_width.value(), self.output_height.value(), comfy_root / "input" / "whatdreamscost", path,
+                             copy.deepcopy(self.audio_panel.clips) if self.audio_panel.enabled.isChecked() else []),
                             lambda _result: self.record_export(path),
                             lambda message: self.export_failed(path, message), serialized=True)
 
@@ -10194,6 +10263,7 @@ class MainWindow(QMainWindow):
             if not loaded:
                 raise ValueError("No supported embedded image, video, or text segments were found.")
             self.segments = loaded
+            self.audio_panel.import_ltx(payload.get('timeline', {}).get('audioSegments', []), fps, comfy_input)
             self.minimax_reference_images = [None] * 4
             self.minimax_prompt_text = ""
             self.minimax_refinement_instructions = ""
@@ -10234,9 +10304,14 @@ class MainWindow(QMainWindow):
                 source = Path(materialize_source(segment)) if segment.kind != "text" and segment.media_path else None
                 value["sourceData"] = data_url(str(source)) if source and source.exists() else None
             frames.append(value)
+        audio_clips = self.audio_panel.records()
+        if include_media:
+            for clip in audio_clips:
+                clip['sourceData'] = data_url(clip['media_path'])
         return {
             "app": "ltx-director-director",
-            "projectVersion": 8,
+            "projectVersion": 10,
+            "conditioningAudio": {'enabled': self.audio_panel.enabled.isChecked(), 'clips': audio_clips},
             "projectType": self.project_type,
             "workspaceDefinition": copy.deepcopy(self.workspace_definition),
             "shotSequence": dict(self.shot_sequence_settings),
@@ -10318,9 +10393,17 @@ class MainWindow(QMainWindow):
             loaded.append(segment)
         prompt_only = self.workspace_definitions.get(payload.get("projectType"), {}).get("prompt_mode") == "prompt_only"
         sequence = self.workspace_definitions.get(payload.get("projectType"), {}).get("engine") == "shot_sequence"
-        if not loaded and not prompt_only and not sequence:
+        if not loaded and not prompt_only and not sequence and not payload.get('conditioningAudio', {}).get('clips'):
             raise ValueError("Project contains no supported main-track segments.")
         self.segments = loaded
+        audio = payload.get('conditioningAudio', {})
+        audio_clips = copy.deepcopy(audio.get('clips', []))
+        for index, clip in enumerate(audio_clips):
+            if clip.get('sourceData'):
+                destination = APP_CACHE / f'audio-{cache_key}-{index}{Path(clip["name"]).suffix}'
+                write_data_url(clip.pop('sourceData'), destination)
+                clip['media_path'] = str(destination)
+        self.audio_panel.set_project(audio_clips, audio.get('enabled', True))
         self.global_prompt.setPlainText(payload.get("globalPrompt", ""))
         self.intent.setPlainText(payload.get("directorIntent", ""))
         render_prompt_notes(self.intent)

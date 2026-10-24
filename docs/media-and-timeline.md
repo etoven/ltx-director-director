@@ -95,6 +95,40 @@ the strip. Its size and collapsed state are remembered.
 
 There is no fixed segment-count or total-length cap in the editor. The renderer you use still determines which output lengths it can produce.
 
+## Place conditioning audio beneath the sequence
+
+The **Audio** timeline is available in every workspace, including Shot Sequence.
+It starts collapsed and opens when you add sound, leaving space for the editors.
+Use **＋ Audio** to import WAV, MP3, FLAC, Ogg, Opus, M4A, AAC or AIFF sound,
+or drop several files directly onto a track. Video containers with an audio
+stream are also accepted. Each strip displays a waveform of its source sound.
+
+Drag a strip freely along its track or onto another track. Strips can overlap,
+start together or leave any amount of silence between them. Moving or trimming
+one strip leaves the other strips in place. Drag either edge to frame its source
+interval; select it to enter exact **Start**, **End**, **Source in** and **Track**
+values. Times snap to 24 fps frames. Changing Start moves the strip; changing End
+trims its length; Source in chooses where playback begins in the original file.
+
+![Native audio timeline with independent waveform strips, a gap in the wind track, overlapping cues and exact frame controls](images/audio-timeline-proof.png)
+
+Drag the audio ruler to scrub with an immediate playhead and time readout plus
+brief audio audition. The arrow keys step by one frame. **▶** or Space on the
+audio timeline plays the strips together, including silence in the gaps. In
+Shot Sequence, scrubbing also seeks the movie preview. Select **Mute** to silence
+one strip, or clear **Conditioning** to exclude all independent audio from
+audition and LTX export.
+
+Drag the dotted grip beneath the audio tracks to resize the panel. Drag up or
+double-click the grip to collapse it; double-click again or use the header arrow
+to reopen it at its previous size. Tracks scroll vertically when needed.
+
+Native **.LTXD** saves include the original audio files, track positions and source
+trims. LTX timeline JSON export copies enabled, unmuted audio into the configured
+ComfyUI input folder and includes independent audio segments. Other renderer
+handoffs and the completed-shot movie bake do not yet consume these independent
+audio tracks.
+
 ## Anchor the opening and the destination
 
 **Start frame** tells a compatible workflow to begin a segment from its supplied image. **End frame** describes the image it should reach by that segment’s end. These controls are available in LTX and MiniMax.

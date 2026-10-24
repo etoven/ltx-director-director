@@ -129,6 +129,9 @@ class ShotSequencePanel(QWidget):
             signal.connect(self.transition_changed)
         column.addWidget(QLabel('NLA timeline · thumbnail strips · drag scrubhead to seek · green cached / red rebuilding'))
         column.addWidget(self.shots,1)
+        self.audio_layout=QVBoxLayout()
+        self.audio_layout.setContentsMargins(0,0,0,0)
+        column.addLayout(self.audio_layout)
         buttons=ControlRow()
         self.timeline_buttons=[]
         actions=[('Add shots…','add',self.choose,'Import completed movie files'),
@@ -209,6 +212,8 @@ class ShotSequencePanel(QWidget):
         self.preview.choose.setEnabled(True)
         self.preview.export.setEnabled(bool(self.owner.segments) and not self._baking)
         self.cache_percent=0;self.preview.play.setToolTip('Play the assembled sequence; the timeline line shows cache coverage')
+        if self._active:
+            self._pending_position=self.owner.audio_panel.transport.position
         self.shots.set_playhead(self._pending_position)
         self.preview.play.setEnabled(bool(self.owner.segments))
         self.preview.title.setText('Shot Sequence · RAM preview')
@@ -460,6 +465,7 @@ class ShotSequencePanel(QWidget):
         self.seek_sequence(milliseconds)
 
     def seek_sequence(self,milliseconds,audible=False):
+        self.owner.audio_panel.transport.seek(milliseconds, audible=audible)
         self._pending_position=milliseconds
         self._waiting_position=milliseconds>=self._available_frames/24*1000
         if getattr(self.preview,'_memory_preview',False):
@@ -477,11 +483,17 @@ class ShotSequencePanel(QWidget):
         if getattr(self.preview,'_memory_preview',False) and not self._installing and not self._waiting_position:
             self._pending_position=milliseconds
             self.shots.set_playhead(milliseconds,follow=self.preview.player.playbackState()==QMediaPlayer.PlaybackState.PlayingState)
+            audio=self.owner.audio_panel.transport
+            audio.position=milliseconds
+            audio.sync(self.preview.player.playbackState()==QMediaPlayer.PlaybackState.PlayingState)
+            audio.position_changed.emit(milliseconds)
 
     def sequence_playback_changed(self,state):
         if self._audio_scrub.active:return
         if not self._installing and state!=QMediaPlayer.PlaybackState.StoppedState:
             self._desired_playing=state==QMediaPlayer.PlaybackState.PlayingState
+        if state!=QMediaPlayer.PlaybackState.PlayingState:
+            self.owner.audio_panel.transport.pause()
 
     def sequence_media_status(self,status):
         if status in {QMediaPlayer.MediaStatus.LoadedMedia,QMediaPlayer.MediaStatus.BufferedMedia}:

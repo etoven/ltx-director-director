@@ -42,6 +42,8 @@ Click a panel's icon to open it; click again or use its heading arrow to collaps
 | Image segments | Establish visual checkpoints | Add or drop PNG, JPEG, WebP or GIF media |
 | Video segments | Bring source motion into the plan | Add or drop MP4 or WebM clips |
 | Text segments | Plan action before a reference exists | Click Add text, then write the beat in the editor |
+| Audio strips | Arrange conditioning sound with gaps and overlaps | Drop audio below the sequence, move strips between tracks and frame Start, End and Source in |
+| Waveforms and audio scrubbing | Audition timing while editing | Drag the audio ruler, step with arrow keys or press Space to play; collapse or resize the panel with its lower grip |
 | Drag reordering | Change the sequence’s progression | Drag a timeline card to its new position |
 | Segment duration | Give each action the time it needs | Drag the resize edge or edit the Duration control |
 | Frame roles | Identify where an image anchors a beat | Select Start frame or End frame where the workspace supports it |

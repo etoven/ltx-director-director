@@ -108,7 +108,7 @@ class ProjectArchiveTests(unittest.TestCase):
             self.assertEqual(Path(materialize_source(restored.segments[1])).read_bytes(), b'full original video source bytes' * 400)
             # Re-saving a reopened project needs no original file outside its archive.
             save_project_archive(project, restored.project_payload(include_media=False), restored.segments)
-            self.assertEqual(read_project(project)['projectVersion'], 9)
+            self.assertEqual(read_project(project)['projectVersion'], 10)
 
     def test_legacy_json_projects_still_open_with_bounded_previews(self):
         with tempfile.TemporaryDirectory() as directory:

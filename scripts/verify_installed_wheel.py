@@ -1,4 +1,5 @@
 """Verify a wheel independently of the source checkout and user settings."""
+import ast
 import os
 from pathlib import Path
 import subprocess
@@ -6,6 +7,7 @@ import sys
 import tempfile
 
 wheel = str(Path(sys.argv[1]).resolve())
+source_root = Path(__file__).resolve().parents[1]
 with tempfile.TemporaryDirectory(prefix='director-wheel-') as folder:
     target = Path(folder) / 'installed'
     subprocess.run([sys.executable, '-m', 'pip', 'install', '--no-deps', '--target', str(target), wheel], check=True)
@@ -73,3 +75,18 @@ print('Installed wheel verified:', ltx_prompt_director.__version__, flush=True)
 sys.stderr.flush(); os._exit(0)
 '''
     subprocess.run([sys.executable, '-c', code], cwd=folder, env=env, check=True, timeout=int(os.environ.get("DIRECTOR_WHEEL_TIMEOUT", "120")))
+    # Exercise the shipped modules from a temporary working directory. Keeping
+    # source-checkout imports out of sys.path catches omitted feature modules.
+    audio_tests = source_root / 'tests/test_conditioning_audio.py'
+    names = [node.name for node in ast.parse(audio_tests.read_text()).body
+             if isinstance(node, ast.FunctionDef) and node.name.startswith('test_')]
+    env['PYTEST_DISABLE_PLUGIN_AUTOLOAD'] = '1'
+    for name in names:
+        code = ('import os,sys; from pathlib import Path; import ltx_prompt_director; '
+                'assert Path(ltx_prompt_director.__file__).resolve().is_relative_to(Path(os.environ["PYTHONPATH"])); '
+                'import pytest; '
+                f'rc=pytest.main({["-q", str(audio_tests) + "::" + name]!r}); '
+                'sys.stdout.flush(); sys.stderr.flush(); os._exit(rc)')
+        print('Installed audio regression:', name, flush=True)
+        subprocess.run([sys.executable, '-X', 'faulthandler', '-c', code], cwd=folder,
+                       env=env, check=True, timeout=int(os.environ.get('DIRECTOR_WHEEL_TIMEOUT', '120')))

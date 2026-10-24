@@ -108,7 +108,7 @@ MEDIA_SUFFIXES = {"video/mp4": ".mp4", "video/webm": ".webm", "video/quicktime":
                   "image/gif": ".gif", "image/bmp": ".bmp", "image/tiff": ".tiff",
                   "image/heif": ".heif", "image/avif": ".avif", "audio/mp4": ".m4a",
                   "audio/wav": ".wav", "audio/mpeg": ".mp3", "audio/flac": ".flac",
-                  "audio/ogg": ".ogg", "audio/aac": ".aac"}
+                  "audio/ogg": ".ogg", "audio/aac": ".aac", "audio/aiff": ".aiff"}
 
 
 def media_suffix(path: str | Path, fallback: str = "") -> str:
@@ -138,6 +138,8 @@ def media_mime_from_header(header: bytes, suffix: str = "") -> str:
         return "video/mp4"
     if header.startswith(b"\x1aE\xdf\xa3"):
         return "video/webm" if b"webm" in header else "video/x-matroska"
+    if header.startswith(b'FORM') and header[8:12] in (b'AIFF', b'AIFC'):
+        return 'audio/aiff'
     if header.startswith(b"RIFF"):
         return {b"WEBP": "image/webp", b"WAVE": "audio/wav",
                 b"AVI ": "video/x-msvideo"}.get(header[8:12], "application/octet-stream")
@@ -152,7 +154,7 @@ def media_mime_from_header(header: bytes, suffix: str = "") -> str:
             ".mkv": "video/x-matroska", ".avi": "video/x-msvideo", ".m4v": "video/mp4",
             ".wav": "audio/wav", ".mp3": "audio/mpeg", ".flac": "audio/flac",
             ".ogg": "audio/ogg", ".m4a": "audio/mp4", ".aac": "audio/aac",
-            ".opus": "audio/ogg", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+            ".opus": "audio/ogg", ".aif": "audio/aiff", ".aiff": "audio/aiff", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
             ".png": "image/png", ".webp": "image/webp", ".gif": "image/gif"}.get(suffix.lower(), "application/octet-stream")
 
 

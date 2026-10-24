@@ -10,6 +10,7 @@ from .shot_sequence import shot_layout, settings, transitions, FPS, MODES
 
 
 class ShotTimeline(QScrollArea):
+    view_changed = Signal()
     movies_dropped = Signal(list,int)
     movies_replaced = Signal(list,str)
     status_requested = Signal(list,str)
@@ -181,6 +182,7 @@ class ShotTimeline(QScrollArea):
         self.canvas.resize(max(self.viewport().width(),round(self.LEFT+self.total*self.scale+28)),
                            max(self.viewport().height(),self.TOP+2*self.TRACK+2*self.AUDIO_TRACK+24))
         self.canvas.update()
+        self.view_changed.emit()
 
     def resizeEvent(self,event):
         super().resizeEvent(event);self.resize_canvas()

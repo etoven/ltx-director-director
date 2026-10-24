@@ -127,6 +127,14 @@ def save_project_archive(path: str | Path, payload: dict, segments: list) -> Non
                     size = video_source_dimensions(segment.media_path) or getattr(segment, "_source_size", None)
                     if size:
                         frame["sourceSize"] = list(size)
+            for index, clip in enumerate(payload.get('conditioningAudio', {}).get('clips', [])):
+                source = Path(clip['media_path'])
+                member = f'audio/{index:04d}{source.suffix.lower()}'
+                with source.open('rb') as stream:
+                    clip['mediaDigest'] = _copy_to_archive(archive, member, stream, digest=True)
+                clip.pop('media_path', None)
+                clip.pop('sourceData', None)
+                clip['archiveSource'] = member
             refs = payload.get("minimaxH3", {}).get("referenceImages", [])
             for index, ref in enumerate(refs):
                 if ref and ref.get('kind') in {'video','audio'}:
@@ -148,7 +156,7 @@ def save_project_archive(path: str | Path, payload: dict, segments: list) -> Non
                 archive.writestr(member, base64.b64decode(encoded))
                 ref["archiveImage"] = member
                 ref["imageMime"] = header.removeprefix("data:").split(";", 1)[0]
-            payload["projectVersion"] = 9
+            payload["projectVersion"] = 10
             archive.writestr(MANIFEST, json.dumps(payload, separators=(",", ":"), ensure_ascii=False), compress_type=zipfile.ZIP_DEFLATED, compresslevel=6)
         os.replace(temporary.name, target)
         for frame, segment in zip(payload["frames"], segments):
@@ -202,6 +210,9 @@ def load_project_archive(path: str | Path) -> dict:
             frame["name"] = safe_media_filename(frame.get("name", ""), "Segment", suffix=suffix)
             frame["_archiveMediaPath"] = str(_member_cache_path(frame["archiveSource"], source, suffix))
             frame["_archiveSourceSize"] = info.file_size
+        for clip in payload.get('conditioningAudio', {}).get('clips', []):
+            if clip.get('archiveSource'):
+                clip['media_path'] = str(_cached_member(archive, clip['archiveSource'], source))
         for ref in payload.get("minimaxH3", {}).get("referenceImages", []):
             if ref:
                 for key, archive_key in [('path','archiveMedia'),('audio_path','archiveAudio')]:

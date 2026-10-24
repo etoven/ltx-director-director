@@ -8,7 +8,7 @@ Build a visual plan for AI video, turn it into a detailed production prompt, and
 
 ![The Aurora workspace: a visual timeline, creative direction and one continuous MiniMax production brief](docs/images/panel-overhaul.png)
 
-*Current release: Aurora 1.13.0a123 on `experimental`. Screenshots show the native app with an authored demonstration project.*
+*Current release: Aurora 1.13.0a124 on `experimental`. Screenshots show the native app with an authored demonstration project.*
 
 ## See the story before you generate
 
@@ -19,6 +19,16 @@ Replace a frame without rebuilding the beat. Copy an original image to the clipb
 ![Image checkpoints and a text action beat arranged on a duration-scaled timeline](docs/images/timeline-and-magic-build.png)
 
 **[Explore the timeline and media tools →](docs/media-and-timeline.md)**
+
+Arrange independent audio strips beneath the sequence in every workspace. Drop
+multiple sound files, preview their waveforms, leave gaps or overlap tracks, and
+frame their start, end and source-in points. Scrub to audition sound with a live
+playhead, or play the tracks together. Collapse the panel or drag its lower grip
+to resize it. Portable projects retain original audio, and LTX timeline JSON
+includes enabled, unmuted strips. Other renderer handoffs and the completed-shot
+movie bake do not yet use these independent tracks.
+
+![Independent waveform tracks with free placement and audio framing controls](docs/images/audio-timeline-proof.png)
 
 ## Direct a complete film—or one precise beat
 
@@ -117,7 +127,7 @@ Customize the workspace itself in **Settings → Workspaces**: choose the editor
 Install the current experimental wheel:
 
 ```bash
-python3 -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a123-py3-none-any.whl'
+python3 -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a124-py3-none-any.whl'
 ltx-director-director
 ```
 
