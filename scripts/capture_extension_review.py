@@ -66,6 +66,14 @@ with tempfile.TemporaryDirectory() as folder:
     w.show_video_render_preview(dict(kind='preview',media='image',path=str(backdrop),step=8))
     w._video_generation_counts[w.video_preview_key()]=2;w.update_render_controls();settle()
     w.project_preview_panel.grab().save(str(output/'video-preview-rendering.png'))
-    queue.shutdown();w.close();app.processEvents()
+    queue.shutdown()
+    w.segments[1].kind='text';w.segments[1].role='text';w.segments[1].media_path='';w.segments[1].preview_path=''
+    w.segments[1].prompt='The traveler follows the ridge, slows, and pauses beneath the aurora.'
+    w.refresh_timeline(0);w.autofit_timeline()
+    w.ruler.scrub_requested.emit(18)
+    settle();settle()
+    w.grab(QRect(0,0,w.centralWidget().geometry().right()+1,420)).save(str(output/'timeline-scrub.png'))
+    w.project_preview_panel.grab().save(str(output/'timeline-scrub-preview.png'))
+    w.close();app.processEvents()
 print('Captured extension timeline, render queue, and rendering preview.',flush=True)
 sys.stdout.flush();os._exit(0)

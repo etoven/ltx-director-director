@@ -39,6 +39,8 @@ Click a panel's icon to open it; click again or use its heading arrow to collaps
 
 Add continuations with **V＋**, set each block's length with the timeline controls, and drag the shared mix box's edges to adjust its length. Choose the blend mode in that same box. Marked block lengths add together, with the blends included. [Read the illustrated extension and render guide](docs/video-extensions.md).
 
+Drag the existing time ruler to scrub rendered video and audio. Before rendering, the preview follows the text, image or video conditioning segment beneath the scrub position.
+
 ## Every creative tool, at a glance
 
 | Tool | What it helps you do | How to use it |

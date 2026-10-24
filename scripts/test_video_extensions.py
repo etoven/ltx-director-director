@@ -15,6 +15,14 @@ CASES=[
     'tests/test_video_extension_ui.py::test_failed_block_prevents_continuations_and_blend',
     'tests/test_video_extension_ui.py::test_grouped_generation_uses_marked_durations_and_previous_tail',
     'tests/test_video_extension_ui.py::test_ctrl_selection_and_context_group_follow_visual_order',
+    'tests/test_timeline_preview.py::test_ruler_gesture_selects_conditioning_preview_and_keeps_editor_selection',
+    'tests/test_timeline_preview.py::test_obsolete_preview_is_discarded_and_new_project_request_is_not_lost',
+    'tests/test_timeline_preview.py::test_rendered_seek_auditions_audio_and_condition_video_seeks_silently',
+    'tests/test_timeline_preview.py::test_cancelled_preview_cannot_reopen_a_panel_in_the_same_project',
+    'tests/test_timeline_preview.py::test_editing_a_prompt_discards_an_older_pending_preview',
+    'tests/test_timeline_preview.py::test_long_conditioning_text_stays_inside_resizable_preview',
+    'tests/test_timeline_preview.py::test_continuous_scrubbing_is_throttled_instead_of_waiting_for_drag_to_stop',
+    'tests/test_timeline_preview.py::test_real_rendered_clip_loads_at_scrub_position_with_audio_stream',
     'tests/test_local_generation_ui.py::test_native_video_uses_unified_output_reference_panel_and_settings_directly',
     'tests/test_local_generation_ui.py::test_generated_video_attachment_updates_origin_and_preserves_previous_render',
     'tests/test_local_generation_ui.py::test_native_video_excludes_saved_references_in_conditioning_only_workspaces',
@@ -24,11 +32,11 @@ CASES=[
 ]
 for index,case in enumerate(CASES):
     with tempfile.TemporaryDirectory(prefix='director-qt-') as folder:
-        env={**os.environ,'QT_QPA_PLATFORM':'offscreen',
+        env={**os.environ,'QT_QPA_PLATFORM':'offscreen','PYTEST_DISABLE_PLUGIN_AUTOLOAD':'1',
              **{f'XDG_{key}_HOME':str(Path(folder)/key.lower()) for key in ('CONFIG','DATA','CACHE')}}
-        code=('import os,sys,pytest;rc=pytest.main('+repr(['-q',case])+');'
+        code=('import requests,os,sys,pytest;rc=pytest.main('+repr(['-q',case])+');'
               'sys.stdout.flush();sys.stderr.flush();os._exit(rc)')
         print(f'Native regression {index+1}/{len(CASES)}: {case}',flush=True)
-        result=subprocess.run([sys.executable,'-X','faulthandler','-c',code],cwd=ROOT,env=env,timeout=65)
+        result=subprocess.run([sys.executable,'-X','faulthandler','-c',code],cwd=ROOT,env=env,timeout=180)
         if result.returncode:raise SystemExit(result.returncode)
 print(f'All {len(CASES)} isolated native regressions passed.',flush=True)

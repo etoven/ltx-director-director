@@ -22,6 +22,8 @@ def test_cleanup_only_selected_completed_group_and_file_export_drag(tmp_path):
     panel=RenderQueuePanel(queue);panel.refresh()
     assert panel.can_cleanup(panel.selected_job())
     jobs[-1].state='Waiting';assert not panel.can_cleanup(panel.selected_job());jobs[-1].state='Complete'
+    consumer=queue.enqueue(lambda:None,(),lambda _:None,lambda _:None,title='Other project continuation',kind='Video',project_id='other',dependencies=(jobs[0].id,))
+    consumer.state='Rendering';assert not panel.can_cleanup(panel.selected_job());consumer.state='Cancelled'
     destination=tmp_path/'export.mp4'
     with patch('ltx_prompt_director.render_widgets.choose_document_save',return_value=str(destination)):
         panel.file_action(jobs[-1],'Export…')

@@ -16,7 +16,7 @@ with zipfile.ZipFile(wheel) as package:
         source=ROOT/name
         assert source.is_file() and source.read_bytes()==package.read(name),name
         count+=1
-    for name in ('video_extensions.py','render_cache.py','extension_timeline.py','collection_combine.py'):
+    for name in ('video_extensions.py','render_cache.py','extension_timeline.py','collection_combine.py','timeline_preview.py'):
         assert 'ltx_prompt_director/'+name in package.namelist()
     assert 'ltx_prompt_director/assets/help/images/video-extensions-timeline.png' in package.namelist()
 print(f'Wheel contents match {count} source/assets.',flush=True)
@@ -24,11 +24,18 @@ with tempfile.TemporaryDirectory(prefix='director-extensions-wheel-') as folder:
     root=Path(folder);target=root/'installed'
     subprocess.run([sys.executable,'-m','pip','install','--no-deps','--target',str(target),str(wheel)],check=True)
     cases=[
-        ['tests/test_video_extensions.py','tests/test_render_cache.py','tests/test_collection_combine.py','tests/test_render_job_files.py'],
+        ['tests/test_video_extensions.py','tests/test_render_cache.py','tests/test_collection_combine.py','tests/test_render_job_files.py','tests/test_timeline_preview.py::test_rendered_sequence_and_cached_blocks_take_priority_with_correct_audio_position','tests/test_timeline_preview.py::test_unrendered_text_image_and_trimmed_video_are_previewed_without_editor_changes'],
         ['tests/test_video_extension_ui.py::test_single_mix_box_has_only_edge_length_controls_and_stays_centered'],
         ['tests/test_video_extension_ui.py::test_original_single_video_is_reused_when_extension_is_added'],
         ['tests/test_video_extension_ui.py::test_edit_next_group_reuses_completed_prefix_and_blend_only_reuses_both'],
         ['tests/test_video_extension_ui.py::test_repeated_generate_and_switch_restores_inactive_latent_then_final'],
+        ['tests/test_timeline_preview.py::test_ruler_gesture_selects_conditioning_preview_and_keeps_editor_selection'],
+        ['tests/test_timeline_preview.py::test_obsolete_preview_is_discarded_and_new_project_request_is_not_lost'],
+        ['tests/test_timeline_preview.py::test_cancelled_preview_cannot_reopen_a_panel_in_the_same_project'],
+        ['tests/test_timeline_preview.py::test_editing_a_prompt_discards_an_older_pending_preview'],
+        ['tests/test_timeline_preview.py::test_long_conditioning_text_stays_inside_resizable_preview'],
+        ['tests/test_timeline_preview.py::test_continuous_scrubbing_is_throttled_instead_of_waiting_for_drag_to_stop'],
+        ['tests/test_timeline_preview.py::test_real_rendered_clip_loads_at_scrub_position_with_audio_stream'],
     ]
     for index,case in enumerate(cases):
         selections=[str(ROOT/value) for value in case]

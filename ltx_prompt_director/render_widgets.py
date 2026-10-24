@@ -211,6 +211,12 @@ class RenderQueuePanel(QWidget):
     def can_cleanup(self,job):
         if not job or not job.group_id:return False
         jobs=[j for j in self.queue.jobs if j.group_id==job.group_id]
+        paths={j.output_path for j in jobs if j.intermediate and j.output_path}
+        by_id={j.id:j for j in self.queue.jobs}
+        for active in self.queue.jobs:
+            if active.state not in ACTIVE_STATES:continue
+            required={by_id[key].output_path for key in active.dependencies if key in by_id}
+            if paths & required:return False
         return (not any(j.state in ACTIVE_STATES and j.kind=='Video' and j.project_id==job.project_id for j in self.queue.jobs)
                 and any(not j.intermediate and j.state=='Complete' and j.output_path and Path(j.output_path).is_file() for j in jobs)
                 and any(j.intermediate and j.output_path and Path(j.output_path).is_file() for j in jobs))

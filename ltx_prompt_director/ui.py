@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
     QColorDialog, QDateTimeEdit, QDockWidget, QGraphicsOpacityEffect, QFileDialog, QFormLayout, QFrame, QHBoxLayout, QLabel, QLayout, QLineEdit,
     QListWidget, QListWidgetItem, QSplitter, QStackedWidget, QTabBar, QTabWidget, QMainWindow, QMenu, QMessageBox, QPushButton, QScrollArea,
-    QSizePolicy, QSlider, QSpinBox, QProgressBar, QStatusBar, QStyle, QStyledItemDelegate, QStyleOptionSlider, QStyleOptionViewItem, QTextEdit, QToolBar, QToolButton, QToolTip, QVBoxLayout, QWidget, QWidgetAction,
+    QSizePolicy, QSlider, QSpinBox, QProgressBar, QPlainTextEdit, QStatusBar, QStyle, QStyledItemDelegate, QStyleOptionSlider, QStyleOptionViewItem, QTextEdit, QToolBar, QToolButton, QToolTip, QVBoxLayout, QWidget, QWidgetAction,
 )
 
 from . import __version__
@@ -1090,6 +1090,7 @@ class ProjectPreviewPanel(QWidget):
         self.setProperty("dropActive", False)
         self.setAcceptDrops(True)
         self.duration = 0
+        self._rendering = False
         self._source_generation = 0
         self.current_frame = None
         self.player = QMediaPlayer(self)
@@ -1136,6 +1137,12 @@ class ProjectPreviewPanel(QWidget):
         video_stack.addWidget(self.video,1)
         video_stack.addWidget(self.latent_image,1)
         video_stack.addWidget(self.empty)
+        self.condition_text=QPlainTextEdit();self.condition_text.setReadOnly(True)
+        self.condition_text.setFrameShape(QFrame.Shape.NoFrame)
+        self.condition_text.setStyleSheet('background:#000000;color:#dce6ec;border:0;padding:8px;')
+        self.condition_text.setMinimumSize(0,0)
+        self.condition_text.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Ignored)
+        self.condition_text.hide();video_stack.addWidget(self.condition_text,1)
         layout.addWidget(self.title)
         layout.addWidget(self.video_surface,1)
         seek_row = QHBoxLayout()
@@ -1166,6 +1173,33 @@ class ProjectPreviewPanel(QWidget):
         self.player.mediaStatusChanged.connect(self.media_status_changed)
         self.player.errorOccurred.connect(self.media_error)
         self.clear_project()
+
+    def show_conditioning_text(self,name,text):
+        self.release_memory_video();self._source_generation+=1
+        self._initial_media_pending=False;self._static_latent_active=True
+        self.player.stop();self.player.setSource(QUrl());self.pending_preview_path=''
+        self.current_frame=None;self.title.setText('Conditioning text · '+name)
+        self.video.hide();self.latent_image.hide();self.empty.hide()
+        # Bound the preview document's paragraph work without changing the
+        # authored prompt. Very long paragraphs otherwise make Qt reshaping
+        # expensive while a dock is being resized.
+        source_text=str(text)
+        paragraphs=[]
+        for paragraph in source_text.split('\n'):
+            paragraphs.append('\n'.join(paragraph[index:index+1000] for index in range(0,len(paragraph),1000)) if len(paragraph)>1000 else paragraph)
+        self.condition_text.setProperty('sourceText',source_text)
+        self.condition_text.setPlainText('\n'.join(paragraphs));self.condition_text.show()
+        self.play.setEnabled(False);self.export.setEnabled(False);self.fullscreen.setEnabled(False)
+        self.seek.setRange(0,0)
+
+    def show_static_image(self,name,image):
+        self.release_memory_video();self._source_generation+=1
+        self._memory_preview=False;self._initial_media_pending=False;self._static_latent_active=True
+        self.player.stop();self.player.setSource(QUrl());self.pending_preview_path=''
+        self.title.setText(name);self._latent_pixmap=QPixmap.fromImage(image)
+        self.empty.hide();self.video.hide();self.condition_text.hide();self.latent_image.show();self.fit_latent_image()
+        self.export.setEnabled(False);self.fullscreen.setEnabled(False);self.play.setEnabled(False)
+        self.video.videoSink().setVideoFrame(QVideoFrame(image))
 
     def fit_latent_image(self):
         if self._static_latent_active and self._latent_pixmap is not None:
@@ -1277,7 +1311,7 @@ class ProjectPreviewPanel(QWidget):
         self.empty.setText("Loading continuous RAM preview…")
 
     def set_project(self, name: str, video_path: str = "") -> None:
-        self._static_latent_active=False;self.latent_image.hide()
+        self._static_latent_active=False;self.latent_image.hide();self.condition_text.hide();self.play.setEnabled(True)
         self.release_memory_video()
         self._generation_preview_active = False
         self._memory_preview = False
@@ -1363,7 +1397,7 @@ class ProjectPreviewPanel(QWidget):
         self.fullscreen.setEnabled(False)
 
     def clear_project(self) -> None:
-        self._static_latent_active=False;self.latent_image.hide()
+        self._static_latent_active=False;self.latent_image.hide();self.condition_text.hide();self.play.setEnabled(True)
         self.release_memory_video()
         self._generation_preview_active = False
         self._memory_preview = False
@@ -1759,13 +1793,37 @@ class TimelineLoadingOverlay(QWidget):
 
 
 class TimelineRuler(QWidget):
+    scrub_started=Signal()
+    scrub_requested=Signal(float)
+    scrub_finished=Signal()
+
     def __init__(self):
         super().__init__()
         self.offset = 0
         self.scale = 65
         self.playhead = None
         self.gaps=[]
+        self._scrubbing=False
+        self.setCursor(Qt.CursorShape.CrossCursor)
+        self.setToolTip('Drag to scrub rendered video and audio, or preview the conditioning segment.')
         self.setFixedHeight(28)
+
+    def mousePressEvent(self,event):
+        if event.button()==Qt.MouseButton.LeftButton:
+            self._scrubbing=True;self.scrub_started.emit();self.grabMouse()
+            self.scrub_requested.emit(max(0.,(event.position().x()+self.offset)/self.scale));event.accept()
+        else:super().mousePressEvent(event)
+
+    def mouseMoveEvent(self,event):
+        if self._scrubbing:
+            self.scrub_requested.emit(max(0.,(event.position().x()+self.offset)/self.scale));event.accept()
+        else:super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self,event):
+        if self._scrubbing and event.button()==Qt.MouseButton.LeftButton:
+            self.scrub_requested.emit(max(0.,(event.position().x()+self.offset)/self.scale))
+            self._scrubbing=False;self.releaseMouse();self.scrub_finished.emit();event.accept()
+        else:super().mouseReleaseEvent(event)
 
     def set_offset(self, value: int) -> None:
         self.offset = value
@@ -3496,6 +3554,8 @@ class MainWindow(QMainWindow):
         from .render_queue import RenderQueue
         self.render_queue=RenderQueue(lambda *args,**kwargs:self.start_disk_job(*args,**kwargs,allow_close_on_error=True),self)
         self._build_ui()
+        from .timeline_preview import TimelinePreviewController
+        self.timeline_preview=TimelinePreviewController(self)
         self._effect_drop_targets = {
             self.timeline.viewport(): "timeline",
             self.segment_prompt.viewport(): "segment",
@@ -4499,6 +4559,7 @@ class MainWindow(QMainWindow):
         def started():
             self.update_render_controls()
             if current():
+                if hasattr(self,'timeline_preview'):self.timeline_preview.cancel()
                 self.local_video_log.clear();self.project_preview_dock.show()
                 self.project_preview_panel._generation_autoplay=True
         if not extensions:
@@ -4583,20 +4644,11 @@ class MainWindow(QMainWindow):
         panel = self.project_preview_panel
         if value.get("media") == "image":
             image = QImageReader(value["path"]).read()
-            if image.isNull(): return
-            panel.release_memory_video()
-            panel._source_generation += 1
-            panel._memory_preview = False; panel._initial_media_pending = False
-            panel.player.stop(); panel.player.setSource(QUrl())
-            panel.pending_preview_path = ""
-            panel.title.setText(f"Local video · live noisy latent · step {value.get('step', 0)} · approximate colors")
-            panel._static_latent_active=True;panel._latent_pixmap=QPixmap.fromImage(image)
-            panel.empty.hide();panel.video.hide();panel.latent_image.show();panel.fit_latent_image()
-            panel.export.setEnabled(False); panel.fullscreen.setEnabled(False)
-            panel.video.videoSink().setVideoFrame(QVideoFrame(image))
-            self.local_video_pill.reposition(); self.local_video_pill.raise_()
+            if image.isNull():return
+            panel.show_static_image(f"Local video · live noisy latent · step {value.get('step',0)} · approximate colors",image)
+            self.local_video_pill.reposition();self.local_video_pill.raise_()
             return
-        panel._static_latent_active=False;panel.latent_image.hide()
+        panel._static_latent_active=False;panel.latent_image.hide();panel.condition_text.hide();panel.play.setEnabled(True)
         panel.release_memory_video()
         panel._memory_preview = False
         panel._source_generation += 1
@@ -5552,6 +5604,7 @@ class MainWindow(QMainWindow):
             return None
 
     def update_project_preview(self) -> None:
+        if hasattr(self,'timeline_preview'):self.timeline_preview.cancel()
         self.update_render_controls()
         restored=self.restore_video_render_preview()
         meta = self.current_library_metadata()
@@ -5592,7 +5645,8 @@ class MainWindow(QMainWindow):
             self.persist_library_metadata(latest)
             if self.render_workspace_is_current(workspace):
                 cached=self._video_preview_cache.get(self.video_preview_key(workspace))
-                if not cached or cached.get('path')==source_path:
+                scrubbing=hasattr(self,'timeline_preview') and (self.timeline_preview.dragging or self.timeline_preview.scrubber.active or self.timeline_preview.pending_seek is not None)
+                if not scrubbing and (not cached or cached.get('path')==source_path):
                     self.project_preview_panel.set_project(str(latest.get("name") or "Generated video"), path)
         self.start_disk_job(copy_render, (), ready,
             lambda message: self.statusBar().showMessage("Video remains in the generation folder: " + str(message), 12000), serialized=True)
@@ -6344,6 +6398,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         self.audio_panel.transport.pause()
+        if hasattr(self,'timeline_preview'):self.timeline_preview.cancel()
         if hasattr(self,'render_queue'):self.render_queue.shutdown()
         self.reject_segment_prompt_review()
         if hasattr(self, "shot_sequence_panel"):
@@ -8466,6 +8521,7 @@ class MainWindow(QMainWindow):
         self.mark_dirty()
 
     def apply_project_type_ui(self) -> None:
+        if hasattr(self,'timeline_preview'):self.timeline_preview.cancel()
         self.refresh_video_extensions()
         if hasattr(self, "timeline") and self.segments and not self._loading:
             current = [item.duration for item in self.segments]
