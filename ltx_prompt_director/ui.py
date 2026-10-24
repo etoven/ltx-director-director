@@ -19,7 +19,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from PySide6.QtCore import QBuffer, QIODevice, QDateTime, QEasingCurve, QEvent, QEventLoop, QObject, QRunnable, QPoint, QRectF, QSettings, QSize, QStandardPaths, Qt, QThreadPool, QTimer, QUrl, QVariantAnimation, Signal, Slot
-from PySide6.QtGui import QAction, QActionGroup, QBrush, QColor, QCursor, QIcon, QImageReader, QPainter, QPen, QPixmap, QTextCharFormat, QTextCursor, QTextOption
+from PySide6.QtGui import QAction, QActionGroup, QBrush, QColor, QCursor, QIcon, QImageReader, QPainter, QPen, QPixmap, QPalette, QTextCharFormat, QTextCursor, QTextOption
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer, QVideoFrame
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
@@ -408,13 +408,13 @@ def _persist_library_archive(meta: dict, metadata_path: Path) -> None:
     if project_path.is_file() and zipfile.is_zipfile(project_path):
         with zipfile.ZipFile(project_path, "a") as archive:
             payload = json.loads(archive.read("project.json"))
-            payload["library"] = {key: meta.get(key, "") for key in ("id", "name", "description", "collection", "savedAt", "status", "color", "tags", "tag", "archived", "notes", "previewVideoPath", "previewVideoName", "projectFiles", "workflowFiles", "downloadDirectory")}
+            payload["library"] = {key: meta.get(key, "") for key in ("id", "name", "description", "collection", "savedAt", "status", "color", "tags", "tag", "archived", "notes", "previewVideoPath", "previewVideoName", "projectFiles", "workflowFiles", "downloadDirectory", "videoRenderCache")}
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", UserWarning)
                 archive.writestr("project.json", json.dumps(payload, separators=(",", ":")), compress_type=zipfile.ZIP_DEFLATED, compresslevel=6)
     elif project_path.is_file() and project_path.stat().st_size < 1024 * 1024:
         payload = json.loads(project_path.read_text(encoding="utf-8"))
-        payload["library"] = {key: meta.get(key, "") for key in ("id", "name", "description", "collection", "savedAt", "status", "color", "tags", "tag", "archived", "notes", "previewVideoPath", "previewVideoName", "projectFiles", "workflowFiles", "downloadDirectory")}
+        payload["library"] = {key: meta.get(key, "") for key in ("id", "name", "description", "collection", "savedAt", "status", "color", "tags", "tag", "archived", "notes", "previewVideoPath", "previewVideoName", "projectFiles", "workflowFiles", "downloadDirectory", "videoRenderCache")}
         project_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
@@ -695,6 +695,8 @@ class ProjectListWidget(QListWidget):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event) -> None:
+        if len(self.selectedItems())>1 or event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            super().mouseMoveEvent(event);return
         if not (event.buttons() & Qt.MouseButton.LeftButton) or self._drag_row < 0 or self._press_position is None:
             super().mouseMoveEvent(event)
             return
@@ -877,6 +879,9 @@ class ProjectVideoWidget(QVideoWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAcceptDrops(True)
+        self.setAutoFillBackground(True)
+        palette=self.palette();palette.setColor(QPalette.ColorRole.Window,QColor('#000000'));self.setPalette(palette)
+        self.setStyleSheet('background-color:#000000;')
         self.setMinimumSize(160, 90)
         self.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Ignored)
 
@@ -1113,14 +1118,26 @@ class ProjectPreviewPanel(QWidget):
         self.title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.empty = QLabel("Save or open a project, then drop a rendered video here")
         self.empty.setObjectName("previewEmpty")
+        self.empty.setStyleSheet("background:#000000;color:#9caeb8;border:0;")
         self.empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.empty.setWordWrap(True)
-        video_stack = QVBoxLayout()
+        self.video_surface=QFrame()
+        self.video_surface.setObjectName('projectVideoSurface')
+        self.video_surface.setStyleSheet('#projectVideoSurface{background:#000000;border:0;}')
+        self.video_surface.setMinimumSize(160,90)
+        video_stack = QVBoxLayout(self.video_surface)
         video_stack.setContentsMargins(0, 0, 0, 0)
-        video_stack.addWidget(self.video, 1)
+        self.latent_image=QLabel()
+        self.latent_image.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.latent_image.setStyleSheet('background:#000000;border:0;')
+        self.latent_image.setMinimumSize(0,0)
+        self.latent_image.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Ignored)
+        self.latent_image.hide();self._static_latent_active=False;self._latent_pixmap=None
+        video_stack.addWidget(self.video,1)
+        video_stack.addWidget(self.latent_image,1)
         video_stack.addWidget(self.empty)
         layout.addWidget(self.title)
-        layout.addLayout(video_stack, 1)
+        layout.addWidget(self.video_surface,1)
         seek_row = QHBoxLayout()
         self.position = QLabel("00:00 / 00:00")
         self.seek = SeekSlider(Qt.Orientation.Horizontal)
@@ -1149,6 +1166,20 @@ class ProjectPreviewPanel(QWidget):
         self.player.mediaStatusChanged.connect(self.media_status_changed)
         self.player.errorOccurred.connect(self.media_error)
         self.clear_project()
+
+    def fit_latent_image(self):
+        if self._static_latent_active and self._latent_pixmap is not None:
+            self.latent_image.setPixmap(self._latent_pixmap.scaled(self.latent_image.size(),Qt.AspectRatioMode.KeepAspectRatio,Qt.TransformationMode.SmoothTransformation))
+
+    def resizeEvent(self,event):
+        super().resizeEvent(event)
+        QTimer.singleShot(0,self.fit_latent_image)
+
+    def set_rendering(self,rendering):
+        self._rendering=bool(rendering)
+        for control in (self.play,self.choose,self.export,self.fullscreen,self.seek,self.position):
+            control.setVisible(not rendering)
+        if rendering and self.fullscreen_window.isVisible():self.fullscreen_window.reject()
 
     def capture_frame(self, frame) -> None:
         image = frame.toImage()
@@ -1193,7 +1224,7 @@ class ProjectPreviewPanel(QWidget):
 
     def dragEnterEvent(self, event) -> None:
         urls = event.mimeData().urls() if event.mimeData().hasUrls() else []
-        if self.choose.isEnabled() and len(urls) == 1 and urls[0].isLocalFile() and Path(urls[0].toLocalFile()).suffix.lower() in ProjectVideoWidget.VIDEO_SUFFIXES:
+        if not getattr(self,"_rendering",False) and self.choose.isEnabled() and len(urls) == 1 and urls[0].isLocalFile() and Path(urls[0].toLocalFile()).suffix.lower() in ProjectVideoWidget.VIDEO_SUFFIXES:
             self.set_drop_active(True)
             event.acceptProposedAction()
             return
@@ -1246,6 +1277,7 @@ class ProjectPreviewPanel(QWidget):
         self.empty.setText("Loading continuous RAM preview…")
 
     def set_project(self, name: str, video_path: str = "") -> None:
+        self._static_latent_active=False;self.latent_image.hide()
         self.release_memory_video()
         self._generation_preview_active = False
         self._memory_preview = False
@@ -1320,6 +1352,7 @@ class ProjectPreviewPanel(QWidget):
             self.current_frame = None
 
     def media_error(self, *_args) -> None:
+        if self._static_latent_active:return
         self.player.stop()
         self.current_frame = None
         self.player.setSource(QUrl())
@@ -1330,6 +1363,7 @@ class ProjectPreviewPanel(QWidget):
         self.fullscreen.setEnabled(False)
 
     def clear_project(self) -> None:
+        self._static_latent_active=False;self.latent_image.hide()
         self.release_memory_video()
         self._generation_preview_active = False
         self._memory_preview = False
@@ -1349,6 +1383,7 @@ class ProjectPreviewPanel(QWidget):
         self.position.setText("00:00 / 00:00")
 
     def toggle_playback(self) -> None:
+        if getattr(self,"_rendering",False):return
         # Only the first load may initialize playback; buffered/seek events must
         # never undo the user's pause or stop a replay at position zero.
         self._initial_media_pending = False
@@ -1401,6 +1436,7 @@ class ProjectPreviewPanel(QWidget):
         self.fullscreen.setText("Exit Fullscreen" if fullscreen else "⛶ Fullscreen")
 
     def open_fullscreen(self) -> None:
+        if getattr(self,"_rendering",False):return
         if self.fullscreen_window.isVisible():
             self.fullscreen_window.reject()
             return
@@ -1728,6 +1764,7 @@ class TimelineRuler(QWidget):
         self.offset = 0
         self.scale = 65
         self.playhead = None
+        self.gaps=[]
         self.setFixedHeight(28)
 
     def set_offset(self, value: int) -> None:
@@ -1751,13 +1788,13 @@ class TimelineRuler(QWidget):
         label_interval = next(step * magnitude for step in (1, 2, 5, 10) if step * magnitude >= minimum_interval)
         first_second = max(0, math.floor(visible_start / label_interval) * label_interval)
         for second in range(first_second, math.ceil(visible_end) + label_interval, label_interval):
-            x = round(second * scale - self.offset)
+            x = round(second * scale + sum(width for at,width in self.gaps if at<=second)- self.offset)
             painter.setPen(QPen(QColor("#303538")))
             painter.drawLine(x, 12, x, 24)
             painter.setPen(QColor("#ff5757") if second == 0 else QColor("#788186"))
             painter.drawText(x + 4, 16, "0" if second == 0 else f"{second}.00")
         if self.playhead is not None:
-            x = round(self.playhead * scale - self.offset)
+            x = round(self.playhead * scale + sum(width for at,width in self.gaps if at<=self.playhead)- self.offset)
             painter.setPen(QPen(QColor('#ffce75'), 2))
             painter.drawLine(x, 0, x, self.height())
 
@@ -3409,6 +3446,11 @@ class MainWindow(QMainWindow):
         self.workspace_definitions = self.workspace_store.load()
         self.project_type = "ltx" if "ltx" in self.workspace_definitions else next(iter(self.workspace_definitions), "")
         self.minimax_drafts: dict[str, dict] = {}
+        self.video_extensions = 0
+        self.video_render_cache = {}
+        self.combined_sources = []
+        self.render_group_options = {}
+        self._active_render_group = 0
         self.workspace_revision = 0
         self.ai_busy = False
         self.current_collection: str | None = None
@@ -3818,6 +3860,17 @@ class MainWindow(QMainWindow):
         self.timeline.horizontalScrollBar().valueChanged.connect(self.ruler.set_offset)
         self.timeline_loading = TimelineLoadingOverlay(self.timeline.viewport())
         track_row.addWidget(self.timeline, 1)
+        from .extension_timeline import ExtensionBrackets
+        self.extension_brackets = ExtensionBrackets(self)
+        brackets_row = QHBoxLayout()
+        brackets_row.setContentsMargins(38, 0, 44, 0)
+        brackets_row.setSpacing(0)
+        brackets_row.addWidget(self.extension_brackets)
+        timeline_layout.addLayout(brackets_row)
+        self.extension_brackets.hide()
+        self._extension_boxes={}
+        self.timeline.viewport().installEventFilter(self)
+        self.timeline.horizontalScrollBar().valueChanged.connect(lambda _: (self.extension_brackets.update(),self.position_extension_boxes()))
         # Slim insertion rail with two distinct click targets and tooltips.
         self.add_tile = QPushButton("＋")
         self.add_tile.setObjectName("addTile")
@@ -3848,6 +3901,13 @@ class MainWindow(QMainWindow):
         self.retime_all_button.setFixedSize(32, 32)
         self.add_tile_layout.addWidget(self.add_tile, 0, Qt.AlignmentFlag.AlignHCenter)
         self.add_tile_layout.addWidget(self.add_text_tile, 0, Qt.AlignmentFlag.AlignHCenter)
+        self.add_extension_tile = QPushButton("V＋")
+        self.add_extension_tile.setObjectName("addTile")
+        self.add_extension_tile.setFixedSize(32, 32)
+        self.add_extension_tile.setAccessibleName("Add video extension")
+        self.add_extension_tile.setToolTip("Add a 15-second MiniMax continuation with a one-second blend")
+        self.add_extension_tile.clicked.connect(self.add_video_extension)
+        self.add_tile_layout.addWidget(self.add_extension_tile, 0, Qt.AlignmentFlag.AlignHCenter)
         self.add_tile_layout.addStretch(1)
         track_row.addWidget(self.add_tile_wrap)
         timeline_layout.addLayout(track_row)
@@ -4022,6 +4082,7 @@ class MainWindow(QMainWindow):
             "Target sequence length in seconds. Re-time all fits this duration; Auto keeps the current total for retiming.")
         self.requested_length.setAccessibleName("Total sequence length")
         self.requested_length.valueChanged.connect(self.mark_dirty)
+        self.requested_length.valueChanged.connect(self.render_group_settings_changed)
         language_label = QLabel("LANGUAGE")
         language_label.setObjectName("groupLabel")
         self.speaker_language = QComboBox()
@@ -4307,6 +4368,10 @@ class MainWindow(QMainWindow):
     def _build_local_generation_ui(self):
         import threading
         self._local_video_cancel = threading.Event()
+        self._video_key_aliases = {}
+        self._video_preview_cache = {}
+        self._video_block_frames = {}
+        self._video_generation_counts = {}
         self._local_video_busy = False
         self.image_generation_dock = QDockWidget("IMAGE GENERATION", self)
         self.image_generation_dock.setObjectName("imageGenerationDock")
@@ -4340,7 +4405,6 @@ class MainWindow(QMainWindow):
         panel.layout().addWidget(self.local_video_log)
 
     def generate_local_video(self):
-        if any(j.kind=='Video' and j.project_id==str(self.current_project_id or '') and j.state in {'Waiting','Rendering','Cancelling'} for j in self.render_queue.jobs):return
         profile = load_profile(self.settings)
         try: validate_profile(profile, "video")
         except ValueError as error:
@@ -4351,74 +4415,80 @@ class MainWindow(QMainWindow):
         if not prompt:
             self.statusBar().showMessage("Write or generate the unified production prompt first.", 10000)
             return
+        extensions = self.video_extensions if self.workspace_engine.startswith('minimax') else 0
+        if extensions and profile.get('video_variant', 'ref2va') != 'ref2va':
+            QMessageBox.information(self, 'Video extensions', 'Select the Ref2VA video checkpoint in Local models to condition extensions on the preceding video.')
+            return
         extra_references = copy.deepcopy([r for r in self.active_reference_images() if r])
-        conditioning_segments = copy.deepcopy(self.segments)
+        grouped_segments = copy.deepcopy(list(self.render_groups().items()))
+        conditioning_segments = grouped_segments[0][1] if extensions else copy.deepcopy(self.segments)
+        cache=self.video_render_cache
         request = dict(kind="video", profile=profile, prompt=prompt,
             duration=profile["video_duration"], width=profile["video_width"], height=profile["video_height"], steps=profile["video_steps"],
             seed=profile["video_seed"])
+        if not extensions and self.workspace_engine.startswith('minimax') and self.requested_length.value()>0:
+            request['duration']=self.requested_length.value()
+        block_durations = [self.render_group_duration(group) for group,items in grouped_segments] if extensions else [float(request['duration'])]
+        if extensions and any(not 4<=length<=15 for length in block_durations):
+            QMessageBox.information(self,'Video extensions','Set each bracketed block length between 4 and 15 seconds using the timeline length control.')
+            return
+        blend_settings=[self.extension_transition(group) for group,items in grouped_segments[1:]]
+        if extensions: request['duration'] = block_durations[0]
         workspace = (self.workspace_revision, self.current_project_id, self.project_type)
         import threading
         video_cancel=threading.Event()
+        preview_key = self.video_preview_key(workspace)
+        generation = self._video_generation_counts.get(preview_key,0)+1
+        self._video_generation_counts[preview_key] = generation
         previous_preview = getattr(self.project_preview_panel, "pending_preview_path", "")
         self.local_video_log.clear()
         self.project_preview_panel._generation_autoplay = True
         self._local_video_busy = True; self._local_video_cancel.clear()
-        self.local_video_generate.setEnabled(False); self.local_video_cancel_button.show()
+        self.local_video_generate.setEnabled(True); self.local_video_cancel_button.show()
         self.project_preview_dock.show()
         self.statusBar().showMessage("Local video generation started")
-        def current(): return self.render_workspace_is_current(workspace)
+        def current(): return self.resolve_video_key(preview_key)==self.video_preview_key()
         def event(value):
+            if value.get('kind')=='preview':
+                self._video_preview_cache[self.resolve_video_key(preview_key)] = {**value,'generation':generation}
             if not current(): return
             self.local_video_log.receive_event(value)
             if value.get("kind") == "progress": self.local_video_pill.update_event(value)
             elif value.get("kind") == "preview":
-                panel = self.project_preview_panel
-                if value.get("media") == "image":
-                    image = QImageReader(value["path"]).read()
-                    if image.isNull(): return
-                    panel.release_memory_video()
-                    panel._source_generation += 1
-                    panel._memory_preview = False; panel._initial_media_pending = False
-                    panel.player.stop(); panel.player.setSource(QUrl())
-                    panel.pending_preview_path = ""
-                    panel.title.setText(f"Local video · live noisy latent · step {value.get('step', 0)} · approximate colors")
-                    panel.empty.hide(); panel.video.show()
-                    panel.export.setEnabled(False); panel.fullscreen.setEnabled(False)
-                    panel.video.videoSink().setVideoFrame(QVideoFrame(image))
-                    self.local_video_pill.reposition(); self.local_video_pill.raise_()
-                    return
-                panel.release_memory_video()
-                panel._memory_preview = False
-                panel._source_generation += 1
-                panel.pending_preview_path = value["path"]
-                panel._generation_preview_active = True
-                panel._initial_media_pending = True
-                panel._initial_media_position = 0
-                panel._initial_media_autoplay = panel._generation_autoplay
-                panel.title.setText("Local video · live latent estimate · approximate colors" if value.get('preview_mode')=='noisy'
-                    else "Local video · denoised draft estimate")
-                panel.empty.hide(); panel.video.show()
-                panel.export.setEnabled(False)
-                panel.player.setSource(QUrl.fromLocalFile(value["path"]))
-                panel.player.setLoops(QMediaPlayer.Loops.Infinite)
+                self.show_video_render_preview(value)
         def operation():
             from .local_conditioning import video_references
             from .project_archive import materialize_source
             for segment in conditioning_segments:
                 if segment.kind in ('image','video'):materialize_source(segment)
             references = video_references(conditioning_segments, extra_references, request['duration'])
-            return run_request({**request, "references": references}, cancel=video_cancel)
+            from .render_cache import cached_render
+            prepared={**request,'references':references}
+            return cached_render(cache,grouped_segments[0][0],prepared,conditioning_segments,
+                                 lambda:run_request(prepared,cancel=video_cancel),video_cancel)
         def finish():
-            self._local_video_busy = False; self.local_video_generate.setEnabled(True)
-            self.local_video_cancel_button.hide(); self.local_video_pill.hide()
+            self.update_render_controls()
+            if current():self.local_video_pill.hide()
             if current(): self.project_preview_panel.player.setLoops(QMediaPlayer.Loops.Once)
+        def save_cache(group,result):
+            record=result.get('_cache_record')
+            if record:
+                record={**record,'result':{**record['result'],**{key:result[key] for key in ('first_frame','last_frame') if key in result}}}
+                cache[str(group)]=record
+                self.persist_video_render_cache(workspace,cache)
+            active=self.render_queue.active
+            if active and result.get('reused'):active.message='Reused completed block'
         def ready(result):
+            if not extensions:save_cache(grouped_segments[0][0],result)
+            self._video_preview_cache[self.resolve_video_key(preview_key)] = {'kind':'final','path':result['path'],'generation':generation}
             finish()
-            if workspace[1]:self.attach_local_generated_video(result["path"],workspace)
+            key=self.resolve_video_key(preview_key)
+            result_scope=(workspace[0],key[1],workspace[2]) if key[0]=='project' else workspace
+            if result_scope[1]:self.attach_local_generated_video(result["path"],result_scope)
             if not current():
                 self.statusBar().showMessage("Queued video saved for its original project.", 8000); return
             self.project_preview_panel.set_project(self.current_project_name or "Generated video", result["path"])
-            self._local_result_video = {"scope": workspace, "path": result["path"]}
+            self._local_result_video = {"scope": result_scope, "path": result["path"]}
             self.statusBar().showMessage("Local video ready · " + result["path"], 12000)
         def failed(message):
             finish()
@@ -4427,13 +4497,129 @@ class MainWindow(QMainWindow):
                 self.project_preview_panel.set_project(self.current_project_name or "Video Preview", previous_preview)
                 self.statusBar().showMessage(str(message), 15000)
         def started():
+            self.update_render_controls()
             if current():
                 self.local_video_log.clear();self.project_preview_dock.show()
                 self.project_preview_panel._generation_autoplay=True
-        self.start_render_job(operation,(),ready,failed,title=self.current_project_name or 'Untitled video',
-            source='local',model='MiniMax H3',kind='Video',
-            details=f"{request['width']} × {request['height']} · {request['duration']} s · {request['steps']} steps",
-            progress=event,cancel=video_cancel,started=started,cancelled=finish)
+        if not extensions:
+            self.start_render_job(operation,(),ready,failed,title=(self.current_project_name or 'Untitled video')+f' · Generation {generation}',
+                source='local',model='MiniMax H3',kind='Video',
+                details=f"{request['width']} × {request['height']} · {request['duration']} s · {request['steps']} steps",
+                progress=event,cancel=video_cancel,started=started,cancelled=finish,
+                workspace_key=preview_key,generation_number=generation)
+            return
+        from .video_extensions import continuation_reference, blend_blocks, add_block_thumbnails
+        from .local_generation import LOCAL_PROGRESS
+        group_id = uuid4().hex
+        group_title = (self.current_project_name or 'Untitled video') + f' · Generation {generation} · Extensions'
+        blocks = []
+        was_paused = self.render_queue.paused
+        self.render_queue.set_paused(True)
+        try:
+            for index in range(extensions + 1):
+                previous = blocks[-1] if blocks else None
+                block_duration = block_durations[index]
+                def render_block(previous=previous, block_duration=block_duration, previous_duration=block_durations[index-1], block_segments=grouped_segments[index][1], group=grouped_segments[index][0], previous_group=grouped_segments[index-1][0]):
+                    if previous is None:
+                        result=operation()
+                        return add_block_thumbnails(result,block_duration,video_cancel)
+                    if video_cancel.is_set(): raise RuntimeError('Extension cancelled.')
+                    from .local_conditioning import video_references
+                    from .project_archive import materialize_source
+                    for segment in block_segments:
+                        if segment.kind in ('image','video'):materialize_source(segment)
+                    references = [continuation_reference(previous.output_path,previous_duration)] + video_references(block_segments,extra_references,block_duration)
+                    from .render_cache import cached_render
+                    direction='\n'.join(segment.prompt for segment in block_segments if segment.prompt.strip())
+                    block_prompt=prompt+('\n\nCurrent continuation direction:\n'+direction if direction else '')
+                    prepared={**request,'prompt':block_prompt,'duration':block_duration,'references':references}
+                    previous_result=cache.get(str(previous_group),{}).get('result',{})
+                    previous_token=previous_result.get('render_token') or previous.output_path
+                    result=cached_render(cache,group,prepared,block_segments,
+                        lambda:run_request(prepared,cancel=video_cancel),video_cancel,previous_token)
+                    return add_block_thumbnails(result,block_duration,video_cancel)
+                def block_ready(result,group=grouped_segments[index][0]):
+                    save_cache(group,result)
+                    self._video_block_frames.setdefault(self.resolve_video_key(preview_key),{})[str(group)]={key:result.get(key,'') for key in ('first_frame','last_frame')}
+                    if current():
+                        for diagram in self.timeline.findChildren(QWidget,'extensionBlendDiagram'):diagram.update()
+                job = self.start_render_job(render_block, (), block_ready, failed,
+                    title=f'Block {index + 1} · {block_duration:g} s', source='local', model='MiniMax H3', kind='Video',
+                    details='Trailing second of preceding block conditions time 0' if index else 'Original timeline conditioning',
+                    progress=event, cancel=video_cancel, started=started, cancelled=finish,
+                    group_id=group_id, group_title=group_title,
+                    dependencies=(previous.id,) if previous else (), intermediate=True,
+                    workspace_key=preview_key,generation_number=generation)
+                blocks.append(job)
+            def assemble():
+                return blend_blocks([block.output_path for block in blocks], video_cancel, LOCAL_PROGRESS.get(), block_durations, blend_settings)
+            self.start_render_job(assemble, (), ready, failed, title='Final · frame blended',
+                source='local', model='Frame blend', kind='Video',
+                details=f'{sum(block_durations):g} s · duration-preserving one-second joins',
+                progress=event, cancel=video_cancel, cancelled=finish,
+                group_id=group_id, group_title=group_title, dependencies=tuple(block.id for block in blocks),
+                workspace_key=preview_key,generation_number=generation)
+        finally:
+            self.render_queue.set_paused(was_paused)
+
+    def persist_video_render_cache(self,workspace,cache):
+        key=self.video_preview_key(workspace)
+        if key[0]!='project':return
+        path=project_library_path()/f'{key[1]}.meta.json'
+        try:meta=json.loads(path.read_text(encoding='utf-8'))
+        except (OSError,ValueError):return
+        meta['videoRenderCache']=copy.deepcopy(cache)
+        self.persist_library_metadata(meta)
+
+    def resolve_video_key(self,key):
+        while key in self._video_key_aliases:key=self._video_key_aliases[key]
+        return key
+
+    def video_preview_key(self,workspace=None):
+        revision,project_id,project_type = workspace or (self.workspace_revision,self.current_project_id,self.project_type)
+        return self.resolve_video_key(('project',str(project_id),project_type) if project_id else ('unsaved',revision,project_type))
+
+    def show_video_render_preview(self,value):
+        panel = self.project_preview_panel
+        if value.get("media") == "image":
+            image = QImageReader(value["path"]).read()
+            if image.isNull(): return
+            panel.release_memory_video()
+            panel._source_generation += 1
+            panel._memory_preview = False; panel._initial_media_pending = False
+            panel.player.stop(); panel.player.setSource(QUrl())
+            panel.pending_preview_path = ""
+            panel.title.setText(f"Local video · live noisy latent · step {value.get('step', 0)} · approximate colors")
+            panel._static_latent_active=True;panel._latent_pixmap=QPixmap.fromImage(image)
+            panel.empty.hide();panel.video.hide();panel.latent_image.show();panel.fit_latent_image()
+            panel.export.setEnabled(False); panel.fullscreen.setEnabled(False)
+            panel.video.videoSink().setVideoFrame(QVideoFrame(image))
+            self.local_video_pill.reposition(); self.local_video_pill.raise_()
+            return
+        panel._static_latent_active=False;panel.latent_image.hide()
+        panel.release_memory_video()
+        panel._memory_preview = False
+        panel._source_generation += 1
+        panel.pending_preview_path = value["path"]
+        panel._generation_preview_active = True
+        panel._initial_media_pending = True
+        panel._initial_media_position = 0
+        panel._initial_media_autoplay = panel._generation_autoplay
+        panel.title.setText("Local video · live latent estimate · approximate colors" if value.get('preview_mode')=='noisy'
+            else "Local video · denoised draft estimate")
+        panel.empty.hide(); panel.video.show()
+        panel.export.setEnabled(False)
+        panel.player.setSource(QUrl.fromLocalFile(value["path"]))
+        panel.player.setLoops(QMediaPlayer.Loops.Infinite)
+
+    def restore_video_render_preview(self):
+        value = self._video_preview_cache.get(self.video_preview_key())
+        if not value or not Path(value.get('path','')).is_file():return False
+        if value['kind']=='final':
+            self.project_preview_panel.set_project(self.current_project_name or 'Generated video',value['path'])
+            self._local_result_video = {'scope':(self.workspace_revision,self.current_project_id,self.project_type),'path':value['path']}
+        else:self.show_video_render_preview(value)
+        return True
 
     def render_workspace_is_current(self,workspace):
         return (workspace[1]==self.current_project_id and workspace[2]==self.project_type
@@ -4448,25 +4634,30 @@ class MainWindow(QMainWindow):
         state=session.get('state',{})
         return state.get('segments',[]) if state.get('projectType')==workspace[2] else []
 
-    def start_render_job(self,operation,args,finished,failed,*,title,source,model,kind='Image',details='',progress=None,cancel=None,started=None,cancelled=None,project_id=None):
+    def start_render_job(self,operation,args,finished,failed,*,title,source,model,kind='Image',details='',progress=None,cancel=None,started=None,cancelled=None,project_id=None,**queue_options):
         job=self.render_queue.enqueue(operation,args,finished,failed,title=title,
             project_id=self.current_project_id if project_id is None else project_id,
             source=source,model=model,kind=kind,details=details,progress=progress,cancel=cancel,
-            started=started,cancelled=cancelled)
+            started=started,cancelled=cancelled,**queue_options)
         self.render_queue_dock.show();self.render_queue_dock.raise_()
         return job
 
     def update_render_controls(self):
         active=[j for j in self.render_queue.jobs if j.kind=='Video' and j.state in {'Waiting','Rendering','Cancelling'}]
         self._local_video_busy=bool(active)
-        current=any(j.project_id==str(self.current_project_id or '') for j in active)
+        key=self.video_preview_key()
+        current=any((j.workspace_key==key if j.workspace_key else j.project_id==str(self.current_project_id or '')) for j in active)
+        rendering=any(j.state in {'Rendering','Cancelling'} and (j.workspace_key==key if j.workspace_key else j.project_id==str(self.current_project_id or '')) for j in active)
         if hasattr(self,'local_video_generate'):
-            self.local_video_generate.setEnabled(not current);self.local_video_cancel_button.setVisible(current)
+            self.local_video_generate.setEnabled(True);self.local_video_cancel_button.setVisible(current)
+            number=self._video_generation_counts.get(key,0)+1
+            self.local_video_generate.setText('✦ Generate locally'+(f' ({number})' if number>1 else ''))
+            self.project_preview_panel.set_rendering(rendering)
         if hasattr(self,'project_list'):self.project_list.viewport().update()
 
     def cancel_queued_video(self):
         for job in tuple(self.render_queue.jobs):
-            if job.kind=='Video' and job.project_id==str(self.current_project_id or ''):self.render_queue.cancel_job(job.id)
+            if job.kind=='Video' and (job.workspace_key==self.video_preview_key() if job.workspace_key else job.project_id==str(self.current_project_id or '')):self.render_queue.cancel_job(job.id)
 
     def cancel_local_artwork(self):
         for job in tuple(self.render_queue.jobs):
@@ -4548,6 +4739,7 @@ class MainWindow(QMainWindow):
         self.project_preview_dock.topLevelChanged.connect(lambda *_: self.save_window_panel_state())
         self.project_preview_dock.visibilityChanged.connect(lambda *_: self.save_window_panel_state())
         self.project_preview_dock.visibilityChanged.connect(self.project_preview_panel.set_preview_visible)
+        self.project_preview_dock.visibilityChanged.connect(lambda visible:self.restore_video_render_preview() if visible else None)
         self.project_preview_dock.hide()
 
     def _build_project_files_dock(self) -> None:
@@ -4672,6 +4864,7 @@ class MainWindow(QMainWindow):
         self.project_list = ProjectListWidget()
         self.project_list.setObjectName("projectList")
         self.project_list.setMouseTracking(True)
+        self.project_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.project_list.setItemDelegate(ProjectTileDelegate(self.project_list))
         self.project_list.setViewMode(QListWidget.ViewMode.IconMode)
         self.project_list.setFlow(QListWidget.Flow.LeftToRight)
@@ -5238,6 +5431,9 @@ class MainWindow(QMainWindow):
         self.settings.setValue("project_sort_mode", "custom")
 
     def activate_clicked_project(self, item: QListWidgetItem) -> None:
+        if QApplication.keyboardModifiers() & (Qt.KeyboardModifier.ControlModifier|Qt.KeyboardModifier.ShiftModifier) or len(self.project_list.selectedItems())>1:
+            self._project_open_timer.stop();self._pending_project_id=None
+            return
         meta = item.data(Qt.ItemDataRole.UserRole) or {}
         if meta.get("kind") == "project":
             self._pending_project_id = str(meta.get("id", ""))
@@ -5356,15 +5552,17 @@ class MainWindow(QMainWindow):
             return None
 
     def update_project_preview(self) -> None:
+        self.update_render_controls()
+        restored=self.restore_video_render_preview()
         meta = self.current_library_metadata()
         if not meta:
-            self.project_preview_panel.clear_project()
+            if not restored:self.project_preview_panel.clear_project()
             self.project_files_panel.clear_project()
             return
         project_files = meta.get("projectFiles", meta.get("workflowFiles", []))
         project_files = [value for value in project_files if isinstance(value, dict) and Path(str(value.get("path", ""))).is_file()]
         name = str(meta.get("name") or "Untitled project")
-        self.project_preview_panel.set_project(name, str(meta.get("previewVideoPath", "")))
+        if not restored:self.project_preview_panel.set_project(name, str(meta.get("previewVideoPath", "")))
         self.project_files_panel.set_project(name, project_files)
 
     def choose_project_video(self) -> None:
@@ -5393,11 +5591,14 @@ class MainWindow(QMainWindow):
             latest["previewVideoName"] = "Generated video.mp4"
             self.persist_library_metadata(latest)
             if self.render_workspace_is_current(workspace):
-                self.project_preview_panel.set_project(str(latest.get("name") or "Generated video"), path)
+                cached=self._video_preview_cache.get(self.video_preview_key(workspace))
+                if not cached or cached.get('path')==source_path:
+                    self.project_preview_panel.set_project(str(latest.get("name") or "Generated video"), path)
         self.start_disk_job(copy_render, (), ready,
             lambda message: self.statusBar().showMessage("Video remains in the generation folder: " + str(message), 12000), serialized=True)
 
     def attach_project_video(self, source_path: str) -> None:
+        self._video_preview_cache.pop(self.video_preview_key(),None)
         self._local_result_video = None
         meta = self.current_library_metadata()
         source = Path(source_path)
@@ -5507,9 +5708,16 @@ class MainWindow(QMainWindow):
         item = self.project_list.itemAt(point)
         if not item:
             return
-        self.project_list.setCurrentItem(item)
+        from PySide6.QtCore import QItemSelectionModel
+        if not item.isSelected():self.project_list.setCurrentItem(item)
+        else:self.project_list.setCurrentItem(item,QItemSelectionModel.SelectionFlag.NoUpdate)
+        self._project_open_timer.stop();self._pending_project_id=None
         meta = item.data(Qt.ItemDataRole.UserRole) or {}
         menu = QMenu(self)
+        if self.current_collection:
+            group_action=menu.addAction('Group selected projects into Shot Sequence',self.group_selected_projects)
+            group_action.setEnabled(len(self.selected_projects_in_order())>=2)
+            menu.addSeparator()
         menu.addAction(self.library_surface.rename_action)
         from .panel_design import dot_icon
         is_collection = meta.get("kind") == "collection"
@@ -5556,6 +5764,50 @@ class MainWindow(QMainWindow):
         menu.addAction("Edit project details", self.edit_library_project)
         menu.addAction("Delete project", self.delete_library_project)
         menu.exec(self.project_list.viewport().mapToGlobal(point))
+
+    def selected_projects_in_order(self):
+        return [item.data(Qt.ItemDataRole.UserRole) for row in range(self.project_list.count())
+                if (item:=self.project_list.item(row)).isSelected() and not item.isHidden()
+                and (item.data(Qt.ItemDataRole.UserRole) or {}).get('kind')=='project']
+
+    def ordered_collection_projects(self,collection=None):
+        collection=self.current_collection if collection is None else collection
+        records=[r for r in self.library_records() if r.get('collection','')==(collection or '')]
+        mode=self.project_sort.currentData()
+        if mode in {'title_asc','title_desc'}:
+            return sorted(records,key=lambda r:str(r.get('name','')).casefold(),reverse=mode=='title_desc')
+        order=json.loads(str(self.settings.value(f'project_custom_order/{collection or "__root__"}','[]')))
+        positions={key:index for index,key in enumerate(order)}
+        return sorted(records,key=lambda r:(positions.get('project:'+str(r['id']),len(positions)),str(r.get('name','')).casefold()))
+
+    def group_selected_projects(self):
+        records=copy.deepcopy(self.selected_projects_in_order())
+        if not self.current_collection or len(records)<2:return
+        missing=[str(r.get('name','')) for r in records if not r.get('previewVideoPath') or not Path(r['previewVideoPath']).is_file()]
+        if missing:
+            QMessageBox.information(self,'Group projects','Save a rendered video for each selected project first. Missing: '+', '.join(missing))
+            return
+        self._project_open_timer.stop();self._pending_project_id=None
+        self.cache_current_workspace()
+        snapshots={str(r['id']):copy.deepcopy(self.project_sessions[str(r['id'])]['state']) for r in records
+                   if self.project_sessions.get(str(r['id']),{}).get('dirty')}
+        ident=uuid4().hex
+        base='Grouped shots';names={str(r.get('name','')) for r in self.library_records()}
+        name=base;number=2
+        while name in names:name=f'{base} ({number})';number+=1
+        from .collection_combine import combine_projects
+        def ready(meta):
+            self.refresh_project_library(meta['id'])
+            self.open_library_project(project_id=meta['id'])
+        self.start_disk_job(combine_projects,(records,project_library_path(),ident,name,snapshots),ready,
+                            lambda error:QMessageBox.warning(self,'Group projects failed',str(error)),serialized=True)
+
+    def open_combined_source(self):
+        row=self.shot_sequence_panel.shots.currentRow()
+        if not 0<=row<len(self.segments):return
+        ident=self.segments[row].source_project_id
+        source=next((record for record in self.combined_sources if record.get('shotId')==self.segments[row].id),None) or next((record for record in self.combined_sources if record['id']==ident),None)
+        if source and Path(source.get('projectPath','')).is_file():self.open_project(path=source['projectPath'],display_name=source.get('name'))
 
     def duplicate_library_project(self) -> None:
         """Make an independently editable copy of the right-clicked project."""
@@ -5650,6 +5902,11 @@ class MainWindow(QMainWindow):
             "downloadDirectory": self.download_directory,
             "minimaxDrafts": {key: dict(value) for key, value in self.minimax_drafts.items()},
             "segments": self.segments,
+            "videoRenderCache": self.video_render_cache,
+            "combinedSources": copy.deepcopy(self.combined_sources),
+            "videoExtensions": self.video_extensions,
+            "renderGroupOptions": copy.deepcopy(self.render_group_options),
+            "activeRenderGroup": self._active_render_group,
             "conditioningAudio": {'enabled': self.audio_panel.enabled.isChecked(), 'clips': self.audio_panel.records()},
             "globalPrompt": self.global_prompt.toPlainText(),
             "directorIntent": self.intent.toPlainText(),
@@ -5688,6 +5945,10 @@ class MainWindow(QMainWindow):
         self._loading = True
         self.workspace_revision += 1
         self.segments = state.get("segments", [])
+        stored_cache=state.get("videoRenderCache",{})
+        self.video_render_cache = stored_cache if isinstance(stored_cache,dict) else {}
+        self.combined_sources = copy.deepcopy(state.get("combinedSources",[]))
+        self.restore_video_extensions(state)
         audio = state.get('conditioningAudio', {})
         self.audio_panel.set_project(audio.get('clips', []), audio.get('enabled', True))
         self.download_directory = str(state.get("downloadDirectory", ""))
@@ -6160,6 +6421,8 @@ class MainWindow(QMainWindow):
         if x!=frame.left() or y!=frame.top():self.move(self.pos()+QPoint(x-frame.left(),y-frame.top()))
 
     def eventFilter(self,watched,event):
+        if watched is getattr(getattr(self,'timeline',None),'viewport',lambda:None)() and event.type() in (QEvent.Type.Resize,QEvent.Type.Show):
+            QTimer.singleShot(0,self.position_extension_boxes)
         targets = getattr(self, "_effect_drop_targets", {})
         if watched in targets:
             kind = event.type()
@@ -6253,6 +6516,7 @@ class MainWindow(QMainWindow):
         self.audio_panel.set_project([])
         self.current_project_id = None
         self.current_project_name = "Untitled"
+        self.workspace_revision += 1
         self.update_project_preview()
         self.intent.clear()
         self.requested_length.setValue(0)
@@ -6267,6 +6531,11 @@ class MainWindow(QMainWindow):
         self.minimax_prompt_mode = "frames"
         self.minimax_reference_images = [None] * 4
         self.minimax_drafts = {}
+        self.video_extensions = 0
+        self.video_render_cache = {}
+        self.combined_sources = []
+        self.render_group_options = {}
+        self._active_render_group = 0
         self.shot_sequence_settings = dict(SHOT_DEFAULTS)
         self.project_type = "ltx" if "ltx" in self.workspace_definitions else next(iter(self.workspace_definitions), "")
         self.workspace_revision += 1
@@ -6352,7 +6621,7 @@ class MainWindow(QMainWindow):
         total = self.total_duration()
         if total <= 0:
             return
-        available = max(1, self.timeline.viewport().width() - 6)
+        available = max(1, self.timeline.viewport().width() - 6 - sum(self.extension_chrome()))
         self.pixels_per_second = available / total
         self.ruler.set_scale(self.pixels_per_second)
         self.autofit_tail_extension = 0
@@ -6361,12 +6630,13 @@ class MainWindow(QMainWindow):
 
     def timeline_item_widths(self, durations: list[float] | None = None) -> list[int]:
         values = durations if durations is not None else [segment.duration for segment in self.segments]
+        chrome=self.extension_chrome() if len(values)==len(self.segments) else [0]*len(values)
         if not self.timeline_fit_mode:
-            widths = [max(48, int(value * self.pixels_per_second)) for value in values]
+            widths = [max(48, int(value * self.pixels_per_second))+gap for value,gap in zip(values,chrome)]
             if widths:
                 widths[-1] += self.autofit_tail_extension
             return widths
-        available = max(1, self.timeline.viewport().width() - 6)
+        available = max(1, self.timeline.viewport().width() - 6 - sum(chrome))
         total = sum(max(MIN_DURATION, value) for value in values)
         if durations is None and total > 0:
             self.pixels_per_second = available / total
@@ -6384,7 +6654,7 @@ class MainWindow(QMainWindow):
             reduction = min(overflow, widths[index] - 1)
             widths[index] -= reduction
             overflow -= reduction
-        return widths
+        return [width+gap for width,gap in zip(widths,chrome)]
 
     def maximum_safe_timeline_height(self) -> int:
         """Keep timeline growth inside the current desktop-sized client area."""
@@ -6437,17 +6707,19 @@ class MainWindow(QMainWindow):
     @property
     def maximum_sequence_duration(self) -> float | None:
         # Completed-shot editing must never inherit a generation duration budget.
-        return None if self.workspace_engine == "shot_sequence" else sequence_limit(self.workspace_definition)
+        limit = None if self.workspace_engine == "shot_sequence" else sequence_limit(self.workspace_definition)
+        return limit * len(self.render_groups()) if limit is not None and self.workspace_engine.startswith('minimax') else limit
 
     def available_segment_duration(self, segment: Segment | None) -> float:
         maximum = self.maximum_sequence_duration
         if maximum is None or segment is None:
             return sys.float_info.max
-        return max(MIN_DURATION, maximum - sum(item.duration for item in self.segments if item.id != segment.id))
+        return max(MIN_DURATION, (sequence_limit(self.workspace_definition) or maximum) - sum(item.duration for item in self.segments if item.id != segment.id and item.render_group==segment.render_group))
 
     def timeline_count_allowed(self, count: int, *, report: bool = True) -> bool:
         maximum = shot_limit(self.workspace_definition)
-        allowed = maximum is None or count <= max(maximum, len(self.segments))
+        budget=maximum * len(self.render_groups()) if maximum is not None and self.video_extensions else maximum
+        allowed = budget is None or count <= max(budget, len(self.segments))
         if not allowed and report:
             self.statusBar().showMessage(
                 f"This workspace allows {maximum} shots. Adjust Maximum shots in Settings → Workspaces to add more.", 8000)
@@ -6470,14 +6742,128 @@ class MainWindow(QMainWindow):
             return
         self.add_media_paths(paths)
 
+    def render_groups(self):
+        groups = {}
+        for segment in self.segments:
+            groups.setdefault(segment.render_group, []).append(segment)
+        return groups or {0: []}
+
+    def refresh_extension_boxes(self):
+        for box in self._extension_boxes.values():box.hide();box.deleteLater()
+        self._extension_boxes={};self.ruler.gaps=[]
+        if not self.workspace_engine.startswith('minimax'):return
+        from .extension_timeline import BlendControl
+        for group in list(self.render_groups())[1:]:
+            box=BlendControl(self,group);box.setParent(self.timeline.viewport())
+            self._extension_boxes[group]=box
+        self.timeline.doItemsLayout();self.position_extension_boxes()
+
+    def position_extension_boxes(self):
+        for group,box in getattr(self,'_extension_boxes',{}).items():
+            row=next((index for index,segment in enumerate(self.segments) if segment.render_group==group),None)
+            if row is None or not self.workspace_engine.startswith('minimax'):box.hide();continue
+            rect=self.timeline.visualItemRect(self.timeline.item(row))
+            setting=self.extension_transition(group)
+            width=max(244,round(setting['overlap']*self.pixels_per_second))
+            x=rect.left()-width//2
+            card=self.timeline.itemWidget(self.timeline.item(max(0,row-1)))
+            if isinstance(card,SegmentCard):
+                card.layout().activate()
+                preview=card.preview
+                point=preview.mapTo(self.timeline.viewport(),QPoint(0,0))
+                pixmap=preview.pixmap()
+                image_height=min(preview.height(),pixmap.height()) if pixmap and not pixmap.isNull() else preview.height()
+                top=point.y()+(preview.height()-image_height)//2
+                height=image_height
+            else:top=rect.top()+24;height=max(80,rect.height()-44)
+            box.setGeometry(x,top+2,width,max(1,height-4))
+            box.setVisible(rect.left()+width//2>0 and rect.left()-width//2<self.timeline.viewport().width())
+            box.raise_()
+
+    def extension_chrome(self,segments=None):
+        return [0]*len(self.segments if segments is None else segments)
+
+    def extension_transition(self,group):
+        options=self.render_group_options.get(str(group),{})
+        groups=list(self.render_groups())
+        index=groups.index(group) if group in groups else 0
+        maximum=min(self.render_group_duration(group),self.render_group_duration(groups[index-1])) if index else 15
+        return {'blend':options.get('blend','perceptual_crossfade'),'overlap':min(maximum,float(options.get('blendLength',1))),'side':options.get('blendSide','source')}
+
+    def set_extension_side(self,group,side):
+        self.render_group_options.setdefault(str(group),{})['blendSide']=side
+        self.mark_dirty();self.position_extension_boxes()
+
+    def set_extension_transition(self,group,length,mode):
+        self.render_group_options.setdefault(str(group),{}).update(blend=mode,blendLength=round(length*24)/24)
+        self.mark_dirty();self.extension_brackets.update();self.position_extension_boxes()
+
+    def render_group_duration(self,group):
+        options = self.render_group_options.get(str(group), {})
+        requested = self.requested_length.value() if group==self._active_render_group else options.get('requestedLength',0)
+        return float(requested or sum(s.duration for s in self.segments if s.render_group==group) or load_profile(self.settings)['video_duration'])
+
+    def render_group_settings_changed(self,*_):
+        if self._loading or not self.workspace_engine.startswith('minimax'):return
+        length=self.requested_length.value()
+        if self.video_extensions and length>15:
+            self.requested_length.blockSignals(True);self.requested_length.setValue(15);self.requested_length.blockSignals(False)
+            length=15
+        self.render_group_options.setdefault(str(self._active_render_group),{}).update(requestedLength=length)
+        if self.video_extensions and length>0:
+            items=[s for s in self.segments if s.render_group==self._active_render_group]
+            total=sum(s.duration for s in items)
+            if total:
+                for item in items:item.duration=round(item.duration*length/total,6)
+                items[-1].duration+=length-sum(s.duration for s in items)
+                self.update_timeline_layout()
+        if hasattr(self,'extension_brackets'):self.extension_brackets.update()
+
+    def select_render_group(self,group):
+        if not self.video_extensions or group==self._active_render_group:return
+        self.render_group_options.setdefault(str(self._active_render_group),{}).update(requestedLength=self.requested_length.value())
+        self._active_render_group = group
+        self.requested_length.blockSignals(True)
+        self.requested_length.setValue(float(self.render_group_options.get(str(group),{}).get('requestedLength',0)))
+        self.requested_length.blockSignals(False)
+        self.extension_brackets.update()
+        self.update_summary()
+
+    def restore_video_extensions(self,record):
+        self.video_extensions = max(0,min(100,int(record.get('videoExtensions',0))))
+        self.render_group_options = copy.deepcopy(record.get('renderGroupOptions',{}))
+        self._active_render_group = max(0,int(record.get("activeRenderGroup",0)))
+
+    def add_video_extension(self) -> None:
+        if not self.workspace_engine.startswith('minimax') or not self.segments:return
+        self.render_group_settings_changed()
+        group = max(s.render_group for s in self.segments)+1
+        length = min(15.,max(4.,self.requested_length.value() or sum(s.duration for s in self.segments if s.render_group==self._active_render_group)))
+        self.render_group_options[str(group)] = {'requestedLength':length}
+        segment = Segment(f'Extension {group}', '', '', 'text', 'text', '', length, render_group=group)
+        self.segments.append(segment)
+        self.video_extensions = len(self.render_groups())-1
+        self.refresh_video_extensions()
+        self.refresh_timeline(len(self.segments)-1)
+        self.mark_dirty()
+
+    def refresh_video_extensions(self) -> None:
+        if not hasattr(self,'extension_brackets'):return
+        enabled = self.workspace_engine.startswith('minimax')
+        self.add_extension_tile.setVisible(enabled)
+        self.extension_brackets.hide()
+        self.extension_brackets.update();self.position_extension_boxes()
+
     def add_text_segment(self) -> None:
         if self.prompt_only_workspace or not self.timeline_count_allowed(len(self.segments) + 1):
             return
         number = sum(segment.kind == "text" for segment in self.segments) + 1
-        segment = Segment(f"Text {number}", "", "", "text", "text", "", 5.0)
-        self.segments.append(segment)
+        segment = Segment(f"Text {number}", "", "", "text", "text", "", 5.0, render_group=self._active_render_group)
+        rows=[i for i,s in enumerate(self.segments) if s.render_group==self._active_render_group]
+        index=rows[-1]+1 if rows else len(self.segments)
+        self.segments.insert(index,segment)
         self.mark_dirty()
-        self.refresh_timeline(len(self.segments) - 1)
+        self.refresh_timeline(index)
         self.segment_prompt.setFocus()
         self.statusBar().showMessage("Text-only segment added; enter its prompt or use Magic Build")
 
@@ -6505,7 +6891,10 @@ class MainWindow(QMainWindow):
         if not self.timeline_count_allowed(len(self.segments) + len(paths)):
             return
         self.settings.setValue("last_media_dir", str(Path(paths[0]).parent))
-        target = len(self.segments) if insert_index is None else max(0, min(insert_index, len(self.segments)))
+        target_group = self._active_render_group if self.video_extensions else 0
+        group_rows = [i for i,s in enumerate(self.segments) if s.render_group==target_group]
+        target = (group_rows[-1]+1 if group_rows else len(self.segments)) if insert_index is None else max(0,min(insert_index,len(self.segments)))
+        if insert_index is not None and target<len(self.segments):target_group=self.segments[target].render_group
         before_id = self.segments[target].id if target < len(self.segments) else None
         workspace = (self.workspace_revision, self.current_project_id)
         self.statusBar().showMessage(f"Preparing {len(paths)} media file(s) in background…")
@@ -6519,7 +6908,7 @@ class MainWindow(QMainWindow):
             index = next((i for i, segment in enumerate(self.segments) if segment.id == before_id), len(self.segments))
             for path, kind, preview, frames, trim in prepared:
                 duration = 1.0 if kind == "video" else 5.0
-                self.segments.insert(index, Segment(Path(path).name, path, preview, kind, "end" if index % 2 else "start", duration=duration, media_duration_frames=frames, trim_start=trim))
+                self.segments.insert(index, Segment(Path(path).name, path, preview, kind, "end" if index % 2 else "start", duration=duration, media_duration_frames=frames, trim_start=trim, render_group=target_group))
                 index += 1
             if prepared:
                 self.mark_dirty()
@@ -6541,9 +6930,11 @@ class MainWindow(QMainWindow):
             self.shot_sequence_panel.refresh()
             self.update_summary()
             return
-        targets = fit_sequence([item.duration for item in self.segments], self.maximum_sequence_duration)
-        for item, duration in zip(self.segments, targets):
-            item.duration = duration
+        for items in self.render_groups().values():
+            targets = fit_sequence([item.duration for item in items], sequence_limit(self.workspace_definition))
+            for item, duration in zip(items, targets): item.duration = duration
+        self.video_extensions = max(0,len(self.render_groups())-1)
+        self.refresh_video_extensions()
         if hasattr(self, "shot_sequence_panel") and self.workspace_engine == "shot_sequence":
             self.shot_sequence_panel.refresh()
         self.update_conditioning_guide()
@@ -6556,6 +6947,8 @@ class MainWindow(QMainWindow):
             indicator.repaint()
         self._loading = True
         try:
+            for box in self._extension_boxes.values():box.hide();box.deleteLater()
+            self._extension_boxes={}
             self.timeline.clear()
             card_height = max(80, self.timeline.height() - 32)
             preview_height = max(24, card_height - 55)
@@ -6567,6 +6960,9 @@ class MainWindow(QMainWindow):
                 item.setSizeHint(QSize(widths[index], card_height))
                 self.timeline.addItem(item)
                 card = SegmentCard(segment, start_time, preview_height, self.pixels_per_second)
+                if segment.render_group and (index==0 or self.segments[index-1].render_group!=segment.render_group):
+                    card.role_badge.setText('EXTENSION')
+                    card.role_badge.setToolTip('Previous block trailing second conditions this block at time 0; frame blend included in marked duration.')
                 card.duration_changed.connect(lambda value, sid=segment.id: self.resize_timeline_edge(sid, value))
                 card.resize_started.connect(lambda sid=segment.id: self.begin_timeline_edge_drag(sid))
                 card.delete_requested.connect(lambda sid=segment.id: self.delete_by_id(sid))
@@ -6586,6 +6982,7 @@ class MainWindow(QMainWindow):
             self._loading = False
             if indicator:
                 indicator.hide_loading()
+        self.refresh_extension_boxes()
 
     def update_timeline_layout(self) -> None:
         """Resize existing cards in place without rebuilding media-backed widgets."""
@@ -6618,6 +7015,8 @@ class MainWindow(QMainWindow):
             self.update_summary()
         finally:
             self._loading = previous_loading
+        self.extension_brackets.update()
+        self.position_extension_boxes()
 
     def update_timeline_selection_style(self, selected_row: int) -> None:
         """Use the same enabled, editable segment cards in every workspace."""
@@ -6636,9 +7035,9 @@ class MainWindow(QMainWindow):
             return
         self.reject_segment_prompt_review()
         ordered_ids = [self.timeline.item(row).data(Qt.ItemDataRole.UserRole) for row in range(self.timeline.count())]
-        self.segments = order_segments_by_ids(self.segments, ordered_ids)
+        self.segments = sorted(order_segments_by_ids(self.segments, ordered_ids),key=lambda segment:segment.render_group)
         self.retime_unified_prompt()
-        self.update_timeline_layout()
+        self.refresh_timeline(self.timeline.currentRow())
         self.mark_dirty()
 
     def update_segment_start_times(self) -> None:
@@ -6662,6 +7061,7 @@ class MainWindow(QMainWindow):
         self.reject_segment_prompt_review()
         self._loading = True
         segment = self.current_segment()
+        if segment:self.select_render_group(segment.render_group)
         self.duration_spin.setMaximum(self.available_segment_duration(segment))
         self.duration_spin.setToolTip("Segment duration in seconds")
         self.duration_spin.setEnabled(bool(segment))
@@ -6801,6 +7201,7 @@ class MainWindow(QMainWindow):
                     card.content.update()
                 break
         self.timeline.viewport().update()
+        self.extension_brackets.update()
         self.update_segment_start_times()
         self.update_summary()
         self.sync_selected_duration_control()
@@ -6813,6 +7214,7 @@ class MainWindow(QMainWindow):
 
     def timeline_boundary_available(self, row: int) -> bool:
         return (not self.ai_busy and not getattr(self, "timeline_review_pending", set())
+                and (row>=len(self.segments)-1 or self.segments[row].render_group==self.segments[row+1].render_group)
                 and all(item.artwork_status != "generating" for item in self.segments[row:row + 2]))
 
     def begin_timeline_edge_drag(self, segment_id: str) -> None:
@@ -6882,7 +7284,8 @@ class MainWindow(QMainWindow):
         if self.minimax_panel:
             self.minimax_panel.refresh_references()
         total = self.total_duration()
-        self.sequence_bar.setText(f"{total:.2f}s · {len(self.segments)}")
+        scoped=[s for s in self.segments if s.render_group==self._active_render_group] if self.video_extensions else self.segments
+        self.sequence_bar.setText(f"{sum(s.duration for s in scoped):.2f}s · {len(scoped)}")
         self.sequence_bar.setToolTip(
             f"Sequence begins at 0.00 seconds and ends at {total:.2f} seconds "
             f"({len(self.segments)} segments)."
@@ -8063,6 +8466,7 @@ class MainWindow(QMainWindow):
         self.mark_dirty()
 
     def apply_project_type_ui(self) -> None:
+        self.refresh_video_extensions()
         if hasattr(self, "timeline") and self.segments and not self._loading:
             current = [item.duration for item in self.segments]
             if fit_sequence(current, self.maximum_sequence_duration) != current:
@@ -9109,7 +9513,15 @@ class MainWindow(QMainWindow):
     def stage_current_workspace(self) -> None:
         """Keep an unsaved project in memory when switching tabs or starting anew."""
         if self.has_project_content and self.project_dirty and not self.current_project_id:
+            old_key=self.video_preview_key()
             self.current_project_id = uuid4().hex
+            new_key=self.video_preview_key()
+            self._video_key_aliases[old_key]=new_key
+            if old_key in self._video_preview_cache:self._video_preview_cache[new_key]=self._video_preview_cache.pop(old_key)
+            if old_key in self._video_generation_counts:self._video_generation_counts[new_key]=self._video_generation_counts.pop(old_key)
+            if old_key in self._video_block_frames:self._video_block_frames[new_key]=self._video_block_frames.pop(old_key)
+            for job in self.render_queue.jobs:
+                if job.workspace_key==old_key:job.workspace_key=new_key;job.project_id=self.current_project_id
             self.current_project_name = (Path(self.segments[0].name).stem if self.segments else "MiniMax Prompt") or "Untitled"
             self.update_window_title()
 
@@ -10311,6 +10723,11 @@ class MainWindow(QMainWindow):
         return {
             "app": "ltx-director-director",
             "projectVersion": 10,
+            "videoRenderCache": copy.deepcopy(self.video_render_cache),
+            "combinedSources": copy.deepcopy(self.combined_sources),
+            "videoExtensions": self.video_extensions,
+            "renderGroupOptions": copy.deepcopy(self.render_group_options),
+            "activeRenderGroup": self._active_render_group,
             "conditioningAudio": {'enabled': self.audio_panel.enabled.isChecked(), 'clips': audio_clips},
             "projectType": self.project_type,
             "workspaceDefinition": copy.deepcopy(self.workspace_definition),
@@ -10345,6 +10762,10 @@ class MainWindow(QMainWindow):
 
     def load_project_payload(self, payload: dict) -> None:
         self.reject_segment_prompt_review()
+        stored_cache=payload.get("library",{}).get("videoRenderCache",payload.get("videoRenderCache",{}))
+        self.video_render_cache=copy.deepcopy(stored_cache) if isinstance(stored_cache,dict) else {}
+        self.combined_sources = copy.deepcopy(payload.get("combinedSources",[]))
+        self.restore_video_extensions(payload)
         self.shot_sequence_settings = shot_settings(payload.get("shotSequence"))
         if payload.get("app") not in {"ltx-director-director", "ltx-prompt-director-python"}:
             raise ValueError("This is not an Prompt Director project file.")
@@ -10523,7 +10944,7 @@ class MainWindow(QMainWindow):
         self.start_disk_job(save_project_archive, (path, payload, copy.deepcopy(self.segments)), saved,
                             lambda message: self.export_failed(path, message), serialized=True)
 
-    def open_project(self, checked: bool = False, path: str | None = None) -> None:
+    def open_project(self, checked: bool = False, path: str | None = None, *, display_name: str | None = None) -> None:
         path = path or choose_document_open(self, "Open Project", self.settings.value("last_document_dir", str(Path.home())), "Prompt Director Project (*.LTXD *.ltxd)")
         if not path:
             return
@@ -10540,7 +10961,7 @@ class MainWindow(QMainWindow):
             try:
                 self.load_project_payload(payload)
                 self.current_project_id = None
-                self.current_project_name = Path(path).stem
+                self.current_project_name = display_name or Path(path).stem
                 self.update_window_title()
                 self.project_dirty = False
                 self.mark_dirty()

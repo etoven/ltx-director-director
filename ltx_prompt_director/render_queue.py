@@ -16,6 +16,13 @@ class RenderJob:
     kind: str
     details: str = ''
     id: str = field(default_factory=lambda:uuid4().hex)
+    workspace_key: tuple = ()
+    generation_number: int = 0
+    group_id: str = ''
+    group_title: str = ''
+    dependencies: tuple = ()
+    output_path: str = ''
+    intermediate: bool = False
     state: str = 'Waiting'
     percent: float | None = None
     message: str = ''
@@ -39,11 +46,13 @@ class RenderQueue(QObject):
         self._notify=QTimer(self);self._notify.setSingleShot(True);self._notify.setInterval(60)
         self._notify.timeout.connect(self.changed)
 
-    def enqueue(self,operation,args,finished,failed,*,title,project_id='',source='local',model='',kind='Image',details='',progress=None,cancel=None,started=None,cancelled=None):
+    def enqueue(self,operation,args,finished,failed,*,title,project_id='',source='local',model='',kind='Image',details='',progress=None,cancel=None,started=None,cancelled=None,group_id='',group_title='',dependencies=(),intermediate=False,workspace_key=(),generation_number=0):
         if self.closing:raise RuntimeError('Render queue is closing')
         job=RenderJob(title,str(project_id or ''),source,model,kind,details,
                       operation=operation,args=args,finished=finished,failed=failed,
-                      progress=progress,started=started,cancelled=cancelled)
+                      progress=progress,started=started,cancelled=cancelled,
+                      group_id=group_id,group_title=group_title,dependencies=tuple(dependencies),intermediate=intermediate,
+                      workspace_key=workspace_key,generation_number=generation_number)
         if cancel is not None:job.cancel=cancel
         self.jobs.append(job);self.changed.emit();self._advance()
         return job
@@ -65,6 +74,10 @@ class RenderQueue(QObject):
         if self.closing or self.paused or self.active is not None:return
         job=next((j for j in self.jobs if j.state=='Waiting'),None)
         if job is None:return
+        parents=[next((candidate for candidate in self.jobs if candidate.id==key),None) for key in job.dependencies]
+        if any(parent is None or parent.state in {'Failed','Cancelled'} for parent in parents):
+            self.cancel_job(job.id);QTimer.singleShot(0,self._advance);return
+        if any(parent.state!='Complete' for parent in parents):return
         if job.cancel.is_set():self.cancel_job(job.id);QTimer.singleShot(0,self._advance);return
         self.active=job;job.state='Rendering';self.changed.emit()
         def progress(event):
@@ -86,6 +99,10 @@ class RenderQueue(QObject):
                 job.state='Failed';job.error=str(error);callback=job.failed;value=error
             else:
                 job.state='Complete';job.percent=100;callback=job.finished;value=result
+                if isinstance(result,dict):
+                    path=result.get('path')
+                    if not path and job.kind=='Image':path=next((value for value in result.values() if isinstance(value,str)), '')
+                    job.output_path=str(path or '')
             try:
                 if callback:
                     if job.state=='Cancelled':callback()
@@ -96,7 +113,8 @@ class RenderQueue(QObject):
                 job.operation=job.finished=job.failed=job.progress=job.started=job.cancelled=None;job.args=()
                 terminal=[j for j in self.jobs if j.state not in ACTIVE_STATES]
                 if len(terminal)>100:
-                    stale={j.id for j in terminal[:-100]};self.jobs[:]=[j for j in self.jobs if j.id not in stale]
+                    protected={j.group_id for j in self.jobs if j.state in ACTIVE_STATES and j.group_id}
+                    stale={j.id for j in terminal[:-100] if not j.group_id or j.group_id not in protected};self.jobs[:]=[j for j in self.jobs if j.id not in stale]
                 self.changed.emit();QTimer.singleShot(0,self._advance)
         try:
             if job.started:job.started()

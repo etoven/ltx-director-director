@@ -35,6 +35,10 @@ Local video, local artwork and cloud image requests share the **Render Queue** o
 
 Click a panel's icon to open it; click again or use its heading arrow to collapse the column. Drag panel headings to rearrange supported docks. [Read the illustrated queue and panel guide](docs/render-queue-and-panels.md).
 
+## Extend local MiniMax videos
+
+Add continuations with **V＋**, set each block's length with the timeline controls, and drag the shared mix box's edges to adjust its length. Choose the blend mode in that same box. Marked block lengths add together, with the blends included. [Read the illustrated extension and render guide](docs/video-extensions.md).
+
 ## Every creative tool, at a glance
 
 | Tool | What it helps you do | How to use it |
@@ -144,6 +148,8 @@ In **Settings → Workspaces**, set **Maximum sequence length** or select **No l
 The ComfyUI export puts the production prompt in a tall group along the left edge, with the remaining groups packed beside it.
 
 ## Completed shot sequences
+
+Ctrl-click projects inside a collection and use **Group selected projects into Shot Sequence** to combine their rendered videos in the displayed order. Source projects, prompts, workflow types, and reference images are embedded for later editing through **Source project…**.
 
 Each collection includes a **Shot Sequence** tile. Drop finished movies onto its thumbnail NLA timeline at the blue insertion marker and reorder them. Select a shot to set its blend, overlap and overlap side using the existing top controls. New shots copy a neighbor’s settings; each shot then keeps its own settings independently. Drag either edge of a video or audio strip to trim both together. **Split at playhead** creates two adjoining pieces; their source media stays intact. Its context menu also offers shot status, export and Delete. Segment export uses the trimmed interval and copies the original video/audio codecs; stream-copy cuts can follow source keyframes. Use **Left/Right** on the timeline or player to step back/forward one frame. The assembled preview updates automatically in background workers, with source audio and a scrubhead linked to the player. Green regions are cached; red regions are rebuilding. Workfiles persist in the per-user cache so unchanged clips and joins can be reused. The default join is a 1-second source-side perceptual crossfade. **Bake WebM** writes the full-resolution sequence with audio and configurable CRF (default 15). [Read the illustrated guide](docs/shot-sequences.md).
 

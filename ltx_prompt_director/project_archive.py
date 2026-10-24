@@ -156,6 +156,12 @@ def save_project_archive(path: str | Path, payload: dict, segments: list) -> Non
                 archive.writestr(member, base64.b64decode(encoded))
                 ref["archiveImage"] = member
                 ref["imageMime"] = header.removeprefix("data:").split(";", 1)[0]
+            for index, source in enumerate(payload.get('combinedSources', [])):
+                member=f'combined-sources/{index:04d}.LTXD'
+                with Path(source['projectPath']).open('rb') as stream:
+                    _copy_to_archive(archive,member,stream)
+                source['archiveProject']=member
+                source.pop('projectPath',None)
             payload["projectVersion"] = 10
             archive.writestr(MANIFEST, json.dumps(payload, separators=(",", ":"), ensure_ascii=False), compress_type=zipfile.ZIP_DEFLATED, compresslevel=6)
         os.replace(temporary.name, target)
@@ -210,6 +216,20 @@ def load_project_archive(path: str | Path) -> dict:
             frame["name"] = safe_media_filename(frame.get("name", ""), "Segment", suffix=suffix)
             frame["_archiveMediaPath"] = str(_member_cache_path(frame["archiveSource"], source, suffix))
             frame["_archiveSourceSize"] = info.file_size
+        for entry in payload.get('combinedSources', []):
+            if entry.get('archiveProject'):
+                member=entry['archiveProject']
+                destination=_member_cache_path(member,source,'.LTXD')
+                if not destination.is_file():
+                    destination.parent.mkdir(parents=True,exist_ok=True)
+                    handle=tempfile.NamedTemporaryFile(prefix='.combined-source-',suffix='.tmp',dir=destination.parent,delete=False)
+                    temporary=Path(handle.name);handle.close()
+                    try:
+                        with archive.open(member) as incoming,temporary.open('wb') as output:
+                            shutil.copyfileobj(incoming,output,1024*1024)
+                        os.replace(temporary,destination)
+                    finally:temporary.unlink(missing_ok=True)
+                entry['projectPath']=str(destination)
         for clip in payload.get('conditioningAudio', {}).get('clips', []):
             if clip.get('archiveSource'):
                 clip['media_path'] = str(_cached_member(archive, clip['archiveSource'], source))

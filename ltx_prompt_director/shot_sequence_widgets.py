@@ -136,6 +136,7 @@ class ShotSequencePanel(QWidget):
         self.timeline_buttons=[]
         actions=[('Add shots…','add',self.choose,'Import completed movie files'),
                  ('Collection previews…','collection',self.add_collection_movies,'Add saved rendered previews from other projects in this collection'),
+                 ('Source project…','collection',owner.open_combined_source,'Open this shot’s original prompts, workflow and reference images'),
                  ('Restore full clips','restore',self.restore_full_clips,'Restore each movie to its full source duration'),
                  ('Remove','remove',self.remove,'Remove selected shots from the sequence'),
                  ('','earlier',lambda:self.move(-1),'Move selected shot earlier'),
@@ -309,12 +310,27 @@ class ShotSequencePanel(QWidget):
         if paths:self.add_paths(paths)
 
     def add_collection_movies(self):
-        collection=self.owner.current_collection or ''
-        paths=[record['previewVideoPath'] for record in self.owner.library_records()
-               if record.get('collection','')==collection and record.get('projectType')!='shot_sequence'
-               and record.get('previewVideoPath') and Path(record['previewVideoPath']).is_file()]
-        if paths:self.add_paths(paths)
-        else:QMessageBox.information(self,'Add collection previews','Save a rendered preview movie in another project in this collection first, or use Add shots to import movie files.')
+        records=[record for record in self.owner.ordered_collection_projects()
+                 if record.get('projectType')!='shot_sequence' and record.get('previewVideoPath')
+                 and Path(record['previewVideoPath']).is_file()]
+        if not records:
+            QMessageBox.information(self,'Add collection previews','Save a rendered preview movie in another project in this collection first, or use Add shots to import movie files.')
+            return
+        project=(self.owner.current_project_id,self.owner.workspace_revision)
+        self.owner.cache_current_workspace()
+        snapshots={str(r['id']):copy.deepcopy(self.owner.project_sessions[str(r['id'])]['state']) for r in records
+                   if self.owner.project_sessions.get(str(r['id']),{}).get('dirty')}
+        from .collection_combine import import_collection_projects
+        from .media import APP_CACHE
+        def ready(result):
+            if project!=(self.owner.current_project_id,self.owner.workspace_revision):return
+            shots,sources=result
+            self.owner.segments.extend(shots)
+            self.owner.combined_sources.extend(sources)
+            self.owner.shot_sequence_settings=inherit_transitions([shot.id for shot in shots],self.owner.shot_sequence_settings)
+            self.owner.refresh_timeline();self.refresh();self.owner.mark_dirty()
+        self.owner.start_disk_job(import_collection_projects,(copy.deepcopy(records),APP_CACHE/'collection-imports',snapshots),ready,
+                                  lambda error:QMessageBox.warning(self,'Add collection previews',str(error)))
 
     def add_paths(self,paths,index=None):
         if not paths:return

@@ -25,6 +25,9 @@ class Segment:
     artwork_prompt: str = ""
     artwork_status: str = ""  # awaiting, generating, failed, complete
     artwork_target_role: str = "start"
+    render_group: int = 0
+    source_project_id: str = ""
+    source_prompt_type: str = ""
 
     def __post_init__(self) -> None:
         self.id = self.id or str(uuid4())
