@@ -70,3 +70,18 @@ permission. The published wheel is also verified directly after publication.
 
 Subjective listening and independent audio integration into other renderer
 handoffs remain outside this release's verified scope.
+
+## Publication record
+
+Published `1.13.0a124` on `experimental` on October 24, 2026. The wheel commit is
+`f354668`. [Release CI](https://github.com/etoven/ltx-director-director/actions/runs/40096092278)
+passed 243 core tests, 12 subtests and all 98 isolated Qt editor checks.
+
+The public raw wheel was downloaded and confirmed byte-for-byte identical to
+the published Git artifact. Its 465 packaged source/assets match the checkout.
+A clean installation of that exact download passed the application smoke check
+and all six audio regressions. SHA-256:
+`ee3f6e50749370601057309d1d425e2392ba35b75397c48e2b32b77ae8d2f517`.
+
+The proposed workflow additions are retained locally, with the original draft
+also preserved on `codex/conditioning-audio-ci-draft`.
