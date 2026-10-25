@@ -1803,8 +1803,11 @@ class UnifiedEditorTests(unittest.TestCase):
                                       engine='generic', prompt_mode='unified')
                     definition['generation_prompts'] = {key: stock_prompt('generic', key)
                                                         for key in ('generate', 'refine')}
-                    w.workspace_store.save(definition)
-                    w.reload_workspace_definitions()
+                    # This workflow belongs only to this window. CI executes
+                    # later cases in separate processes sharing the same XDG
+                    # directory; saving it would change their workspace order.
+                    w.workspace_definitions[definition['id']] = definition
+                    w.project_type_combo.addItem(definition['name'], definition['id'])
                     w.set_project_type(definition['id'])
                 w._close_saves_queued = True
                 w.segments[0].prompt = 'Old draft: the traveler says "Wait here".'
