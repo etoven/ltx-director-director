@@ -5,6 +5,27 @@ import json
 from pathlib import Path
 
 
+def render_cache_from(*values):
+    """Read optional/legacy metadata caches without losing a valid fallback.
+
+    Older library metadata wrote a missing cache as an empty string. Some
+    project metadata also contains JSON text; neither is a render-cache map.
+    """
+    empty=None
+    for value in values:
+        if isinstance(value,str):
+            try:value=json.loads(value)
+            except (ValueError,TypeError):continue
+        if not isinstance(value,dict):continue
+        valid={str(group):entry for group,entry in value.items()
+               if isinstance(entry,dict) and isinstance(entry.get('result',{}),dict)}
+        if valid:
+            if valid==value:return value
+            return valid
+        if not value and empty is None:empty=value
+    return empty if empty is not None else {}
+
+
 def file_identity(path):
     try:
         stat=Path(path).stat()
@@ -48,7 +69,9 @@ def block_signature(request,segments,previous_token=''):
 def cached_render(cache,group,request,segments,render,cancel,previous_token=''):
     signature=block_signature(request,segments,previous_token)
     entry=cache.get(str(group),{})
+    if not isinstance(entry,dict):entry={}
     result=entry.get('result',{})
+    if not isinstance(result,dict):result={}
     path=result.get('path','')
     if (path and Path(path).is_file() and entry.get('signature')==signature and entry.get('identity')==file_identity(path)
             and file_identity(path) is not None):

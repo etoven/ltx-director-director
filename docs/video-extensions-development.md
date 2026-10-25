@@ -63,3 +63,12 @@ Published 1.13.0a127 to `experimental` after the user's explicit publication req
 The initial CI run caught saved references being included for conditioning-only workflows. Video request snapshots now apply each group's engine eligibility as well as its reference settings. The existing exclusion test and a mixed-group request regression pass.
 
 The downloaded public wheel matches the committed artifact byte-for-byte and all 476 packaged source/assets. All 41 installed feature checks pass against the public artifact, including real Qt audio playback, trimmed media, shared-control restoration, exact blend geometry and reuse of the original completed block after merging. Candidate baseline app smoke and all six conditioning-audio regressions also passed. Public SHA-256: `3819b4b6475c9723a4b0592ba38af696f9e683c79f401acae7489b16aeb81050`. No new GPU inference was run.
+
+
+## a128 saved-project grouping fix
+
+The reported `'str' object has no attribute 'get'` was reproduced through the real library metadata persistence path. A missing `videoRenderCache` had been written into the archive's library header as `""`; grouping then treated that value as a dictionary. The reproducer failed at the cache lookup in `combine_projects`.
+
+Cache readers now tolerate empty/legacy metadata and retain a valid metadata/archive fallback. The metadata writer stores a cache object for both ZIP and JSON projects. Live empty cache objects retain their identity so queued renders can still populate the original session cache. Cached-render lookups also reject malformed entries safely. The grouping layout, controls and styling are unchanged.
+
+Eight focused metadata, portable-combine and cache checks passed, including byte-for-byte preservation of the source archives. The native acceptance case runs the actual collection Group action on two saved video projects with reference images and checks the opened groups, original Unified Prompts, reference pixels and completed-block reuse. Release validation will be recorded after publication.

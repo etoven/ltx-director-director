@@ -404,17 +404,20 @@ def _prepare_media_batch(paths: list[str]) -> tuple[list[tuple[str, str, str, in
 
 def _persist_library_archive(meta: dict, metadata_path: Path) -> None:
     """Update the archive in order; the UI already saved current gallery metadata."""
+    from .render_cache import render_cache_from
     project_path = Path(meta.get("projectPath", ""))
     if project_path.is_file() and zipfile.is_zipfile(project_path):
         with zipfile.ZipFile(project_path, "a") as archive:
             payload = json.loads(archive.read("project.json"))
             payload["library"] = {key: meta.get(key, "") for key in ("id", "name", "description", "collection", "savedAt", "status", "color", "tags", "tag", "archived", "notes", "previewVideoPath", "previewVideoName", "projectFiles", "workflowFiles", "downloadDirectory", "videoRenderCache")}
+            payload["library"]["videoRenderCache"] = render_cache_from(meta.get("videoRenderCache"))
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", UserWarning)
                 archive.writestr("project.json", json.dumps(payload, separators=(",", ":")), compress_type=zipfile.ZIP_DEFLATED, compresslevel=6)
     elif project_path.is_file() and project_path.stat().st_size < 1024 * 1024:
         payload = json.loads(project_path.read_text(encoding="utf-8"))
         payload["library"] = {key: meta.get(key, "") for key in ("id", "name", "description", "collection", "savedAt", "status", "color", "tags", "tag", "archived", "notes", "previewVideoPath", "previewVideoName", "projectFiles", "workflowFiles", "downloadDirectory", "videoRenderCache")}
+        payload["library"]["videoRenderCache"] = render_cache_from(meta.get("videoRenderCache"))
         project_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
@@ -6022,8 +6025,8 @@ class MainWindow(QMainWindow):
         self._loading = True
         self.workspace_revision += 1
         self.segments = state.get("segments", [])
-        stored_cache=state.get("videoRenderCache",{})
-        self.video_render_cache = stored_cache if isinstance(stored_cache,dict) else {}
+        from .render_cache import render_cache_from
+        self.video_render_cache = render_cache_from(state.get('videoRenderCache'))
         self.combined_sources = copy.deepcopy(state.get("combinedSources",[]))
         self.restore_video_extensions(state)
         audio = state.get('conditioningAudio', {})
@@ -10921,8 +10924,8 @@ class MainWindow(QMainWindow):
 
     def load_project_payload(self, payload: dict) -> None:
         self.reject_segment_prompt_review()
-        stored_cache=payload.get("library",{}).get("videoRenderCache",payload.get("videoRenderCache",{}))
-        self.video_render_cache=copy.deepcopy(stored_cache) if isinstance(stored_cache,dict) else {}
+        from .render_cache import render_cache_from
+        self.video_render_cache=copy.deepcopy(render_cache_from(payload.get('library',{}).get('videoRenderCache'),payload.get('videoRenderCache')))
         self.combined_sources = copy.deepcopy(payload.get("combinedSources",[]))
         self.restore_video_extensions(payload)
         self.shot_sequence_settings = shot_settings(payload.get("shotSequence"))

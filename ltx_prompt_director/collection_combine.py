@@ -121,6 +121,7 @@ def combine_projects(records,root,ident,name,snapshots=None):
     """Combine editable prompt groups; rendered footage is never a prerequisite."""
     from uuid import uuid4
     from .render_groups import context_from_payload,group_context
+    from .render_cache import render_cache_from
     root=Path(root);root.mkdir(parents=True,exist_ok=True);snapshots=snapshots or {}
     target=root/(ident+'.LTXD');meta_path=root/(ident+'.meta.json')
     if target.exists() or meta_path.exists():raise FileExistsError('Combined project already exists.')
@@ -151,7 +152,7 @@ def combine_projects(records,root,ident,name,snapshots=None):
                         context.setdefault('directionOptions',{})['requestedLength']=length
                         old.update(context=context,requestedLength=length,sourceProjectId=source_id,name=record.get('name',''))
                         options[str(group)]=old
-                        cached=(record.get('videoRenderCache') or payload.get('videoRenderCache') or payload.get('library',{}).get('videoRenderCache',{})).get(str(previous))
+                        cached=render_cache_from(record.get('videoRenderCache'),payload.get('library',{}).get('videoRenderCache'),payload.get('videoRenderCache')).get(str(previous))
                         if cached:cache[str(group)]=copy.deepcopy(cached)
                     segment.render_group=mapping[previous];segment.id=uuid4().hex
                     segment.source_project_id=source_id;segment.source_prompt_type=payload.get('projectType','')

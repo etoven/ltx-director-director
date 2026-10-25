@@ -7,6 +7,7 @@ import tempfile
 
 ROOT=Path(__file__).resolve().parents[1]
 CASES=[
+    'tests/test_grouping_metadata.py::test_collection_group_action_opens_saved_video_groups_without_changing_sources',
     'tests/test_prompt_groups.py::test_three_plus_one_keeps_shared_bottom_controls_and_original_prompts',
     'tests/test_prompt_groups.py::test_group_workflow_and_references_restore_in_existing_ui',
     'tests/test_prompt_groups.py::test_each_generation_request_uses_its_group_unified_prompt',
