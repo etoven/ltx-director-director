@@ -95,7 +95,9 @@ def test_real_rendered_clip_loads_at_scrub_position_with_audio_stream(tmp_path):
     with window(tmp_path) as w:
         video=clip(tmp_path,'audio-preview',4,'purple')
         w.set_project_type('minimax_frames');w.segments=[Segment('Text','','','text','text','Source',4)];w.refresh_timeline()
-        w._video_preview_cache[w.video_preview_key()]={'kind':'final','path':video}
+        w.store_render_group()
+        from ltx_prompt_director.render_groups import input_stamp
+        w._video_preview_cache[w.video_preview_key()]={'kind':'final','path':video,'groupStamps':{'0':input_stamp(w.segments,w.capture_render_group())},'blendSettings':[]}
         w.start_disk_job=lambda op,args,ready,failed,**kw:ready(op(*args))
         w.resize(1300,900);w.show();APP.processEvents()
         w.project_preview_panel.audio.setMuted(True)

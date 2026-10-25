@@ -43,3 +43,14 @@ The a126 candidate matches all 475 packaged source/assets. Installed baseline sm
 ## a126 publication
 
 Published 1.13.0a126 on `experimental`; source `66041dd`, wheel commit `0925d36`. [Release CI](https://github.com/etoven/ltx-director-director/actions/runs/40119893834) passed 243 core tests plus 98 isolated Qt editor tests. The downloaded public wheel matches the committed artifact byte-for-byte and all 475 packaged source/assets. All 29 installed extension/scrubbing regressions, the baseline app smoke check, and six installed conditioning-audio regressions pass against that public wheel. Public SHA-256: `2200e171d8804868327f711776f241739685739825d4944b46e95729953a3128`. A new GPU H3 inference run was not performed.
+
+
+## a127 local review candidate
+
+This corrects the merge model to editable prompt groups using the existing bottom controls, with independent production contexts, workflow types and references. The user approved the Group 2 layout and then explicitly clarified 10 px top/bottom clearance for the whole mix. The working capture measures that inset against visible media bounds. No new group tabs or settings panels are added.
+
+Audio-panel seeking/playback now follows the condition/rendered preview in prompt workflows, and the Shot Sequence audio Play control starts its assembled preview. Audio seeks wait for media loading and do not repeatedly reset the decoder on buffered notifications. Source video analysis uploads and storyboard samples use the actual trim, while local conditioning enforces trim-out and source timestamp origins. Source files are unchanged.
+
+The local 1.13.0a127 wheel matches all 476 packaged source/assets and passes 41 installed feature checks, the baseline app smoke check, and six installed conditioning-audio regressions. Source media/local-runtime checks passed 32 tests with 11 optional ML tests skipped. Real Qt audio buffer and rendered playback checks were included. No new GPU inference was performed.
+
+Candidate SHA-256: `1aa1882fc46f705bd36518f7ecc2c2deddf15997837a162c6a6b744d0752caf6`. This is a local review build; it has not been committed, pushed, published, or installed into the user's running application.

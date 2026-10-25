@@ -12,7 +12,7 @@ from pathlib import Path
 
 import requests
 
-from .media import data_url, video_storyboard_data_urls
+from .media import data_url, video_storyboard_data_urls, trimmed_analysis_video
 from .project_archive import materialize_source
 from .models import Segment
 from .ai_stream import send_stream, streaming_enabled
@@ -569,14 +569,17 @@ def _minimax_h3_inputs(segments: list[Segment], provider: str = "gemini", refine
                 source_start = max(0.0, float(item.trim_start or 0) / 24)
                 value["continuity_function"] += (
                     f"; only source time {source_start:.3f}s to {source_start + item.duration:.3f}s "
-                    "belongs to this timeline item; preceding source footage is context, not an earlier timeline cue"
+                    "belongs to this timeline item; footage outside that interval is excluded"
                 )
-            if provider not in {"openai", "chatgpt"} and source.stat().st_size <= MAX_INLINE_VIDEO_BYTES:
-                value["video"] = data_url(str(source))
-                value["video_analysis_mode"] = "full source video"
+            source_start=max(0.,float(item.trim_start or 0)/24)
+            selected=trimmed_analysis_video(str(source),source_start,item.duration) if provider not in {'openai','chatgpt'} else None
+            if selected and Path(selected).stat().st_size<=MAX_INLINE_VIDEO_BYTES:
+                value['video']=data_url(selected)
+                value['video_analysis_mode']='selected source interval only; uploaded clip starts at zero'
             else:
-                value["video_frames"] = video_storyboard_data_urls(str(source))
-                value["video_analysis_mode"] = "timestamped samples across the full source video"
+                value['video_frames']=video_storyboard_data_urls(str(source),start=source_start,duration=item.duration)
+                value['video_analysis_mode']='timestamped samples inside the selected source interval only'
+                if not value['video_frames']:raise ValueError('The selected video trim has no decodable frames: '+item.name)
         if item.kind == "image" and item.media_path:
             value["image"] = data_url(materialize_source(item), max_edge=512)
         elif item.kind == "video" and not value.get("video") and not value.get("video_frames") and item.preview_path:

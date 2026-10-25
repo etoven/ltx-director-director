@@ -1,3 +1,3 @@
 """Prompt Director native desktop application."""
 
-__version__ = "1.13.0a126"
+__version__ = "1.13.0a127"

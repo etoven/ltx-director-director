@@ -187,20 +187,27 @@ def read_reference_video(path, *, start=0, duration=15, width=832, height=480, f
     import av
     from PIL import ImageOps
     start = max(0.0, float(start)); duration = min(15.0, max(0.0, float(duration)))
-    count = max(1, math.ceil(duration * fps)); output = []
+    if not math.isfinite(start) or not math.isfinite(duration) or duration<=0:raise ValueError('Video conditioning needs a positive finite trim.')
+    count = max(1, math.ceil(duration * fps)); output = [];last_image=None
     with av.open(str(path)) as container:
         if not container.streams.video: raise ValueError('Reference has no video stream.')
         stream = container.streams.video[0]
-        if start: container.seek(int(start / stream.time_base), stream=stream, backward=True)
-        target = start
+        origin=float(stream.start_time*stream.time_base) if stream.start_time is not None else 0.
+        if start: container.seek(int((origin+start) / stream.time_base), stream=stream, backward=True)
+        target = start;end=start+duration
         for frame in container.decode(stream):
-            stamp = float(frame.pts * frame.time_base) if frame.pts is not None else target
-            if stamp + 1e-6 < target: continue
-            image = None
-            while target <= stamp + 1e-6 and len(output) < count:
-                if image is None: image = ImageOps.fit(frame.to_image().convert('RGB'), (width, height))
-                output.append(image.copy()); target = start + len(output) / fps
-            if len(output) >= count: break
+            stamp = float(frame.pts * frame.time_base)-origin if frame.pts is not None else target
+            if stamp>=end-1e-6:break
+            if stamp+1e-6<start:continue
+            if stamp+1e-6<target:continue
+            image=ImageOps.fit(frame.to_image().convert('RGB'),(width,height));last_image=image
+            while target<=stamp+1e-6 and len(output)<count:
+                output.append(image.copy());target=start+len(output)/fps
+            if len(output)>=count:break
+        # A low/variable-rate source may end between output sample points.
+        # Repeat only an in-range frame; never import a frame beyond trim-out.
+        while last_image is not None and len(output)<count:output.append(last_image.copy())
+
     return output
 
 

@@ -1090,6 +1090,7 @@ class ProjectPreviewPanel(QWidget):
         self.setProperty("dropActive", False)
         self.setAcceptDrops(True)
         self.duration = 0
+        self.pending_preview_path = ""
         self._rendering = False
         self._source_generation = 0
         self.current_frame = None
@@ -1397,6 +1398,7 @@ class ProjectPreviewPanel(QWidget):
         self.fullscreen.setEnabled(False)
 
     def clear_project(self) -> None:
+        self.pending_preview_path=''
         self._static_latent_active=False;self.latent_image.hide();self.condition_text.hide();self.play.setEnabled(True)
         self.release_memory_video()
         self._generation_preview_active = False
@@ -4470,17 +4472,32 @@ class MainWindow(QMainWindow):
         except ValueError as error:
             QMessageBox.information(self, "Local video setup", str(error))
             self.open_settings(); return
+        self.store_render_group()
         production = self.minimax_prompt_text if self.unified_workspace else self.global_prompt.toPlainText()
         prompt = prompt_content(production, preserve_spacing=True)
         if not prompt:
             self.statusBar().showMessage("Write or generate the unified production prompt first.", 10000)
             return
-        extensions = self.video_extensions if self.workspace_engine.startswith('minimax') else 0
+        extensions = self.video_extensions
         if extensions and profile.get('video_variant', 'ref2va') != 'ref2va':
             QMessageBox.information(self, 'Video extensions', 'Select the Ref2VA video checkpoint in Local models to condition extensions on the preceding video.')
             return
         extra_references = copy.deepcopy([r for r in self.active_reference_images() if r])
         grouped_segments = copy.deepcopy(list(self.render_groups().items()))
+        from .render_groups import input_stamp,production_prompt
+        contexts=[copy.deepcopy(self.render_group_options.get(str(group),{}).get('context') or self.capture_render_group()) for group,items in grouped_segments]
+        prompts=[prompt_content(production_prompt(context),preserve_spacing=True) for context in contexts]
+        if any(not value.strip() for value in prompts):
+            self.statusBar().showMessage('Write or generate the Unified Prompt for each group before rendering.',10000);return
+        group_references=[]
+        for context in contexts:
+            definition=context.get('workspaceDefinition') or self.workspace_definitions.get(context.get('projectType'),{})
+            refs=definition.get('references',{})
+            enabled=refs.get('enabled') and refs.get('untimed_slots',0)>0
+            group_references.append([value for index,value in enumerate(context.get('minimaxH3',{}).get('referenceImages',[]))
+                if enabled and value and index<refs.get('untimed_slots',0) and value.get('role','identity') in refs.get('kinds',[])])
+        stamps={str(group):input_stamp(items,context) for (group,items),context in zip(grouped_segments,contexts)}
+        prompt=prompts[0];extra_references=group_references[0]
         conditioning_segments = grouped_segments[0][1] if extensions else copy.deepcopy(self.segments)
         cache=self.video_render_cache
         request = dict(kind="video", profile=profile, prompt=prompt,
@@ -4533,18 +4550,24 @@ class MainWindow(QMainWindow):
         def save_cache(group,result):
             record=result.get('_cache_record')
             if record:
-                record={**record,'result':{**record['result'],**{key:result[key] for key in ('first_frame','last_frame') if key in result}}}
+                record={**record,'inputStamp':stamps[str(group)],'result':{**record['result'],**{key:result[key] for key in ('first_frame','last_frame') if key in result}}}
                 cache[str(group)]=record
                 self.persist_video_render_cache(workspace,cache)
             active=self.render_queue.active
             if active and result.get('reused'):active.message='Reused completed block'
         def ready(result):
             if not extensions:save_cache(grouped_segments[0][0],result)
-            self._video_preview_cache[self.resolve_video_key(preview_key)] = {'kind':'final','path':result['path'],'generation':generation}
+            self._video_preview_cache[self.resolve_video_key(preview_key)] = {'kind':'final','path':result['path'],'generation':generation,'groupStamps':copy.deepcopy(stamps),'blendSettings':copy.deepcopy(blend_settings)}
             finish()
             key=self.resolve_video_key(preview_key)
             result_scope=(workspace[0],key[1],workspace[2]) if key[0]=='project' else workspace
             if result_scope[1]:self.attach_local_generated_video(result["path"],result_scope)
+            if current():
+                metadata=self.current_library_metadata()
+                if metadata:
+                    metadata['previewGroupStamps']=copy.deepcopy(stamps);metadata['previewBlendSettings']=copy.deepcopy(blend_settings)
+                    self.persist_library_metadata(metadata)
+
             if not current():
                 self.statusBar().showMessage("Queued video saved for its original project.", 8000); return
             self.project_preview_panel.set_project(self.current_project_name or "Generated video", result["path"])
@@ -4580,7 +4603,7 @@ class MainWindow(QMainWindow):
             for index in range(extensions + 1):
                 previous = blocks[-1] if blocks else None
                 block_duration = block_durations[index]
-                def render_block(previous=previous, block_duration=block_duration, previous_duration=block_durations[index-1], block_segments=grouped_segments[index][1], group=grouped_segments[index][0], previous_group=grouped_segments[index-1][0]):
+                def render_block(previous=previous, block_duration=block_duration, previous_duration=block_durations[index-1], block_segments=grouped_segments[index][1], group=grouped_segments[index][0], previous_group=grouped_segments[index-1][0],block_prompt=prompts[index],block_refs=group_references[index]):
                     if previous is None:
                         result=operation()
                         return add_block_thumbnails(result,block_duration,video_cancel)
@@ -4589,10 +4612,8 @@ class MainWindow(QMainWindow):
                     from .project_archive import materialize_source
                     for segment in block_segments:
                         if segment.kind in ('image','video'):materialize_source(segment)
-                    references = [continuation_reference(previous.output_path,previous_duration)] + video_references(block_segments,extra_references,block_duration)
+                    references = [continuation_reference(previous.output_path,previous_duration)] + video_references(block_segments,block_refs,block_duration)
                     from .render_cache import cached_render
-                    direction='\n'.join(segment.prompt for segment in block_segments if segment.prompt.strip())
-                    block_prompt=prompt+('\n\nCurrent continuation direction:\n'+direction if direction else '')
                     prepared={**request,'prompt':block_prompt,'duration':block_duration,'references':references}
                     previous_result=cache.get(str(previous_group),{}).get('result',{})
                     previous_token=previous_result.get('render_token') or previous.output_path
@@ -4638,6 +4659,12 @@ class MainWindow(QMainWindow):
 
     def video_preview_key(self,workspace=None):
         revision,project_id,project_type = workspace or (self.workspace_revision,self.current_project_id,self.project_type)
+        if project_id==self.current_project_id and self.video_extensions:
+            project_type=self.render_group_options.get('0',{}).get('context',{}).get('projectType',project_type)
+            revision=getattr(self,'_group_video_revision',revision)
+        elif project_id:
+            state=self.project_sessions.get(str(project_id),{}).get('state',{})
+            if state.get('videoExtensions'):project_type=state.get('renderGroupOptions',{}).get('0',{}).get('context',{}).get('projectType',project_type)
         return self.resolve_video_key(('project',str(project_id),project_type) if project_id else ('unsaved',revision,project_type))
 
     def show_video_render_preview(self,value):
@@ -5643,7 +5670,7 @@ class MainWindow(QMainWindow):
             latest["previewVideoPath"] = path
             latest["previewVideoName"] = "Generated video.mp4"
             self.persist_library_metadata(latest)
-            if self.render_workspace_is_current(workspace):
+            if self.video_preview_key(workspace)==self.video_preview_key():
                 cached=self._video_preview_cache.get(self.video_preview_key(workspace))
                 scrubbing=hasattr(self,'timeline_preview') and (self.timeline_preview.dragging or self.timeline_preview.scrubber.active or self.timeline_preview.pending_seek is not None)
                 if not scrubbing and (not cached or cached.get('path')==source_path):
@@ -5769,7 +5796,7 @@ class MainWindow(QMainWindow):
         meta = item.data(Qt.ItemDataRole.UserRole) or {}
         menu = QMenu(self)
         if self.current_collection:
-            group_action=menu.addAction('Group selected projects into Shot Sequence',self.group_selected_projects)
+            group_action=menu.addAction('Group selected projects',self.group_selected_projects)
             group_action.setEnabled(len(self.selected_projects_in_order())>=2)
             menu.addSeparator()
         menu.addAction(self.library_surface.rename_action)
@@ -5837,16 +5864,12 @@ class MainWindow(QMainWindow):
     def group_selected_projects(self):
         records=copy.deepcopy(self.selected_projects_in_order())
         if not self.current_collection or len(records)<2:return
-        missing=[str(r.get('name','')) for r in records if not r.get('previewVideoPath') or not Path(r['previewVideoPath']).is_file()]
-        if missing:
-            QMessageBox.information(self,'Group projects','Save a rendered video for each selected project first. Missing: '+', '.join(missing))
-            return
         self._project_open_timer.stop();self._pending_project_id=None
         self.cache_current_workspace()
         snapshots={str(r['id']):copy.deepcopy(self.project_sessions[str(r['id'])]['state']) for r in records
                    if self.project_sessions.get(str(r['id']),{}).get('dirty')}
         ident=uuid4().hex
-        base='Grouped shots';names={str(r.get('name','')) for r in self.library_records()}
+        base='Grouped prompts';names={str(r.get('name','')) for r in self.library_records()}
         name=base;number=2
         while name in names:name=f'{base} ({number})';number+=1
         from .collection_combine import combine_projects
@@ -5948,7 +5971,7 @@ class MainWindow(QMainWindow):
         return bool(self.project_sessions.get(project_id, {}).get("dirty"))
 
     def capture_workspace_state(self) -> dict:
-        self.store_minimax_draft()
+        self.store_render_group()
         return {
             "projectType": self.project_type,
             "workspaceDefinition": copy.deepcopy(self.workspace_definition),
@@ -6763,13 +6786,16 @@ class MainWindow(QMainWindow):
     def maximum_sequence_duration(self) -> float | None:
         # Completed-shot editing must never inherit a generation duration budget.
         limit = None if self.workspace_engine == "shot_sequence" else sequence_limit(self.workspace_definition)
-        return limit * len(self.render_groups()) if limit is not None and self.workspace_engine.startswith('minimax') else limit
+        if self.video_extensions:
+            limits=[sequence_limit(self.render_group_definition(group)) for group in self.render_groups()]
+            return sum(limits) if all(value is not None for value in limits) else None
+        return limit
 
     def available_segment_duration(self, segment: Segment | None) -> float:
         maximum = self.maximum_sequence_duration
         if maximum is None or segment is None:
             return sys.float_info.max
-        return max(MIN_DURATION, (sequence_limit(self.workspace_definition) or maximum) - sum(item.duration for item in self.segments if item.id != segment.id and item.render_group==segment.render_group))
+        return max(MIN_DURATION, (sequence_limit(self.render_group_definition(segment.render_group)) or maximum) - sum(item.duration for item in self.segments if item.id != segment.id and item.render_group==segment.render_group))
 
     def timeline_count_allowed(self, count: int, *, report: bool = True) -> bool:
         maximum = shot_limit(self.workspace_definition)
@@ -6797,6 +6823,13 @@ class MainWindow(QMainWindow):
             return
         self.add_media_paths(paths)
 
+    def render_group_definition(self,group):
+        context=self.render_group_options.get(str(group),{}).get('context',{})
+        return context.get('workspaceDefinition') or self.workspace_definitions.get(context.get('projectType'),self.workspace_definition)
+
+    def active_group_segments(self):
+        return [s for s in self.segments if s.render_group==self._active_render_group] if self.video_extensions else self.segments
+
     def render_groups(self):
         groups = {}
         for segment in self.segments:
@@ -6806,7 +6839,7 @@ class MainWindow(QMainWindow):
     def refresh_extension_boxes(self):
         for box in self._extension_boxes.values():box.hide();box.deleteLater()
         self._extension_boxes={};self.ruler.gaps=[]
-        if not self.workspace_engine.startswith('minimax'):return
+        if not self.workspace_engine.startswith('minimax') and not self.video_extensions:return
         from .extension_timeline import BlendControl
         for group in list(self.render_groups())[1:]:
             box=BlendControl(self,group);box.setParent(self.timeline.viewport())
@@ -6816,22 +6849,19 @@ class MainWindow(QMainWindow):
     def position_extension_boxes(self):
         for group,box in getattr(self,'_extension_boxes',{}).items():
             row=next((index for index,segment in enumerate(self.segments) if segment.render_group==group),None)
-            if row is None or not self.workspace_engine.startswith('minimax'):box.hide();continue
+            if row is None or not (self.workspace_engine.startswith('minimax') or self.video_extensions):box.hide();continue
             rect=self.timeline.visualItemRect(self.timeline.item(row))
             setting=self.extension_transition(group)
-            width=max(244,round(setting['overlap']*self.pixels_per_second))
+            cut=setting['blend']=='cut'
+            width=1 if cut else max(1,round(setting['overlap']*self.pixels_per_second))
             x=rect.left()-width//2
-            card=self.timeline.itemWidget(self.timeline.item(max(0,row-1)))
-            if isinstance(card,SegmentCard):
-                card.layout().activate()
-                preview=card.preview
-                point=preview.mapTo(self.timeline.viewport(),QPoint(0,0))
-                pixmap=preview.pixmap()
-                image_height=min(preview.height(),pixmap.height()) if pixmap and not pixmap.isNull() else preview.height()
-                top=point.y()+(preview.height()-image_height)//2
-                height=image_height
-            else:top=rect.top()+24;height=max(80,rect.height()-44)
-            box.setGeometry(x,top+2,width,max(1,height-4))
+            from .extension_timeline import preview_bounds
+            before=self.timeline.itemWidget(self.timeline.item(max(0,row-1)))
+            after=self.timeline.itemWidget(self.timeline.item(row))
+            bounds=[preview_bounds(card,self.timeline.viewport()) for card in (before,after) if isinstance(card,SegmentCard)]
+            top=max(value[0] for value in bounds) if bounds else rect.top()+24
+            bottom=min(value[1] for value in bounds) if bounds else rect.bottom()-20
+            box.setGeometry(x,top+10,width,max(1,bottom-top-20))
             box.setVisible(rect.left()+width//2>0 and rect.left()-width//2<self.timeline.viewport().width())
             box.raise_()
 
@@ -6859,7 +6889,7 @@ class MainWindow(QMainWindow):
         return float(requested or sum(s.duration for s in self.segments if s.render_group==group) or load_profile(self.settings)['video_duration'])
 
     def render_group_settings_changed(self,*_):
-        if self._loading or not self.workspace_engine.startswith('minimax'):return
+        if self._loading or not (self.workspace_engine.startswith('minimax') or self.video_extensions):return
         length=self.requested_length.value()
         if self.video_extensions and length>15:
             self.requested_length.blockSignals(True);self.requested_length.setValue(15);self.requested_length.blockSignals(False)
@@ -6874,27 +6904,85 @@ class MainWindow(QMainWindow):
                 self.update_timeline_layout()
         if hasattr(self,'extension_brackets'):self.extension_brackets.update()
 
+    def capture_render_group(self):
+        self.store_minimax_draft()
+        return dict(projectType=self.project_type,workspaceDefinition=copy.deepcopy(self.workspace_definition),
+            globalPrompt=self.global_prompt.toPlainText(),directorIntent=self.intent.toPlainText(),
+            directionOptions=dict(requestedLength=self.requested_length.value(),speakerLanguage=self.speaker_language.currentText(),speakerAccent=self.speaker_accent.currentText()),
+            magicBuild=dict(sfx=self.sfx.isChecked(),spokenDialog=self.spoken_dialog.isChecked(),hdr=self.hdr.isChecked(),reduceMusic=self.reduce_music.isChecked()),
+            minimaxH3=dict(prompt=self.minimax_prompt_text,refinementInstructions=self.minimax_refinement_instructions,sourceHash=self.minimax_prompt_cache_key,
+                updatedAt=self.minimax_prompt_updated_at,mode=self.minimax_prompt_mode,referenceImages=reference_slots(self.minimax_reference_images),drafts=copy.deepcopy(self.minimax_drafts)),
+            output=dict(width=self.output_width.value(),height=self.output_height.value()))
+
+    def store_render_group(self):
+        context=self.capture_render_group()
+        options=self.render_group_options.setdefault(str(self._active_render_group),{})
+        options.update(context=context,requestedLength=self.requested_length.value())
+
     def select_render_group(self,group):
         if not self.video_extensions or group==self._active_render_group:return
-        self.render_group_options.setdefault(str(self._active_render_group),{}).update(requestedLength=self.requested_length.value())
-        self._active_render_group = group
-        self.requested_length.blockSignals(True)
-        self.requested_length.setValue(float(self.render_group_options.get(str(group),{}).get('requestedLength',0)))
-        self.requested_length.blockSignals(False)
-        self.extension_brackets.update()
-        self.update_summary()
+        self.finish_prompt_reviews()
+        self.store_render_group()
+        options=self.render_group_options.setdefault(str(group),{})
+        context=copy.deepcopy(options.get('context') or self.capture_render_group())
+        context.setdefault('directionOptions',{})['requestedLength']=options.get('requestedLength',0)
+        self._active_render_group=group
+        self.apply_render_group(context)
+        self.extension_brackets.update();self.update_summary();self.update_render_controls()
+
+    def apply_render_group(self,context):
+        previous=self._loading;self._loading=True
+        scope=self.prompt_surface.scope.currentData();previous_type=self.project_type
+        audio_visible=not self.audio_panel.isHidden()
+        if hasattr(self,'timeline_preview'):self.timeline_preview.cancel()
+        try:
+            definition=context.get('workspaceDefinition',{})
+            if definition.get('id') and definition['id'] not in self.workspace_definitions:
+                self.workspace_definitions[definition['id']]=copy.deepcopy(definition)
+                self.project_type_combo.addItem(definition.get('name',definition['id']),definition['id'])
+            production=context.get('minimaxH3',{})
+            self.minimax_prompt_text=str(production.get('prompt',''))
+            self.minimax_refinement_instructions=str(production.get('refinementInstructions',''))
+            self.minimax_prompt_cache_key=str(production.get('sourceHash',''))
+            self.minimax_prompt_updated_at=str(production.get('updatedAt',''))
+            self.minimax_prompt_mode=production.get('mode','frames')
+            self.minimax_reference_images=reference_slots(production.get('referenceImages',[]))
+            self.restore_project_type(context.get('projectType'),production.get('drafts',{}))
+            self.global_prompt.setPlainText(str(context.get('globalPrompt','')))
+            self.intent.setPlainText(str(context.get('directorIntent','')))
+            direction=context.get('directionOptions',{})
+            self.requested_length.setValue(requested_length_value(direction.get('requestedLength')))
+            self.speaker_language.setCurrentText(str(direction.get('speakerLanguage','(Image/context provided)')))
+            self.speaker_accent.setCurrentText(str(direction.get('speakerAccent','(Image/context provided)')))
+            for key,widget in [('sfx',self.sfx),('spokenDialog',self.spoken_dialog),('hdr',self.hdr),('reduceMusic',self.reduce_music)]:widget.setChecked(bool(context.get('magicBuild',{}).get(key)))
+            output=context.get('output',{})
+            self.output_width.setValue(int(output.get('width',1280)));self.output_height.setValue(int(output.get('height',704)))
+            self.workspace_revision+=1
+            if previous_type!=self.project_type:self.apply_project_type_ui()
+            self.audio_panel.setVisible(audio_visible)
+            self.minimax_panel.set_project(self.current_project_name,self.minimax_prompt_text,self.minimax_refinement_instructions,'Saved group prompt')
+            self.prompt_surface.select(scope)
+            self._conditioning_signature=None
+            self.update_conditioning_guide()
+        finally:self._loading=previous
 
     def restore_video_extensions(self,record):
         self.video_extensions = max(0,min(100,int(record.get('videoExtensions',0))))
+        from .render_groups import normalize_context
         self.render_group_options = copy.deepcopy(record.get('renderGroupOptions',{}))
+        for options in self.render_group_options.values():
+            if options.get('context'):options['context']=normalize_context(options['context'])
         self._active_render_group = max(0,int(record.get("activeRenderGroup",0)))
+        self._group_video_revision=self.workspace_revision
 
     def add_video_extension(self) -> None:
         if not self.workspace_engine.startswith('minimax') or not self.segments:return
+        if not self.video_extensions:self._group_video_revision=self.workspace_revision
+        self.store_render_group()
         self.render_group_settings_changed()
         group = max(s.render_group for s in self.segments)+1
         length = min(15.,max(4.,self.requested_length.value() or sum(s.duration for s in self.segments if s.render_group==self._active_render_group)))
-        self.render_group_options[str(group)] = {'requestedLength':length}
+        self.render_group_options[str(group)] = {'requestedLength':length,'context':self.capture_render_group()}
         segment = Segment(f'Extension {group}', '', '', 'text', 'text', '', length, render_group=group)
         self.segments.append(segment)
         self.video_extensions = len(self.render_groups())-1
@@ -6906,7 +6994,7 @@ class MainWindow(QMainWindow):
         if not hasattr(self,'extension_brackets'):return
         enabled = self.workspace_engine.startswith('minimax')
         self.add_extension_tile.setVisible(enabled)
-        self.extension_brackets.hide()
+        self.extension_brackets.setVisible(bool(self.video_extensions))
         self.extension_brackets.update();self.position_extension_boxes()
 
     def add_text_segment(self) -> None:
@@ -6985,8 +7073,8 @@ class MainWindow(QMainWindow):
             self.shot_sequence_panel.refresh()
             self.update_summary()
             return
-        for items in self.render_groups().values():
-            targets = fit_sequence([item.duration for item in items], sequence_limit(self.workspace_definition))
+        for group,items in self.render_groups().items():
+            targets = fit_sequence([item.duration for item in items], sequence_limit(self.render_group_definition(group)))
             for item, duration in zip(items, targets): item.duration = duration
         self.video_extensions = max(0,len(self.render_groups())-1)
         self.refresh_video_extensions()
@@ -8682,6 +8770,8 @@ class MainWindow(QMainWindow):
     def seek_conditioning_audio(self, milliseconds, audible):
         if self.workspace_engine == 'shot_sequence':
             self.shot_sequence_panel.seek_sequence(milliseconds, audible=audible)
+        elif hasattr(self,'timeline_preview'):
+            self.timeline_preview.seek_audio(milliseconds,audible)
 
     def show_audio_playhead(self, milliseconds):
         self.ruler.playhead = milliseconds / 1000
@@ -8693,16 +8783,16 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "conditioning_guide"):
             return
         available = self.unified_workspace and not self.prompt_only_workspace
-        self.conditioning_guide.setVisible(available and bool(self.segments) and self.conditioning_height > 0)
+        self.conditioning_guide.setVisible(available and bool(self.active_group_segments()) and self.conditioning_height > 0)
         self.conditioning_height_handle.setVisible(available)
         if self.prompt_only_workspace:
             return
         signature = (self.unified_workspace, self.project_type,
-                     tuple((s.id, s.name, s.kind, s.role, s.duration, s.preview_path, s.trim_start) for s in self.segments),
+                     tuple((s.id, s.name, s.kind, s.role, s.duration, s.preview_path, s.trim_start) for s in self.active_group_segments()),
                      tuple(str(r) for r in self.active_reference_images()))
         if signature == getattr(self, '_conditioning_signature', None):
             # Prompt edits update text previews without rebuilding media tiles.
-            for segment in self.segments:
+            for segment in self.active_group_segments():
                 preview=getattr(self,'_conditioning_text_previews',{}).get(segment.id)
                 if preview is not None:
                     preview.setText(segment.prompt or 'Text-only segment')
@@ -8719,10 +8809,10 @@ class MainWindow(QMainWindow):
                 widget.deleteLater()
         if not self.unified_workspace:
             return
-        inventory = reference_inventory(self.segments, self.active_reference_images())
+        inventory = reference_inventory(self.active_group_segments(), self.active_reference_images())
         timed_images = [r for r in inventory if r['kind'] == 'image' and 'checkpoint_time' in r]
         videos = [r for r in inventory if r['kind'] == 'video' and 'timeline_index' in r]
-        total = sum(segment.duration for segment in self.segments)
+        total = sum(segment.duration for segment in self.active_group_segments())
         mode = ('V2V' if videos else 'T2V' if not timed_images else
                 'L2V' if len(timed_images) == 1 and timed_images[0]['role'] == 'end' else
                 'I2V' if len(timed_images) == 1 else
@@ -8750,7 +8840,7 @@ class MainWindow(QMainWindow):
             title.setObjectName("conditioningTitle")
             row.addWidget(title)
             if is_text:
-                segment=self.segments[record['timeline_index']]
+                segment=self.active_group_segments()[record['timeline_index']]
                 thumbnail=ConditioningTilePreview(segment.prompt or 'Text-only segment')
                 thumbnail.setObjectName('conditioningTextPreview')
                 thumbnail.setTextFormat(Qt.TextFormat.PlainText)
@@ -8760,7 +8850,7 @@ class MainWindow(QMainWindow):
                 thumbnail.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Expanding)
                 self._conditioning_text_previews[segment.id]=thumbnail
             elif 'timeline_index' in record:
-                segment = self.segments[record['timeline_index']]
+                segment = self.active_group_segments()[record['timeline_index']]
                 preview = QPixmap(segment.preview_path)
             else:
                 reference = reference_slots(self.minimax_reference_images)[record['reference_slot']]
@@ -9052,10 +9142,10 @@ class MainWindow(QMainWindow):
         # This snapshot deliberately uses the entire project timeline, not
         # currentRow(), selected tiles, or the active viewport.
         self.sync_combined_source = self.minimax_prompt_text
-        self.sync_combined_segments = copy.deepcopy(self.segments)
+        self.sync_combined_segments = copy.deepcopy(self.active_group_segments())
         self.sync_combined_signature = tuple(
             (s.id, s.name, s.kind, s.role, s.duration, s.prompt,
-             s.image_prompt, s.media_path) for s in self.segments)
+             s.image_prompt, s.media_path) for s in self.active_group_segments())
         final_notes = (
             self.build_director_request(include_requested_length=False)
             + "\\n\\nFINAL REFINEMENT NOTES:\\n"
@@ -9077,7 +9167,7 @@ class MainWindow(QMainWindow):
         """Apply new combined prose; never update the original timeline data."""
         signature = tuple(
             (s.id, s.name, s.kind, s.role, s.duration, s.prompt,
-             s.image_prompt, s.media_path) for s in self.segments)
+             s.image_prompt, s.media_path) for s in self.active_group_segments())
         if (signature != getattr(self, "sync_combined_signature", None)
                 or self.minimax_prompt_text != self.sync_combined_source
                 or self.unified_prompt.toPlainText() != self.sync_combined_source):
@@ -9099,7 +9189,7 @@ class MainWindow(QMainWindow):
         self.mark_dirty()
         self.set_ai_controls_enabled(True)
         self.statusBar().showMessage(
-            f"⇄ Combined prompt synchronized from ALL {len(self.segments)} "
+            f"⇄ Combined prompt synchronized from ALL {len(self.active_group_segments())} "
             "timeline segments; segment prompts and media unchanged", 9000)
 
     def sync_timeline_from_prompt(self) -> None:
@@ -9125,7 +9215,7 @@ class MainWindow(QMainWindow):
                 "or Gemini Flash model. Choose one in Settings.", "warning")
             return
         self.sync_timeline_source = self.minimax_prompt_text
-        self.ai_segment_snapshot = copy.deepcopy(self.segments)
+        self.ai_segment_snapshot = copy.deepcopy(self.active_group_segments())
         self.ai_plan_raw = ""
         self.ai_plan_record_count = 0
         self.ai_plan_stream_active = True
@@ -9149,6 +9239,15 @@ class MainWindow(QMainWindow):
             "Matching timeline timings and wording to the combined prompt…",
             self.sync_timeline_finished, show_main_overlay=False,
         )
+
+    def replace_group_segments(self,before,updated):
+        if self.video_extensions and {item.id for item in before}=={item.id for item in self.active_group_segments()}:
+            group=self._active_render_group
+            start=next(i for i,item in enumerate(self.segments) if item.render_group==group)
+            for item in updated:item.render_group=group
+            remaining=[item for item in self.segments if item.render_group!=group]
+            return remaining[:start]+updated+remaining[start:]
+        return updated
 
     def sync_timeline_finished(self, result: dict) -> None:
         """Reload AI-produced timeline JSON without touching the combined prompt."""
@@ -9200,9 +9299,9 @@ class MainWindow(QMainWindow):
                     to_render.append((item.id, dict(row)))
 
         self.timeline_review_pending = set()
-        self.segments = updated
+        self.segments = self.replace_group_segments(before,updated)
         selected = next(
-            (i for i, item in enumerate(updated) if item.id == selected_id), 0)
+            (i for i, item in enumerate(self.segments) if item.id == selected_id), 0)
         self.refresh_timeline(selected)
         self._animate_ai_timeline(before, inserted)
         self._start_segment_review(before, updated, changes)
@@ -9402,8 +9501,8 @@ class MainWindow(QMainWindow):
         for review in (getattr(self, 'inline_typing', None), getattr(self, 'paragraph_review', None)):
             if review is not None and review.editor is self.unified_prompt:
                 return
-        if retime_prompt(self.unified_prompt, [item.duration for item in self.segments],
-                         [item.role for item in self.segments]):
+        if retime_prompt(self.unified_prompt, [item.duration for item in self.active_group_segments()],
+                         [item.role for item in self.active_group_segments()]):
             self.minimax_editor_changed()
         self.highlight_selected_prompt_timecode()
 
@@ -9422,6 +9521,7 @@ class MainWindow(QMainWindow):
         row = self.timeline.currentRow()
         selections = []
         sections = document_sections(self.unified_prompt)
+        if self.video_extensions and 0<=row<len(self.segments):row=self.active_group_segments().index(self.segments[row])
         selected = next((section for section in sections if section.index == row), None)
         if self.workspace_engine.startswith('minimax_'):
             for section in sections:
@@ -9555,8 +9655,11 @@ class MainWindow(QMainWindow):
             if prepared and location >= 0:
                 old = self.segments[location]
                 path, kind, preview, frames, trim = prepared[0]
-                self.segments[location] = Segment(Path(path).name, path, preview, kind, old.role, old.prompt,
-                                                   old.duration, frames, trim, old.id, old.image_prompt, False)
+                replacement=copy.deepcopy(old)
+                replacement.name=Path(path).name;replacement.media_path=path;replacement.preview_path=preview
+                replacement.kind=kind;replacement.media_duration_frames=frames;replacement.trim_start=trim
+                replacement.prompt_detached=False;clear_archived_source(replacement)
+                self.segments[location]=replacement
                 self.mark_dirty()
                 self.refresh_timeline(location)
                 if len(prepared) > 1:
@@ -9588,7 +9691,7 @@ class MainWindow(QMainWindow):
         provider = provider or str(self.settings.value("provider", "gemini"))
         model = model or str(self.settings.value("gemini_model", GEMINI_MODELS[0]))
         return f"{self.workspace_revision}:{self.project_type}:" + minimax_h3_cache_key(
-            self.segments,
+            self.active_group_segments(),
             provider,
             model,
             self.build_director_request(),
@@ -9845,9 +9948,9 @@ class MainWindow(QMainWindow):
         self.minimax_h3_finished(result["prompt"])
         current = self.current_segment()
         selected_id = current.id if current else None
-        self.segments = updated
+        self.segments = self.replace_group_segments(before,updated)
         selected = next(
-            (i for i, item in enumerate(updated) if item.id == selected_id), 0
+            (i for i, item in enumerate(self.segments) if item.id == selected_id), 0
         )
         self._clear_ai_timeline_preview()
         self.refresh_timeline(selected)
@@ -10380,16 +10483,16 @@ class MainWindow(QMainWindow):
             self.minimax_refinement_instructions,
         )
         timeout = self.settings.value("api_timeout", 400, int)
-        window.set_busy(True, f"Generating from all {len(self.segments)} current segments…")
+        window.set_busy(True, f"Generating from all {len(self.active_group_segments())} current segments…")
         operation = build_generic_prompt if self.workspace_engine == "generic" else (build_minimax_h3_reference_prompt if reference_mode else build_minimax_h3_prompt)
         self.start_ai_worker(
             operation,
             (
-                copy.deepcopy(self.segments), provider, model, key, self.build_director_request(include_requested_length=False),
+                copy.deepcopy(self.active_group_segments()), provider, model, key, self.build_director_request(include_requested_length=False),
                 self.global_prompt.toPlainText(), self.sfx.isChecked(), self.spoken_dialog.isChecked(),
                 self.reduce_music.isChecked(), timeout,
             ) + (copy.deepcopy(self.active_reference_images()),),
-            f"Generating combined prompt from all {len(self.segments)} current segments…",
+            f"Generating combined prompt from all {len(self.active_group_segments())} current segments…",
             self.minimax_h3_finished,
             show_main_overlay=False,
         )
@@ -10397,7 +10500,7 @@ class MainWindow(QMainWindow):
     def combined_generation_source_key(self):
         return tuple((s.id, s.kind, s.role, s.duration, s.prompt, s.image_prompt,
                       (getattr(s, "_media_digest", "") or s.media_path or s.preview_path)
-                      if s.kind != "text" else "", s.trim_start) for s in self.segments)
+                      if s.kind != "text" else "", s.trim_start) for s in self.active_group_segments())
 
     def minimax_h3_finished(self, prompt: str) -> None:
         # The unified editor and timeline are locked while AI is running.
@@ -10528,7 +10631,7 @@ class MainWindow(QMainWindow):
         self.start_ai_worker(
             operation,
             (
-                self.segments.copy(), provider, model, key, self.build_director_request(include_requested_length=False),
+                self.active_group_segments().copy(), provider, model, key, self.build_director_request(include_requested_length=False),
                 self.global_prompt.toPlainText(), self.sfx.isChecked(), self.spoken_dialog.isChecked(),
                 self.reduce_music.isChecked(), self.minimax_prompt_text,
                 self.minimax_refinement_instructions, timeout,
@@ -10763,7 +10866,7 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Import failed", str(error))
 
     def project_payload(self, include_media: bool = True) -> dict:
-        self.store_minimax_draft()
+        self.store_render_group()
         frames = []
         for segment in self.segments:
             value = segment.to_dict()

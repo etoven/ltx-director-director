@@ -508,8 +508,14 @@ class ShotSequencePanel(QWidget):
         if self._audio_scrub.active:return
         if not self._installing and state!=QMediaPlayer.PlaybackState.StoppedState:
             self._desired_playing=state==QMediaPlayer.PlaybackState.PlayingState
-        if state!=QMediaPlayer.PlaybackState.PlayingState:
-            self.owner.audio_panel.transport.pause()
+        audio=self.owner.audio_panel.transport
+        if state==QMediaPlayer.PlaybackState.PlayingState:
+            # The movie is the clock once its cached preview is playing.
+            audio.timer.stop();audio.audition.stop()
+            if not audio.playing:
+                audio.playing=True;audio.playing_changed.emit(True)
+        else:
+            audio.pause()
 
     def sequence_media_status(self,status):
         if status in {QMediaPlayer.MediaStatus.LoadedMedia,QMediaPlayer.MediaStatus.BufferedMedia}:

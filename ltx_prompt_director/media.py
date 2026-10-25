@@ -4,6 +4,7 @@ import base64
 import hashlib
 import io
 import json
+import math
 import os
 import re
 import shutil
@@ -184,17 +185,20 @@ def probe_video_duration(path: str) -> float:
     return int(match.group(1)) * 3600 + int(match.group(2)) * 60 + float(match.group(3))
 
 
-def video_storyboard_data_urls(path: str, count: int = 6, max_edge: int = 512) -> list[dict[str, float | str]]:
+def video_storyboard_data_urls(path: str, count: int = 6, max_edge: int = 512, *, start: float = 0, duration: float | None = None) -> list[dict[str, float | str]]:
     """Sample timestamped frames across a video for providers without native video input."""
     source = Path(path)
     if not source.is_file():
         return []
-    duration = probe_video_duration(str(source))
-    if duration <= 0:
+    source_duration = probe_video_duration(str(source))
+    if source_duration <= 0:
         return []
     count = max(2, min(10, int(count)))
-    final_timestamp = max(0.0, duration - min(.1, duration / (count * 2)))
-    timestamps = [final_timestamp * index / (count - 1) for index in range(count)]
+    start=max(0.,float(start))
+    span=max(0.,min(source_duration-start,float(duration) if duration is not None else source_duration-start))
+    if span<=0:return []
+    final_timestamp = max(0.0, span - min(.1, span / (count * 2)))
+    timestamps = [start+final_timestamp * index / (count - 1) for index in range(count)]
     frames: list[dict[str, float | str]] = []
     ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
     with tempfile.TemporaryDirectory(prefix="ltx-video-analysis-") as directory:
@@ -208,6 +212,34 @@ def video_storyboard_data_urls(path: str, count: int = 6, max_edge: int = 512) -
             if not result.returncode and output.is_file():
                 frames.append({"timestamp": round(timestamp, 3), "image": data_url(str(output), max_edge=max_edge)})
     return frames
+
+
+def trimmed_analysis_video(path: str, start: float, duration: float) -> str:
+    """Encode only the selected frames/audio; stream-copy may retain GOP preroll.
+
+    Called from provider/media workers, never the UI thread. The original is
+    unchanged; cache identity includes the source stat and exact trim interval.
+    """
+    source=Path(path);stat=source.stat();start=max(0.,float(start));duration=float(duration)
+    if not math.isfinite(start) or not math.isfinite(duration) or duration<=0:raise ValueError('Video trim must have a positive finite duration.')
+    key=hashlib.sha256(f'{source.resolve()}:{stat.st_size}:{stat.st_mtime_ns}:{start:.9f}:{duration:.9f}'.encode()).hexdigest()
+    target=APP_CACHE/'video-analysis'/f'{key}.mp4'
+    if target.is_file() and target.stat().st_size:return str(target)
+    target.parent.mkdir(parents=True,exist_ok=True)
+    handle=tempfile.NamedTemporaryFile(prefix='.video-trim-',suffix='.mp4',dir=target.parent,delete=False);temporary=Path(handle.name);handle.close()
+    command=[imageio_ffmpeg.get_ffmpeg_exe(),'-nostdin','-hide_banner','-loglevel','error','-y',
+        '-ss',f'{start:.9f}','-i',str(source),'-t',f'{duration:.9f}',
+        '-map','0:v:0','-map','0:a?','-c:v','libx264','-preset','veryfast','-crf','20','-pix_fmt','yuv420p',
+        '-c:a','aac','-movflags','+faststart',str(temporary)]
+    try:
+        result=subprocess.run(command,capture_output=True,check=False)
+        if result.returncode or not temporary.stat().st_size:raise ValueError('The selected video interval could not be decoded.')
+        import av
+        with av.open(str(temporary)) as media:
+            if next(media.decode(video=0),None) is None:raise ValueError('The selected trim contains no video frames.')
+        os.replace(temporary,target)
+        return str(target)
+    finally:temporary.unlink(missing_ok=True)
 
 
 def write_data_url(value: str, destination: Path) -> None:

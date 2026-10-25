@@ -71,6 +71,15 @@ def _resolve_source_member(archive: zipfile.ZipFile, segment, member: str) -> st
         f"Original media unavailable for {segment.name}. Reopen the project or replace this segment's media.")
 
 
+def _reference_records(payload):
+    contexts=[payload]+[value.get('context',{}) for value in payload.get('renderGroupOptions',{}).values()]
+    seen=set()
+    for context in contexts:
+        for ref in context.get('minimaxH3',{}).get('referenceImages',[]):
+            if ref and id(ref) not in seen:
+                seen.add(id(ref));yield ref
+
+
 def save_project_archive(path: str | Path, payload: dict, segments: list) -> None:
     """Save atomically; no source file or base64 copy is held in memory."""
     target = Path(path)
@@ -135,7 +144,7 @@ def save_project_archive(path: str | Path, payload: dict, segments: list) -> Non
                 clip.pop('media_path', None)
                 clip.pop('sourceData', None)
                 clip['archiveSource'] = member
-            refs = payload.get("minimaxH3", {}).get("referenceImages", [])
+            refs = list(_reference_records(payload))
             for index, ref in enumerate(refs):
                 if ref and ref.get('kind') in {'video','audio'}:
                     for key, archive_key in [('path','archiveMedia'),('audio_path','archiveAudio')]:
@@ -233,7 +242,7 @@ def load_project_archive(path: str | Path) -> dict:
         for clip in payload.get('conditioningAudio', {}).get('clips', []):
             if clip.get('archiveSource'):
                 clip['media_path'] = str(_cached_member(archive, clip['archiveSource'], source))
-        for ref in payload.get("minimaxH3", {}).get("referenceImages", []):
+        for ref in _reference_records(payload):
             if ref:
                 for key, archive_key in [('path','archiveMedia'),('audio_path','archiveAudio')]:
                     if ref.get(archive_key):

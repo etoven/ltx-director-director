@@ -37,18 +37,29 @@ def _movie_duration(path,size,modified):
     except (OSError,ValueError,av.FFmpegError,IndexError,TypeError):return 0.
 
 
-def resolve_preview(segments,seconds,final_path='',block_cache=None):
+def resolve_preview(segments,seconds,final_path='',block_cache=None,provenance=None):
     """Runs off the UI thread, including archive extraction and image decoding."""
     segment,local,start=segment_at(segments,seconds)
     if segment is None:return {'kind':'empty'}
     seconds=start+local
+    valid_blocks=None
+    if provenance is not None:
+        from .render_groups import input_stamp
+        groups={}
+        for item in segments:groups.setdefault(item.render_group,[]).append(item)
+        stamps={str(group):input_stamp(items,provenance['contexts'].get(str(group),{})) for group,items in groups.items()}
+        if provenance.get('finalStamps')!=stamps or provenance.get('finalBlends')!=provenance.get('blends'):final_path=''
+        valid_blocks=set();prefix=True
+        for group in groups:
+            prefix=prefix and (block_cache or {}).get(str(group),{}).get('inputStamp')==stamps[str(group)]
+            if prefix:valid_blocks.add(str(group))
     if final_path and Path(final_path).is_file() and seconds<movie_duration(final_path):
         return dict(kind='rendered',path=final_path,position=round(seconds*1000),name='Rendered sequence')
     cache=(block_cache or {}).get(str(segment.render_group),{})
     result=cache.get('result',{})
     path=result.get('path','')
     group_start=sum(item.duration for item in segments[:segments.index(segment)] if item.render_group!=segment.render_group)
-    if path and Path(path).is_file() and seconds-group_start<movie_duration(path):
+    if path and (valid_blocks is None or str(segment.render_group) in valid_blocks) and Path(path).is_file() and seconds-group_start<movie_duration(path):
         return dict(kind='rendered',path=path,position=round((seconds-group_start)*1000),name='Rendered block')
     if segment.kind=='text':return dict(kind='text',text=segment.prompt or segment.name,name=segment.name)
     if segment.kind=='image':
@@ -60,7 +71,8 @@ def resolve_preview(segments,seconds,final_path='',block_cache=None):
             reader.setScaledSize(size.scaled(1280,1280,Qt.AspectRatioMode.KeepAspectRatio))
         image=reader.read()
         if image.isNull():raise ValueError('Conditioning image is unavailable: '+segment.name)
-        return dict(kind='image',image=image,name=segment.name)
+        stat=Path(path).stat()
+        return dict(kind='image',image=image,name=segment.name,identity=(str(path),stat.st_size,stat.st_mtime_ns))
     path=materialize_source(segment)
     if not Path(path).is_file():raise ValueError('Conditioning video is unavailable: '+segment.name)
     return dict(kind='video',path=path,position=round(((segment.trim_start or 0)/24+local)*1000),name=segment.name)
@@ -74,6 +86,9 @@ class TimelinePreviewController(QObject):
         self.timer.timeout.connect(self._resolve)
         self.serial=0;self.epoch=0;self.worker=False;self.latest=0.;self.last_scope=None
         self.pending_seek=None;self.dragging=False;self.queued=False
+        self.static_key=None;self.from_audio=False;self.audio_seek_audible=True;self.follow_playback=False;self.audio_muted_before=None;self.syncing_audio=False
+        owner.audio_panel.transport.playing_changed.connect(self.audio_play_state)
+        owner.audio_panel.transport.position_changed.connect(self.audio_position)
         self.panel.player.mediaStatusChanged.connect(self._media_ready)
         owner.ruler.scrub_started.connect(self.begin)
         owner.ruler.scrub_requested.connect(self.seek)
@@ -97,6 +112,9 @@ class TimelinePreviewController(QObject):
 
     def cancel(self):
         self.serial+=1;self.epoch+=1;self.timer.stop();self.pending_seek=None;self.dragging=False;self.queued=False;self.scrubber.cancel()
+        self.static_key=None;self.follow_playback=False
+        if self.audio_muted_before is not None:
+            self.panel.audio.setMuted(self.audio_muted_before);self.audio_muted_before=None
         if self.owner.ruler._scrubbing:self.owner.ruler._scrubbing=False;self.owner.ruler.releaseMouse()
 
     def begin_player(self):
@@ -107,9 +125,33 @@ class TimelinePreviewController(QObject):
         self.panel._initial_media_pending=False
         self.scrubber.seek(position)
 
-    def seek(self,seconds):
+    def audio_play_state(self,playing):
+        if self.owner.workspace_engine=='shot_sequence':return
+        if playing:
+            if self.audio_muted_before is None:self.audio_muted_before=self.panel.audio.isMuted()
+            self.seek(self.owner.audio_panel.transport.position/1000,from_audio=True)
+        else:
+            if self.follow_playback:self.panel.player.pause()
+            self.follow_playback=False
+            if self.audio_muted_before is not None:
+                self.panel.audio.setMuted(self.audio_muted_before);self.audio_muted_before=None
+
+    def audio_position(self,position):
+        if self.owner.audio_panel.transport.playing and not self.syncing_audio:self.seek(position/1000,from_audio=True)
+
+    def seek_audio(self,position,audible):
+        self.audio_seek_audible=audible
+        self.seek(position/1000,from_audio=True)
+
+    def seek(self,seconds,from_audio=False):
         if self.panel._rendering or self.owner.workspace_engine=='shot_sequence':return
+        self.from_audio=from_audio
         self.latest=max(0.,min(float(seconds),self.owner.total_duration()))
+        if not from_audio:
+            self.audio_seek_audible=True
+            self.syncing_audio=True
+            try:self.owner.audio_panel.transport.seek(round(self.latest*1000),audible=True)
+            finally:self.syncing_audio=False
         self.serial+=1;self.queued=True;self.owner.ruler.playhead=self.latest;self.owner.ruler.update()
         if not self.worker and not self.timer.isActive():self.timer.start()
 
@@ -119,7 +161,13 @@ class TimelinePreviewController(QObject):
         value=self.owner._video_preview_cache.get(self.owner.video_preview_key(),{})
         meta=self.owner.current_library_metadata() or {}
         final=value.get('path','') if value.get('kind')=='final' else meta.get('previewVideoPath','')
-        args=(copy.deepcopy(self.owner.segments),seconds,final,copy.deepcopy(self.owner.video_render_cache))
+        self.owner.store_render_group()
+        provenance=dict(contexts={key:copy.deepcopy(options.get('context',{})) for key,options in self.owner.render_group_options.items()},
+            finalStamps=value.get('groupStamps',meta.get('previewGroupStamps')),
+            finalBlends=value.get('blendSettings',meta.get('previewBlendSettings')),
+            blends=[self.owner.extension_transition(group) for group in list(self.owner.render_groups())[1:]])
+        if not provenance['finalStamps'] and not self.owner.project_dirty:provenance=None
+        args=(copy.deepcopy(self.owner.segments),seconds,final,copy.deepcopy(self.owner.video_render_cache),provenance)
         def finish(result=None,error=None):
             self.worker=False
             current=scope==self.scope() and epoch==self.epoch and not self.panel._rendering
@@ -136,24 +184,37 @@ class TimelinePreviewController(QObject):
         if kind=='empty':return
         self.owner.project_preview_dock.show()
         if kind=='text':
+            key=('text',result['name'],result['text'])
+            if self.static_key==key and not self.panel.condition_text.isHidden():return
+            self.static_key=key
             self.pending_seek=None;self.scrubber.cancel()
             self.panel.show_conditioning_text(result['name'],result['text']);return
         if kind=='image':
+            key=('image',result['name'],result.get('identity',result['image'].cacheKey()))
+            if self.static_key==key and not self.panel.latent_image.isHidden():return
+            self.static_key=key
             self.pending_seek=None;self.scrubber.cancel()
             self.panel.show_static_image('Conditioning image · '+result['name'],result['image']);return
+        self.static_key=None
         rendered=kind=='rendered'
+        self.follow_playback=self.from_audio and self.owner.audio_panel.transport.playing
+        conditioning_audio=self.owner.audio_panel.transport.enabled and any(not clip.muted for clip in self.owner.audio_panel.clips)
+        audible=rendered and (not self.from_audio or (self.audio_seek_audible or self.follow_playback) and not conditioning_audio)
+        if self.follow_playback:
+            if self.audio_muted_before is None:self.audio_muted_before=self.panel.audio.isMuted()
+            self.panel.audio.setMuted(not rendered or conditioning_audio or bool(self.audio_muted_before))
         name=result['name'] if rendered else 'Conditioning video · '+result['name']
         position=result['position'];path=result['path']
         current=self.panel.pending_preview_path==path and self.panel.player.source().toLocalFile()==path
-        self.pending_seek=(path,position,rendered)
+        self.pending_seek=(path,position,audible)
         if not current:self.panel.set_project(name,path)
         else:self.panel.title.setText(name)
         from PySide6.QtMultimedia import QMediaPlayer
-        if current and self.panel.player.mediaStatus() in {QMediaPlayer.MediaStatus.LoadedMedia,QMediaPlayer.MediaStatus.BufferedMedia}:self._apply_seek()
+        if current and self.panel.player.mediaStatus() in {QMediaPlayer.MediaStatus.LoadedMedia,QMediaPlayer.MediaStatus.BufferedMedia,QMediaPlayer.MediaStatus.BufferingMedia}:self._apply_seek()
 
     def _media_ready(self,status):
         from PySide6.QtMultimedia import QMediaPlayer
-        ready={QMediaPlayer.MediaStatus.LoadedMedia,QMediaPlayer.MediaStatus.BufferedMedia}
+        ready={QMediaPlayer.MediaStatus.LoadedMedia,QMediaPlayer.MediaStatus.BufferedMedia,QMediaPlayer.MediaStatus.BufferingMedia}
         if status in ready and self.panel.player.mediaStatus() in ready:self._apply_seek()
 
     def _apply_seek(self):
@@ -161,7 +222,12 @@ class TimelinePreviewController(QObject):
         path,position,audible=self.pending_seek
         if self.panel.player.source().toLocalFile()!=path:return
         self.pending_seek=None;self.panel._initial_media_pending=False
-        if audible:
+        if self.follow_playback and self.owner.audio_panel.transport.playing:
+            self.scrubber.cancel()
+            if abs(self.panel.player.position()-position)>110:self.panel.player.setPosition(position)
+            from PySide6.QtMultimedia import QMediaPlayer
+            if self.panel.player.playbackState()!=QMediaPlayer.PlaybackState.PlayingState:self.panel.player.play()
+        elif audible:
             self.scrubber.seek(position)
             if not self.dragging:self.scrubber.end()
         else:

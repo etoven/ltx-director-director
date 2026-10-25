@@ -195,11 +195,22 @@ def test_edit_next_group_reuses_completed_prefix_and_blend_only_reuses_both(tmp_
             w.segments[1].prompt='Turn and wave in the final five seconds.'
             build();assert len(requests)==3
             assert w.video_render_cache['0']['result']['path']==first_output
-            assert 'Turn and wave' in requests[-1]['prompt']
+            assert requests[-1]['prompt']=='Original production wording.'
             assert requests[-1]['references'][0]['path']==first_output
             w.set_extension_transition(1,2,'filmic_crossfade')
             build();assert len(requests)==3
             assert 'Reused completed block' in w.render_queue.jobs[-2].message
+            w.unified_prompt.setPlainText('Only the later group Unified Prompt changes.')
+            build();assert len(requests)==4
+            assert w.video_render_cache['0']['result']['path']==first_output
+            assert requests[-1]['prompt']=='Only the later group Unified Prompt changes.'
+            from PIL import Image
+            from ltx_prompt_director.media import data_url
+            image=tmp_path/'later-reference.png';Image.new('RGB',(16,16),'green').save(image)
+            w.minimax_reference_images=[dict(role='identity',name='Later reference',image=data_url(str(image))),None,None,None]
+            build();assert len(requests)==5
+            assert w.video_render_cache['0']['result']['path']==first_output
+
 
 
 def test_single_mix_box_has_only_edge_length_controls_and_stays_centered(tmp_path):
@@ -210,7 +221,7 @@ def test_single_mix_box_has_only_edge_length_controls_and_stays_centered(tmp_pat
         prepare(w);w.add_video_extension();w.requested_length.setValue(5)
         w.resize(1800,1000);w.show();APP.processEvents();w.autofit_timeline();APP.processEvents()
         assert len(w.segments)==2 and len(w._extension_boxes)==1
-        assert w.extension_brackets.isHidden()
+        assert not w.extension_brackets.isHidden()
         box=w._extension_boxes[1]
         assert box.findChildren(QSlider)==[]
         boundary=w.timeline.visualItemRect(w.timeline.item(1)).left()
@@ -228,8 +239,8 @@ def test_single_mix_box_has_only_edge_length_controls_and_stays_centered(tmp_pat
         card=w.timeline.itemWidget(w.timeline.item(0))
         preview=card.preview
         top=preview.mapTo(w.timeline.viewport(),QPoint(0,0)).y()
-        assert box.geometry().top()==top+2
-        assert box.geometry().bottom()==top+preview.height()-3
+        assert box.geometry().top()==top+10
+        assert box.geometry().bottom()==top+preview.height()-11
         from PySide6.QtCore import QRect
         for control in (box.mode,box.side,box.diagram,box.left_handle,box.right_handle):
             region=QRect(control.mapTo(box,QPoint(0,0)),control.size())

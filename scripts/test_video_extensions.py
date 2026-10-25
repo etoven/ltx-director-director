@@ -7,6 +7,14 @@ import tempfile
 
 ROOT=Path(__file__).resolve().parents[1]
 CASES=[
+    'tests/test_prompt_groups.py::test_three_plus_one_keeps_shared_bottom_controls_and_original_prompts',
+    'tests/test_prompt_groups.py::test_group_workflow_and_references_restore_in_existing_ui',
+    'tests/test_prompt_groups.py::test_each_generation_request_uses_its_group_unified_prompt',
+    'tests/test_prompt_groups.py::test_blend_matches_ruler_and_keeps_ten_pixel_padding',
+    'tests/test_prompt_groups.py::test_merging_preserves_reuse_of_the_completed_first_group',
+    'tests/test_conditioning_media_playback.py::test_real_audio_scrub_decodes_at_source_trim_and_playback_advances',
+    'tests/test_conditioning_media_playback.py::test_conditioning_audio_panel_seeks_and_plays_unrendered_preview',
+    'tests/test_conditioning_media_playback.py::test_conditioning_audio_transport_follows_rendered_preview_and_restores_mute',
     'tests/test_video_extension_ui.py::test_brackets_use_existing_length_control_and_save_source_prompts',
     'tests/test_video_extension_ui.py::test_repeated_generate_and_switch_restores_inactive_latent_then_final',
     'tests/test_video_extension_ui.py::test_edit_next_group_reuses_completed_prefix_and_blend_only_reuses_both',

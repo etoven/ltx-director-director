@@ -1,7 +1,29 @@
 """Timeline brackets for independently rendered video blocks."""
-from PySide6.QtCore import Qt, QRectF
+from PySide6.QtCore import Qt, QRectF, QSize
 from PySide6.QtGui import QColor, QPainter, QPen
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QWidget, QComboBox, QSizePolicy, QStylePainter, QStyleOptionComboBox, QStyle
+
+
+def preview_bounds(card,viewport):
+    from PySide6.QtCore import QPoint
+    preview=card.preview;point=preview.mapTo(viewport,QPoint(0,0));pixmap=preview.pixmap()
+    height=min(preview.height(),pixmap.height()) if pixmap and not pixmap.isNull() else preview.height()
+    top=point.y()+(preview.height()-height)//2
+    return top,top+height
+
+
+class BlendComboBox(QComboBox):
+    def __init__(self,side=False):
+        super().__init__();self.side=side
+        self.setMinimumWidth(0);self.setMinimumContentsLength(0)
+        self.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Fixed)
+    def paintEvent(self,event):
+        painter=QStylePainter(self);option=QStyleOptionComboBox();self.initStyleOption(option)
+        if self.width()<150:
+            option.currentText=('←' if self.currentData()=='source' else '→') if self.side else ''
+            self.setIconSize(QSize(12,12))
+        painter.drawComplexControl(QStyle.ComplexControl.CC_ComboBox,option)
+        painter.drawControl(QStyle.ControlElement.CE_ComboBoxLabel,option)
 
 
 class ExtensionBrackets(QWidget):
@@ -24,6 +46,14 @@ class ExtensionBrackets(QWidget):
                 result.append([segment.render_group,rect.left()+gap,rect.right()])
         return result
 
+    def mousePressEvent(self,event):
+        if event.button()==Qt.MouseButton.LeftButton:
+            for group,left,right in self.spans():
+                if left<=event.position().x()<=right:
+                    row=next(i for i,s in enumerate(self.owner.segments) if s.render_group==group)
+                    self.owner.timeline.setCurrentRow(row);event.accept();return
+        super().mousePressEvent(event)
+
     def paintEvent(self,event):
         painter=QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -37,7 +67,7 @@ class ExtensionBrackets(QWidget):
             left+=3;right-=3
             painter.drawLine(left,25,left,9);painter.drawLine(left,9,right,9);painter.drawLine(right,9,right,25)
             length=self.owner.render_group_duration(group)
-            title=('Block 1' if group==0 else f'Extension {group}')+f' · {length:g} s'
+            title=f'Group {list(self.owner.render_groups()).index(group)+1} · {length:g} s'
             visible_left=max(0,left);visible_right=min(self.width(),right)
             label=painter.fontMetrics().elidedText(title,Qt.TextElideMode.ElideRight,max(0,visible_right-visible_left-12))
             width=painter.fontMetrics().horizontalAdvance(label)+10
@@ -82,9 +112,12 @@ class BlendControl(QWidget):
         from PySide6.QtWidgets import QVBoxLayout,QHBoxLayout,QLabel,QDoubleSpinBox,QComboBox
         from .shot_sequence import MODES
         self.owner=owner;self.group=group
-        self.setObjectName('extensionBlendBox');self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground,True)
+        self.setToolTip('Drag either edge to change blend length. Right-click for blend mode and side at narrow zoom.');self.setObjectName('extensionBlendBox');self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground,True)
         self.setStyleSheet('#extensionBlendBox{background:#14262d;border-top:1px solid #63868e;border-bottom:1px solid #63868e;border-left:0;border-right:0;} QLabel{background:transparent;border:0;color:#b9dfd7}')
-        row=QHBoxLayout(self);row.setContentsMargins(1,2,1,2);row.setSpacing(3)
+        row=QHBoxLayout(self);row.setContentsMargins(0,2,0,2);row.setSpacing(1)
+        from PySide6.QtWidgets import QLayout
+        row.setSizeConstraint(QLayout.SizeConstraint.SetNoConstraint)
+        self.setMinimumWidth(0)
         self.left_handle=BlendEdgeHandle(self,-1);row.addWidget(self.left_handle)
         setting=owner.extension_transition(group);self._last_blend_length=setting['overlap'] or 1
         # Internal bounded value; the only visible length controls are the edges.
@@ -95,11 +128,11 @@ class BlendControl(QWidget):
         middle=QVBoxLayout();middle.setContentsMargins(0,0,0,0);middle.setSpacing(2)
         self.title=QLabel(self);self.title.hide()
         self.diagram=BlendDiagram(owner,group);middle.addWidget(self.diagram,1)
-        self.mode=QComboBox();self.mode.setMinimumWidth(0);self.mode.setMinimumContentsLength(1)
+        self.mode=BlendComboBox();self.mode.setMinimumWidth(0);self.mode.setMinimumContentsLength(1)
         self.mode.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon);self.mode.setAccessibleName('Blend mode')
         for mode in MODES:self.mode.addItem(blend_type_icon(mode),'Hard cut' if mode=='cut' else mode.replace('_',' ').title(),mode)
         self.mode.setCurrentIndex(self.mode.findData(setting['blend']));self.mode.setFixedHeight(22);self.mode.setStyleSheet('QComboBox{padding:1px 20px 1px 3px;min-height:0;}');middle.addWidget(self.mode)
-        self.side=QComboBox();self.side.addItem('Source side','source');self.side.addItem('Destination side','destination')
+        self.side=BlendComboBox(True);self.side.addItem('Source side','source');self.side.addItem('Destination side','destination')
         self.side.setCurrentIndex(self.side.findData(setting['side']));self.side.setAccessibleName('Blend overlap side');self.side.setFixedHeight(22);self.side.setStyleSheet('QComboBox{padding:1px 20px 1px 3px;min-height:0;}');middle.addWidget(self.side)
         row.addLayout(middle,1)
         self.right_handle=BlendEdgeHandle(self,1);row.addWidget(self.right_handle)
@@ -125,6 +158,29 @@ class BlendControl(QWidget):
         self.side.currentIndexChanged.connect(side_changed)
         title()
         for control in (self.length,self.left_handle,self.right_handle):control.setEnabled(setting['blend']!='cut')
+
+    def contextMenuEvent(self,event):
+        from PySide6.QtWidgets import QMenu
+        from .shot_sequence import MODES
+        menu=QMenu(self)
+        for mode in MODES:
+            action=menu.addAction(blend_type_icon(mode),'Hard cut' if mode=='cut' else mode.replace('_',' ').title())
+            action.setCheckable(True);action.setChecked(self.mode.currentData()==mode)
+            action.triggered.connect(lambda checked=False,value=mode:self.mode.setCurrentIndex(self.mode.findData(value)))
+        menu.addSeparator()
+        for label,side in [('Source side','source'),('Destination side','destination')]:
+            action=menu.addAction(label);action.setCheckable(True);action.setChecked(self.side.currentData()==side)
+            action.triggered.connect(lambda checked=False,value=side:self.side.setCurrentIndex(self.side.findData(value)))
+        menu.exec(event.globalPos())
+
+    def resizeEvent(self,event):
+        super().resizeEvent(event)
+        width=max(1,min(8,self.width()//10))
+        self.left_handle.setFixedWidth(width);self.right_handle.setFixedWidth(width)
+        available=max(0,self.width()-2*width-4)
+        self.mode.setMaximumWidth(available);self.side.setMaximumWidth(available)
+        self.mode.setToolTip(self.mode.currentText());self.side.setToolTip(self.side.currentText())
+
 
 
 def blend_type_icon(mode):
@@ -158,7 +214,7 @@ class BlendDiagram(QWidget):
     def __init__(self,owner,group):
         super().__init__();self.owner=owner;self.group=group
         self.setObjectName("extensionBlendDiagram")
-        self.setMinimumHeight(38);self.setMaximumHeight(90)
+        self.setMinimumHeight(0)
         self.setToolTip('Outgoing (gold) and incoming (mint) blend. Image segments show edge frames when available; text sequences show the curve. Curves illustrate the selected blend type.')
 
     def edge_paths(self):

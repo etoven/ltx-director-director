@@ -18,6 +18,8 @@ def block_signature(request,segments,previous_token=''):
     references=copy.deepcopy(request.get('references',[]))
     media=[]
     for index,reference in enumerate(references):
+        for field in tuple(reference):
+            if field.startswith('archive'):reference.pop(field,None)
         previous=index==0 and previous_token and reference.get('kind')=='video'
         for key in ('path','audio_path'):
             if reference.get(key):
@@ -27,6 +29,9 @@ def block_signature(request,segments,previous_token=''):
     for segment in segments:
         records.append({key:value for key,value in segment.to_dict().items()
                         if key not in {'id','preview_path','artwork_status','render_group','prompt_detached'}})
+        # Origin labels are archive metadata, not model inputs. Keep the
+        # original empty fields so existing block signatures remain compatible.
+        records[-1]['source_project_id']='';records[-1]['source_prompt_type']=''
         if segment.media_path:media.append([segment.media_path,file_identity(segment.media_path)])
     for key in ('video_model',):
         if selected.get(key):media.append([selected[key],file_identity(selected[key])])

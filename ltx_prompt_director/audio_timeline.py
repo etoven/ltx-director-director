@@ -27,6 +27,8 @@ class AudioTransport(QObject):
         self.player_factory, self.output_factory = player_factory, output_factory
         self.clips = []
         self.players = {}
+        self.pending_seek=set()
+        self.audition_requested=False
         self.enabled = True
         self.playing = False
         self.position = 0
@@ -48,6 +50,7 @@ class AudioTransport(QObject):
         for ident in list(self.players):
             if ident not in ids:
                 player, output = self.players.pop(ident)
+                self.pending_seek.discard(ident)
                 player.stop(); player.deleteLater(); output.deleteLater()
         # QMediaPlayer owns streaming decoders; no complete audio buffer is
         # held on the GUI thread, and each overlapping strip can sound at once.
@@ -72,7 +75,9 @@ class AudioTransport(QObject):
         if status in (QMediaPlayer.MediaStatus.LoadedMedia, QMediaPlayer.MediaStatus.BufferedMedia):
             for clip in self.clips:
                 if self.players[clip.id][0] is player:
-                    self.sync_clip(clip, self.playing or self.audition.isActive(), force=True)
+                    pending=clip.id in self.pending_seek
+                    self.sync_clip(clip,self.playing or self.audition_requested,force=pending)
+                    if self.audition_requested and not self.playing and clip.id not in self.pending_seek:self.audition.start()
                     break
 
     def sync_clip(self, clip, audible, force=False):
@@ -81,14 +86,20 @@ class AudioTransport(QObject):
         active = self.enabled and not clip.muted and clip.start_frame <= frame < clip.end_frame
         if active:
             target = round((clip.trim_start + frame - clip.start_frame) * 1000 / FPS)
-            if force or abs(player.position() - target) > 110:
+            ready=not hasattr(player,'mediaStatus') or player.mediaStatus() in (QMediaPlayer.MediaStatus.LoadedMedia,QMediaPlayer.MediaStatus.BufferedMedia,QMediaPlayer.MediaStatus.BufferingMedia)
+            if not ready:
+                self.pending_seek.add(clip.id)
+                if audible:player.play()
+                return
+            pending=clip.id in self.pending_seek;self.pending_seek.discard(clip.id)
+            if force or pending or abs(player.position() - target) > 110:
                 player.setPosition(target)
             if audible:
                 player.play()
             else:
                 player.pause()
         else:
-            player.pause()
+            self.pending_seek.discard(clip.id);player.pause()
 
     def sync(self, audible=False, force=False):
         for clip in self.clips:
@@ -99,19 +110,21 @@ class AudioTransport(QObject):
         self.anchor = self.position
         if self.playing:
             self.clock.restart()
-        if audible and not self.playing:
-            self.audition.start()
+        self.audition_requested=bool(audible and not self.playing)
+        self.audition.stop()
         self.sync(self.playing or audible, force=True)
+        if self.audition_requested and not self.pending_seek:self.audition.start()
         self.position_changed.emit(self.position)
 
     def finish_scrub(self):
+        self.audition_requested=False
         if not self.playing:
             self.sync(False, force=True)
 
     def play(self):
         if self.position >= self.duration:
             self.seek(0)
-        self.audition.stop()
+        self.audition.stop();self.audition_requested=False
         self.playing = True
         self.anchor = self.position
         self.clock.start(); self.timer.start()
@@ -119,7 +132,7 @@ class AudioTransport(QObject):
         self.playing_changed.emit(True)
 
     def pause(self):
-        self.timer.stop(); self.audition.stop()
+        self.timer.stop(); self.audition.stop();self.audition_requested=False
         self.playing = False
         self.sync(False)
         self.playing_changed.emit(False)
@@ -552,6 +565,14 @@ class AudioTimelinePanel(QFrame):
         self.set_body_height(0 if self.handle.current_height else self.handle.last_height); self.save_height()
 
     def toggle_play(self):
+        if self.owner.workspace_engine=='shot_sequence':
+            sequence=self.owner.shot_sequence_panel
+            if sequence._desired_playing or sequence.preview.player.playbackState()==QMediaPlayer.PlaybackState.PlayingState:
+                sequence._desired_playing=False;sequence.preview.player.pause();self.transport.pause()
+            else:
+                sequence.seek_sequence(self.transport.position)
+                self.transport.play();sequence.build_preview()
+            return
         self.transport.pause() if self.transport.playing else self.transport.play()
 
     def seek(self, position, audible=False):
