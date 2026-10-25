@@ -4493,7 +4493,7 @@ class MainWindow(QMainWindow):
         for context in contexts:
             definition=context.get('workspaceDefinition') or self.workspace_definitions.get(context.get('projectType'),{})
             refs=definition.get('references',{})
-            enabled=refs.get('enabled') and refs.get('untimed_slots',0)>0
+            enabled=definition.get('engine') in {'minimax_references','generic'} and refs.get('enabled') and refs.get('untimed_slots',0)>0
             group_references.append([value for index,value in enumerate(context.get('minimaxH3',{}).get('referenceImages',[]))
                 if enabled and value and index<refs.get('untimed_slots',0) and value.get('role','identity') in refs.get('kinds',[])])
         stamps={str(group):input_stamp(items,context) for (group,items),context in zip(grouped_segments,contexts)}

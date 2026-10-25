@@ -66,6 +66,14 @@ def test_group_workflow_and_references_restore_in_existing_ui(tmp_path):
 def test_each_generation_request_uses_its_group_unified_prompt(tmp_path):
     with window(tmp_path) as w:
         prepare(w);runs=[];requests=[]
+        # A saved reference stays editable in its source context, but a
+        # conditioning-only group's request must not receive it.
+        w.minimax_reference_images=[dict(name='Group A identity',role='identity',image='data:image/png;base64,AAAA'),None,None,None]
+        w.store_render_group()
+        standard=next(key for key,value in w.workspace_definitions.items() if value['engine']=='minimax_frames')
+        other=w.render_group_options['1']['context'];other['projectType']=standard
+        other['workspaceDefinition']=copy.deepcopy(w.workspace_definitions[standard])
+        other['minimaxH3']['referenceImages']=[dict(name='Saved inactive identity',role='identity',image='data:image/png;base64,BBBB')]
         w.render_queue.executor=lambda op,args,ready,failed,**kw:runs.append((op,args,ready,failed))
         def render(request,**kwargs):requests.append(copy.deepcopy(request));return {'path':str(tmp_path/f'{len(requests)}.mp4')}
         with patch('ltx_prompt_director.ui.validate_profile'),patch('ltx_prompt_director.ui.run_request',side_effect=render),patch('ltx_prompt_director.video_extensions.continuation_reference',return_value=dict(kind='video',path='previous.mp4',timeline_time=0,duration=1)),patch('ltx_prompt_director.video_extensions.blend_blocks',return_value={'path':str(tmp_path/'final.mp4')}),patch.object(w,'attach_local_generated_video'),patch.object(w.project_preview_panel,'set_project'):
@@ -76,6 +84,8 @@ def test_each_generation_request_uses_its_group_unified_prompt(tmp_path):
         assert [r['prompt'] for r in requests]==['Group A original Unified Prompt.','Group B original Unified Prompt.']
         assert [r['duration'] for r in requests]==[15,5]
         assert requests[1]['references'][0]['timeline_time']==0
+        assert requests[0]['references'][0]['name']=='Group A identity'
+        assert len(requests[1]['references'])==1
         assert len(w.segments)==4
 
 
