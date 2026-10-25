@@ -53,4 +53,13 @@ Audio-panel seeking/playback now follows the condition/rendered preview in promp
 
 The local 1.13.0a127 wheel matches all 476 packaged source/assets and passes 41 installed feature checks, the baseline app smoke check, and six installed conditioning-audio regressions. Source media/local-runtime checks passed 32 tests with 11 optional ML tests skipped. Real Qt audio buffer and rendered playback checks were included. No new GPU inference was performed.
 
-Candidate SHA-256: `1aa1882fc46f705bd36518f7ecc2c2deddf15997837a162c6a6b744d0752caf6`. This is a local review build; it has not been committed, pushed, published, or installed into the user's running application.
+Candidate SHA-256: `1aa1882fc46f705bd36518f7ecc2c2deddf15997837a162c6a6b744d0752caf6`. At this checkpoint it was a local review build, before publication authorization; it was not installed into the user's running application.
+
+
+## a127 publication
+
+Published 1.13.0a127 to `experimental` after the user's explicit publication request. Source correction `02441bf`, wheel commit `e172b92`. [Release CI](https://github.com/etoven/ltx-director-director/actions/runs/40204964765) passed 243 core tests and all 98 isolated editor tests.
+
+The initial CI run caught saved references being included for conditioning-only workflows. Video request snapshots now apply each group's engine eligibility as well as its reference settings. The existing exclusion test and a mixed-group request regression pass.
+
+The downloaded public wheel matches the committed artifact byte-for-byte and all 476 packaged source/assets. All 41 installed feature checks pass against the public artifact, including real Qt audio playback, trimmed media, shared-control restoration, exact blend geometry and reuse of the original completed block after merging. Candidate baseline app smoke and all six conditioning-audio regressions also passed. Public SHA-256: `3819b4b6475c9723a4b0592ba38af696f9e683c79f401acae7489b16aeb81050`. No new GPU inference was run.
