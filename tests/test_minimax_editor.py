@@ -1790,6 +1790,72 @@ class UnifiedEditorTests(unittest.TestCase):
             self.assertEqual(w.unified_prompt.toPlainText(), 'Refined production prompt')
             self.assertFalse(hasattr(w.minimax_panel, 'instructions'))
 
+    def test_refine_after_deleting_dialogue_and_reference_uses_current_immutable_snapshot(self):
+        import copy
+        for kind in ('minimax_frames', 'minimax_references', 'generic'):
+            with self.subTest(kind=kind):
+                w = self.make_window(kind)
+                if kind == 'generic':
+                    from ltx_prompt_director.prompt_templates import stock_prompt
+                    definition = copy.deepcopy(next(value for value in w.workspace_definitions.values()
+                                                    if value['engine'] == 'minimax_frames'))
+                    definition.update(id='generic_refinement_test', name='Generic refinement test',
+                                      engine='generic', prompt_mode='unified')
+                    definition['generation_prompts'] = {key: stock_prompt('generic', key)
+                                                        for key in ('generate', 'refine')}
+                    w.workspace_store.save(definition)
+                    w.reload_workspace_definitions()
+                    w.set_project_type(definition['id'])
+                w._close_saves_queued = True
+                w.segments[0].prompt = 'Old draft: the traveler says "Wait here".'
+                w.minimax_reference_images = [dict(kind='audio', name='Old dialogue', role='voice',
+                                                  path='/unused/old.wav', notes='Wait here'), None, None, None]
+                w.unified_prompt.setPlainText('Old draft: the traveler says "Wait here".')
+                w.unified_prompt.setPlainText('The traveler opens the door. Footsteps echo.')
+                w.spoken_dialog.setChecked(False)
+                w.set_minimax_reference_image(0, None)
+                current = w.minimax_prompt_text
+                with (patch.object(w, 'ai_credentials', return_value=('gemini', 'model', 'key')),
+                      patch.object(w.thread_pool, 'start') as pool):
+                    w.refine_minimax_prompt()
+                worker = pool.call_args.args[0]
+                assert worker.args[9] == current
+                assert worker.args[7] is False
+                assert not any(worker.args[-1])
+                original = copy.deepcopy(worker.args[0][0].to_dict())
+                w.segments[0].prompt = 'A later edit'
+                assert worker.args[0][0].to_dict() == original
+                worker.signals.finished.emit(current + ' The camera holds still.')
+                assert 'Wait here' not in w.minimax_prompt_text
+                assert 'Footsteps echo' in w.minimax_prompt_text
+                assert not w.ai_busy
+
+    def test_refinement_request_authority_and_dialogue_validation(self):
+        from test_minimax_h3 import MiniMaxH3PromptTests
+        checks = MiniMaxH3PromptTests()
+        checks.test_refine_excludes_old_segment_wording_and_uses_current_sound_controls()
+        checks.test_refine_dialogue_enabled_does_not_invent_lines_from_old_drafts()
+        checks.test_refine_rejects_speech_markup_when_dialogue_is_off()
+
+    def test_refinement_completion_keeps_newer_prompt_or_sound_controls(self):
+        for changed in ('prompt', 'dialogue'):
+            w = self.make_window('minimax_references')
+            w._close_saves_queued = True
+            w.unified_prompt.setPlainText('Current editor draft')
+            with (patch.object(w, 'ai_credentials', return_value=('gemini', 'model', 'key')),
+                  patch.object(w.thread_pool, 'start') as pool):
+                w.refine_minimax_prompt()
+            worker = pool.call_args.args[0]
+            if changed == 'prompt':
+                w.unified_prompt.setPlainText('Newer editor draft')
+            else:
+                w.spoken_dialog.setChecked(not w.spoken_dialog.isChecked())
+            before = w.minimax_prompt_text
+            worker.signals.finished.emit('Obsolete refined draft')
+            self.assertEqual(w.minimax_prompt_text, before)
+            self.assertEqual(w.pending_minimax_result, 'Obsolete refined draft')
+            self.assertFalse(w.ai_busy)
+
     def test_combined_generate_and_refine_never_rewrite_timeline_for_any_provider(self):
         import json
         for provider, model in (("openai", "gpt-6"), ("gemini", "gemini-3.5-flash-lite")):

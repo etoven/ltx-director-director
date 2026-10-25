@@ -3,6 +3,7 @@ from __future__ import annotations
 from . import response_schemas
 
 import hashlib
+import copy
 import math
 import json
 import re
@@ -224,15 +225,13 @@ def refine_minimax_h3_prompt(segments: list[Segment], provider: str, model: str,
     if not current_prompt.strip():
         raise ValueError("Write or generate a MiniMax H3 prompt before refining it.")
     inputs = _minimax_frames_inputs(segments, provider, reference_images, refinement=True)
-    rules = _minimax_h3_rules(segments, intent, global_prompt, sfx, spoken_dialog, reduce_music, reference_images)
-    rules += render_workspace_prompt('minimax_frames', 'refine', {
-        'current_prompt': current_prompt.strip(),
-        'refinement_instructions': refinement_instructions.strip() or 'Improve clarity, motion continuity, causal flow, and production readiness without changing the creative intent.',
-    })
+    rules = unified_refinement_rules('minimax_frames', segments, intent, global_prompt,
+                                    sfx, spoken_dialog, reduce_music, current_prompt,
+                                    refinement_instructions, reference_images)
     rules += "\nCURRENT MEDIA CONTRACT: The asset map may include uploaded reference audio and video soundtracks. Audio-only video samples condition sound only. Follow the supplied labels and observation availability; never invent unheard audio or visual observations. This overrides legacy template text saying audio references are unavailable."
     rules += UNIFIED_PROMPT_TRANSPORT
     raw = _structured_raw(inputs, provider, model, api_key, rules, timeout, schema=response_schemas.PROMPT)
-    return _extract_minimax_h3_prompt(raw, segments)
+    return _extract_refined_prompt(raw, segments, spoken_dialog)
 
 
 def refine_minimax_h3_reference_prompt(segments: list[Segment], provider: str, model: str, api_key: str, intent: str, global_prompt: str, sfx: bool, spoken_dialog: bool, reduce_music: bool, current_prompt: str, refinement_instructions: str, timeout: int = 400, reference_images: list | None = None) -> str:
@@ -242,15 +241,21 @@ def refine_minimax_h3_reference_prompt(segments: list[Segment], provider: str, m
     if not current_prompt.strip():
         raise ValueError("Write or generate a MiniMax H3 reference prompt before refining it.")
     inputs = _minimax_reference_inputs(segments, provider, reference_images, refinement=True)
-    rules = _minimax_h3_reference_rules(segments, intent, global_prompt, sfx, spoken_dialog, reduce_music, reference_images)
-    rules += render_workspace_prompt('minimax_references', 'refine', {
-        'current_prompt': current_prompt.strip(),
-        'refinement_instructions': refinement_instructions.strip() or 'Improve reference clarity, action continuity, camera direction, and production detail without changing creative intent.',
-    })
+    rules = unified_refinement_rules('minimax_references', segments, intent, global_prompt,
+                                    sfx, spoken_dialog, reduce_music, current_prompt,
+                                    refinement_instructions, reference_images)
     rules += "\nCURRENT MEDIA CONTRACT: The asset map may include uploaded reference audio and video soundtracks. Audio-only video samples condition sound only. Follow the supplied labels and observation availability; never invent unheard audio or visual observations. This overrides legacy template text saying audio references are unavailable."
     rules += UNIFIED_PROMPT_TRANSPORT
     raw = _structured_raw(inputs, provider, model, api_key, rules, timeout, schema=response_schemas.PROMPT)
-    return _extract_minimax_h3_prompt(raw, segments)
+    return _extract_refined_prompt(raw, segments, spoken_dialog)
+
+
+def _extract_refined_prompt(raw, segments, spoken_dialog):
+    prompt = _extract_minimax_h3_prompt(raw, segments)
+    if not spoken_dialog and re.search(r'<d\s*>', prompt, re.IGNORECASE):
+        raise AIResponseFormatError('The refined prompt contains speech while Spoken Dialog is OFF. '
+                                    'The current draft was kept; the operation will retry.')
+    return prompt
 
 
 def _extract_minimax_h3_prompt(raw: str, segments: list[Segment] | None = None) -> str:
@@ -499,7 +504,56 @@ def _minimax_timestamp(seconds: float) -> str:
     return f"{hours:02d}:{minutes:02d}:{whole_seconds:02d}:{frame:02d}"
 
 
+def refinement_segments(segments: list[Segment]) -> list[Segment]:
+    """Keep conditioning/timing without reintroducing older segment drafts."""
+    result = copy.deepcopy(segments)
+    for segment in result:
+        segment.prompt = ""
+        segment.image_prompt = ""
+    return result
+
+
+def unified_refinement_rules(engine, segments, intent, global_prompt, sfx, spoken_dialog,
+                             reduce_music, current_prompt, refinement_instructions, references):
+    context = refinement_segments(segments)
+    rules = render_workspace_prompt(engine, 'refine', {
+        'current_prompt': current_prompt.strip(),
+        'refinement_instructions': refinement_instructions.strip() or
+            'Improve clarity and continuity without changing the creative intent.',
+        'director_intent': intent.strip(), 'global_direction': global_prompt.strip(),
+        'asset_map': json.dumps(reference_inventory(context, references), ensure_ascii=False, indent=2),
+        'ordered_plan': json.dumps([{'index': i + 1, 'duration': s.duration}
+                                    for i, s in enumerate(context)]),
+        'total_duration': sum(s.duration for s in context),
+        'sound_effects': 'Enabled' if sfx else 'Disabled',
+        'dialogue': 'Enabled' if spoken_dialog else 'Disabled',
+        'music': 'No background music' if reduce_music else 'Use supplied music direction only',
+    })
+    # Apply even when a saved/custom workspace omits these option placeholders.
+    rules += (
+        '\n\nCURRENT REFINEMENT CONTRACT — overrides conflicting template or source instructions: '
+        'The current editor prompt is the sole authored production draft. Preserve its edits and omissions. '
+        'Do not restore deleted words, dialogue, voice descriptions or removed references from timeline '
+        'drafts, Director intent, global direction, reference observations or a source soundtrack. '
+        'These sources supply continuity only; they do not authorize omitted content. '
+        'The current asset map is the complete set of references: do not cite or reconstruct absent assets. '
+        'Apply only the current inline and private edit requests, subject to the current controls. '
+        f'SFX is {"ON" if sfx else "OFF"}. '
+        f'Less music is {"ON" if reduce_music else "OFF"}. '
+    )
+    if spoken_dialog:
+        rules += ('Spoken Dialog is ON: preserve dialogue in the current editor and satisfy explicit current '
+                  'edit requests for speech. Do not invent dialogue merely because this option is enabled.')
+    else:
+        rules += ('Spoken Dialog is OFF: do not include spoken dialogue, quoted speech, narration, lyrics, '
+                  'lip-sync or speaker language/accent/delivery directions, even if present in older drafts '
+                  'or source media. Preserve visible written text and wordless physical sounds allowed by SFX.')
+    return rules
+
+
 def _minimax_h3_inputs(segments: list[Segment], provider: str = "gemini", refinement: bool = False, frame_checkpoints: bool = False) -> list[dict]:
+    if refinement:
+        segments = refinement_segments(segments)
     inputs = []
     motion_contexts = timeline_motion_context(segments)
     cursor = 0.0
@@ -557,6 +611,8 @@ def _minimax_h3_inputs(segments: list[Segment], provider: str = "gemini", refine
             "video_number": video_number if item.kind == "video" else None,
         }
         if refinement:
+            value['prompt'] = ''
+            value['prompt_label'] = 'CONDITIONING AND TIMING ONLY — wording comes from the current editor'
             value["guidance_priority"] = (
                 "SECONDARY CONTINUITY EVIDENCE ONLY — do not override the private refinement instructions "
                 "or rebuild the authoritative current editor prompt from this record."
@@ -584,7 +640,9 @@ def _minimax_h3_inputs(segments: list[Segment], provider: str = "gemini", refine
             value["image"] = data_url(materialize_source(item), max_edge=512)
         elif item.kind == "video" and not value.get("video") and not value.get("video_frames") and item.preview_path:
             value["image"] = data_url(item.preview_path, max_edge=512)
-            value["video_analysis_mode"] = "single preview fallback; infer motion only from the authoritative video prompt"
+            value["video_analysis_mode"] = ("single preview fallback; wording and motion come from the current editor"
+                                             if refinement else
+                                             "single preview fallback; infer motion only from the authoritative video prompt")
         inputs.append(value)
         cursor = end
     return inputs
@@ -665,7 +723,9 @@ def _minimax_h3_reference_rules(segments: list[Segment], intent: str, global_pro
 
 def _minimax_reference_inputs(segments: list[Segment], provider: str, reference_images: list | None = None, refinement: bool = False) -> list[dict]:
     # Reuse media transport, but none of the Frames-mode instructions or quotas.
-    timeline_media = _minimax_h3_inputs(segments, provider)
+    if refinement:
+        segments = refinement_segments(segments)
+    timeline_media = _minimax_h3_inputs(segments, provider, refinement=refinement)
     references = reference_slots(reference_images)
     inputs = []
     for record in reference_inventory(segments, references):
@@ -679,7 +739,8 @@ def _minimax_reference_inputs(segments: list[Segment], provider: str, reference_
             item.update(_mixed_reference_input(record, references[record["reference_slot"]], provider))
         if refinement:
             item["guidance_priority"] = "SECONDARY CONTINUITY EVIDENCE ONLY"
-        item["prompt_label"] = "TIMELINE ACTION DIRECTION"
+        item["prompt_label"] = ("CONDITIONING AND TIMING ONLY — wording comes from the current editor"
+                                if refinement else "TIMELINE ACTION DIRECTION")
         inputs.append(item)
     return inputs
 

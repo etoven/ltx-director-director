@@ -10509,9 +10509,22 @@ class MainWindow(QMainWindow):
         # The unified editor and timeline are locked while AI is running.
         # Project/workspace identity is checked once by ai_result_received().
         # Legacy editor-change fingerprint checks caused completed output loss.
-        # References remain editable, so compare only the request's reference
-        # snapshot rather than the entire editor/model cache fingerprint.
+        # Compare actual refine inputs and references rather than recomputing a
+        # model/media cache fingerprint (materialization can change its paths).
         operation = str(getattr(self, "minimax_operation_kind", "generate_frames"))
+        controls = self.__dict__.pop('minimax_refinement_controls', None)
+        if operation.startswith('refine_') and (
+                (getattr(self, 'minimax_operation_editor_snapshot', None) is not None and
+                 self.minimax_operation_editor_snapshot !=
+                 (self.minimax_prompt_text, self.minimax_refinement_instructions)) or
+                (controls is not None and controls != self.refinement_controls_snapshot())):
+            self.pending_minimax_result = prompt
+            self.set_ai_controls_enabled(True)
+            self.magic_overlay.hide_overlay()
+            self.minimax_panel.show_message(
+                'The prompt or sound controls changed while Refine was running. Your current '
+                'draft was kept; refine again to use the latest edits.', 'warning')
+            return
         references = self.__dict__.pop("minimax_operation_references", None)
         if references is not None and references != self.active_reference_images():
             self.pending_minimax_result = prompt
@@ -10620,6 +10633,7 @@ class MainWindow(QMainWindow):
             self.minimax_prompt_text,
             self.minimax_refinement_instructions,
         )
+        self.minimax_refinement_controls = self.refinement_controls_snapshot()
         timeout = self.settings.value("api_timeout", 400, int)
         if self.minimax_panel:
             self.minimax_panel.set_busy(True, "Refining edited prompt…")
@@ -10634,15 +10648,19 @@ class MainWindow(QMainWindow):
         self.start_ai_worker(
             operation,
             (
-                self.active_group_segments().copy(), provider, model, key, self.build_director_request(include_requested_length=False),
+                copy.deepcopy(self.active_group_segments()), provider, model, key, self.build_director_request(include_requested_length=False),
                 self.global_prompt.toPlainText(), self.sfx.isChecked(), self.spoken_dialog.isChecked(),
                 self.reduce_music.isChecked(), self.minimax_prompt_text,
                 self.minimax_refinement_instructions, timeout,
-            ) + (self.active_reference_images(),),
+            ) + (copy.deepcopy(self.active_reference_images()),),
             "Refining the edited MiniMax prompt with timeline continuity context…",
             self.minimax_h3_finished,
             show_main_overlay=False,
         )
+
+    def refinement_controls_snapshot(self) -> tuple:
+        return (self.sfx.isChecked(), self.spoken_dialog.isChecked(), self.reduce_music.isChecked(),
+                self.speaker_language.currentText(), self.speaker_accent.currentText())
 
     def retry_minimax_operation(self) -> None:
         """Repeat the failed MiniMax operation using current inline controls."""

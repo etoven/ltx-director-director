@@ -57,6 +57,14 @@ with tempfile.TemporaryDirectory(prefix='director-extensions-wheel-') as folder:
             ['tests/test_prompt_groups.py::test_merging_preserves_reuse_of_the_completed_first_group'],
             ['tests/test_prompt_groups.py::test_three_plus_one_keeps_shared_bottom_controls_and_original_prompts'],
         ]
+    if '--refinement' in sys.argv[2:]:
+        cases=[
+            ['tests/test_minimax_h3.py', 'tests/test_minimax_structured_response.py'],
+            ['tests/test_minimax_editor.py::UnifiedEditorTests::test_refine_after_deleting_dialogue_and_reference_uses_current_immutable_snapshot'],
+            ['tests/test_minimax_editor.py::UnifiedEditorTests::test_refinement_completion_keeps_newer_prompt_or_sound_controls'],
+            ['tests/test_minimax_editor.py::UnifiedEditorTests::test_refine_uses_edited_prompt_and_notes_for_selected_mode'],
+            ['tests/test_minimax_editor.py::UnifiedEditorTests::test_reference_changes_preserve_draft_during_generate_and_refine'],
+        ]
     for index,case in enumerate(cases):
         selections=[str(ROOT/value) for value in case]
         env={**os.environ,'PYTHONPATH':str(target),'QT_QPA_PLATFORM':'offscreen','PYTEST_DISABLE_PLUGIN_AUTOLOAD':'1',

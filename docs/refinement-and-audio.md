@@ -24,6 +24,13 @@ or use **Approve all** / **Deny all**. These controls also let you review text
 generated for an initially empty segment. Use the lower editor's own buttons
 when you want to generate or refine the combined production brief.
 
+For Unified Prompt **Refine**, the text currently in that editor is the working
+draft. Deleted wording is not brought back from older segment prompts. Current
+conditioning media and timing remain available for continuity. Turn **Dialog**
+off to keep the refinement free of spoken lines and voice directions; visible
+written text and wordless sounds can remain. Removing a reference excludes it
+from the next request.
+
 Generate and Refine request a defined response format for the chosen operation.
 Segment requests return that segment's prompt and duration; the combined editor
 returns production text, and timing-only actions return durations. Quick Fix uses

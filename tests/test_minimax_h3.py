@@ -12,6 +12,55 @@ from ltx_prompt_director.models import Segment
 
 
 class MiniMaxH3PromptTests(unittest.TestCase):
+    def test_refine_excludes_old_segment_wording_and_uses_current_sound_controls(self):
+        from ltx_prompt_director.generic_ai import refine_generic_prompt
+        segment = Segment('Beat', '', '', kind='text', duration=5,
+                          prompt='The traveler says "STALE SPOKEN LINE" with lip sync.',
+                          image_prompt='STALE ART DIRECTION')
+        before = segment.to_dict()
+        current = 'The traveler opens the door. A sign reads "Welcome". Footsteps echo.'
+        for custom in (None, {'generate': 'Invent original dialogue.', 'refine': 'Improve clarity.'}):
+            token = ai.WORKSPACE_INSTRUCTIONS.set(custom)
+            try:
+                for refiner in (ai.refine_minimax_h3_prompt, ai.refine_minimax_h3_reference_prompt,
+                                refine_generic_prompt):
+                    with self.subTest(refiner=refiner.__name__, custom=custom), patch.object(
+                            ai, '_provider_raw', return_value=json.dumps({'prompt': current})) as raw:
+                        self.assertEqual(refiner([segment], 'gemini', 'model', 'key', '', '',
+                                                 True, False, True, current, ''), current)
+                        inputs, _, _, _, rules, *_ = raw.call_args.args
+                        request = json.dumps(inputs) + rules
+                        self.assertNotIn('STALE SPOKEN LINE', request)
+                        self.assertNotIn('STALE ART DIRECTION', request)
+                        self.assertNotIn('Invent original dialogue.', rules)
+                        self.assertIn(current, rules)
+                        self.assertIn('Spoken Dialog is OFF', rules)
+                        self.assertIn('Preserve visible written text and wordless physical sounds', rules)
+                        self.assertEqual(inputs[0]['start_time'], 0)
+                        self.assertEqual(inputs[0]['end_time'], 5)
+                        self.assertEqual(segment.to_dict(), before)
+            finally:
+                ai.WORKSPACE_INSTRUCTIONS.reset(token)
+
+    def test_refine_dialogue_enabled_does_not_invent_lines_from_old_drafts(self):
+        current = 'The traveler quietly opens the door.'
+        with patch.object(ai, '_provider_raw', return_value=json.dumps({'prompt': current})) as raw:
+            ai.refine_minimax_h3_reference_prompt(self.segments(), 'gemini', 'model', 'key', '', '',
+                                                 True, True, True, current, '')
+        rules = raw.call_args.args[4]
+        self.assertIn('Do not invent dialogue merely because this option is enabled', rules)
+        self.assertNotIn('if none are supplied, write suitable original spoken lines', rules)
+
+    def test_refine_rejects_speech_markup_when_dialogue_is_off(self):
+        from ltx_prompt_director.generic_ai import refine_generic_prompt
+        for refiner in (ai.refine_minimax_h3_prompt, ai.refine_minimax_h3_reference_prompt,
+                        refine_generic_prompt):
+            with self.subTest(refiner=refiner.__name__), patch.object(
+                    ai, '_provider_raw', return_value=json.dumps({'prompt': '<d>[English] Wait here.</d>'})):
+                with self.assertRaisesRegex(ai.AIResponseFormatError, 'Spoken Dialog is OFF'):
+                    refiner(self.segments(), 'gemini', 'model', 'key', '', '', True, False,
+                            True, 'The traveler opens the door.', '')
+
     def test_refiners_prioritize_current_details_over_saved_template_brevity(self):
         from ltx_prompt_director.generic_ai import refine_generic_prompt
         current = 'The traveler raises the copper compass, turns it twice, then says "Hold here."'

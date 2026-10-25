@@ -41,10 +41,11 @@ def refine_generic_prompt(segments, provider, model, api_key, intent, global_pro
                           spoken_dialog, reduce_music, current_prompt, refinement_instructions,
                           timeout=400, reference_images=None):
     inputs = ai._minimax_reference_inputs(segments, provider, reference_images, refinement=True)
-    rules = _rules(segments, intent, global_prompt, sfx, spoken_dialog, reduce_music, reference_images,
-                   current_prompt, refinement_instructions, refine=True)
+    rules = ai.unified_refinement_rules('generic', segments, intent, global_prompt, sfx,
+                                        spoken_dialog, reduce_music, current_prompt,
+                                        refinement_instructions, reference_images)
     raw = ai._structured_raw(inputs, provider, model, api_key, rules + UNIFIED_CONTRACT, timeout, schema=response_schemas.PROMPT)
-    return ai._extract_minimax_h3_prompt(raw, segments)
+    return ai._extract_refined_prompt(raw, segments, spoken_dialog)
 
 
 def build_generic_segments(segments, provider, model, api_key, intent, sfx, spoken_dialog, hdr,
