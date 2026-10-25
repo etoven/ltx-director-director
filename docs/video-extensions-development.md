@@ -72,3 +72,10 @@ The reported `'str' object has no attribute 'get'` was reproduced through the re
 Cache readers now tolerate empty/legacy metadata and retain a valid metadata/archive fallback. The metadata writer stores a cache object for both ZIP and JSON projects. Live empty cache objects retain their identity so queued renders can still populate the original session cache. Cached-render lookups also reject malformed entries safely. The grouping layout, controls and styling are unchanged.
 
 Eight focused metadata, portable-combine and cache checks passed, including byte-for-byte preservation of the source archives. The native acceptance case runs the actual collection Group action on two saved video projects with reference images and checks the opened groups, original Unified Prompts, reference pixels and completed-block reuse. Release validation will be recorded after publication.
+
+
+## a128 publication
+
+Published 1.13.0a128 to `experimental`; source `e63b349`, wheel commit `baf0c1a`. [Release CI](https://github.com/etoven/ltx-director-director/actions/runs/40213161930) passed 243 core tests and 98 isolated editor tests. The public download matches the committed artifact and all 476 packaged source/assets.
+
+`verify_extension_wheel.py --grouping` passed all 11 focused checks against the installed public wheel, including the actual collection Group action on saved video projects, retained reference images and original archives, completed-block reuse, and shared editor restoration. Public SHA-256: `a338a90f34d6467ea20ede1b08fdbcda9a4772c5ae51813d4776cd45f79a67b1`. The accepted timeline controls and visual styling were not changed.

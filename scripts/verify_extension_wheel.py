@@ -46,6 +46,17 @@ with tempfile.TemporaryDirectory(prefix='director-extensions-wheel-') as folder:
         ['tests/test_conditioning_media_playback.py::test_conditioning_audio_panel_seeks_and_plays_unrendered_preview'],
         ['tests/test_conditioning_media_playback.py::test_conditioning_audio_transport_follows_rendered_preview_and_restores_mute'],
     ]
+    if '--grouping' in sys.argv[2:]:
+        cases=[
+            ['tests/test_grouping_metadata.py::test_grouping_normal_saved_library_projects_with_empty_string_cache',
+             'tests/test_grouping_metadata.py::test_metadata_writer_stores_empty_cache_as_object_for_archive_and_json',
+             'tests/test_grouping_metadata.py::test_optional_cache_formats_preserve_a_valid_fallback',
+             'tests/test_grouping_metadata.py::test_grouping_keeps_saved_cache_when_legacy_metadata_cache_is_blank',
+             'tests/test_collection_combine.py','tests/test_render_cache.py'],
+            ['tests/test_grouping_metadata.py::test_collection_group_action_opens_saved_video_groups_without_changing_sources'],
+            ['tests/test_prompt_groups.py::test_merging_preserves_reuse_of_the_completed_first_group'],
+            ['tests/test_prompt_groups.py::test_three_plus_one_keeps_shared_bottom_controls_and_original_prompts'],
+        ]
     for index,case in enumerate(cases):
         selections=[str(ROOT/value) for value in case]
         env={**os.environ,'PYTHONPATH':str(target),'QT_QPA_PLATFORM':'offscreen','PYTEST_DISABLE_PLUGIN_AUTOLOAD':'1',
