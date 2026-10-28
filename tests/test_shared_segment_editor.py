@@ -38,8 +38,8 @@ def test_unified_edit_never_conforms_or_mutates_segments(window, draft):
 def test_segment_edits_and_duration_preserve_unified_draft(window, mode):
     window.set_project_type(mode)
     window.unified_prompt.setPlainText('My manually edited production draft')
-    # The editor opens in Global scope. A card click selects Segment scope and
-    # exposes the native segment editor rather than editing global direction.
+    # Choose Segment explicitly; clicking a card preserves the chosen scope.
+    window.prompt_surface.select('segment')
     window.reload_clicked_segment(window.timeline.item(0))
     with patch.object(window, 'start_ai_worker') as worker:
         window.intent_segment_prompt.setPlainText('New motion')

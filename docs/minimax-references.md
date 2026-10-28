@@ -40,6 +40,9 @@ Video and audio originals are copied into Director’s managed media folder. The
 
 ## Export directly to ComfyUI
 
+The exported **Video Combine** node uses the current project name as its output
+filename prefix, including when you rename the exported JSON file.
+
 Choose **Export ComfyUI** in the top toolbar, marked with Comfy’s official logo. The exporter adapts the supplied MiniMax graph, fills its prompt and duration, and applies the pictured 16:9 / 0.5 MP / multiple 32 / 20-step defaults, and copies referenced media into **ComfyUI/input** using the existing ComfyUI root setting. Exported `Load Image`, `Load Video` and `Load Audio` fields use those relative input paths. Repeated exports avoid overwriting prior input files.
 
 All timeline images connect directly to their timed condition nodes, including the image at zero seconds; timeline videos feed their full frame batch and soundtrack into a timed audiovisual guide at their starting position. Later image checkpoints are chained at their cumulative timeline times. Two end images lasting 3.0 and 7.5 seconds anchor at **3.0** and **10.5** seconds. Audio-only references go to standalone audio inputs; untimed video-reference soundtracks go to paired video-audio inputs.

@@ -1,5 +1,5 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Director · Interactive illustrated manual</title><link rel="stylesheet" href="manual.css"></head><body>
-<aside id="sidebar"><a class="brand" href="#start">DIRECTOR<span>Interactive illustrated manual</span></a><label class="search-label" for="search">Find a feature</label><input id="search" type="search" placeholder="Search the guide…"><nav aria-label="Chapters"><a href="#start">Start here</a><a href="#setup">Setup and local generation</a><a href="#renders">Render queue and panels</a><a href="#extensions">Video extensions and mixes</a><a href="#timeline">Media and timeline</a><a href="#prompts">Prompt workflows</a><a href="#refinement">Refinement and audio</a><a href="#references">MiniMax references</a><a href="#effects">Effects Library</a><a href="#projects">Projects and properties</a><a href="#review">Video and project files</a><a href="#shots">Finished shot sequences</a><a href="#workspaces">Workspaces and exports</a><a href="#comfy">ComfyUI handoff</a><a href="#install">Installation</a></nav><p id="search-status" aria-live="polite"></p><button id="tour-start">Take the quick tour</button><p class="small">Available offline · Aurora 1.13.0a129<br>External provider and source links need internet.</p></aside>
+<aside id="sidebar"><a class="brand" href="#start">DIRECTOR<span>Interactive illustrated manual</span></a><label class="search-label" for="search">Find a feature</label><input id="search" type="search" placeholder="Search the guide…"><nav aria-label="Chapters"><a href="#start">Start here</a><a href="#setup">Setup and local generation</a><a href="#renders">Render queue and panels</a><a href="#extensions">Video extensions and mixes</a><a href="#timeline">Media and timeline</a><a href="#prompts">Prompt workflows</a><a href="#refinement">Refinement and audio</a><a href="#references">MiniMax references</a><a href="#effects">Effects Library</a><a href="#projects">Projects and properties</a><a href="#review">Video and project files</a><a href="#shots">Finished shot sequences</a><a href="#workspaces">Workspaces and exports</a><a href="#comfy">ComfyUI handoff</a><a href="#install">Installation</a></nav><p id="search-status" aria-live="polite"></p><button id="tour-start">Take the quick tour</button><p class="small">Available offline · Aurora 1.13.0a130<br>External provider and source links need internet.</p></aside>
 <main><header class="hero"><div><span class="eyebrow">YOUR CREATIVE WORKSPACE</span><h1>From first idea<br>to a directed sequence.</h1><p>A practical guide to planning, refinement, effects, local generation and production handoff.</p></div><img src="../onboarding/welcome.png" alt="Line-art director’s chair, camera and storyboard frames"></header><aside class="scope-note"><strong>Current editor scope:</strong> Segment Generate/Refine changes the selected beat only. Global acts on the full ordered sequence and rebuilds the combined prompt. The unified editor has independent Generate/Refine controls. Synchronization preserves the source side; timeline-to-combined synchronization uses the whole ordered timeline.</aside>
 <div id="sandbox"><h2>Try the scope controls</h2><p>This guide-only example shows which authored beats a refinement targets.</p><div class="beats"><button class="beat selected" data-beat="0">Opening</button><button class="beat" data-beat="1">Action</button><button class="beat" data-beat="2">Hold</button></div><label>Refine scope <select id="scope"><option value="segment">Selected segment</option><option value="global">Global sequence</option><option value="unified">Unified prompt</option></select></label><p id="scope-result" aria-live="polite"></p></div>
 <section id="start" class="chapter" data-title="Start here"><span class="eyebrow">DIRECTOR GUIDE</span><h1 id="your-complete-guide-to-director">Your complete guide to Director</h1>
@@ -572,9 +572,9 @@ handoffs and the completed-shot movie bake do not yet consume these independent
 audio tracks.</p>
 <h2 id="anchor-the-opening-and-the-destination">Anchor the opening and the destination</h2>
 <p><strong>Start frame</strong> tells a compatible workflow to begin a segment from its supplied image. <strong>End frame</strong> describes the image it should reach by that segment’s end. These controls are available in LTX and MiniMax.</p>
-<p>Click a card to edit its segment prompt. In MiniMax, this automatically switches
-the upper editor to <strong>Segment</strong>, including when you click the selected card
-again. Choose <strong>Global</strong> to return to whole-sequence direction. MiniMax keeps an
+<p>Clicking a card keeps your chosen prompt box open, including when you click the
+selected card again. Choose <strong>Segment</strong> in the prompt selector to edit the selected
+card's wording, or <strong>Global</strong> for whole-sequence direction. MiniMax keeps an
 independently editable unified production prompt below it. Refining a segment
 can update its duration and the timeline; typing in the unified box preserves
 segment timing.</p>
@@ -749,8 +749,8 @@ retain their selected roles rather than becoming timeline endpoints.</p>
 <p><img alt="Shared intent, total length, sound options and editable language and accent controls" loading="lazy" decoding="async" width="1540" height="164" src="images/direction-and-audio.png" /></p>
 <p>Set <strong>Total length</strong> to guide the sequence’s pacing, or use Auto to let the initial generation suggest it. Collapse <strong>Director’s Intent</strong> when you want a larger writing area; its contents and options remain available when you reopen it.</p>
 <h2 id="edit-directly-then-refine">Edit directly, then refine</h2>
-<p>Write in the prompt editor as you would in any draft. Click a timeline card to
-switch the upper editor to <strong>Segment</strong>, then use its <strong>Generate</strong> or <strong>Refine</strong>
+<p>Write in the prompt editor as you would in any draft. Choose <strong>Segment</strong> in the
+prompt selector and click the timeline card, then use its <strong>Generate</strong> or <strong>Refine</strong>
 button. The AI works on that segment's text, with nearby beats supplying
 continuity context. Other segment prompts and the lower production brief stay
 as you wrote them.</p>
@@ -887,6 +887,8 @@ plain and editable.</p>
 <p>For an uploaded video sample, enable <strong>Use ref audio only</strong> to use its soundtrack without borrowing its visual appearance or motion. The checkbox is available when the imported video contains a usable audio stream. Leave it off to use the video and its paired soundtrack together. Standalone audio files can be dropped into a slot directly.</p>
 <p>Video and audio originals are copied into Director’s managed media folder. Their soundtrack and selected audio-only state travel inside saved .LTXD projects. Gemini receives the actual audio for prompt analysis; with OpenAI, provide explicit sound notes because this transport does not audition reference audio. Both providers export the real audio into the ComfyUI graph.</p>
 <h2 id="export-directly-to-comfyui">Export directly to ComfyUI</h2>
+<p>The exported <strong>Video Combine</strong> node uses the current project name as its output
+filename prefix, including when you rename the exported JSON file.</p>
 <p>Choose <strong>Export ComfyUI</strong> in the top toolbar, marked with Comfy’s official logo. The exporter adapts the supplied MiniMax graph, fills its prompt and duration, and applies the pictured 16:9 / 0.5 MP / multiple 32 / 20-step defaults, and copies referenced media into <strong>ComfyUI/input</strong> using the existing ComfyUI root setting. Exported <code>Load Image</code>, <code>Load Video</code> and <code>Load Audio</code> fields use those relative input paths. Repeated exports avoid overwriting prior input files.</p>
 <p>All timeline images connect directly to their timed condition nodes, including the image at zero seconds; timeline videos feed their full frame batch and soundtrack into a timed audiovisual guide at their starting position. Later image checkpoints are chained at their cumulative timeline times. Two end images lasting 3.0 and 7.5 seconds anchor at <strong>3.0</strong> and <strong>10.5</strong> seconds. Audio-only references go to standalone audio inputs; untimed video-reference soundtracks go to paired video-audio inputs.</p>
 <p>The graph retains the supplied model, sampler and decoder subgraphs. ComfyUI needs the same native MiniMax and custom nodes used by that base workflow. The export checks the native node’s media limits: 9 image inputs, 3 video inputs and 3 standalone audio inputs. Director still offers four mixed reference slots; timed conditioning assets are additional inputs.</p>
@@ -1215,14 +1217,14 @@ setting to add more. The sequence-duration setting remains independent.</p>
 <pre><code class="language-bash">python3 -m venv ~/.venvs/ltx-director
 source ~/.venvs/ltx-director/bin/activate
 python -m pip install --upgrade pip
-python -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a129-py3-none-any.whl'
+python -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a130-py3-none-any.whl'
 prompt-director
 </code></pre>
 <h3 id="windows-powershell">Windows PowerShell</h3>
 <pre><code class="language-powershell">py -m venv &quot;$env:USERPROFILE\ltx-director-venv&quot;
 &amp; &quot;$env:USERPROFILE\ltx-director-venv\Scripts\Activate.ps1&quot;
 python -m pip install --upgrade pip
-python -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a129-py3-none-any.whl'
+python -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a130-py3-none-any.whl'
 prompt-director
 </code></pre>
 <p>On first launch, Prompt Director migrates preferences, custom workspaces, projects and managed media from the previous LTX Director folders. Existing files in the new folders take priority, and the original folders are retained.</p>

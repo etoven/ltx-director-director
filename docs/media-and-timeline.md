@@ -133,9 +133,9 @@ audio tracks.
 
 **Start frame** tells a compatible workflow to begin a segment from its supplied image. **End frame** describes the image it should reach by that segment’s end. These controls are available in LTX and MiniMax.
 
-Click a card to edit its segment prompt. In MiniMax, this automatically switches
-the upper editor to **Segment**, including when you click the selected card
-again. Choose **Global** to return to whole-sequence direction. MiniMax keeps an
+Clicking a card keeps your chosen prompt box open, including when you click the
+selected card again. Choose **Segment** in the prompt selector to edit the selected
+card's wording, or **Global** for whole-sequence direction. MiniMax keeps an
 independently editable unified production prompt below it. Refining a segment
 can update its duration and the timeline; typing in the unified box preserves
 segment timing.

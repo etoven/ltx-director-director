@@ -7232,14 +7232,10 @@ class MainWindow(QMainWindow):
         self.highlight_selected_prompt_timecode()
 
     def reload_clicked_segment(self, item: QListWidgetItem) -> None:
-        """A timeline click targets the segment, even when already selected."""
+        """Refresh the selected segment while keeping the chosen prompt scope."""
         row = self.timeline.row(item)
         if self.ai_busy or not 0 <= row < len(self.segments):
             return
-        if self.unified_workspace and not self.prompt_only_workspace:
-            self.prompt_scope.setCurrentIndex(self.prompt_scope.findData("segment"))
-        if hasattr(self, 'prompt_surface') and not self.prompt_only_workspace:
-            self.prompt_surface.select('segment')
         self.refresh_segment_prompt_box(row)
         self.highlight_selected_prompt_timecode(scroll=True)
 
@@ -10797,7 +10793,8 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Exporting MiniMax ComfyUI workflow and copying input media…")
         self.start_disk_job(export_minimax_workflow,
             (path, copy.deepcopy(self.segments) if not self.prompt_only_workspace else [], self.minimax_prompt_text,
-             copy.deepcopy(self.active_reference_images()), comfy_root, self.output_width.value(), self.output_height.value()),
+             copy.deepcopy(self.active_reference_images()), comfy_root, self.output_width.value(), self.output_height.value(),
+             safe_export_name(self.current_project_name)),
             lambda _result:self.record_export(path), lambda message:self.export_failed(path,message), serialized=True)
 
     def resolve_comfy_root(self) -> Path | None:

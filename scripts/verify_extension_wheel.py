@@ -65,6 +65,13 @@ with tempfile.TemporaryDirectory(prefix='director-extensions-wheel-') as folder:
             ['tests/test_minimax_editor.py::UnifiedEditorTests::test_refine_uses_edited_prompt_and_notes_for_selected_mode'],
             ['tests/test_minimax_editor.py::UnifiedEditorTests::test_reference_changes_preserve_draft_during_generate_and_refine'],
         ]
+    if '--scope-export' in sys.argv[2:]:
+        cases=[
+            ['tests/test_comfy_minimax_export.py'],
+            ['tests/test_minimax_editor.py::UnifiedEditorTests::test_timeline_click_keeps_chosen_prompt_scope_including_reselected_card'],
+            ['tests/test_minimax_editor.py::UnifiedEditorTests::test_comfy_export_video_combine_uses_project_name'],
+            ['tests/test_prompt_groups.py::test_three_plus_one_keeps_shared_bottom_controls_and_original_prompts'],
+        ]
     for index,case in enumerate(cases):
         selections=[str(ROOT/value) for value in case]
         env={**os.environ,'PYTHONPATH':str(target),'QT_QPA_PLATFORM':'offscreen','PYTEST_DISABLE_PLUGIN_AUTOLOAD':'1',

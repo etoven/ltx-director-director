@@ -171,10 +171,18 @@ def test_default_four_slot_ui_checkbox_and_export_action(media,tmp_path):
         assert w.comfy_export_action.isVisible()
         assert not w.comfy_export_action.icon().isNull()
         w.unified_prompt.setPlainText('Scene')
+        w.current_project_name='Aurora journey'
         with patch.object(w,'resolve_comfy_root',return_value=tmp_path/'comfy'),patch.object(w,'start_disk_job') as job:
             w.comfy_export_action.trigger()
             assert job.call_args.args[0] is export_minimax_workflow
             assert job.call_args.args[1][3][3]['audio_only']
+            args=job.call_args.args[1]
+            assert args[-1]=='Aurora journey'
+            # Inspect the exported graph independently of its JSON filename.
+            export_minimax_workflow(tmp_path/'different-name.json',*args[1:])
+            workflow=json.loads((tmp_path/'different-name.json').read_text())
+            combine=next(n for n in workflow['nodes'] if n['type']=='VHS_VideoCombine')
+            assert combine['widgets_values']['filename_prefix']=='Aurora journey'
     finally:
         w.project_dirty=False;w._close_saves_queued=True;w.close()
 

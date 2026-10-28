@@ -501,7 +501,7 @@ class UnifiedEditorTests(unittest.TestCase):
         self.assertEqual(w.minimax_prompt_text, master)
         self.assertEqual(w.paragraph_review.pending_count, 0)
 
-    def test_timeline_click_switches_to_segment_scope_including_reselected_card(self):
+    def test_timeline_click_keeps_chosen_prompt_scope_including_reselected_card(self):
         from PySide6.QtTest import QTest
         w = self.make_window("minimax_frames")
         w.intent.setPlainText("Keep the whole-sequence direction")
@@ -510,16 +510,21 @@ class UnifiedEditorTests(unittest.TestCase):
         before = [segment.to_dict() for segment in w.segments]
         w.show()
         self.app.processEvents()
-        for row in (1, 1, 0):
-            w.prompt_scope.setCurrentIndex(w.prompt_scope.findData("global"))
-            item = w.timeline.item(row)
-            w.timeline.scrollToItem(item)
-            self.app.processEvents()
-            QTest.mouseClick(w.timeline.viewport(), Qt.MouseButton.LeftButton,
-                            pos=w.timeline.visualItemRect(item).center())
-            self.assertEqual(w.prompt_scope.currentData(), "segment")
-            self.assertEqual(w.intent_segment_prompt.toPlainText(), w.segments[row].prompt)
-            self.assertIs(w.prompt_surface.editors.currentWidget(), w.intent_segment_prompt)
+        for scope in ('global', 'unified', 'segment'):
+            w.prompt_surface.select(scope)
+            editor = w.prompt_surface.editors.currentWidget()
+            for row in (1, 1, 0):
+                item = w.timeline.item(row)
+                w.timeline.scrollToItem(item)
+                self.app.processEvents()
+                QTest.mouseClick(w.timeline.viewport(), Qt.MouseButton.LeftButton,
+                                pos=w.timeline.visualItemRect(item).center())
+                self.assertEqual(w.timeline.currentRow(), row)
+                self.assertEqual(w.prompt_surface.scope.currentData(), scope)
+                self.assertEqual(w.prompt_scope.currentData(), 'segment' if scope == 'segment' else 'global')
+                if scope == 'segment':
+                    self.assertEqual(w.intent_segment_prompt.toPlainText(), w.segments[row].prompt)
+                self.assertIs(w.prompt_surface.editors.currentWidget(), editor)
         self.assertEqual([segment.to_dict() for segment in w.segments], before)
         self.assertEqual(w.intent.toPlainText(), "Keep the whole-sequence direction")
         self.assertEqual(w.global_prompt.toPlainText(), "Keep the global prompt")
@@ -527,6 +532,26 @@ class UnifiedEditorTests(unittest.TestCase):
         w.prompt_scope.setCurrentIndex(w.prompt_scope.findData("global"))
         w.refresh_timeline(1)
         self.assertEqual(w.prompt_scope.currentData(), "global")
+
+    def test_comfy_export_video_combine_uses_project_name(self):
+        import tempfile
+        import json
+        w = self.make_window('minimax_frames')
+        w._close_saves_queued = True
+        w.current_project_name = 'Aurora journey'
+        w.unified_prompt.setPlainText('The traveler follows the mountain path.')
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            destination = root / 'renamed-workflow.json'
+            with (patch.object(w, 'resolve_comfy_root', return_value=root / 'comfy'),
+                  patch.object(w, 'next_export_path', return_value=destination),
+                  patch.object(w, 'start_disk_job') as job):
+                w.comfy_export_action.trigger()
+            operation, args = job.call_args.args[:2]
+            operation(*args)
+            workflow = json.loads(destination.read_text())
+            combine = next(n for n in workflow['nodes'] if n['type'] == 'VHS_VideoCombine')
+            self.assertEqual(combine['widgets_values']['filename_prefix'], 'Aurora journey')
 
     def test_segment_context_menu_has_manual_generate_artwork(self):
         w = self.make_window("minimax_frames")

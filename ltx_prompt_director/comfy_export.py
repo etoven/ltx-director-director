@@ -61,7 +61,7 @@ def _set_widget(node, value, name=None, index=0):
     if name:node.setdefault('widgets_values_named',{})[name]=value
 
 
-def export_minimax_workflow(path, segments, prompt, references, comfy_root, width=1280, height=704):
+def export_minimax_workflow(path, segments, prompt, references, comfy_root, width=1280, height=704, project_name='Untitled'):
     if not prompt.strip():raise ValueError('Write or generate the MiniMax production prompt before exporting.')
     refs=reference_slots(references)
     inventory=reference_inventory(segments,refs)
@@ -141,7 +141,7 @@ def export_minimax_workflow(path, segments, prompt, references, comfy_root, widt
                   [('images','IMAGE'),('audio','AUDIO'),('meta_batch','VHS_BatchManager'),('vae','VAE')]],
         'outputs':[{'name':'Filenames','type':'VHS_FILENAMES','links':[]}],
         'properties':{'Node name for S&R':'VHS_VideoCombine','cnr_id':'comfyui-videohelpersuite'},
-        'widgets_values':{'frame_rate':24,'loop_count':0,'filename_prefix':'AnimateDiff','format':'video/webm',
+        'widgets_values':{'frame_rate':24,'loop_count':0,'filename_prefix':project_name.strip() or 'Untitled','format':'video/webm',
             'pix_fmt':'yuv420p','crf':15,'save_metadata':True,'trim_to_audio':True,'pingpong':False,'save_output':True}},
         'Video Combine')
     g.connect(decoder,0,output,'images','IMAGE');g.connect(decoder,1,output,'audio','AUDIO')

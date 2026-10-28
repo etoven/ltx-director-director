@@ -50,6 +50,7 @@ BRIEF = ('[Shot 1] At 00:00.00, Walk slowly.\n\n'
 
 def type_segment(window, app, text, row=0):
     window.set_director_intent_expanded(True, persist=False)
+    window.prompt_surface.select('segment')
     window.timeline.setCurrentRow(row)
     window.reload_clicked_segment(window.timeline.item(row))
     editor = window.intent_segment_prompt

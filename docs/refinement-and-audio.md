@@ -12,8 +12,8 @@ Set **Total length** to guide the sequence’s pacing, or use Auto to let the in
 
 ## Edit directly, then refine
 
-Write in the prompt editor as you would in any draft. Click a timeline card to
-switch the upper editor to **Segment**, then use its **Generate** or **Refine**
+Write in the prompt editor as you would in any draft. Choose **Segment** in the
+prompt selector and click the timeline card, then use its **Generate** or **Refine**
 button. The AI works on that segment's text, with nearby beats supplying
 continuity context. Other segment prompts and the lower production brief stay
 as you wrote them.
