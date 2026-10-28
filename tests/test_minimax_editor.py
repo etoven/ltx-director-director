@@ -553,6 +553,86 @@ class UnifiedEditorTests(unittest.TestCase):
             combine = next(n for n in workflow['nodes'] if n['type'] == 'VHS_VideoCombine')
             self.assertEqual(combine['widgets_values']['filename_prefix'], 'Aurora journey')
 
+    def test_project_details_thumbnail_menus_export_clicked_images_to_downloads(self):
+        import base64
+        import io
+        import tempfile
+        import time
+        from PIL import Image
+        from PySide6.QtCore import QPoint
+        from PySide6.QtTest import QTest
+        from PySide6.QtWidgets import QMenu
+        from ltx_prompt_director.ui import ProjectDetailsDialog
+        w = self.make_window('minimax_frames')
+        w._close_saves_queued = True
+        settings_before = {key: w.settings.value(key) for key in ('segment_export_dir', 'download_history')}
+        images = []
+        for fmt, mime, size in [('PNG', 'png', (320, 160)), ('WEBP', 'webp', (160, 320)),
+                                ('JPEG', 'jpeg', (240, 120))]:
+            data = io.BytesIO()
+            Image.new('RGB', size, 'navy').save(data, format=fmt)
+            images.append((f'data:image/{mime};base64,' + base64.b64encode(data.getvalue()).decode(), data.getvalue(), size))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            w.download_directory = str(root / 'active-project')
+            w.settings.setValue('segment_export_dir', str(root / 'default'))
+            w.download_tray.history = []
+            dialog = ProjectDetailsDialog('', w, name='Other project',
+                thumbnail_options=[('Segment 1', images[0][0]), ('Segment 2', images[1][0])],
+                thumbnail_source='custom', thumbnail_data=images[2][0],
+                download_directory=str(root / 'dialog-project'))
+            try:
+                dialog.show()
+                self.app.processEvents()
+                selected = dialog.selected_thumbnail()
+                menus = []
+                def export_action(menu, _position):
+                    menus.append(menu)
+                    self.assertEqual([a.text() for a in menu.actions()], ['Export Image'])
+                    menu.actions()[0].trigger()
+                def menu_factory(parent):
+                    menu = QMenu(parent)
+                    menu.exec = lambda position: export_action(menu, position)
+                    return menu
+                with patch('ltx_prompt_director.ui.QMenu', side_effect=menu_factory), patch.object(QMessageBox, 'critical') as errors:
+                    for row in range(3):
+                        if row == 2:
+                            dialog.download_folder.clear()
+                        item = dialog.thumbnail_list.item(row)
+                        dialog.thumbnail_list.scrollToItem(item)
+                        self.app.processEvents()
+                        point = dialog.thumbnail_list.visualItemRect(item).center()
+                        before = len(menus)
+                        QTest.mouseClick(dialog.thumbnail_list.viewport(), Qt.MouseButton.RightButton, pos=point)
+                        if len(menus) == before:
+                            # Offscreen platforms do not synthesize the native
+                            # context event after the right-button gesture.
+                            dialog.thumbnail_list.customContextMenuRequested.emit(point)
+                        self.assertEqual(dialog.selected_thumbnail(), selected)
+                    dialog.thumbnail_list.customContextMenuRequested.emit(QPoint(10000, 10000))
+                    self.assertEqual(len(menus), 3)
+                    dialog.hide()
+                    deadline = time.monotonic() + 10
+                    while w._pending_disk_jobs and time.monotonic() < deadline:
+                        self.app.processEvents()
+                        time.sleep(0.01)
+                    self.assertFalse(errors.called, errors.call_args_list)
+                self.assertEqual(w._pending_disk_jobs, 0)
+                exports = [Path(entry['path']) for entry in w.download_tray.history]
+                self.assertEqual(len(exports), 3)
+                for index, (suffix, parent) in enumerate([('.png', 'dialog-project'), ('.webp', 'dialog-project'), ('.jpg', 'default')]):
+                    target = next(path for path in exports if path.suffix == suffix)
+                    self.assertEqual(target.parent, root / parent)
+                    self.assertEqual(target.read_bytes(), images[index][1])
+                    with Image.open(target) as image:
+                        self.assertEqual(image.size, images[index][2])
+                self.assertEqual(w.download_directory, str(root / 'active-project'))
+            finally:
+                dialog.hide()
+                dialog.deleteLater()
+                for key, value in settings_before.items():
+                    w.settings.remove(key) if value is None else w.settings.setValue(key, value)
+
     def test_segment_context_menu_has_manual_generate_artwork(self):
         w = self.make_window("minimax_frames")
         w.resize(1150, 820)

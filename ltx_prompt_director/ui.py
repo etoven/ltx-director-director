@@ -2804,6 +2804,9 @@ class ProjectDetailsDialog(QDialog):
         self.thumbnail_list.setIconSize(QSize(104, 104))
         self.thumbnail_list.setFixedHeight(148)
         self.thumbnail_list.setSpacing(6)
+        self.thumbnail_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.thumbnail_list.customContextMenuRequested.connect(self.thumbnail_menu)
+        self.thumbnail_list.viewport().installEventFilter(self)
         for index, (label, value) in enumerate(self.thumbnail_options):
             item = QListWidgetItem(QIcon(self._thumbnail_pixmap(value)), label)
             item.setData(Qt.ItemDataRole.UserRole, (f"segment:{index}", value))
@@ -2914,6 +2917,27 @@ class ProjectDetailsDialog(QDialog):
         if self.thumbnail_options:
             return "segment:0", self.thumbnail_options[0][1]
         return self.thumbnail_source, self.thumbnail_data
+
+    def eventFilter(self, watched, event) -> bool:
+        if (watched is self.thumbnail_list.viewport()
+                and event.type() in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonRelease)
+                and event.button() == Qt.MouseButton.RightButton):
+            # Opening an export menu must not select a different project cover.
+            return True
+        return super().eventFilter(watched, event)
+
+    def thumbnail_menu(self, position: QPoint) -> None:
+        item = self.thumbnail_list.itemAt(position)
+        if item is None:
+            return
+        _source, image = item.data(Qt.ItemDataRole.UserRole) or ('', '')
+        if not image:
+            return
+        name = f"{self.name.text().strip() or 'Untitled'} - {item.text()}"
+        directory = self.download_folder.text().strip()
+        menu = QMenu(self.thumbnail_list)
+        menu.addAction('Export Image', lambda: self.parent().export_thumbnail_image(image, name, directory))
+        menu.exec(self.thumbnail_list.viewport().mapToGlobal(position))
 
     def refresh_notes(self) -> None:
         self.notes = normalize_notes(self.notes)
@@ -11045,12 +11069,13 @@ class MainWindow(QMainWindow):
             self.apply_timeline_fit()
         self.project_dirty = False
 
-    def export_directory(self) -> Path:
+    def export_directory(self, project_directory: str | None = None) -> Path:
         fallback = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DownloadLocation) or str(Path.home())
-        return Path(self.download_directory or str(self.settings.value("segment_export_dir", fallback) or fallback)).expanduser()
+        directory = self.download_directory if project_directory is None else project_directory
+        return Path(directory or str(self.settings.value("segment_export_dir", fallback) or fallback)).expanduser()
 
-    def next_export_path(self, filename: str) -> Path:
-        directory = self.export_directory()
+    def next_export_path(self, filename: str, *, directory: Path | None = None) -> Path:
+        directory = self.export_directory() if directory is None else Path(directory).expanduser()
         directory.mkdir(parents=True, exist_ok=True)
         target = directory / safe_media_filename(filename, "Export")
         base, suffix = target.stem, target.suffix
@@ -11061,6 +11086,14 @@ class MainWindow(QMainWindow):
         self._reserved_exports.add(str(target))
         self.statusBar().showMessage(f"Exporting {target.name}…")
         return target
+
+    def export_thumbnail_image(self, image: str, name: str, download_directory: str) -> None:
+        mime = image.split(';', 1)[0].removeprefix('data:').lower()
+        suffix = {'image/png': '.png', 'image/jpeg': '.jpg', 'image/webp': '.webp',
+                  'image/bmp': '.bmp', 'image/tiff': '.tiff'}.get(mime, '.png')
+        target = self.next_export_path(name + suffix, directory=self.export_directory(download_directory))
+        self.start_disk_job(write_data_url, (image, target), lambda _result: self.record_export(target),
+                            lambda message: self.export_failed(target, message), serialized=True)
 
     def record_export(self, path) -> None:
         path = Path(path)

@@ -72,6 +72,12 @@ with tempfile.TemporaryDirectory(prefix='director-extensions-wheel-') as folder:
             ['tests/test_minimax_editor.py::UnifiedEditorTests::test_comfy_export_video_combine_uses_project_name'],
             ['tests/test_prompt_groups.py::test_three_plus_one_keeps_shared_bottom_controls_and_original_prompts'],
         ]
+    if '--thumbnails' in sys.argv[2:]:
+        cases=[
+            ['tests/test_minimax_editor.py::UnifiedEditorTests::test_project_details_thumbnail_menus_export_clicked_images_to_downloads'],
+            ['tests/test_minimax_editor.py::UnifiedEditorTests::test_download_popup_anchor'],
+            ['tests/test_minimax_editor.py::UnifiedEditorTests::test_comfy_export_video_combine_uses_project_name'],
+        ]
     for index,case in enumerate(cases):
         selections=[str(ROOT/value) for value in case]
         env={**os.environ,'PYTHONPATH':str(target),'QT_QPA_PLATFORM':'offscreen','PYTEST_DISABLE_PLUGIN_AUTOLOAD':'1',

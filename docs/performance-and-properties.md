@@ -15,6 +15,12 @@ Choose **Save to Library** to save its content; later saves update that same
 project. In project details, choose a segment frame as its cover or upload a
 custom thumbnail. A recognizable cover helps you find the right plan as the library grows.
 
+Right-click any image in the project-details thumbnail list and choose
+**Export Image**. It saves the stored image to the dialog's **Download folder**
+and adds it to **Recent exports**, where you can open it, reveal its folder or
+drag the file into another application. An empty folder field uses the
+application download folder. Exporting a thumbnail keeps the selected cover.
+
 Open **Projects** from the toolbar. Select a saved project to return to it, or use its context menu to open it or edit the details. Search matches names, descriptions, statuses, tags and notes. Use the grid/list buttons beside search to choose a view. The **…** menu retains sorting, thumbnail sizes, duplication, details and archive controls. **New**, **Rename**, **Delete** and **Catalog** stay in the compact action row.
 
 ![The native library with search, view buttons and Status/Tags filters](images/project-browser.png)
