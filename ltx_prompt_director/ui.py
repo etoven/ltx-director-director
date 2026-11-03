@@ -3604,13 +3604,15 @@ class MainWindow(QMainWindow):
         if splash:
             splash.set_status('Preparing text tools and appearance…')
             QApplication.processEvents()
-        self._apply_theme()
         self.magic_overlay = MagicBuildOverlay(self)
         self.inline_typing = LiveTypingPreview(self)
         self.paragraph_review = ParagraphDiffReview(self)
         self.segment_prompt_review = SegmentPromptReview(self)
         self.reasoning_dock = ReasoningActivityDock(self)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.reasoning_dock)
+        for dock in self.findChildren(QDockWidget, options=Qt.FindChildOption.FindDirectChildrenOnly):
+            dock.setProperty('adobePanel', True)
+        self._apply_theme()
         geometry = self.settings.value("window/geometry")
         state = self.settings.value("window/state")
         if geometry:
@@ -3630,7 +3632,6 @@ class MainWindow(QMainWindow):
         self.chrome=WindowChrome(self,self.findChild(QToolBar,'mainToolbar'),
                                  self.current_project_name or 'Untitled project')
         self.chrome.update_metrics(max(75,min(200,self.settings.value('ui_text_scale',100,int)))/100)
-        QTimer.singleShot(0, self.style_library_tabs)
         self.sync_reference_panel_visibility()
         from .dock_panels import PanelRails
         from .render_widgets import render_icon
@@ -3649,17 +3650,6 @@ class MainWindow(QMainWindow):
         self.tabifiedDockWidgetActivated.connect(lambda *_: self.queue_project_panel_width_restore())
         QTimer.singleShot(0, self.restore_startup_workspace)
         self.update_window_title()
-
-    def style_library_tabs(self) -> None:
-        if hasattr(self,'panel_rails'):
-            self.panel_rails.schedule();return
-        for bar in self.findChildren(QTabBar):
-            labels={bar.tabText(index).replace('&','') for index in range(bar.count())}
-            if labels=={'Effects Library','PROJECT LIBRARY'}:
-                bar.setObjectName('libraryDockTabs')
-                bar.setElideMode(Qt.TextElideMode.ElideNone)
-                bar.setExpanding(False)
-                bar.style().unpolish(bar);bar.style().polish(bar)
 
     def open_catalog_viewer(self, entry):
         entries = [self.media_catalog.tiles.item(i).data(Qt.ItemDataRole.UserRole)

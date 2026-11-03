@@ -248,6 +248,96 @@ def test_native_dock_contents_survive_collapse_float_move_and_reference_capabili
     finally:w.project_dirty=False;w.close()
 
 
+def panel_group_tabs(window, *titles):
+    from PySide6.QtWidgets import QTabBar
+    return next(bar for bar in window.findChildren(QTabBar, 'panelDockTabs')
+                if bar.isVisible() and set(titles)=={bar.tabText(i) for i in range(bar.count())})
+
+
+def test_native_top_tabs_switch_panels_and_restore_the_group_from_its_rail():
+    from PySide6.QtWidgets import QTabWidget
+    from ltx_prompt_director import dock_panels
+    w=make_window()
+    w._restoring_layout=False
+    try:
+        rails=w.panel_rails
+        for dock in (w.project_dock,w.effects_dock):dock.show()
+        w.tabifyDockWidget(w.project_dock,w.effects_dock)
+        rails.dock_at(w.catalog_dock,Qt.DockWidgetArea.RightDockWidgetArea);QTest.qWait(30)
+        menus=[]
+        class CapturedMenu(QMenu):
+            def exec(self,*_):menus.append(self)
+        with patch.object(dock_panels,'QMenu',CapturedMenu):
+            QTest.mouseClick(rails.headers[w.catalog_dock].menu,Qt.MouseButton.LeftButton)
+        group=next(action.menu() for action in menus[0].actions() if action.text()=='Group with')
+        next(action for action in group.actions() if action.text()=='Projects').trigger()
+        assert w.dockWidgetArea(w.catalog_dock)==Qt.DockWidgetArea.LeftDockWidgetArea
+        w.project_dock.raise_();QTest.qWait(40)
+        tabs=panel_group_tabs(w,'Projects','Effects Library','Media Catalog')
+        assert w.tabPosition(Qt.DockWidgetArea.LeftDockWidgetArea)==QTabWidget.TabPosition.North
+        assert tabs.mapTo(w,QPoint()).y()<w.project_dock.mapTo(w,QPoint()).y()
+        assert tabs.height()>20 and tabs.isMovable() and tabs.usesScrollButtons()
+        index=next(i for i in range(tabs.count()) if tabs.tabText(i)=='Media Catalog')
+        QTest.mouseClick(tabs,Qt.MouseButton.LeftButton,pos=tabs.tabRect(index).center());QTest.qWait(30)
+        assert not w.catalog_dock.visibleRegion().isEmpty()
+        assert w.project_dock.visibleRegion().isEmpty()
+        # Closing one tab leaves the other group members open. Closing the
+        # column to icons retains those members and its user-chosen width.
+        QTest.mouseClick(rails.headers[w.catalog_dock].close,Qt.MouseButton.LeftButton);QTest.qWait(30)
+        assert w.catalog_dock.isHidden()
+        tabs=panel_group_tabs(w,'Projects','Effects Library')
+        index=next(i for i in range(tabs.count()) if tabs.tabText(i)=='Effects Library')
+        QTest.mouseClick(tabs,Qt.MouseButton.LeftButton,pos=tabs.tabRect(index).center());QTest.qWait(30)
+        w.resizeDocks([w.effects_dock],[425],Qt.Orientation.Horizontal);QTest.qWait(30)
+        width=w.effects_dock.width()
+        QTest.mouseClick(rails.headers[w.effects_dock].collapse,Qt.MouseButton.LeftButton);QTest.qWait(30)
+        assert all(d.isHidden() for d in (w.project_dock,w.effects_dock,w.catalog_dock))
+        assert not rails.rails['left'].isHidden()
+        QTest.mouseClick(rails.rails['left'].chevron,Qt.MouseButton.LeftButton);QTest.qWait(40)
+        tabs=panel_group_tabs(w,'Projects','Effects Library')
+        assert tabs.tabText(tabs.currentIndex())=='Effects Library'
+        assert w.catalog_dock.isHidden() and abs(w.effects_dock.width()-width)<=2
+        w.set_ui_text_scale(200);QTest.qWait(30)
+        tabs=panel_group_tabs(w,'Projects','Effects Library')
+        assert tabs.height()>=tabs.fontMetrics().height() and tabs.width()<=w.width()
+        assert tabs.usesScrollButtons()
+    finally:w.project_dirty=False;w.close()
+
+
+def test_stacked_tab_groups_and_selected_members_restore_after_restart():
+    right=Qt.DockWidgetArea.RightDockWidgetArea
+    first=make_window()
+    first._restoring_layout=False
+    try:
+        rails=first.panel_rails
+        for dock in rails.group('right'):first.removeDockWidget(dock)
+        preview,properties=first.project_preview_dock,first.project_properties_dock
+        files,queue=first.project_files_dock,first.render_queue_dock
+        first.addDockWidget(right,preview)
+        first.splitDockWidget(preview,rails.rails['right'],Qt.Orientation.Horizontal)
+        first.splitDockWidget(preview,files,Qt.Orientation.Vertical)
+        first.tabifyDockWidget(preview,properties);first.tabifyDockWidget(files,queue)
+        for dock in (preview,properties,files,queue):dock.show()
+        properties.raise_();queue.raise_();QTest.qWait(40)
+        top=panel_group_tabs(first,'Video Preview','Properties')
+        bottom=panel_group_tabs(first,'Project Files','Render Queue')
+        assert top.mapTo(first,QPoint()).y()<bottom.mapTo(first,QPoint()).y()
+        QTest.mouseClick(rails.headers[queue].collapse,Qt.MouseButton.LeftButton);QTest.qWait(30)
+        assert all(dock.isHidden() for dock in (preview,properties,files,queue))
+    finally:first.project_dirty=False;first.close()
+
+    second=make_window()
+    try:
+        QTest.mouseClick(second.panel_rails.rails['right'].chevron,Qt.MouseButton.LeftButton);QTest.qWait(60)
+        top=panel_group_tabs(second,'Video Preview','Properties')
+        bottom=panel_group_tabs(second,'Project Files','Render Queue')
+        assert top.mapTo(second,QPoint()).y()<bottom.mapTo(second,QPoint()).y()
+        assert top.tabText(top.currentIndex())=='Properties'
+        assert bottom.tabText(bottom.currentIndex())=='Render Queue'
+        assert second.panel_rails.rails['right'].x()>second.render_queue_dock.x()
+    finally:second.project_dirty=False;second.close()
+
+
 def test_queue_result_updates_originating_project_session_without_touching_current(tmp_path):
     from ltx_prompt_director.models import Segment
     from ltx_prompt_director.artwork_tools import ArtworkTool

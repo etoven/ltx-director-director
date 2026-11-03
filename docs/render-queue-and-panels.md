@@ -24,11 +24,17 @@ Project cover images show an animated spinner while their jobs are waiting or re
 
 The queue belongs to the current app session. Closing Director cancels waiting jobs and requests cancellation of the active render while finishing project saves. Completed media and saved project edits remain available.
 
-## Use collapsible panels
+## Group, tab and collapse panels
 
-Click an outer icon to open its panel. Click the active icon again, or the double arrow in the panel heading, to collapse the column to icons. Switching panels retains their contents. **Projects**, **Effects Library** and **Media Catalog** start on the left; references, previews, files, properties, the queue and AI activity start on the right.
+Choose a panel from the tabs at the top of its group. Drag a tab to reorder it, or choose **Panel options → Group with** to put it beside another panel as a tab. Groups can stack in the same column. Use the tab bar's arrows to reach more tabs when space is tight.
 
-Drag a panel heading to move it. Right-click the heading for docking locations, supported floating options, or **Close panel**. Effects Library retains its panel sizing controls under **Panel sizing and options**. You can reopen a closed panel from its icon. Positions and column widths are remembered. A workspace without Reference Media hides that panel and its icon; returning to a supported workspace restores it if it was open.
+![Projects, Effects Library and Media Catalog in a top tab bar, with two stacked panel groups on the right](images/dock-tabs-expanded.png)
+
+Click an outer icon to open its panel. Click the active icon again, or use the double arrow on the icon rail or panel heading, to collapse the column to icons. Expand it with the rail's double arrow or a panel icon. The groups reopen with their previous tabs, selections and column width. **Projects**, **Effects Library** and **Media Catalog** start on the left; references, previews, files, properties, the queue and AI activity start on the right.
+
+![Both panel columns collapsed into icon rails, leaving the timeline and prompt editor expanded](images/dock-tabs-collapsed.png)
+
+Drag a panel heading to reposition it. Use the heading's menu for docking locations, floating options, and **Close panel**. Closing a panel removes its tab; you can reopen it from its icon. Effects Library retains its sizing controls under **Panel sizing and options**. A workspace without Reference Media hides that panel and its icon; returning to a supported workspace restores it if it was open.
 
 The integrated header keeps file commands and window controls beside the centered project title, with workspace, preview, output-size and provider tools on the next row. Drag empty header space to move the window; double-click to maximize or restore. The timing overview stays beneath the timeline.
 

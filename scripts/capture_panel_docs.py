@@ -1,10 +1,13 @@
 """Capture the panel redesign with authored demo data and no model calls."""
 from pathlib import Path
-import os,sys
+import os,sys,tempfile
 from unittest.mock import patch
 
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT))
 os.environ.setdefault('QT_QPA_PLATFORM','offscreen')
+capture_home=tempfile.TemporaryDirectory(prefix='director-panel-docs-')
+for kind in ('CONFIG','DATA','CACHE'):
+    os.environ[f'XDG_{kind}_HOME']=str(Path(capture_home.name)/kind.lower())
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 from PySide6.QtTest import QTest
@@ -45,6 +48,28 @@ w.resizeDocks([w.project_dock,w.minimax_panel.reference_dock],[330,330],Qt.Orien
 w.set_timeline_height(184);w.autofit_timeline();QTest.qWait(350)
 w.project_dock.raise_();QTest.qWait(100)
 out=ROOT/'docs/images';out.mkdir(exist_ok=True)
+if '--dock-groups' in sys.argv:
+    rails=w.panel_rails
+    w.catalog_dock.show();w.tabifyDockWidget(w.project_dock,w.catalog_dock);w.project_dock.raise_()
+    reference=w.minimax_panel.reference_dock
+    for dock in rails.group('right'):w.removeDockWidget(dock)
+    w.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea,reference)
+    w.splitDockWidget(reference,rails.rails['right'],Qt.Orientation.Horizontal)
+    w.splitDockWidget(reference,w.render_queue_dock,Qt.Orientation.Vertical)
+    w.tabifyDockWidget(reference,w.project_preview_dock)
+    w.tabifyDockWidget(w.render_queue_dock,w.project_files_dock)
+    for dock in (reference,w.project_preview_dock,w.render_queue_dock,w.project_files_dock):dock.show()
+    reference.raise_();w.render_queue_dock.raise_()
+    w.resizeDocks([w.project_dock,reference],[345,355],Qt.Orientation.Horizontal)
+    w.resizeDocks([reference,w.render_queue_dock],[640,280],Qt.Orientation.Vertical)
+    QTest.qWait(350);w.autofit_timeline();QTest.qWait(100)
+    assert w.grab().save(str(out/'dock-tabs-expanded.png'))
+    rails.collapse('left');rails.collapse('right');QTest.qWait(200)
+    w.autofit_timeline();QTest.qWait(100)
+    assert w.grab().save(str(out/'dock-tabs-collapsed.png'))
+    w.project_dirty=False;w.close();capture_home.cleanup()
+    print('Captured expanded and collapsed native panel groups.',flush=True)
+    os._exit(0)
 w.grab().save(str(out/'panel-overhaul.png'))
 w.project_dock.grab().save(str(out/'project-browser.png'))
 w.prompt_surface.grab().save(str(out/'prompt-scope-panel.png'))
@@ -58,5 +83,6 @@ w.library_surface.color_menu.popup(w.library_surface.color.mapToGlobal(w.library
 QTest.qWait(100)
 w.library_surface.color_menu.grab().save(str(out/'project-status-colors.png'));w.library_surface.color_menu.close()
 w.project_dirty=False;w.close()
+capture_home.cleanup()
 print('Captured panel overhaul, project browser, scope editor, status menu and retained timing overview.',flush=True)
 os._exit(0)

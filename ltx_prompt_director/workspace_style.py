@@ -88,6 +88,5 @@ def workspace_style(theme, scale):
     #surfaceScope{{background:#172630;border:1px solid #344d5c;border-radius:{size(4)}px;padding:{size(1)}px {size(6)}px;color:#d0e3f1;font:{size(13)}px "Roboto Condensed";min-width:0;min-height:0}}
     QMainWindow QTabBar::tab{{background:#121b24;color:#c0cfda;border:0;border-bottom:2px solid transparent;padding:{size(4)}px {size(7)}px;font-size:{size(13)}px}}
     QMainWindow QTabBar::tab:selected{{border-bottom-color:#38bbd0;color:#e1f3f5}}
-    #libraryDockTabs::tab{{min-width:{size(130)}px}}
     '''
     return theme

@@ -151,7 +151,7 @@ class RenderQueuePanel(QWidget):
         layout.addWidget(self.cleanup)
         self.file_status=QLabel();self.file_status.setWordWrap(True);layout.addWidget(self.file_status)
         note=QLabel('Jobs render in order. Pausing holds waiting jobs; the active render continues.');note.setWordWrap(True);note.setMinimumWidth(0);layout.addWidget(note)
-        self.setStyleSheet('''#renderQueuePanel{background:#18232d} #renderQueueJobs{background:#101c25;border:1px solid #354a5c;border-radius:4px;padding:5px} #renderJobDetails{background:#15212b;border:1px solid #354a5c;border-radius:4px} #renderJobDetails QLabel{background:transparent;border:0}''')
+        self.setStyleSheet('''#renderQueuePanel{background:#292929} #renderQueueJobs{background:#202020;border:1px solid #444;border-radius:4px;padding:5px} #renderJobDetails{background:#303030;border:1px solid #484848;border-radius:4px} #renderJobDetails QLabel{background:transparent;border:0}''')
         queue.changed.connect(self.refresh);self.refresh()
 
     def selected_job(self):
