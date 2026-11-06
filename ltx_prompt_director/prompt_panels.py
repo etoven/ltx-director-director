@@ -1,7 +1,7 @@
 """Independent dockable prompt documents, retaining existing AI action routes."""
 from PySide6.QtCore import Qt, QTimer, QEvent
 from PySide6.QtWidgets import (QDockWidget, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
-    QStackedWidget, QApplication, QToolButton, QMenu)
+    QStackedWidget, QApplication, QToolButton, QMenu, QFrame, QLabel)
 from .panel_design import PromptSurface
 from .structured_prompt_panel import StructuredPromptPanel
 
@@ -37,6 +37,18 @@ class DockPromptSurface(PromptSurface):
             copy = QToolButton(); copy.setText('Copy'); bar.addWidget(copy)
             copy.clicked.connect(lambda _, k=scope: QApplication.clipboard().setText(self.panel_text(k)))
             layout.addLayout(bar)
+            if scope == 'unified':
+                self.reference_flag = QFrame(); self.reference_flag.setObjectName('minimaxMessagePanel')
+                self.reference_flag.setProperty('level', 'warning')
+                flag_layout = QHBoxLayout(self.reference_flag); flag_layout.setContentsMargins(8, 5, 8, 5)
+                self.reference_flag_message = QLabel('References changed. Reassess the prompts to apply them.'); self.reference_flag_message.setWordWrap(True)
+                self.reference_flag_message.setMinimumWidth(0)
+                self.reference_flag_message.setObjectName('minimaxMessageBanner')
+                flag_layout.addWidget(self.reference_flag_message, 1)
+                self.reference_flag_button = QPushButton('Reassess')
+                self.reference_flag_button.clicked.connect(self.structured.reassess_references)
+                flag_layout.addWidget(self.reference_flag_button)
+                layout.addWidget(self.reference_flag); self.reference_flag.hide()
             marquee = {'global': owner.director_ai_marquee, 'segment': owner.segment_ai_marquee,
                        'unified': owner.minimax_panel.ai_marquee}[scope]
             layout.addWidget(marquee)
@@ -124,6 +136,22 @@ class DockPromptSurface(PromptSurface):
             quick.setEnabled(refine.isEnabled())
         if hasattr(self, 'structured'):
             self.structured.schedule()
+        self.update_reference_flag()
+
+    def update_reference_flag(self):
+        if not hasattr(self, 'reference_flag'):return
+        state = self.structured.state()
+        pending = state.get('pending_reference_definitions', [])
+        needed = state.get('references_need_reassessment', bool(state.get('reference_changes')))
+        running = self.structured.definition_running
+        error = state.get('reference_definition_error', '')
+        self.reference_flag.setVisible(self.owner.unified_workspace and not self.owner.prompt_only_workspace and bool(needed or pending or running or error))
+        text = ('Generating reference definitions… Prompts will need reassessment.' if running else
+                'Definitions need attention. Reassess to retry and update the prompts.' if error else
+                'Reference definitions queued. Reassess to update the prompts.' if pending else
+                'References changed. Reassess the prompts to apply them.')
+        self.reference_flag_message.setText(text); self.reference_flag_message.setToolTip(error or text)
+        self.reference_flag_button.setEnabled(not self.owner.ai_busy and not running)
 
     def sync_workspace(self):
         owner = self.owner

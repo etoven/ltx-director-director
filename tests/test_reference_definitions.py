@@ -57,106 +57,93 @@ def test_reassessment_returns_model_sections_without_text_matching(monkeypatch):
     assert set(captured['schema']['properties']['fields']['properties'])==set(original)
 
 
-def test_native_add_generate_remove_and_project_roundtrip(tmp_path,monkeypatch):
+def test_native_automatic_definitions_and_unified_flag(tmp_path,monkeypatch):
+    from PySide6.QtTest import QTest
     app=QApplication.instance() or QApplication([])
     with patch.object(ui.MainWindow,'restore_startup_workspace'):
         w=ui.MainWindow()
-    w.segments=[Segment('Opening','','','text','text','Keep timeline prose',2)]
-    w.refresh_timeline(0);w.set_project_type('minimax_official_skill_reference')
-    panel=w.prompt_surface.structured
-    panel.refresh();state=panel.state()
-    state.update(global_ignored='unused', global_source=None)
-    state['global']='Keep summary';state['fields'].update(sound='Keep sound',music='Keep music',retention='Keep retention')
-    panel.refresh()
-    image=data_url(str(Path(ui.__file__).parent/'assets/icon.png'))
-    fixtures={
-        'image':dict(name='Picture.png',kind='image',image=image,role='identity',notes='Blue coat'),
-        'video':dict(name='Motion.mp4',kind='video',path='motion.mp4',image=image,audio_path='motion.wav',role='motion',notes='Slow turn'),
-        'audio':dict(name='Voice.wav',kind='audio',path='voice.wav',audio_path='voice.wav',role='voice',notes='Soft voice')}
     try:
-        menu=panel.add.menu()
-        for slot,kind in enumerate(fixtures):
-            monkeypatch.setattr(w.minimax_panel.reference_targets[slot],'load_path',lambda path,slot=slot,kind=kind:w.set_minimax_reference_image(slot,fixtures[kind]))
-            monkeypatch.setattr('ltx_prompt_director.file_dialogs.choose_document_open',lambda *a,kind=kind:kind)
-            next(a for a in menu.actions() if a.text()==kind.title()+' reference…').trigger()
+        w.segments=[Segment('Opening','','','text','text','Keep timeline prose',2)]
+        w.refresh_timeline(0);w.set_project_type('minimax_official_skill_reference')
+        panel=w.prompt_surface.structured;panel.refresh()
+        state=panel.state();state['global']='Keep summary';state['fields'].update(sound='Keep sound',music='Keep music')
         panel.refresh()
-        assert {s['media_kind'] for s in panel.subjects()}=={'image','video','audio'}
-        assert len(panel.subjects())==4 # video and its paired soundtrack
-        before=copy.deepcopy(w.project_payload(include_media=False)['frames'])
-        monkeypatch.setattr(w,'ai_credentials',lambda:('gemini','model','key'))
-        calls=[]
-        monkeypatch.setattr(w,'start_ai_worker',lambda operation,args,activity,finished,**kwargs:calls.append((args,finished)))
-        w.minimax_panel.reference_targets[1].generate_button.click()
-        selected=calls[-1][0][2]
-        assert len(selected)==2 and {s['media_kind'] for s in selected}=={'video','audio'}
-        calls[-1][1]({s['id']:'Generated '+s['label'] for s in selected})
-        assert 'Generated Video1' in w.unified_prompt.toPlainText() and 'Generated Audio1' in w.unified_prompt.toPlainText()
-        assert panel.state()['global']=='Keep summary' and panel.state()['fields']['retention']=='Keep retention'
-        assert w.project_payload(include_media=False)['frames']==before
-        assert w.minimax_panel.reference_targets[1].generate_button.text()=='Regenerate'
-        w.minimax_panel.generate_references_button.click()
-        selected=calls[-1][0][2]
-        calls[-1][1]({s['id']:'All '+s['label'] for s in selected})
+        launched=[];calls=[];credential_modes=[]
+        def credentials(**options):
+            credential_modes.append(options);return ('gemini','model','key')
+        monkeypatch.setattr(w,'ai_credentials',credentials)
+        monkeypatch.setattr(panel,'launch_definition_worker',lambda operation,args,cancel:launched.append((operation,args,cancel)))
+        monkeypatch.setattr(w,'start_ai_worker',lambda operation,args,activity,finished,**kw:calls.append((operation,args,finished)))
+        image=data_url(str(Path(ui.__file__).parent/'assets/icon.png'))
+        fixtures=[dict(name='Picture.png',kind='image',image=image,role='identity',notes='Blue coat'),
+                  dict(name='Motion.mp4',kind='video',path='motion.mp4',image=image,audio_path='motion.wav',role='motion',notes='Slow turn'),
+                  dict(name='Voice.wav',kind='audio',path='voice.wav',audio_path='voice.wav',role='voice',notes='Soft voice')]
+        assert not hasattr(w.minimax_panel,'generate_references_button')
+        assert not hasattr(w.minimax_panel,'reassess_references_button')
+        assert not hasattr(w.minimax_panel.reference_targets[0],'generate_button')
+        # Real add-menu routes; burst imports and note edits become one job.
+        for slot,kind in enumerate(('image','video','audio')):
+            monkeypatch.setattr(w.minimax_panel.reference_targets[slot],'load_path',lambda path,slot=slot:w.set_minimax_reference_image(slot,fixtures[slot]))
+            monkeypatch.setattr('ltx_prompt_director.file_dialogs.choose_document_open',lambda *a,kind=kind:kind)
+            next(a for a in panel.add.menu().actions() if a.text()==kind.title()+' reference…').trigger()
+        w.set_minimax_reference_image(0,{**fixtures[0],'notes':'Blue coat, final notes'})
+        panel.refresh();assert not w.prompt_surface.reference_flag.isHidden()
+        QTest.qWait(850)
+        assert len(launched)==1 and credential_modes[-1]=={'interactive':False}
+        assert not w.ai_busy and not w.intent.isReadOnly()
+        selected=launched[-1][1][2]
+        assert len(selected)==4 and {s['media_kind'] for s in selected}=={'image','video','audio'}
+        # Changing a source while its job runs discards the older response.
+        w.set_minimax_reference_image(0,{**fixtures[0],'notes':'Newer instructions'})
+        panel.definition_finished({s['id']:'STALE' for s in selected})
+        assert 'STALE' not in w.unified_prompt.toPlainText()
+        panel.definition_timer.stop();panel.drain_definition_queue()
+        selected=launched[-1][1][2]
+        panel.definition_finished({s['id']:'Definition '+s['label'] for s in selected})
+        assert not state['pending_reference_definitions']
+        assert w.minimax_reference_images[1]['audio_description']=='Definition Audio1'
+        assert 'Definition Audio2' in w.unified_prompt.toPlainText()
+        assert panel.state()['global']=='Keep summary' and w.segments[0].prompt=='Keep timeline prose'
+        assert not w.prompt_surface.reference_flag.isHidden()
+        # Only the Unified flag reassesses all prompt surfaces.
+        w.prompt_surface.reference_flag_button.click();operation,args,finish=calls[-1]
+        assert operation is reassess_references
+        finish(args[0])
+        assert w.prompt_surface.reference_flag.isHidden()
+        panel.definition_timer.stop()
+        assert not panel.state()['references_need_reassessment']
+        count=len(launched)
+        w.minimax_panel.reference_targets[2].remove_button.click();panel.refresh()
+        panel.definition_timer.stop();panel.drain_definition_queue()
+        assert len(launched)==count and not w.prompt_surface.reference_flag.isHidden()
         payload=w.project_payload(include_media=False)
         w.load_project_payload(payload);panel.refresh()
-        assert 'All Image1' in w.unified_prompt.toPlainText() and 'All Audio2' in w.unified_prompt.toPlainText()
-        # A result arriving after replacement cannot overwrite the newer reference.
-        panel.generate_references(0);args,finish=calls[-1]
-        w.set_minimax_reference_image(0,{**fixtures['image'],'notes':'Changed since request'})
-        finish({s['id']:'STALE' for s in args[2]})
-        assert 'STALE' not in w.unified_prompt.toPlainText()
-        # Reassess every prompt surface after deleting an audio source.
-        state = panel.state(); sid = w.segments[0].id
-        state['global'] = 'Quiet scene. Voice from <Audio2>. Keep blue lighting.'
-        state['prompts'][sid] = 'She says <d>Good evening.</d> using <Audio2>. Then turns.'
-        state['fields']['sound'] = 'Rain and a door creak. Match <Audio2>.'
-        w.segments[0].prompt = 'Timeline voice from <Audio2>. Keep the turn.'
-        w.segments[0].image_prompt = 'Coat pose. Source <Audio2>.'
-        w.segments[0].artwork_prompt = 'Blue coat. Source <Audio2>.'
-        w.global_prompt.setPlainText('Evening. Voice source <Audio2>.')
-        w.intent.setPlainText('Slow turn. Voice source <Audio2>.')
-        panel.refresh()
-        timeline_before = copy.deepcopy([s.to_dict() for s in w.segments])
-        w.minimax_panel.reference_targets[2].remove_button.click();panel.refresh()
-        assert '<Audio2>' in w.unified_prompt.toPlainText()
-        assert w.minimax_panel.reassess_references_button.isEnabled()
-        w.minimax_panel.reassess_references_button.click();args,finish=calls[-1]
-        document,roster,changes=args[:3]
-        assert not any(item.get('label')=='Audio2' for item in roster)
-        assert any(any(item.get('label')=='Audio2' for item in change['before']) for change in changes)
-        finish({**document, 'global':'Quiet scene. Keep blue lighting.',
-                sid:'She says <d>Good evening.</d>. Then turns.', 'field:sound':'Rain and a door creak.',
-                f'timeline:{sid}:prompt':'Keep the turn.', f'timeline:{sid}:image_prompt':'Coat pose.',
-                f'timeline:{sid}:artwork_prompt':'Blue coat.', 'source:global':'Evening.', 'source:intent':'Slow turn.'})
-        assert '<Audio2>' not in w.unified_prompt.toPlainText()
-        assert panel.state()['global']=='Quiet scene. Keep blue lighting.'
-        assert panel.state()['prompts'][sid]=='She says <d>Good evening.</d>. Then turns.'
-        assert panel.state()['fields']['sound']=='Rain and a door creak.'
-        assert panel.state()['reference_changes']==[]
-        assert w.segments[0].prompt=='Keep the turn.' and w.segments[0].image_prompt=='Coat pose.'
-        assert w.segments[0].artwork_prompt=='Blue coat.'
-        assert w.global_prompt.toPlainText()=='Evening.' and w.intent.toPlainText()=='Slow turn.'
-        for old,new in zip(timeline_before,[s.to_dict() for s in w.segments]):
-            assert {k:v for k,v in old.items() if k not in {'prompt','image_prompt','artwork_prompt'}}=={k:v for k,v in new.items() if k not in {'prompt','image_prompt','artwork_prompt'}}
-        w.load_project_payload(w.project_payload(include_media=False));panel.refresh()
-        assert '<Audio2>' not in w.unified_prompt.toPlainText() and '<d>Good evening.</d>' in w.unified_prompt.toPlainText()
-        panel.reassess_references();args,finish=calls[-1]
-        panel.rows['global'][0].setPlainText('New user summary')
-        finish({'global':'STALE reassessment'})
-        assert panel.state()['global']=='New user summary' and 'STALE reassessment' not in w.unified_prompt.toPlainText()
-        # Explicit Remove in Reference Media clears paired definitions too.
-        w.minimax_panel.reference_targets[1].remove_button.click();panel.refresh()
-        assert w.minimax_reference_images[1] is None and 'All Video1' not in w.unified_prompt.toPlainText()
-        panel.add_subject();panel.refresh()
-        subject=next(s for s in panel.subjects() if s['id'].startswith('subject:') and not s.get('timeline_id'))
-        next(b for b in panel.rows[subject['id']][0].parentWidget().findChildren(QPushButton) if b.text()=='×').click()
-        panel.refresh();assert subject['id'] not in panel.rows
-        panel.add_segment();panel.refresh()
-        added=w.segments[-1]
-        next(b for b in panel.rows[added.id][0].parentWidget().findChildren(QPushButton) if b.text()=='×').click()
-        assert added not in w.segments
-        assert panel.state()['fields']['sound']=='Rain and a door creak.' and panel.state()['fields']['music']=='Keep music'
+        assert not w.prompt_surface.reference_flag.isHidden()
+        w.prompt_surface.reference_flag_button.click();operation,args,finish=calls[-1]
+        assert not any(item.get('label')=='Audio2' for item in args[1])
+        finish(args[0]);assert w.prompt_surface.reference_flag.isHidden()
+        # A failed background definition reports in the flag; Reassess retries
+        # definitions first, then continues to reassess without another button.
+        w.set_minimax_reference_image(2,fixtures[2]);panel.definition_timer.stop();panel.drain_definition_queue()
+        panel.definition_failed('Temporary provider error')
+        assert panel.state()['reference_definition_error'] and w.prompt_surface.reference_flag_button.isEnabled()
+        count=len(calls);w.prompt_surface.reference_flag_button.click()
+        panel.definition_timer.stop();panel.drain_definition_queue()
+        selected=launched[-1][1][2]
+        panel.definition_finished({s['id']:'Recovered '+s['label'] for s in selected})
+        QTest.qWait(30)
+        assert len(calls)==count+1
+        calls[-1][2](calls[-1][1][0])
+        assert w.prompt_surface.reference_flag.isHidden()
+        # Automatic generation never overwrites a newer hand-edited definition.
+        w.set_minimax_reference_image(0,{**w.minimax_reference_images[0],'notes':'Another change'})
+        panel.definition_timer.stop();panel.drain_definition_queue()
+        selected=launched[-1][1][2];identity=selected[0]['id']
+        panel.rows[identity][0].setPlainText('Manual definition')
+        panel.definition_finished({s['id']:'Old generated definition' for s in selected})
+        assert panel.state()['subjects'][identity]=='Manual definition'
+        assert not w.prompt_surface.reference_flag.isHidden()
         w.resize(1400,900);w.show();app.processEvents();panel.reveal_timer.stop();panel.scroll.verticalScrollBar().setValue(0)
-        w.grab().save('/tmp/director-a141-references.png')
+        w.grab().save('/tmp/director-a143-reference-flag.png')
     finally:
         w.project_dirty=False;w._close_saves_queued=True;w.close()

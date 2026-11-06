@@ -19,7 +19,6 @@ class MiniMaxReferenceSlot(QFrame):
     changed = Signal(object)
     error = Signal(str)
     export_requested = Signal()
-    generate_requested = Signal()
 
     def __init__(self, number: int, owner=None):
         super().__init__()
@@ -52,12 +51,6 @@ class MiniMaxReferenceSlot(QFrame):
         self.clear_action.triggered.connect(self.clear)
         layout.addLayout(row)
         actions = QHBoxLayout()
-        self.generate_button = QPushButton('Generate')
-        self.generate_button.setAccessibleName('Generate reference definition')
-        self.generate_button.setToolTip('Generate or regenerate this reference in the existing Unified prompt')
-        self.generate_button.clicked.connect(self.generate_requested.emit)
-        self.generate_button.setEnabled(False)
-        actions.addWidget(self.generate_button)
         self.remove_button = QPushButton('Remove')
         self.remove_button.clicked.connect(self.clear); self.remove_button.setEnabled(False)
         actions.addWidget(self.remove_button)
@@ -111,8 +104,6 @@ class MiniMaxReferenceSlot(QFrame):
         self.value = dict(value) if value else None
         self.export_action.setEnabled(bool(value and (value.get("image") or value.get("path"))))
         self.clear_action.setEnabled(bool(value))
-        self.generate_button.setEnabled(bool(value) and not bool(self.owner and self.owner.ai_busy))
-        self.generate_button.setText('Regenerate' if value and value.get('description') else 'Generate')
         self.remove_button.setEnabled(bool(value))
         self.preview.setCursor(Qt.CursorShape.OpenHandCursor if value else Qt.CursorShape.ArrowCursor)
         self.audio_only.blockSignals(True)

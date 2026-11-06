@@ -46,3 +46,11 @@ def install_legacy_workspace_for_existing_regressions(request, monkeypatch):
             self.save(value)
             self.delete(stem)
     monkeypatch.setattr(WorkspaceStore, '__init__', initialize)
+
+
+@pytest.fixture(autouse=True)
+def automatic_reference_transport_is_explicit(request, monkeypatch):
+    """Unrelated UI regressions never launch background provider requests."""
+    if request.module.__name__.split('.')[-1] == 'test_reference_definitions':return
+    from ltx_prompt_director.structured_prompt_panel import StructuredPromptPanel
+    monkeypatch.setattr(StructuredPromptPanel, 'drain_definition_queue', lambda self: None)

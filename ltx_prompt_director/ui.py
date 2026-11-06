@@ -3389,21 +3389,12 @@ class MiniMaxPromptPanel(QFrame):
         self.reference_dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetClosable | QDockWidget.DockWidgetFeature.DockWidgetMovable)
         content = QWidget()
         refs_layout = QVBoxLayout(content)
-        self.generate_references_button = QPushButton('Generate definitions')
-        self.generate_references_button.setToolTip('Update reference definitions in Unified; preserve summary, shots, sound and music')
-        self.generate_references_button.clicked.connect(lambda: owner.prompt_surface.structured.generate_references())
-        refs_layout.addWidget(self.generate_references_button)
-        self.reassess_references_button = QPushButton('Reassess references')
-        self.reassess_references_button.setToolTip('Reassess references across timeline/segment prompts, Global, Unified and reference notes with minimal wording changes')
-        self.reassess_references_button.clicked.connect(lambda: owner.prompt_surface.structured.reassess_references())
-        refs_layout.addWidget(self.reassess_references_button)
         self.reference_targets = []
         for index in range(4):
             target = MiniMaxReferenceSlot(index + 1, owner)
             target.changed.connect(lambda value, slot=index: owner.set_minimax_reference_image(slot, value))
             target.error.connect(lambda message: self.show_message(message, "warning"))
             target.export_requested.connect(lambda slot=index: owner.export_reference_image(slot))
-            target.generate_requested.connect(lambda slot=index: owner.prompt_surface.structured.generate_references(slot))
             refs_layout.addWidget(target)
             self.reference_targets.append(target)
         refs_layout.addStretch()
@@ -3502,10 +3493,6 @@ class MiniMaxPromptPanel(QFrame):
 
     def update_actions(self) -> None:
         self.copy_button.setEnabled(bool(self.editor.toPlainText().strip()))
-        self.generate_references_button.setEnabled(not self.busy and self.owner.unified_workspace)
-        self.reassess_references_button.setEnabled(not self.busy and self.owner.unified_workspace)
-        for target in self.reference_targets:
-            target.generate_button.setEnabled(not self.busy and bool(target.value))
         self.retry_button.setEnabled(not self.busy)
         self.recover_button.setEnabled(not self.busy)
         self.copy_recovered_button.setEnabled(bool(getattr(self.owner, "pending_minimax_result", "")))
@@ -6521,6 +6508,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         self.audio_panel.transport.pause()
+        if hasattr(self, 'prompt_surface'):self.prompt_surface.structured.cancel_definition_generation()
         for panel in getattr(self, 'audio_generation_panels', {}).values():
             panel.dispose()
         if hasattr(self,'timeline_preview'):self.timeline_preview.cancel()
@@ -8001,13 +7989,14 @@ class MainWindow(QMainWindow):
         )
         return "\n\n".join(line for line in lines if line)
 
-    def ai_credentials(self) -> tuple[str, str, object] | None:
+    def ai_credentials(self, *, interactive=True) -> tuple[str, str, object] | None:
         override = getattr(self, '_effect_ai_choice', None) or {}
         provider = override.get('provider') or self.settings.value("provider", "gemini")
         if provider == "local":
             profile = load_profile(self.settings)
             try: validate_profile(profile, "text")
             except ValueError:
+                if not interactive:return None
                 self.open_settings()
                 profile = load_profile(self.settings)
                 try: validate_profile(profile, "text")
@@ -8017,6 +8006,7 @@ class MainWindow(QMainWindow):
             profile = self.chatgpt_auth.active_profile()
             model = str(override.get('model') or self.settings.value("chatgpt_model", ""))
             if not (profile and profile["connected"] and profile["enabled"] and model):
+                if not interactive:return None
                 self.open_settings()
                 profile = self.chatgpt_auth.active_profile()
                 model = str(override.get('model') or self.settings.value("chatgpt_model", ""))
@@ -8026,6 +8016,7 @@ class MainWindow(QMainWindow):
             return provider, model, self.chatgpt_auth
         key = self.session_keys.get(provider) or self.settings.value(f"{provider}_key", "")
         if not key:
+            if not interactive:return None
             self.open_settings()
             key = self.session_keys.get(provider) or self.settings.value(f"{provider}_key", "")
         if not key:
@@ -9837,6 +9828,14 @@ class MainWindow(QMainWindow):
         refs[slot] = dict(value) if value else None
         image_changed = (self.minimax_reference_images[slot] or {}) != (value or {})
         self.minimax_reference_images = reference_slots(refs)
+        if image_changed:
+            state = structured.state()
+            state['references_need_reassessment'] = True
+            state.pop('reference_definition_error', None)
+            pending = state.setdefault('pending_reference_definitions', [])
+            pending[:] = [key for key in pending if key not in (f'reference:{slot}', f'reference:{slot}:audio')]
+            if new and any(old.get(key) != new.get(key) for key in ('kind', 'path', 'image', 'audio_only', 'role', 'notes')):
+                structured.queue_definition_generation([item['id'] for item in structured.subjects() if item.get('reference_slot') == slot])
         self.minimax_prompt_cache_key = ""
         self.mark_dirty()
         structured.schedule()
@@ -11167,6 +11166,7 @@ class MainWindow(QMainWindow):
         from .prompt_migration import migrate_project
         payload = migrate_project(payload, self.workspace_definitions)
         self.prompt_template_states = copy.deepcopy(payload.get("promptTemplateStates", {}))
+        for state in self.prompt_template_states.values():state['_reference_inventory_restored'] = True
         self.reject_segment_prompt_review()
         from .render_cache import render_cache_from
         self.video_render_cache=copy.deepcopy(render_cache_from(payload.get('library',{}).get('videoRenderCache'),payload.get('videoRenderCache')))

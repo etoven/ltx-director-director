@@ -79,3 +79,7 @@ acceptance criteria.
 - Global input is instruction text; Unified Summary is generated production
   prose. Do not copy Global notes into Summary. Pass changed Global guidance as
   explicit current edits to Refine and apply it across affected output fields.
+- Reference additions/changes generate definitions automatically in a debounced
+  background job. Reassessment belongs in a persistent flag at the top of Unified,
+  with one Reassess action. Do not add separate reference generation/reassessment
+  buttons or open settings/error dialogs from automatic work.

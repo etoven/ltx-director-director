@@ -1,0 +1,9 @@
+# Aurora 1.13.0a143 automatic reference definitions and Unified flag
+
+Reference Media no longer has dedicated Generate/Regenerate, batch generation or Reassess buttons. Source additions, replacement, role/notes edits and audio-only changes queue only the affected definitions. A short debounce combines rapid edits; background workers keep prompt editors usable. Timeline media additions/replacements also queue definitions. Definition output does not requeue itself.
+
+The existing warning-panel style is used at the top of Unified for a persistent references-need-reassessment flag and Reassess button. Deletions mark the flag without generating a removed asset. Reassess reconciles all prompt surfaces using the existing LLM operation and clears the flag only on completion. Missing credentials and generation failures are surfaced in the flag; an explicit Reassess retries pending definitions and continues afterward, without automatic settings/error dialogs.
+
+Pending definition IDs, reference changes and reassessment state persist with the workspace/render group. Project loading restores the inventory baseline without treating media materialization as a new reference edit. Jobs reject changed sources, renamed inventories, switched workspaces and newer definition edits. Automatic results wait while a foreground AI operation runs. App closure cancels queued/local work. User-authored prompts and original media remain preserved.
+
+The focused native workflow covers burst imports of image/video/audio, paired soundtracks, silent credential resolution, an editable UI during generation, stale-source rejection, manual edit preservation, save/reopen of the flag, deletion, and retry-then-reassess. Transport responses are fixtures; there are no paid provider calls or semantic content gates. Unrelated native tests stub the new automatic transport.

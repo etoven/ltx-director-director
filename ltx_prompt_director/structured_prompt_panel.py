@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import math
 import re
+import threading
 from uuid import uuid4
 
 from PySide6.QtCore import Qt, QTimer
@@ -34,6 +35,9 @@ class StructuredPromptPanel(QWidget):
         self.timer.timeout.connect(self.refresh)
         self.reveal_timer = QTimer(self); self.reveal_timer.setSingleShot(True); self.reveal_timer.setInterval(40)
         self.reveal_timer.timeout.connect(self.reveal_selected)
+        self.definition_timer = QTimer(self); self.definition_timer.setSingleShot(True); self.definition_timer.setInterval(700)
+        self.definition_timer.timeout.connect(self.drain_definition_queue)
+        self.definition_job = None; self.definition_result = None; self.reassess_after_definitions = None
         outer = QHBoxLayout(self); outer.setContentsMargins(0, 0, 0, 0)
         gutter = QVBoxLayout(); outer.addLayout(gutter)
         self.add = QPushButton('+'); self.add.setFixedWidth(32); self.add.setToolTip('Add a timeline section, subject, image, video or audio reference')
@@ -129,6 +133,7 @@ class StructuredPromptPanel(QWidget):
             from .prompt_references import reference_roster
             roster = reference_roster(subjects)
             previous_roster = state.get('reference_inventory')
+            if state.pop('_reference_inventory_restored', False):previous_roster = None
             if previous_roster is not None and previous_roster != roster:
                 changes = state.setdefault('reference_changes', [])
                 old = {item['id']: item for item in previous_roster}; new = {item['id']: item for item in roster}
@@ -140,6 +145,13 @@ class StructuredPromptPanel(QWidget):
                     changes[-1]['after'] = after
                 else:changes.append(dict(before=before, after=after))
                 state['reference_changes'] = changes[-64:]
+                state['references_need_reassessment'] = True
+                # Imported slots are queued by their setter. Detect newly added
+                # or replaced timeline media here, without reacting to prompt edits.
+                timeline_ids = [item['id'] for item in roster if item.get('id', '').startswith('subject:timeline:')
+                    and (item['id'] not in old or any(old[item['id']].get(key) != item.get(key)
+                         for key in ('source_path', 'source_name', 'media_kind', 'role')))]
+                if timeline_ids:self.queue_definition_generation(timeline_ids)
             state['reference_inventory'] = copy.deepcopy(roster)
             records = [{**s.to_dict(), 'prompt': state['prompts'][s.id]} for s in segments]
             text = render(layout, state['global'], records, subjects, state['fields'])
@@ -184,6 +196,119 @@ class StructuredPromptPanel(QWidget):
             self.selected_id = selected_id
         finally:
             self.updating = False
+        if state.get('pending_reference_definitions') and not state.get('reference_definition_error') and not self.definition_job and not self.definition_timer.isActive():
+            self.definition_timer.start(700)
+        self.update_reference_flag()
+
+    @property
+    def definition_running(self):
+        return (self.definition_job is not None and self.definition_job['context'] == self.definition_context()
+                and any(item['id'] in self.state().get('pending_reference_definitions', []) for item in self.definition_job['selected']))
+
+    def definition_context(self):
+        owner = self.owner
+        return (owner.workspace_revision, owner.current_project_id, owner.project_type, getattr(owner, '_active_render_group', 0))
+
+    def update_reference_flag(self):
+        surface = getattr(self.owner, 'prompt_surface', None)
+        if surface is not None:surface.update_reference_flag()
+
+    def queue_definition_generation(self, identities):
+        state = self.state(); pending = state.setdefault('pending_reference_definitions', [])
+        pending[:] = list(dict.fromkeys([*pending, *identities]))
+        state['references_need_reassessment'] = True
+        state.pop('reference_definition_error', None)
+        self.definition_timer.start(700); self.update_reference_flag()
+
+    def drain_definition_queue(self):
+        owner = self.owner
+        if owner.render_queue.closing:return
+        if owner.ai_busy:
+            self.definition_timer.start(350); return
+        if self.definition_result is not None:
+            result = self.definition_result; self.definition_result = None
+            self.definition_finished(result); return
+        if self.definition_job is not None or owner._loading or not owner.unified_workspace or owner.prompt_only_workspace:return
+        self.refresh()
+        state = self.state(); pending = state.setdefault('pending_reference_definitions', [])
+        current = {item['id']: item for item in self.subjects()}
+        pending[:] = [key for key in pending if key in current]
+        if not pending or state.get('reference_definition_error'):return
+        credentials = owner.ai_credentials(interactive=False)
+        if not credentials:
+            state['reference_definition_error'] = 'Choose a connected writing model in Settings to generate reference definitions.'
+            self.update_reference_flag(); return
+        selected = [dict(current[key], prompt=state.get('subjects', {}).get(key, current[key]['prompt'])) for key in pending]
+        segments = copy.deepcopy(self.segments()); references = copy.deepcopy(owner.active_reference_images())
+        cancel = threading.Event()
+        self.definition_job = dict(context=self.definition_context(), selected=selected, references=references, cancel=cancel)
+        self.update_reference_flag()
+        from .prompt_references import generate_definitions
+        self.launch_definition_worker(generate_definitions, (segments, references, selected, *credentials,
+            owner.settings.value('api_timeout', 400, int)), cancel)
+
+    def launch_definition_worker(self, operation, args, cancel):
+        from .ui import BackgroundWorker
+        worker = BackgroundWorker(operation, args, cancel)
+        self.definition_job['worker'] = worker
+        worker.signals.finished.connect(self.definition_finished)
+        worker.signals.failed.connect(self.definition_failed)
+        self.owner.media_pool.start(worker)
+
+    def definition_finished(self, result):
+        owner = self.owner; job = self.definition_job
+        if job is None:return
+        if owner.render_queue.closing:
+            self.definition_job = None; return
+        if owner.ai_busy:
+            self.definition_result = result; self.definition_timer.start(350); return
+        self.definition_job = None
+        if not self.definition_sources_current(job):
+            self.definition_timer.start(); self.update_reference_flag(); return
+        state = self.state(); pending = state.setdefault('pending_reference_definitions', [])
+        for item in job['selected']:
+            key = item['id']
+            if key in pending:pending.remove(key)
+            # A newer hand edit to this definition takes precedence.
+            if state.get('subjects', {}).get(key, item['prompt']) != item['prompt']:continue
+            text = result[key]; state.setdefault('subjects', {})[key] = text
+            slot = item.get('reference_slot')
+            if slot is not None:
+                reference = owner.minimax_reference_images[slot]
+                field = 'audio_description' if item.get('media_kind') == 'audio' and reference.get('kind') == 'video' and not reference.get('audio_only') else 'description'
+                reference[field] = text
+        state.pop('reference_definition_error', None)
+        owner.minimax_prompt_cache_key = ''; owner.minimax_panel.refresh_references()
+        owner.mark_dirty(); self.refresh(); self.definition_timer.start()
+        if self.reassess_after_definitions == self.definition_context() and not pending:
+            self.reassess_after_definitions = None
+            QTimer.singleShot(0, self.reassess_references)
+
+    def definition_sources_current(self, job):
+        if job['context'] != self.definition_context():return False
+        current = {item['id']: item for item in self.subjects()}
+        references = self.owner.active_reference_images()
+        for item in job['selected']:
+            live = current.get(item['id'])
+            if live is None or any(item.get(key) != live.get(key) for key in ('label', 'media_kind', 'source_name', 'source_path', 'role', 'notes')):return False
+            slot = item.get('reference_slot')
+            if slot is not None:
+                before = job['references'][slot] or {}; after = references[slot] or {}
+                if any(before.get(key) != after.get(key) for key in ('kind', 'path', 'image', 'audio_path', 'audio_only', 'role', 'notes')):return False
+        return True
+
+    def definition_failed(self, message):
+        job = self.definition_job; self.definition_job = None; self.definition_result = None
+        current = job is not None and self.definition_sources_current(job)
+        if current:
+            self.state()['reference_definition_error'] = str(message)
+        if current:self.reassess_after_definitions = None
+        self.update_reference_flag()
+        if job is not None and not current:self.definition_timer.start(700)
+
+    def cancel_definition_generation(self):
+        self.definition_timer.stop()
+        if self.definition_job is not None:self.definition_job['cancel'].set()
 
     def request_reveal(self):
         self.reveal_pending = True
@@ -259,6 +384,9 @@ class StructuredPromptPanel(QWidget):
             state['fields'][key.removeprefix('field:')] = text
         elif key.startswith(('reference:', 'subject:')):
             state['subjects'][key] = text
+            pending = state.get('pending_reference_definitions', [])
+            if key in pending:pending.remove(key)
+            if not pending:state.pop('reference_definition_error', None)
         else:
             state['prompts'][key] = text
             segment = next((s for s in self.owner.segments if s.id == key), None)
@@ -418,6 +546,10 @@ class StructuredPromptPanel(QWidget):
         self.refresh()
         credentials = owner.ai_credentials()
         if not credentials:return
+        if self.state().get('pending_reference_definitions'):
+            self.state().pop('reference_definition_error', None)
+            self.reassess_after_definitions = self.definition_context()
+            self.definition_timer.start(0); self.update_reference_flag(); return
         from .prompt_references import reassess_references, reference_roster
         document = copy.deepcopy(self.reassessment_document())
         roster = reference_roster([dict(item, prompt=document[item['id']]) for item in self.subjects()])
@@ -464,6 +596,8 @@ class StructuredPromptPanel(QWidget):
             if references_changed:owner.minimax_panel.refresh_references()
             owner.mark_dirty(); self.refresh()
             state['reference_changes'] = []
+            state['references_need_reassessment'] = False
+            self.update_reference_flag()
             self.status.setText(f'References reassessed · {len(updates)} fields updated.' if updates else 'References are consistent; prompt unchanged.')
         owner.start_ai_worker(reassess_references,
             (document, roster, changes, *credentials, owner.settings.value('api_timeout', 400, int)),
