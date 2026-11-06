@@ -404,7 +404,7 @@ def test_saved_native_layout_restores_outer_rails_and_selected_panel():
         assert second.render_queue_dock.width()>=260
         left=second.panel_rails.rails['left'];right=second.panel_rails.rails['right']
         assert not left.isHidden() and not right.isHidden()
-        assert left.x()<second.centralWidget().mapTo(second,QPoint()).x()
+        assert left.x()<second.editor_root.mapTo(second,QPoint()).x()
         assert right.x()>second.render_queue_dock.x()
         assert second.findChild(QDockWidget,"panelIconRailDockright") is None
         assert second.toolBarArea(left)==Qt.ToolBarArea.LeftToolBarArea
