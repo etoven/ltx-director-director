@@ -44,9 +44,10 @@ def prompt_content(prompt: str, *, preserve_spacing: bool = False) -> str:
     return content.strip() if preserve_spacing else ' '.join(content.split())
 
 
-def consume_global_refinements(prompt: str) -> str:
+def consume_global_refinements(prompt: str, *, preserve_spacing: bool = False) -> str:
     """Remove completed global edit instructions from a successful response."""
-    return re.sub(r'\n{3,}', '\n\n', GLOBAL_REFINEMENT_LINE.sub('', prompt)).strip()
+    content = GLOBAL_REFINEMENT_LINE.sub('', prompt)
+    return content if preserve_spacing else re.sub(r'\n{3,}', '\n\n', content).strip()
 
 def insert_note(editor: PromptTextEdit, cursor: QTextCursor, tag: str, body: str = '') -> None:
     """Insert a native wrapping note inside the existing document and focus its body."""

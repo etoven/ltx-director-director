@@ -40,6 +40,12 @@ After removing, replacing or changing references, choose **Reassess references**
 
 Reassessment uses the writing model selected in the toolbar. It updates all related prompt text together: timeline/segment prompts, image/artwork prompts, Global direction and intent, Unified sections, and remaining reference notes and definitions. Each draft retains its own unrelated wording; Unified prose is not copied over the timeline. The model returns revised text directly, without literal-snippet matching or a separate content checker. Timing, order, media and settings stay intact. If you edit a draft or switch projects during the request, the newer work is preserved.
 
+## Apply Global direction to the production prompt
+
+Write sequence-wide changes in **Global Prompt**, then choose **Generate** or **Refine** in **Unified Prompt** to apply that guidance to the production document. Changed Global direction is treated as an explicit edit request for the Summary and affected shot, subject, sound and music sections. Summary remains finished narrative prose; typing instructions in Global does not replace it with those notes. Once a request has been applied, later refinement preserves subsequent manual edits instead of repeatedly replaying unchanged Global notes.
+
+The **Global Prompt** panel's own Generate/Refine buttons update the sequence's segment prompts and rebuild Unified afterward. The **Segment Prompt** actions remain limited to the selected segment.
+
 ## Generate dialogue, Foley and music
 
 The audio panels are available alongside every video workspace:

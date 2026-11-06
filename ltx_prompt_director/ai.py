@@ -159,12 +159,21 @@ def combined_timeline_contract(segments: list[Segment]) -> str:
     )
 
 
+def current_generation_direction(intent):
+    return ('\n\nCURRENT GLOBAL INPUT — this is the latest visible Global Prompt guidance and explicit generation request. '
+            'Apply it across every affected production section, including Summary and shot descriptions. '
+            'Where it requests a change, it supersedes conflicting earlier segment wording and older global '
+            'production notes. Preserve unrelated details and the existing timeline boundaries. Write Summary '
+            'as finished production prose for the resulting whole sequence, not as copied input instructions.\n' + intent)
+
+
 def build_minimax_h3_prompt(segments: list[Segment], provider: str, model: str, api_key: str, intent: str, global_prompt: str, sfx: bool, spoken_dialog: bool, reduce_music: bool, timeout: int = 400, reference_images: list | None = None) -> str:
     """Synthesize the complete ordered timeline into one MiniMax H3 prompt."""
     if not segments:
         raise ValueError("Add at least one timeline item before exporting a MiniMax H3 prompt.")
     inputs = _minimax_frames_inputs(segments, provider, reference_images)
     rules = _minimax_h3_rules(segments, intent, global_prompt, sfx, spoken_dialog, reduce_music, reference_images)
+    rules += current_generation_direction(intent)
     rules += "\nCURRENT MEDIA CONTRACT: The asset map may include uploaded reference audio and video soundtracks. Audio-only video samples condition sound only. Follow the supplied labels and observation availability; never invent unheard audio or visual observations. This overrides legacy template text saying audio references are unavailable."
     rules += UNIFIED_PROMPT_TRANSPORT + combined_timeline_contract(segments)
     raw = _structured_raw(inputs, provider, model, api_key, rules, timeout, schema=response_schemas.PROMPT)
@@ -177,6 +186,7 @@ def build_minimax_h3_reference_prompt(segments: list[Segment], provider: str, mo
         raise ValueError("Add at least one timeline item before generating a MiniMax H3 reference prompt.")
     inputs = _minimax_reference_inputs(segments, provider, reference_images)
     rules = _minimax_h3_reference_rules(segments, intent, global_prompt, sfx, spoken_dialog, reduce_music, reference_images)
+    rules += current_generation_direction(intent)
     rules += "\nCURRENT MEDIA CONTRACT: The asset map may include uploaded reference audio and video soundtracks. Audio-only video samples condition sound only. Follow the supplied labels and observation availability; never invent unheard audio or visual observations. This overrides legacy template text saying audio references are unavailable."
     rules += UNIFIED_PROMPT_TRANSPORT + combined_timeline_contract(segments)
     raw = _structured_raw(inputs, provider, model, api_key, rules, timeout, schema=response_schemas.PROMPT)
@@ -266,7 +276,8 @@ def _extract_minimax_h3_prompt(raw: str, segments: list[Segment] | None = None) 
     for key in ("prompt", "minimaxPrompt", "minimax_prompt", "productionPrompt", "production_prompt", "productionBrief", "production_brief"):
         value = result.get(key)
         if isinstance(value, str) and value.strip():
-            return value.strip()
+            from .output_templates import ACTIVE_OUTPUT
+            return value if ACTIVE_OUTPUT.get() is not None else value.strip()
     # Accept providers returning named prose sections; never interpret their
     # contents or extra metadata as instructions to mutate the timeline.
     sections = []
@@ -538,6 +549,9 @@ def unified_refinement_rules(engine, segments, intent, global_prompt, sfx, spoke
         'These sources supply continuity only; they do not authorize omitted content. '
         'The current asset map is the complete set of references: do not cite or reconstruct absent assets. '
         'Apply only the current inline and private edit requests, subject to the current controls. '
+        'A CURRENT GLOBAL EDIT REQUEST in the private instructions is an explicit new edit request. '
+        'Apply its changed Global direction to every affected production section; it is not passive context. '
+        'Preserve unrelated omissions, but do not use the no-restoration rule to ignore those requested changes. '
         f'SFX is {"ON" if sfx else "OFF"}. '
         f'Less music is {"ON" if reduce_music else "OFF"}. '
     )

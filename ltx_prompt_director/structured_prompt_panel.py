@@ -86,8 +86,15 @@ class StructuredPromptPanel(QWidget):
                 state['last_render'] = source_text
             if 'global' not in state:
                 legacy = source_text
-                global_text, prompts = split_legacy(legacy, segments) if legacy else ('', {})
-                state.update({'global': global_text or owner.global_prompt.toPlainText() or owner.intent.toPlainText(), 'prompts': prompts})
+                parsed = parse_rendered(legacy, layout, segments, subjects) if legacy else None
+                if parsed is not None:
+                    global_text = parsed.get('global', '')
+                    prompts = {s.id: parsed[s.id] for s in segments if s.id in parsed}
+                    state['fields'].update({key.removeprefix('field:'): value for key, value in parsed.items() if key.startswith('field:')})
+                    state['subjects'].update({s['id']: parsed[s['id']] for s in subjects if s['id'] in parsed})
+                else:
+                    global_text, prompts = split_legacy(legacy, segments) if legacy else ('', {})
+                state.update({'global': global_text, 'prompts': prompts})
                 if legacy:
                     state['original_draft'] = legacy
                 state['sources'] = {s.id: s.prompt for s in segments}
@@ -109,11 +116,8 @@ class StructuredPromptPanel(QWidget):
                 state['sources'][segment.id] = segment.prompt
                 state['prompts'].setdefault(segment.id, segment.prompt)
             global_source = dict(production=owner.global_prompt.toPlainText(), intent=owner.intent.toPlainText())
-            previous_source = state.get('global_source')
-            if isinstance(previous_source, dict):
-                for key in ('production', 'intent'):
-                    if global_source[key] != previous_source.get(key):
-                        state['global'] = global_source[key]
+            # Global is instruction input. Summary/scene prose is independent
+            # model output, and must not be overwritten with raw edit requests.
             state['global_source'] = global_source
             for subject in subjects:
                 previous = state['subject_sources'].get(subject['id'])

@@ -218,7 +218,22 @@ def request_context(definition, segments, subjects):
 
 
 def template_contract(context):
-    variables = schemas.record(**{name: schemas.text('Complete text for the ${' + name + '} block, without template headings.', empty=True)
+    headings = {}
+    def collect(blocks, heading=''):
+        for block in blocks:
+            if block['type'] == 'section':collect(block['children'], block.get('heading', ''))
+            elif block['type'] == 'text':
+                for name in names(block['text']):headings.setdefault(name, []).append(heading)
+    collect(parse_template(context['layout']))
+    def description(name):
+        labels = ', '.join(dict.fromkeys(headings.get(name, []))).strip(', ')
+        result = 'Complete production prose for ${' + name + '}' + (' in section ' + labels if labels else '') + '; omit template headings.'
+        if name == 'summary' or any('summary' in heading.lower() for heading in headings.get(name, [])):
+            result += (' Write the finished narrative summary of the complete ordered sequence, including the current Global '
+                       'direction and requested changes. Do not echo instructions, edit requests or raw Global notes. '
+                       'Keep shot details in the timeline sections and sound/music details in their own sections.')
+        return result
+    variables = schemas.record(**{name: schemas.text(description(name), empty=True)
                                  for name in root_fields(context['layout'])})
     return schemas.named('production_template_variables', schemas.record(
         variables=variables,
@@ -231,13 +246,14 @@ def template_contract(context):
 
 
 def render_response(raw, context):
+    from .prompt_tags import consume_global_refinements
     value = json.loads(raw); segments = copy.deepcopy(context['segments']); subjects = copy.deepcopy(context['subjects'])
     for key, records in [('segments', segments), ('subjects', subjects)]:
         if [item['id'] for item in value[key]] != [item['id'] for item in records]:
             raise ValueError('Template variables must retain every input ID in its original order.')
         for record, output in zip(records, value[key]):
-            record['prompt'] = output['prompt']
-    variables = value['variables']
+            record['prompt'] = consume_global_refinements(output['prompt'], preserve_spacing=True)
+    variables = {key: consume_global_refinements(text, preserve_spacing=True) for key, text in value['variables'].items()}
     return json.dumps({'prompt': render(context['layout'], variables.get('global_prompt', ''), segments, subjects, variables)}, ensure_ascii=False)
 
 

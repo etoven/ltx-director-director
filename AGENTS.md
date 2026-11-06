@@ -76,3 +76,6 @@ acceptance criteria.
   and artwork prompts, Global direction/intent, Unified and reference notes/
   definitions. Preserve each draft's unrelated wording independently; never copy
   Unified text over the timeline. Keep timing, order, media and settings intact.
+- Global input is instruction text; Unified Summary is generated production
+  prose. Do not copy Global notes into Summary. Pass changed Global guidance as
+  explicit current edits to Refine and apply it across affected output fields.

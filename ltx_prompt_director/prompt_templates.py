@@ -99,7 +99,20 @@ def render_workspace_prompt(engine: str, kind: str, values: dict) -> str:
     result = template.safe_substitute(values)
     # Input facts and edit targets remain available even in a completely custom template.
     present = {match.group("named") or match.group("braced") for match in Template.pattern.finditer(source)}
-    for key in ("director_intent", "authoritative_intent", "current_prompt", "refinement_instructions", "asset_map", "intervals", "reference_map", "ordered_plan"):
+    for key in ("director_intent", "global_direction", "authoritative_intent", "current_prompt", "refinement_instructions", "asset_map", "intervals", "reference_map", "ordered_plan"):
         if key in values and key not in present:
             result += f"\n\n{key.replace('_', ' ').upper()}:\n{values[key]}"
     return result + CONTENT_FIDELITY + ('' if engine == 'minimax_prompt_refinement' else FRAME_MOTION_GUIDANCE)
+
+
+def changed_direction_request(current, previous=None):
+    changed = {key: value for key, value in current.items()
+               if (previous is None and value.strip()) or (previous is not None and value != previous.get(key, ''))}
+    if not changed:return ''
+    return ('CURRENT GLOBAL EDIT REQUEST — the Global input has changed since the last accepted production result. '
+            'Apply these latest directions across the existing production draft, including Summary and all affected '
+            'shot, subject, sound and music sections. These are explicit current edit requests, not background '
+            'continuity evidence. They supersede conflicting earlier wording only where requested; preserve '
+            'unrelated edits and omissions. Do not paste the instructions verbatim into Summary. '
+            'An empty updated input removes that source of guidance without erasing unrelated authored prose.\n'
+            + '\n\n'.join(key.upper() + ':\n' + (value or '(cleared)') for key, value in changed.items()))

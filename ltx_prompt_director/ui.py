@@ -10658,6 +10658,9 @@ class MainWindow(QMainWindow):
             tool,
         )
 
+    def production_direction_sources(self):
+        return dict(intent=self.intent.toPlainText(), production=self.global_prompt.toPlainText())
+
     def _generate_minimax_prompt(self, mode: str) -> None:
         if self.prompt_only_workspace:
             self.refine_minimax_prompt()
@@ -10666,6 +10669,7 @@ class MainWindow(QMainWindow):
             return
         self.finish_prompt_reviews()
         self.inline_typing.finish()
+        self.prompt_surface.structured.refresh()
         self.minimax_editor_changed()
         if not self.segments:
             window = self.show_minimax_panel("Not generated")
@@ -10684,6 +10688,7 @@ class MainWindow(QMainWindow):
         self.minimax_operation_signature = signature
         self.minimax_operation_provider_model = (provider, model)
         self.minimax_operation_kind = f"generate_{mode}"
+        self.minimax_direction_sources = self.production_direction_sources()
         self.combined_generation_source = self.combined_generation_source_key()
         self.minimax_operation_references = copy.deepcopy(self.active_reference_images())
         self.minimax_operation_editor_snapshot = (
@@ -10751,13 +10756,16 @@ class MainWindow(QMainWindow):
                 "was kept; generate again to use the latest segments.", "warning")
             return
         if operation.startswith("refine_"):
-            prompt = consume_global_refinements(prompt)
+            prompt = consume_global_refinements(prompt, preserve_spacing=not self.prompt_only_workspace)
         unchanged = (self.prompt_only_workspace and operation.startswith("refine_") and
                      prompt_content(prompt, preserve_spacing=True) ==
                      prompt_content(self.minimax_prompt_text, preserve_spacing=True))
         if unchanged:
             prompt = self.minimax_prompt_text
         self.minimax_prompt_text = prompt
+        direction_sources = self.__dict__.pop('minimax_direction_sources', None)
+        if direction_sources is not None and not self.prompt_only_workspace:
+            self.prompt_surface.structured.state()['applied_direction_sources'] = direction_sources
         self.pending_minimax_result = ""
         self.minimax_prompt_updated_at = datetime.now(timezone.utc).isoformat()
         self.set_ai_controls_enabled(True)
@@ -10816,6 +10824,7 @@ class MainWindow(QMainWindow):
             return
         self.finish_prompt_reviews()
         self.inline_typing.finish()
+        self.prompt_surface.structured.refresh()
         self.minimax_editor_changed()
         if not self.minimax_prompt_text.strip():
             if self.minimax_panel:
@@ -10839,6 +10848,11 @@ class MainWindow(QMainWindow):
             self.minimax_refinement_instructions,
         )
         self.minimax_refinement_controls = self.refinement_controls_snapshot()
+        self.minimax_direction_sources = self.production_direction_sources()
+        from .prompt_templates import changed_direction_request
+        direction_request = changed_direction_request(self.minimax_direction_sources,
+            self.prompt_surface.structured.state().get('applied_direction_sources')) if not self.prompt_only_workspace else ''
+        refinement_instructions = '\n\n'.join(text for text in (self.minimax_refinement_instructions, direction_request) if text)
         timeout = self.settings.value("api_timeout", 400, int)
         if self.minimax_panel:
             self.minimax_panel.set_busy(True, "Refining edited prompt…")
@@ -10856,7 +10870,7 @@ class MainWindow(QMainWindow):
                 copy.deepcopy(self.active_group_segments()), provider, model, key, self.build_director_request(include_requested_length=False),
                 self.global_prompt.toPlainText(), self.sfx.isChecked(), self.spoken_dialog.isChecked(),
                 self.reduce_music.isChecked(), self.minimax_prompt_text,
-                self.minimax_refinement_instructions, timeout,
+                refinement_instructions, timeout,
             ) + (copy.deepcopy(self.active_reference_images()),),
             "Refining the edited MiniMax prompt with timeline continuity context…",
             self.minimax_h3_finished,
