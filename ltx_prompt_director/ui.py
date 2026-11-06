@@ -3394,7 +3394,7 @@ class MiniMaxPromptPanel(QFrame):
         self.generate_references_button.clicked.connect(lambda: owner.prompt_surface.structured.generate_references())
         refs_layout.addWidget(self.generate_references_button)
         self.reassess_references_button = QPushButton('Reassess references')
-        self.reassess_references_button.setToolTip('Reconcile reference mentions throughout the existing Unified prompt with minimal wording changes, including deleted references')
+        self.reassess_references_button.setToolTip('Reassess references across timeline/segment prompts, Global, Unified and reference notes with minimal wording changes')
         self.reassess_references_button.clicked.connect(lambda: owner.prompt_surface.structured.reassess_references())
         refs_layout.addWidget(self.reassess_references_button)
         self.reference_targets = []
@@ -8229,6 +8229,7 @@ class MainWindow(QMainWindow):
         retry_cooldown = self.settings.value("api_retry_cooldown", 10, int)
         self.set_ai_controls_enabled(False)
         self.ai_activity_title = (
+            "Reference reassessment" if getattr(operation, "__name__", "") == "reassess_references" else
             "Generic Generate" if operation in {build_generic_prompt, build_generic_segments} else
             "Generic Refine" if operation in {refine_generic_prompt, refine_generic_segment} else
             "Magic Build" if operation is build_prompts else

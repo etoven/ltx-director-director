@@ -1,0 +1,7 @@
+# Aurora 1.13.0a141 direct LLM reference reassessment
+
+The a140 literal-snippet contract rejected a real model response when its before-text did not match a unique source passage. Reassessment now asks the selected writing model for revised sections directly. Exact snippet matching, overlap validation and content acceptance gates have been removed. The model owns additions/removals and receives the current inventory, reference-change history and original sections, with instructions to preserve unrelated wording and dialogue.
+
+The application applies returned text across all related surfaces: timeline/segment prompts, image/artwork prompts, Global direction/intent, Unified, and reference notes/descriptions. Independent drafts receive their own minimal edits instead of copying Unified over the timeline. Timing, ordering, media and unrelated settings are outside the write path. Source synchronization is advanced with the returned drafts so it does not overwrite the LLM's independent edits. There are no semantic or similarity checks. Guards against overwriting newer work or a different project remain. Activity/error titles identify Reference reassessment. Existing fixtures are updated to the direct field-return contract.
+
+Per the user's instruction, this patch does not run model-content checks or a test suite. Release verification is limited to Python compilation, wheel/source parity and importing the packaged reassessment module before installation.

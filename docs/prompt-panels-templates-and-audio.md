@@ -38,6 +38,8 @@ In Reference Media, choose **Generate** or **Regenerate** for one reference, or 
 
 After removing, replacing or changing references, choose **Reassess references** to reconcile their use throughout the existing Unified prompt. It makes small edits to reference mentions in the summary, retention analysis, shot descriptions, sound, music and definitions. Deleted voice references lose their source attribution while spoken dialogue and unrelated wording stay intact. Reference-change history distinguishes a removed file from a remaining file that inherits its number. This is a separate, explicit action; generating definitions does not reassess the rest of the prompt.
 
+Reassessment uses the writing model selected in the toolbar. It updates all related prompt text together: timeline/segment prompts, image/artwork prompts, Global direction and intent, Unified sections, and remaining reference notes and definitions. Each draft retains its own unrelated wording; Unified prose is not copied over the timeline. The model returns revised text directly, without literal-snippet matching or a separate content checker. Timing, order, media and settings stay intact. If you edit a draft or switch projects during the request, the newer work is preserved.
+
 ## Generate dialogue, Foley and music
 
 The audio panels are available alongside every video workspace:

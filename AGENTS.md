@@ -68,3 +68,11 @@ acceptance criteria.
 - Keep progress reports concrete: what is implemented, what check remains, and
   what is actually installed/published. Do not spend the user's usage budget on
   speculative redesigns, repeated repository surveys, or unrelated cleanup.
+- Reference reassessment is an LLM editing operation. Apply its revised sections
+  directly. Do not add exact/fuzzy snippet matching or a non-LLM semantic gate to
+  decide whether additions/removals are acceptable. Preserve newer user edits
+  and project targeting while the request is in flight.
+  Reassess all related prompt surfaces together: timeline/segment prompts, image
+  and artwork prompts, Global direction/intent, Unified and reference notes/
+  definitions. Preserve each draft's unrelated wording independently; never copy
+  Unified text over the timeline. Keep timing, order, media and settings intact.

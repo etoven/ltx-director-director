@@ -397,6 +397,15 @@ class StructuredPromptPanel(QWidget):
         document.update({'field:' + key: value for key, value in state.get('fields', {}).items()})
         document.update({s.id: state.get('prompts', {}).get(s.id, s.prompt) for s in self.segments()})
         document.update({item['id']: state.get('subjects', {}).get(item['id'], item['prompt']) for item in self.subjects()})
+        document['source:global'] = self.owner.global_prompt.toPlainText()
+        document['source:intent'] = self.owner.intent.toPlainText()
+        for segment in self.segments():
+            for field in ('prompt', 'image_prompt', 'artwork_prompt'):
+                document[f'timeline:{segment.id}:{field}'] = getattr(segment, field)
+        for slot, reference in enumerate(self.owner.active_reference_images()):
+            if reference:
+                for field in ('notes', 'description', 'audio_description'):
+                    if field in reference:document[f'media:{slot}:{field}'] = reference[field]
         return document
 
     def reassess_references(self):
@@ -419,15 +428,36 @@ class StructuredPromptPanel(QWidget):
             if (snapshot != current or references != owner.active_reference_images() or
                     segments != [s.to_dict() for s in self.segments()] or document != self.reassessment_document()):
                 self.status.setText('Prompt or references changed; reassessment was discarded.'); return
-            if not isinstance(updates, dict) or not set(updates) <= set(document) or not all(isinstance(value, str) for value in updates.values()):
-                self.status.setText('Invalid reassessment; the original prompt was preserved.'); return
             state = self.state()
+            updates = {key: text for key, text in updates.items() if text != document[key]}
             state['reference_reassessment_backup'] = {key: document[key] for key in updates}
+            timeline_changed = references_changed = False
             for key, text in updates.items():
                 if key == 'global':state['global'] = text
                 elif key.startswith('field:'):state['fields'][key.removeprefix('field:')] = text
+                elif key.startswith('timeline:'):
+                    sid, field = key.removeprefix('timeline:').rsplit(':', 1)
+                    segment = next(item for item in self.segments() if item.id == sid)
+                    setattr(segment, field, text); timeline_changed = True
+                    if field == 'prompt':state['sources'][sid] = text
+                elif key.startswith('media:'):
+                    _, slot, field = key.split(':', 2)
+                    owner.minimax_reference_images[int(slot)][field] = text; references_changed = True
+                elif key in ('source:global', 'source:intent'):
+                    editor = owner.global_prompt if key == 'source:global' else owner.intent
+                    blocked = editor.blockSignals(True)
+                    try:editor.setPlainText(text)
+                    finally:editor.blockSignals(blocked)
                 elif key.startswith(('reference:', 'subject:')):state['subjects'][key] = text
                 else:state['prompts'][key] = text
+            # All surfaces were reassessed together; source synchronization must
+            # not replace the independently returned Unified passages afterward.
+            state['global_source'] = dict(production=owner.global_prompt.toPlainText(), intent=owner.intent.toPlainText())
+            for subject in self.subjects():state['subject_sources'][subject['id']] = subject['prompt']
+            if timeline_changed:
+                owner.refresh_segment_prompt_box(owner.timeline.currentRow())
+                owner.refresh_text_segment_previews()
+            if references_changed:owner.minimax_panel.refresh_references()
             owner.mark_dirty(); self.refresh()
             state['reference_changes'] = []
             self.status.setText(f'References reassessed · {len(updates)} fields updated.' if updates else 'References are consistent; prompt unchanged.')

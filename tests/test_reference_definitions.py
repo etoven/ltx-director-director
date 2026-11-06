@@ -8,7 +8,7 @@ from PySide6.QtWidgets import QApplication, QPushButton
 from ltx_prompt_director import ai, ui
 from ltx_prompt_director.models import Segment
 from ltx_prompt_director.media import data_url
-from ltx_prompt_director.prompt_references import subjects, generate_definitions, reassess_references, apply_reference_edits
+from ltx_prompt_director.prompt_references import subjects, generate_definitions, reassess_references
 
 
 def test_reference_contract_and_migrated_media_identities(monkeypatch):
@@ -38,30 +38,23 @@ def test_reference_contract_and_migrated_media_identities(monkeypatch):
     with pytest.raises(ai.AIResponseFormatError):generate_definitions(segments,refs,[records[1]],'openai','model','key',10)
 
 
-def test_reassessment_replaces_only_exact_nonoverlapping_passages(monkeypatch):
+def test_reassessment_returns_model_sections_without_text_matching(monkeypatch):
     original = {'global': 'Quiet scene. Voice from <Audio2>. Keep blue lighting.',
                 'shot': 'She says <d>Good evening.</d> using <Audio2>. Then turns.',
-                'field:sound': 'Rain and a door creak. Match <Audio2>.', 'field:music': 'No music.'}
-    edits = [dict(field='global',before=' Voice from <Audio2>.',after=''),
-             dict(field='shot',before=' using <Audio2>',after=''),
-             dict(field='field:sound',before=' Match <Audio2>.',after='')]
+                'field:sound': 'Match <Audio2>.', 'field:music': 'No music.'}
+    revised = {'global': 'Quiet scene. Keep the blue lighting.',
+               'shot': 'She says <d>Good evening.</d>, then turns.',
+               'field:sound': '', 'field:music': 'No music.'}
     captured = {}
     def respond(inputs,*args,**kwargs):
-        assert inputs == []
-        captured['rules'] = args[3]
-        return json.dumps(dict(edits=edits))
+        captured.update(inputs=inputs,rules=args[3],schema=kwargs['schema'])
+        return json.dumps(dict(fields=revised))
     monkeypatch.setattr(ai,'_structured_raw',respond)
-    updated = reassess_references(original,[],[dict(before=[dict(id='reference:2',label='Audio2')],after=[])],
-                                  'gemini','model','key',10)
-    assert updated == {'global':'Quiet scene. Keep blue lighting.', 'shot':'She says <d>Good evening.</d>. Then turns.',
-                       'field:sound':'Rain and a door creak.'}
-    assert original['field:music']=='No music.' and '<Audio2>' in original['global']
+    assert reassess_references(original,[],[],'gemini','model','key',10)==revised
     assert 'renumbered labels by source identity' in captured['rules']
-    with pytest.raises(ai.AIResponseFormatError):apply_reference_edits(original,[dict(field='missing',before='Quiet',after='')])
-    with pytest.raises(ai.AIResponseFormatError):apply_reference_edits(original,[dict(field='global',before='Not present',after='')])
-    with pytest.raises(ai.AIResponseFormatError):apply_reference_edits(original,[edits[0],edits[0]])
-    monkeypatch.setattr(ai,'_structured_raw',lambda *a,**k:'{"edits":[]}')
-    assert reassess_references(original,[],[],'gemini','model','key',10)=={}
+    assert captured['inputs']==[]
+    assert '<Audio2>' in original['global']
+    assert set(captured['schema']['properties']['fields']['properties'])==set(original)
 
 
 def test_native_add_generate_remove_and_project_roundtrip(tmp_path,monkeypatch):
@@ -112,11 +105,16 @@ def test_native_add_generate_remove_and_project_roundtrip(tmp_path,monkeypatch):
         w.set_minimax_reference_image(0,{**fixtures['image'],'notes':'Changed since request'})
         finish({s['id']:'STALE' for s in args[2]})
         assert 'STALE' not in w.unified_prompt.toPlainText()
-        # Reassess usage throughout Unified after deleting an audio source.
+        # Reassess every prompt surface after deleting an audio source.
         state = panel.state(); sid = w.segments[0].id
         state['global'] = 'Quiet scene. Voice from <Audio2>. Keep blue lighting.'
         state['prompts'][sid] = 'She says <d>Good evening.</d> using <Audio2>. Then turns.'
         state['fields']['sound'] = 'Rain and a door creak. Match <Audio2>.'
+        w.segments[0].prompt = 'Timeline voice from <Audio2>. Keep the turn.'
+        w.segments[0].image_prompt = 'Coat pose. Source <Audio2>.'
+        w.segments[0].artwork_prompt = 'Blue coat. Source <Audio2>.'
+        w.global_prompt.setPlainText('Evening. Voice source <Audio2>.')
+        w.intent.setPlainText('Slow turn. Voice source <Audio2>.')
         panel.refresh()
         timeline_before = copy.deepcopy([s.to_dict() for s in w.segments])
         w.minimax_panel.reference_targets[2].remove_button.click();panel.refresh()
@@ -126,16 +124,20 @@ def test_native_add_generate_remove_and_project_roundtrip(tmp_path,monkeypatch):
         document,roster,changes=args[:3]
         assert not any(item.get('label')=='Audio2' for item in roster)
         assert any(any(item.get('label')=='Audio2' for item in change['before']) for change in changes)
-        patches=[dict(field='global',before=' Voice from <Audio2>.',after=''),
-                 dict(field=sid,before=' using <Audio2>',after=''),
-                 dict(field='field:sound',before=' Match <Audio2>.',after='')]
-        finish(apply_reference_edits(document,patches))
+        finish({**document, 'global':'Quiet scene. Keep blue lighting.',
+                sid:'She says <d>Good evening.</d>. Then turns.', 'field:sound':'Rain and a door creak.',
+                f'timeline:{sid}:prompt':'Keep the turn.', f'timeline:{sid}:image_prompt':'Coat pose.',
+                f'timeline:{sid}:artwork_prompt':'Blue coat.', 'source:global':'Evening.', 'source:intent':'Slow turn.'})
         assert '<Audio2>' not in w.unified_prompt.toPlainText()
         assert panel.state()['global']=='Quiet scene. Keep blue lighting.'
         assert panel.state()['prompts'][sid]=='She says <d>Good evening.</d>. Then turns.'
         assert panel.state()['fields']['sound']=='Rain and a door creak.'
         assert panel.state()['reference_changes']==[]
-        assert [s.to_dict() for s in w.segments]==timeline_before
+        assert w.segments[0].prompt=='Keep the turn.' and w.segments[0].image_prompt=='Coat pose.'
+        assert w.segments[0].artwork_prompt=='Blue coat.'
+        assert w.global_prompt.toPlainText()=='Evening.' and w.intent.toPlainText()=='Slow turn.'
+        for old,new in zip(timeline_before,[s.to_dict() for s in w.segments]):
+            assert {k:v for k,v in old.items() if k not in {'prompt','image_prompt','artwork_prompt'}}=={k:v for k,v in new.items() if k not in {'prompt','image_prompt','artwork_prompt'}}
         w.load_project_payload(w.project_payload(include_media=False));panel.refresh()
         assert '<Audio2>' not in w.unified_prompt.toPlainText() and '<d>Good evening.</d>' in w.unified_prompt.toPlainText()
         panel.reassess_references();args,finish=calls[-1]
@@ -155,6 +157,6 @@ def test_native_add_generate_remove_and_project_roundtrip(tmp_path,monkeypatch):
         assert added not in w.segments
         assert panel.state()['fields']['sound']=='Rain and a door creak.' and panel.state()['fields']['music']=='Keep music'
         w.resize(1400,900);w.show();app.processEvents();panel.reveal_timer.stop();panel.scroll.verticalScrollBar().setValue(0)
-        w.grab().save('/tmp/director-a140-references.png')
+        w.grab().save('/tmp/director-a141-references.png')
     finally:
         w.project_dirty=False;w._close_saves_queued=True;w.close()

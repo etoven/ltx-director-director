@@ -74,46 +74,33 @@ def reference_roster(records):
             for item in records]
 
 
-def apply_reference_edits(document, edits):
-    """Apply non-overlapping literal patches against the unchanged source fields."""
-    from .ai import AIResponseFormatError
-    spans = {}
-    for edit in edits:
-        key, before, after = edit['field'], edit['before'], edit['after']
-        if key not in document or not before or document[key].count(before) != 1:
-            raise AIResponseFormatError('Reference edit did not identify one exact passage in an existing field.')
-        start = document[key].index(before); end = start + len(before)
-        if any(start < old_end and end > old_start for old_start, old_end, _ in spans.get(key, [])):
-            raise AIResponseFormatError('Reference edits overlap; the original prompt was preserved.')
-        spans.setdefault(key, []).append((start, end, after))
-    updated = {}
-    for key, patches in spans.items():
-        text = document[key]
-        for start, end, after in sorted(patches, reverse=True):text = text[:start] + after + text[end:]
-        if text != document[key]:updated[key] = text
-    return updated
-
 
 def reassess_references(document, roster, changes, provider, model, key, timeout):
     from . import ai, response_schemas as schemas
-    schema = schemas.named('reference_reassessment', schemas.record(edits=dict(type='array', minItems=0,
-        items=schemas.record(field=schemas.text('Exact editable field ID'),
-            before=schemas.text('Smallest exact source passage that occurs once in that field'),
-            after=schemas.text('Replacement passage; empty to remove only an obsolete clause', empty=True)))))
-    rules = ('Reassess reference usage in the EXISTING Unified production prompt. Return only minimal literal edits, '
-             'never a rewritten prompt. CURRENT REFERENCES is the authoritative inventory; REFERENCE CHANGES records '
-             'earlier labels and definitions, including removed or replaced sources. Reconcile reference mentions '
-             'throughout all supplied editable fields: subject definitions, summary, retention, detailed shot prose, '
-             'sound and music. Remove obsolete source attributions and dependencies on deleted media. Correct '
-             'renumbered labels by source identity, never attach a deleted reference to another asset that inherited '
-             'its label. When earlier history is unavailable, remove citations to absent sources without inventing '
-             'a replacement. Preserve every unrelated word verbatim. Preserve dialogue, language, speaker identity, '
-             'actions, timing and explicitly requested sounds; removing a voice file does not cancel dialogue. '
-             'Do not invent media, unheard audio, subjects, shots, fields, or new creative content. Use definitions '
-             'and explicit notes only. Each before snippet must match once in its specified field; include just '
-             'enough context to disambiguate it. Do not overlap edits. Return an empty edits array if consistent.\n'
+    schema = schemas.named('reference_reassessment', schemas.record(fields=schemas.record(**{
+        name: schemas.text('Complete revised section; preserve unrelated wording verbatim. Empty if removal leaves no content.', empty=True)
+        for name in document})))
+    rules = ('Reassess reference usage throughout ALL supplied project prompt text. Return the complete revised text '
+             'of every supplied field in fields. This includes timeline/segment prompts (timeline:*:prompt), '
+             'image and artwork prompts, Global source direction (source:global), director instructions (source:intent), '
+             'all Unified sections, and remaining reference notes/descriptions (media:*). Reconcile EACH surface; '
+             'updating Unified alone is insufficient. Timeline and Unified prompts are independent drafts: edit '
+             'each existing draft minimally instead of copying one over the other. Timing, segment order, media files '
+             'and unrelated project data are outside this text-only operation and must never be altered. '
+             'You decide which references and source-dependent wording '
+             'need removal, addition or adjustment. CURRENT REFERENCES is authoritative; REFERENCE CHANGES records '
+             'earlier labels and definitions, including removed or replaced sources. Reconcile reference usage '
+             'throughout subject definitions, summary, retention, detailed shot prose, sound and music. '
+             'Remove obsolete source attributions and dependencies on deleted media; incorporate current definitions '
+             'and notes where relevant. Correct renumbered labels by source identity: never redirect a deleted '
+             'reference to a different file that inherited its number. If history is unavailable, reconcile '
+             'the existing draft against the current inventory. Make the smallest wording changes needed. '
+             'Preserve all unrelated content, dialogue, language, speaker identity, actions, timing and explicitly '
+             'requested sounds. Removing a voice file does not cancel spoken dialogue. Do not invent media or '
+             'unheard audio. Use the supplied definitions and notes. Leave consistent sections exactly unchanged. '
+             'Return revised fields directly, not text-match patches, snippets or an edit plan. A field may '
+             'be empty when its content exists solely to describe a removed reference.\n'
              + json.dumps(dict(current_references=roster, reference_changes=changes, editable_fields=document), ensure_ascii=False)
              + '\nOUTPUT SCHEMA:\n' + json.dumps(schema))
     raw = ai._structured_raw([], provider, model, key, rules, timeout, schema=schema)
-    with schemas.using(schema):schemas.validate(raw)
-    return apply_reference_edits(document, json.loads(raw)['edits'])
+    return json.loads(raw)['fields']
