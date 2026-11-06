@@ -15,7 +15,7 @@ def _generate_audio(request):
     kind = request['audio_kind']; config = request['audio_config']; output = Path(request['job_dir']) / 'audio.wav'
     progress('Loading ' + {'dialog': 'IndexTTS 2.5', 'foley': 'Stable Audio 3', 'music': 'MiniMax Music 3'}[kind] + '…')
     if kind == 'dialog':
-        from .dialogue_controls import inference_options
+        from .local_dialogue_controls import inference_options
         options = inference_options(request)
         root = Path(config['source']).expanduser()
         sys.path.insert(0, str(root)); os.chdir(root)
