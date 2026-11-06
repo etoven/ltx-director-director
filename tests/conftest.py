@@ -9,6 +9,21 @@ from ltx_prompt_director.workspaces import WorkspaceStore
 
 
 @pytest.fixture(autouse=True)
+def isolated_desktop_settings(tmp_path, monkeypatch):
+    """Keep saved dock layouts and preferences inside the current test."""
+    from PySide6.QtCore import QSettings
+    config = tmp_path / 'desktop-config'
+    for key, folder in [('CONFIG', config), ('DATA', tmp_path / 'desktop-data'),
+                        ('CACHE', tmp_path / 'desktop-cache')]:
+        folder.mkdir(exist_ok=True)
+        monkeypatch.setenv('XDG_' + key + '_HOME', str(folder))
+    # QApplication can be created during test collection, before fixtures run.
+    # Set Qt's path explicitly as well as isolating child-process environments.
+    for format in (QSettings.Format.NativeFormat, QSettings.Format.IniFormat):
+        QSettings.setPath(format, QSettings.Scope.UserScope, str(config))
+
+
+@pytest.fixture(autouse=True)
 def install_legacy_workspace_for_existing_regressions(request, monkeypatch):
     if request.module.__name__.split('.')[-1] in {'test_catalog_release', 'test_shared_segment_editor', 'test_prompt_only_refinement', 'test_comfy_minimax_export', 'test_prompt_timecodes', 'test_segment_prompt_review'}:
         return
