@@ -3617,6 +3617,8 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.reasoning_dock)
         for dock in self.findChildren(QDockWidget, options=Qt.FindChildOption.FindDirectChildrenOnly):
             dock.setProperty('adobePanel', True)
+            dock.dockLocationChanged.connect(lambda *_: self._viewport_timer.start())
+            dock.visibilityChanged.connect(lambda *_: self._viewport_timer.start())
         self._apply_theme()
         geometry = self.settings.value("window/geometry")
         state = self.settings.value("window/state")
@@ -6641,6 +6643,15 @@ class MainWindow(QMainWindow):
         self._fitting_panels=True
         try:
             self.toolbar_brand_action.setVisible(self.width()>=1450)
+            anchor = self.centralWidget()
+            if anchor is not None and anchor.objectName() == 'dockLayoutAnchor':
+                horizontal_docks = any(not dock.isHidden() and not dock.isFloating()
+                    and self.dockWidgetArea(dock) in (Qt.DockWidgetArea.TopDockWidgetArea, Qt.DockWidgetArea.BottomDockWidgetArea)
+                    for dock in self.findChildren(QDockWidget, options=Qt.FindChildOption.FindDirectChildrenOnly))
+                minimum, maximum = (320, 16777215) if horizontal_docks else (0, 0)
+                if anchor.minimumWidth() != minimum or anchor.maximumWidth() != maximum:
+                    anchor.setMinimumWidth(minimum); anchor.setMaximumWidth(maximum)
+                anchor.setVisible(horizontal_docks)
             self.fit_sequence_options()
             self.editor_root.layout().activate()
             timeline_resized=False
