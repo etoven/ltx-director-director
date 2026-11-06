@@ -81,7 +81,7 @@ def prepare_float_checkpoint(path, cache, callback=progress):
     return str(target)
 
 
-def image_generation(request):
+def _load_image_pipeline(profile):
     progress('Starting native image runtime…')
     import torch
     from PIL import Image
@@ -89,7 +89,7 @@ def image_generation(request):
     from diffusers import Flux2KleinPipeline, Flux2Transformer2DModel, AutoencoderKLFlux2
     from safetensors.torch import load_file
     from .local_generation import data_root, validate_profile
-    profile = request['profile']; validate_profile(profile, 'image')
+    validate_profile(profile, 'image')
     assets = Path(profile['image_assets'])
     if not (assets / 'model_index.json').is_file():
         raise ValueError('Download the image configuration/tokenizer files in Local models first.')
@@ -144,42 +144,54 @@ def image_generation(request):
         else: pipe.enable_sequential_cpu_offload()
     else: pipe.to(device)
     pipe.vae.enable_tiling()
-    width = int(request.get('width', 1024)); height = int(request.get('height', 1024))
-    steps = int(request.get('steps', 30)); every = max(1, int(profile.get('preview_every', 5)))
-    root = Path(request['job_dir']); started = [None]
-    from .local_previews import FluxImagePreview
-    preview = FluxImagePreview(pipe, root, width, height, steps, every, emit)
-    progress(f'Preview: clean image estimate · every {every} steps · reuses sampler prediction')
-    def sampling_started(*_):
-        if started[0] is None:started[0]=time.monotonic()
-    transformer.register_forward_pre_hook(sampling_started)
-    def callback(pipeline, step, timestep, kwargs):
-        done = step + 1
-        eta = ((time.monotonic() - started[0]) / done * max(0, steps - done)
-               if started[0] is not None else None)
-        progress('Rendering image', done / steps * 95, eta)
-        preview.finish_step(done)
-        return kwargs
-    images = []
-    if request.get('source'): images.append(Image.open(request['source']).convert('RGB'))
-    for ref in request.get('references', []):
-        image = _pil_reference(ref)
-        if image is not None: images.append(image)
-    arguments = dict(prompt=generation_prompt(request['prompt'], profile, 'image'), width=width, height=height, num_inference_steps=steps,
-        guidance_scale=4.0 if 'base' in Path(profile['image_model']).name.lower() else 1.0,
-        generator=torch.Generator('cpu').manual_seed(int(request.get('seed', 42))),
-        callback_on_step_end=callback, callback_on_step_end_tensor_inputs=['latents'])
-    if images: arguments['image'] = images
-    encode = pipe.encode_prompt
-    def encode_prompt(*args, **kwargs):
-        progress('Encoding image prompt and references…')
-        result = encode(*args, **kwargs)
-        progress('Prompt encoded; starting image sampling…')
-        return result
-    pipe.encode_prompt = encode_prompt
-    output = pipe(**arguments).images[0]
-    path = root / 'image.png'; output.save(path)
-    emit('result', path=str(path), media='image')
+    return pipe
+
+
+def image_generation(request):
+    import torch
+    from PIL import Image
+    from .local_generation import validate_profile
+    from .local_lora import generation_prompt
+    from .local_model_cache import model, job_scope
+    profile=request['profile'];validate_profile(profile,'image')
+    with job_scope(model(request,lambda:_load_image_pipeline(profile))) as pipe:
+        transformer=pipe.transformer
+        width = int(request.get('width', 1024)); height = int(request.get('height', 1024))
+        steps = int(request.get('steps', 30)); every = max(1, int(profile.get('preview_every', 5)))
+        root = Path(request['job_dir']); started = [None]
+        from .local_previews import FluxImagePreview
+        preview = FluxImagePreview(pipe, root, width, height, steps, every, emit)
+        progress(f'Preview: clean image estimate · every {every} steps · reuses sampler prediction')
+        def sampling_started(*_):
+            if started[0] is None:started[0]=time.monotonic()
+        transformer.register_forward_pre_hook(sampling_started)
+        def callback(pipeline, step, timestep, kwargs):
+            done = step + 1
+            eta = ((time.monotonic() - started[0]) / done * max(0, steps - done)
+                   if started[0] is not None else None)
+            progress('Rendering image', done / steps * 95, eta)
+            preview.finish_step(done)
+            return kwargs
+        images = []
+        if request.get('source'): images.append(Image.open(request['source']).convert('RGB'))
+        for ref in request.get('references', []):
+            image = _pil_reference(ref)
+            if image is not None: images.append(image)
+        arguments = dict(prompt=generation_prompt(request['prompt'], profile, 'image'), width=width, height=height, num_inference_steps=steps,
+            guidance_scale=4.0 if 'base' in Path(profile['image_model']).name.lower() else 1.0,
+            generator=torch.Generator('cpu').manual_seed(int(request.get('seed', 42))),
+            callback_on_step_end=callback, callback_on_step_end_tensor_inputs=['latents'])
+        if images: arguments['image'] = images
+        encode = pipe.encode_prompt
+        def encode_prompt(*args, **kwargs):
+            progress('Encoding image prompt and references…')
+            result = encode(*args, **kwargs)
+            progress('Prompt encoded; starting image sampling…')
+            return result
+        pipe.encode_prompt = encode_prompt
+        output = pipe(**arguments).images[0]
+        path = root / 'image.png'; output.save(path)
+        emit('result', path=str(path), media='image')
 
 
 def read_reference_video(path, *, start=0, duration=15, width=832, height=480, fps=24):
@@ -238,31 +250,8 @@ def read_reference_audio(path, *, start=0, duration=15, rate=32000):
     return np.concatenate(chunks, axis=1), rate
 
 
-def video_generation(request):
-    refs = request.get('references', [])
-    image_count = sum(r.get('kind', 'image') == 'image' for r in refs)
-    video_count = sum(r.get('kind') == 'video' for r in refs)
-    audio_count = sum(r.get('kind') == 'audio' or r.get('kind') == 'video' and bool(r.get('audio_path')) for r in refs)
-    if image_count > 9 or video_count > 3 or audio_count > 3 or image_count + video_count + audio_count > 12:
-        raise ValueError('H3 accepts up to 9 images, 3 video and 3 audio references, 12 files in total.')
-    if request['profile'].get('video_variant', 'ref2va' if 'ref2va' in Path(request['profile']['video_model']).name.lower() else 'fl2va') != 'ref2va':
-        if video_count or audio_count or image_count > 2:
-            raise ValueError('FL2VA uses at most two image keyframes; use Ref2VA for mixed references.')
-        roles = [-1 if r.get('role') == 'end' else 0 for r in refs]
-        if len(roles) != len(set(roles)):
-            raise ValueError('FL2VA keyframes need one Start and one End role.')
-        for ref in refs:
-            expected=float(request.get('duration',15)) if ref.get('role')=='end' else 0
-            if 'timeline_time' in ref and abs(float(ref['timeline_time'])-expected)>1/24:
-                raise ValueError('FL2VA supports only the opening and final frame. Use Ref2VA for intermediate timeline checkpoints.')
-    elif not refs:
-        raise ValueError('Ref2VA requires timeline conditioning media or Reference panel media. Add media or use a pruned FL2VA checkpoint.')
-    for number,ref in enumerate(refs,1):
-        embedded=ref.get('kind','image')=='image' and str(ref.get('image','')).startswith('data:image/')
-        if ref.get('path') and not Path(ref['path']).is_file() and not embedded:
-            raise ValueError(f'Conditioning source is missing: {ref.get("name") or Path(ref["path"]).name}')
-        source=f'timeline at {ref["timeline_time"]:g}s' if 'timeline_time' in ref else 'Reference panel'
-        progress(f'Conditioning {number}: {ref.get("kind","image")} · {ref.get("name","media")} · {source}')
+def _load_video_pipeline(request):
+    refs=request.get('references',[])
     progress('Starting native video runtime…')
     import torch
     from PIL import Image
@@ -303,132 +292,170 @@ def video_generation(request):
     load_video_loras(pipe, profile, progress)
     from .local_h3_quant import optimize_h3_convolutions, stream_h3_feed_forward, stream_h3_video_pixels
     optimize_h3_convolutions(pipe); stream_h3_feed_forward(pipe); stream_h3_video_pixels(pipe)
-    if profile.get('video_sampler', 'res_multistep') == 'res_multistep':
-        from .local_h3_sampling import H3ResMultistepScheduler
-        pipe.scheduler = H3ResMultistepScheduler()
-        pipe.scheduler_audio = H3ResMultistepScheduler(audio=True)
-        progress('Sampler: RES multistep · simple schedule · guidance 1')
     encoder = pipe.text_encoder.model
     for label, layers in (('vision', encoder.visual.blocks), ('prompt', encoder.language_model.layers)):
         for index, layer in enumerate(layers):
             layer.register_forward_pre_hook(lambda module, inputs, name=label, number=index + 1, total=len(layers):
                 progress(f'H3 {name} encoder · layer {number}/{total}'))
-    current_step = [0]
-    def denoiser_progress(number, total):
-        emit('log', message=f'H3 sampling network · layer {number}/{total}')
-        steps = int(request.get('steps', profile.get('video_steps', 20)))
-        fraction = current_step[0] + (number - 1) / total
-        eta = (time.monotonic() - started[0]) / fraction * max(0, steps - fraction) if fraction >= 1 and started[0] else None
-        progress(f'Rendering video and audio · step {current_step[0] + 1}/{steps} · network layer {number}/{total}',
-                 fraction / steps * 94, eta)
-    for index, block in enumerate(pipe.dit.blocks):
-        block.register_forward_pre_hook(lambda module, inputs, number=index + 1, total=len(pipe.dit.blocks):
-            denoiser_progress(number, total))
-    sampling_finished = [False]
-    def trace_decode(method, label, percent):
-        def decode(*args, **kwargs):
-            if sampling_finished[0]: progress(label, percent)
-            else: emit('log', message=label)
-            return method(*args, **kwargs)
-        return decode
-    pipe.video_vae.decode_video = trace_decode(pipe.video_vae.decode_video, 'Decoding video latents…', 95)
-    pipe.audio_vae.decode_audio = trace_decode(pipe.audio_vae.decode_audio, 'Decoding audio latents…', 96)
-    run_unit = pipe.unit_runner
-    def unit_runner(unit, *args, **kwargs):
-        progress('H3 stage: ' + type(unit).__name__.replace('MiniMaxH3Unit_', ''))
-        return run_unit(unit, *args, **kwargs)
-    pipe.unit_runner = unit_runner
-    from .local_conditioning import install_timeline_positions, configure_video_conditioning_encoder
-    configure_video_conditioning_encoder(pipe,request.get('references',[]))
-    if profile.get('video_variant','ref2va')=='ref2va':
-        install_timeline_positions(pipe,request.get('references',[]),emit)
-    references = []
-    for ref in request.get('references', []):
-        if ref.get('kind') == 'video':
-            frames = read_reference_video(ref['path'], height=request['height'], width=request['width'],
-                start=ref.get('start', 0), duration=ref.get('duration', 15), fps=24)
-            minimum=1 if 'timeline_time' in ref else 48
-            if len(frames)<minimum:
-                raise ValueError('Video conditioning has no frames in the selected trim.' if minimum==1 else 'H3 video references need at least two seconds of source footage.')
-            progress(f'Video conditioning: {ref.get("name","video")} · {len(frames)} frames · source trim {ref.get("start",0):g}s')
-            reference = {'type': 'video', 'video': frames}
-            if ref.get('audio_path'):
-                audio, rate = read_reference_audio(ref['audio_path'], start=ref.get('start', 0), duration=ref.get('duration', 15))
+    return pipe
+
+
+def video_generation(request):
+    refs = request.get('references', [])
+    image_count = sum(r.get('kind', 'image') == 'image' for r in refs)
+    video_count = sum(r.get('kind') == 'video' for r in refs)
+    audio_count = sum(r.get('kind') == 'audio' or r.get('kind') == 'video' and bool(r.get('audio_path')) for r in refs)
+    if image_count > 9 or video_count > 3 or audio_count > 3 or image_count + video_count + audio_count > 12:
+        raise ValueError('H3 accepts up to 9 images, 3 video and 3 audio references, 12 files in total.')
+    if request['profile'].get('video_variant', 'ref2va' if 'ref2va' in Path(request['profile']['video_model']).name.lower() else 'fl2va') != 'ref2va':
+        if video_count or audio_count or image_count > 2:
+            raise ValueError('FL2VA uses at most two image keyframes; use Ref2VA for mixed references.')
+        roles = [-1 if r.get('role') == 'end' else 0 for r in refs]
+        if len(roles) != len(set(roles)):
+            raise ValueError('FL2VA keyframes need one Start and one End role.')
+        for ref in refs:
+            expected=float(request.get('duration',15)) if ref.get('role')=='end' else 0
+            if 'timeline_time' in ref and abs(float(ref['timeline_time'])-expected)>1/24:
+                raise ValueError('FL2VA supports only the opening and final frame. Use Ref2VA for intermediate timeline checkpoints.')
+    elif not refs:
+        raise ValueError('Ref2VA requires timeline conditioning media or Reference panel media. Add media or use a pruned FL2VA checkpoint.')
+    for number,ref in enumerate(refs,1):
+        embedded=ref.get('kind','image')=='image' and str(ref.get('image','')).startswith('data:image/')
+        if ref.get('path') and not Path(ref['path']).is_file() and not embedded:
+            raise ValueError(f'Conditioning source is missing: {ref.get("name") or Path(ref["path"]).name}')
+        source=f'timeline at {ref["timeline_time"]:g}s' if 'timeline_time' in ref else 'Reference panel'
+        progress(f'Conditioning {number}: {ref.get("kind","image")} · {ref.get("name","media")} · {source}')
+    import copy
+    import torch
+    from PIL import Image
+    from diffsynth.utils.data.audio_video import write_video_audio
+    from .local_generation import validate_profile,align_h3_frames,resolve_video_seed
+    from .local_lora import generation_prompt
+    from .local_model_cache import model,job_scope
+    profile=request['profile'];validate_profile(profile,'video');dtype=torch.bfloat16
+    with job_scope(model(request,lambda:_load_video_pipeline(request))) as pipe:
+        pipe.scheduler=copy.deepcopy(pipe.scheduler)
+        pipe.scheduler_audio=copy.deepcopy(pipe.scheduler_audio)
+        if profile.get('video_sampler', 'res_multistep') == 'res_multistep':
+            from .local_h3_sampling import H3ResMultistepScheduler
+            pipe.scheduler = H3ResMultistepScheduler()
+            pipe.scheduler_audio = H3ResMultistepScheduler(audio=True)
+            progress('Sampler: RES multistep · simple schedule · guidance 1')
+        current_step = [0]
+        def denoiser_progress(number, total):
+            emit('log', message=f'H3 sampling network · layer {number}/{total}')
+            steps = int(request.get('steps', profile.get('video_steps', 20)))
+            fraction = current_step[0] + (number - 1) / total
+            eta = (time.monotonic() - started[0]) / fraction * max(0, steps - fraction) if fraction >= 1 and started[0] else None
+            progress(f'Rendering video and audio · step {current_step[0] + 1}/{steps} · network layer {number}/{total}',
+                     fraction / steps * 94, eta)
+        for index, block in enumerate(pipe.dit.blocks):
+            block.register_forward_pre_hook(lambda module, inputs, number=index + 1, total=len(pipe.dit.blocks):
+                denoiser_progress(number, total))
+        sampling_finished = [False]
+        def trace_decode(method, label, percent):
+            def decode(*args, **kwargs):
+                if sampling_finished[0]: progress(label, percent)
+                else: emit('log', message=label)
+                return method(*args, **kwargs)
+            return decode
+        pipe.video_vae.decode_video = trace_decode(pipe.video_vae.decode_video, 'Decoding video latents…', 95)
+        pipe.audio_vae.decode_audio = trace_decode(pipe.audio_vae.decode_audio, 'Decoding audio latents…', 96)
+        run_unit = pipe.unit_runner
+        def unit_runner(unit, *args, **kwargs):
+            progress('H3 stage: ' + type(unit).__name__.replace('MiniMaxH3Unit_', ''))
+            return run_unit(unit, *args, **kwargs)
+        pipe.unit_runner = unit_runner
+        from .local_conditioning import install_timeline_positions, configure_video_conditioning_encoder
+        configure_video_conditioning_encoder(pipe,request.get('references',[]))
+        if profile.get('video_variant','ref2va')=='ref2va':
+            install_timeline_positions(pipe,request.get('references',[]),emit)
+        references = []
+        for ref in request.get('references', []):
+            if ref.get('kind') == 'video':
+                frames = read_reference_video(ref['path'], height=request['height'], width=request['width'],
+                    start=ref.get('start', 0), duration=ref.get('duration', 15), fps=24)
+                minimum=1 if 'timeline_time' in ref else 48
+                if len(frames)<minimum:
+                    raise ValueError('Video conditioning has no frames in the selected trim.' if minimum==1 else 'H3 video references need at least two seconds of source footage.')
+                progress(f'Video conditioning: {ref.get("name","video")} · {len(frames)} frames · source trim {ref.get("start",0):g}s')
+                reference = {'type': 'video', 'video': frames}
+                if ref.get('audio_path'):
+                    audio, rate = read_reference_audio(ref['audio_path'], start=ref.get('start', 0), duration=ref.get('duration', 15))
+                    if audio.shape[-1] / rate < 2: raise ValueError('H3 audio references need at least two seconds of source audio.')
+                    reference.update(type='video_audio', audio=torch.from_numpy(audio), sample_rate=rate)
+                references.append(reference)
+            elif ref.get('kind') == 'audio':
+                audio, rate = read_reference_audio(ref['path'], start=ref.get('start', 0), duration=ref.get('duration', 15))
                 if audio.shape[-1] / rate < 2: raise ValueError('H3 audio references need at least two seconds of source audio.')
-                reference.update(type='video_audio', audio=torch.from_numpy(audio), sample_rate=rate)
-            references.append(reference)
-        elif ref.get('kind') == 'audio':
-            audio, rate = read_reference_audio(ref['path'], start=ref.get('start', 0), duration=ref.get('duration', 15))
-            if audio.shape[-1] / rate < 2: raise ValueError('H3 audio references need at least two seconds of source audio.')
-            references.append({'type': 'audio', 'audio': torch.from_numpy(audio), 'sample_rate': rate})
+                references.append({'type': 'audio', 'audio': torch.from_numpy(audio), 'sample_rate': rate})
+            else:
+                image = _pil_reference(ref)
+                if image is None:raise ValueError(f'Cannot load conditioning image: {ref.get("name","image")}')
+                if 'timeline_time' in ref:image=image.resize((int(request['width']),int(request['height'])),Image.Resampling.LANCZOS)
+                references.append({'type': 'image', 'image': image})
+        steps = int(request.get('steps', profile.get('video_steps', 20)))
+        diagnostic_steps = max(0, int(request.get('diagnostic_steps', 0)))
+        completed_steps = [0]
+        root = Path(request['job_dir']); started = [None]
+        from .local_previews import H3VideoPreview
+        preview = H3VideoPreview(pipe, profile, root, int(request['width']), int(request['height']), steps, dtype, emit)
+        progress('Preview: ' + ('live predicted latent · reuses sampler prediction · no VAE decoding during sampling' if profile.get('video_preview_mode', 'noisy') == 'noisy'
+                                  else f'denoised estimate · every {profile.get("video_preview_every", 5)} steps'))
+        last_video = [None]; original_step = pipe.step
+        def step(scheduler, latents, progress_id, **kwargs):
+            if scheduler is pipe.scheduler:
+                preview.capture_clean(scheduler, latents, progress_id, kwargs['noise_pred'],
+                                      kwargs.get('input_latents'), kwargs.get('inpaint_mask'))
+            output = original_step(scheduler, latents, progress_id, **kwargs)
+            if scheduler is pipe.scheduler:
+                last_video[0] = output.detach()
+            return output
+        pipe.step = step
+        def iterate(values):
+            total = len(values); started[0] = time.monotonic()
+            for index, value in enumerate(values):
+                current_step[0] = index
+                progress(f'Rendering video and audio · step {index + 1}/{total}', index / total * 94)
+                yield value
+                done = index + 1
+                completed_steps[0] = done
+                eta = (time.monotonic() - started[0]) / done * max(0, total - done)
+                progress('Rendering video and audio', done / total * 94, eta)
+                diagnostic_end = diagnostic_steps and done >= diagnostic_steps
+                if last_video[0] is not None: preview.finish_step(last_video[0], done)
+                if diagnostic_end:
+                    progress(f'Diagnostic check: decoding after {done}/{total} sampling steps. Output is unfinished.')
+                    break
+            sampling_finished[0] = True
+        count = align_h3_frames(request.get('duration', 5))
+        seed = resolve_video_seed(request.get('seed', profile.get('video_seed', -1)))
+        progress(f'MiniMax seed: {seed}')
+        args = dict(prompt=generation_prompt(request['prompt'], profile, 'video'), height=int(request['height']), width=int(request['width']),
+            num_frames=count, num_inference_steps=steps, seed=seed, progress_bar_cmd=iterate,
+            ref_image_short_edge=min(768, int(request['height']), int(request['width'])),
+            ref_video_short_edge=min(480, int(request['height']), int(request['width'])),
+            ref_video_max_pixels=int(request['height']) * int(request['width']))
+        if profile.get('video_variant', 'ref2va' if 'ref2va' in Path(profile['video_model']).name.lower() else 'fl2va') == 'ref2va':
+            if not references: raise ValueError('The selected Ref2VA checkpoint requires reference media. Add references or select a pruned FL2VA checkpoint.')
+            args['references'] = references
         else:
-            image = _pil_reference(ref)
-            if image is None:raise ValueError(f'Cannot load conditioning image: {ref.get("name","image")}')
-            if 'timeline_time' in ref:image=image.resize((int(request['width']),int(request['height'])),Image.Resampling.LANCZOS)
-            references.append({'type': 'image', 'image': image})
-    steps = int(request.get('steps', profile.get('video_steps', 20)))
-    diagnostic_steps = max(0, int(request.get('diagnostic_steps', 0)))
-    completed_steps = [0]
-    root = Path(request['job_dir']); started = [None]
-    from .local_previews import H3VideoPreview
-    preview = H3VideoPreview(pipe, profile, root, int(request['width']), int(request['height']), steps, dtype, emit)
-    progress('Preview: ' + ('live predicted latent · reuses sampler prediction · no VAE decoding during sampling' if profile.get('video_preview_mode', 'noisy') == 'noisy'
-                              else f'denoised estimate · every {profile.get("video_preview_every", 5)} steps'))
-    last_video = [None]; original_step = pipe.step
-    def step(scheduler, latents, progress_id, **kwargs):
-        if scheduler is pipe.scheduler:
-            preview.capture_clean(scheduler, latents, progress_id, kwargs['noise_pred'],
-                                  kwargs.get('input_latents'), kwargs.get('inpaint_mask'))
-        output = original_step(scheduler, latents, progress_id, **kwargs)
-        if scheduler is pipe.scheduler:
-            last_video[0] = output.detach()
-        return output
-    pipe.step = step
-    def iterate(values):
-        total = len(values); started[0] = time.monotonic()
-        for index, value in enumerate(values):
-            current_step[0] = index
-            progress(f'Rendering video and audio · step {index + 1}/{total}', index / total * 94)
-            yield value
-            done = index + 1
-            completed_steps[0] = done
-            eta = (time.monotonic() - started[0]) / done * max(0, total - done)
-            progress('Rendering video and audio', done / total * 94, eta)
-            diagnostic_end = diagnostic_steps and done >= diagnostic_steps
-            if last_video[0] is not None: preview.finish_step(last_video[0], done)
-            if diagnostic_end:
-                progress(f'Diagnostic check: decoding after {done}/{total} sampling steps. Output is unfinished.')
-                break
-        sampling_finished[0] = True
-    count = align_h3_frames(request.get('duration', 5))
-    seed = resolve_video_seed(request.get('seed', profile.get('video_seed', -1)))
-    progress(f'MiniMax seed: {seed}')
-    args = dict(prompt=generation_prompt(request['prompt'], profile, 'video'), height=int(request['height']), width=int(request['width']),
-        num_frames=count, num_inference_steps=steps, seed=seed, progress_bar_cmd=iterate,
-        ref_image_short_edge=min(768, int(request['height']), int(request['width'])),
-        ref_video_short_edge=min(480, int(request['height']), int(request['width'])),
-        ref_video_max_pixels=int(request['height']) * int(request['width']))
-    if profile.get('video_variant', 'ref2va' if 'ref2va' in Path(profile['video_model']).name.lower() else 'fl2va') == 'ref2va':
-        if not references: raise ValueError('The selected Ref2VA checkpoint requires reference media. Add references or select a pruned FL2VA checkpoint.')
-        args['references'] = references
-    else:
-        keyframes = [r['image'] for r in references if r['type'] == 'image']
-        indices = [-1 if r.get('role') == 'end' else 0 for r in request.get('references', [])]
-        if keyframes: args.update(keyframes=keyframes, keyframe_indices=indices)
-    video, audio = pipe(**args)
-    progress('Encoding finished video…', 97)
-    path = root / 'video.mp4'
-    write_video_audio(video=video, audio=audio, output_path=str(path), fps=24, audio_sample_rate=32000)
-    emit('result', path=str(path), media='video', duration=count / 24, seed=seed,
-         completed_steps=completed_steps[0], sampling_steps=steps, diagnostic=bool(diagnostic_steps))
+            keyframes = [r['image'] for r in references if r['type'] == 'image']
+            indices = [-1 if r.get('role') == 'end' else 0 for r in request.get('references', [])]
+            if keyframes: args.update(keyframes=keyframes, keyframe_indices=indices)
+        video, audio = pipe(**args)
+        progress('Encoding finished video…', 97)
+        path = root / 'video.mp4'
+        write_video_audio(video=video, audio=audio, output_path=str(path), fps=24, audio_sample_rate=32000)
+        emit('result', path=str(path), media='video', duration=count / 24, seed=seed,
+             completed_steps=completed_steps[0], sampling_steps=steps, diagnostic=bool(diagnostic_steps))
 
 
-def text_generation(request):
+def _load_text_model(profile):
     progress('Starting native writing runtime…')
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer, TextIteratorStreamer
     import threading
-    profile = request['profile']
     model_dir = profile['llm_model']
     if not Path(model_dir).is_dir() or not (Path(model_dir) / 'config.json').is_file():
         raise ValueError('Choose a complete instruction-model folder containing config, tokenizer and safetensors weights. Encoder-only image checkpoints cannot refine prompts.')
@@ -436,6 +463,16 @@ def text_generation(request):
     tokenizer = AutoTokenizer.from_pretrained(model_dir, local_files_only=True, trust_remote_code=False)
     model = AutoModelForCausalLM.from_pretrained(model_dir, device_map='cpu' if profile.get('device') == 'cpu' else 'auto',
         torch_dtype='auto', local_files_only=True, trust_remote_code=False)
+    return tokenizer,model
+
+
+def text_generation(request):
+    import torch
+    from transformers import TextIteratorStreamer
+    import threading
+    from .local_model_cache import model as cached_model
+    profile=request['profile']
+    tokenizer,model=cached_model(request,lambda:_load_text_model(profile))
     # Text-only models receive explicit authored context; never claim they saw media.
     contexts = [{key: item.get(key) for key in ('name', 'prompt', 'duration', 'role', 'kind') if key in item}
                 for item in request.get('images', [])]
@@ -465,7 +502,7 @@ def text_generation(request):
     emit('result', text=text)
 
 
-def main():
+def single_request():
     request = json.loads(Path(sys.argv[1]).read_text(encoding='utf-8'))
     # Bound CPU threads so loading and format conversion do not starve the editor.
     os.environ.setdefault('OMP_NUM_THREADS', '4')
@@ -505,6 +542,53 @@ def main():
             if request.get('hf_token'): message = message.replace(request['hf_token'], '[redacted]')
             emit('error', message=f'{type(error).__name__}: {message}')
             raise SystemExit(1)
+
+
+def serve_requests(first_path):
+    from . import local_model_cache as cache
+    from .local_protocol import capture_terminal, set_job_id
+    from .local_generation import gpu_memory, data_root
+    from filelock import FileLock
+    import gc
+    cache.enable()
+    pending=first_path
+    while pending:
+        request=json.loads(Path(pending).read_text(encoding='utf-8'))
+        set_job_id(request.get('worker_job_id'))
+        with capture_terminal() as terminal:
+            with contextlib.redirect_stdout(sys.stderr):
+                try:
+                    progress('Waiting for the local engine…')
+                    with FileLock(str(data_root()/'inference.lock')):
+                        if not cache.has_model() and request['profile'].get('device','cuda')=='cuda':
+                            memory=gpu_memory()
+                            if memory['total_gb'] and memory['free_gb']<.5:
+                                raise RuntimeError('The GPU is busy with another application. Free GPU memory before starting local generation.')
+                        if request['kind']=='audio':
+                            from .local_audio import generate_audio
+                            generate_audio(request)
+                        else:{'image':image_generation,'video':video_generation,'text':text_generation}[request['kind']](request)
+                except Exception as error:
+                    import traceback
+                    traceback.print_exc(file=sys.stderr)
+                    message=str(error)[:1400]
+                    if request.get('hf_token'):message=message.replace(request['hf_token'],'[redacted]')
+                    pressure=isinstance(error,RuntimeError) and ('out of memory' in message.lower() or 'cuda_error_out_of_memory' in message.lower())
+                    emit('error',message=type(error).__name__+': '+message,memory_pressure=pressure,
+                         recoverable=isinstance(error,ValueError) and request['kind']!='text')
+        request=None
+        gc.collect()
+        for event in terminal:emit(event.pop('kind'),**event)
+        emit('ready')
+        set_job_id(None)
+        pending=sys.stdin.readline().strip()
+    cache.clear()
+
+
+def main():
+    os.environ.setdefault('OMP_NUM_THREADS','4');os.environ.setdefault('MKL_NUM_THREADS','4')
+    if '--resident' in sys.argv:serve_requests(sys.argv[1])
+    else:single_request()
 
 
 if __name__ == '__main__': main()

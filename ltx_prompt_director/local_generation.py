@@ -19,6 +19,7 @@ from uuid import uuid4
 PROFILE_KEY = 'local_generation/profile_v1'
 LOCAL_PROGRESS = ContextVar('local_generation_progress', default=None)
 LOCAL_CANCEL = ContextVar('local_generation_cancel', default=None)
+LOCAL_KEEP_LOADED = ContextVar('local_generation_keep_loaded', default=False)
 DIFFSYNTH_REVISION = '681c456a3e8cf9e17cf2cb9a35297718ed4270ca'
 
 
@@ -161,6 +162,23 @@ def resolve_video_seed(value):
 
 
 def run_request(request, on_event=None, cancel=None, timeout=None):
+    from .local_session import MANAGER, WorkerError
+    if cancel is None:cancel=LOCAL_CANCEL.get()
+    timeout=timeout if timeout is not None else 86400 if request.get('kind')=='video' else 7200
+    inference=request.get('kind') in ('image','video','text','audio')
+    if not inference:return _run_request(request,on_event,cancel,timeout)
+    with MANAGER.access(cancel,timeout):
+        keep=LOCAL_KEEP_LOADED.get()
+        if not keep:MANAGER.close()
+        for attempt in range(2):
+            try:return _run_request(request,on_event,cancel,timeout,MANAGER if keep else None)
+            except WorkerError as error:
+                if not(error.memory_pressure and MANAGER.reused and attempt==0):raise
+                callback=on_event or LOCAL_PROGRESS.get()
+                if callback:callback(dict(kind='progress',message='Freeing cached model memory and retrying this render…'))
+
+
+def _run_request(request, on_event=None, cancel=None, timeout=None, manager=None):
     """Run the worker off the UI thread. Its stdout protocol contains no credentials."""
     if on_event is None: on_event = LOCAL_PROGRESS.get()
     if timeout is None: timeout = 86400 if request.get('kind') == 'video' else 7200
@@ -189,10 +207,18 @@ def run_request(request, on_event=None, cancel=None, timeout=None):
     # site-packages directory or its distribution metadata. ML dependencies
     # must resolve from the selected private interpreter.
     runtime = job / 'runtime'
-    package = runtime / 'ltx_prompt_director'; package.mkdir(parents=True)
+    session=None
+    if manager is not None:
+        from .local_model_cache import runtime_key, file_identity
+        key=(runtime_key(request),file_identity(python),file_identity(str(Path(__file__).with_name('__init__.py'))),os.environ.get('CUDA_VISIBLE_DEVICES'))
+        if manager.current and (manager.current.key!=key or manager.current.process.poll() is not None):manager.close()
+        session=manager.current;manager.reused=session is not None
+        if session is not None:runtime=session.runtime
+    package = runtime / 'ltx_prompt_director'; package.mkdir(parents=True,exist_ok=True)
     source = Path(__file__).parent
-    for module in (source / '__init__.py', *source.glob('local_*.py')):
-        shutil.copy2(module, package / module.name)
+    if session is None:
+        for module in (source / '__init__.py', *source.glob('local_*.py')):
+            shutil.copy2(module, package / module.name)
     env['PYTHONPATH'] = str(runtime)
     events = queue.Queue()
     started = time.monotonic()
@@ -218,13 +244,23 @@ def run_request(request, on_event=None, cancel=None, timeout=None):
         return event
     process = None
     readers = []
+    keep_session=False
+    result_event=None;error_event=None
+    if manager is not None:request['worker_job_id']=job.name
     try:
         path.write_text(json.dumps(request), encoding='utf-8')
         if os.name != 'nt': path.chmod(0o600)
-        process = subprocess.Popen([python, '-m', 'ltx_prompt_director.local_worker', str(path)],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, errors='replace', env=env,
-            cwd=str(job),
-            start_new_session=(os.name != 'nt'))
+        command=[python,'-m','ltx_prompt_director.local_worker',str(path)]
+        if manager is not None:
+            from .local_session import Session
+            if session is None:
+                session=Session(key,command,env,job,runtime);manager.current=session
+            else:session.submit(path)
+            process=session.process;events=session.events
+        else:
+            process = subprocess.Popen(command,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, errors='replace', env=env,
+                cwd=str(job),start_new_session=(os.name != 'nt'))
         def read(stream, protocol=False):
             try:
                 for line in stream:
@@ -234,9 +270,10 @@ def run_request(request, on_event=None, cancel=None, timeout=None):
                     line = clean(line.rstrip())
                     if line: events.put({'kind': 'log', 'message': line[-4000:]})
             finally: events.put(None)
-        for stream, protocol in ((process.stdout, True), (process.stderr, False)):
-            reader = threading.Thread(target=read, args=(stream, protocol), daemon=True)
-            reader.start(); readers.append(reader)
+        if manager is None:
+            for stream, protocol in ((process.stdout, True), (process.stderr, False)):
+                reader = threading.Thread(target=read, args=(stream, protocol), daemon=True)
+                reader.start(); readers.append(reader)
         ended = 0
         while ended < 2:
             if cancel is not None and cancel.is_set(): raise InterruptedError('Local generation cancelled.')
@@ -245,16 +282,29 @@ def run_request(request, on_event=None, cancel=None, timeout=None):
             except queue.Empty: continue
             if event is None:
                 ended += 1; continue
+            if event.get('job_id') and event['job_id']!=job.name:continue
             event = deliver(event)
             if event.get('kind') == 'log':
                 tail.append(event.get('message', '')); tail = tail[-12:]
-            if event.get('kind') == 'error': raise RuntimeError(event.get('message', 'Local engine failed.'))
-            if event.get('kind') == 'result': return event
+            if manager is not None:
+                if event.get('kind')=='error':error_event=event
+                elif event.get('kind')=='result':result_event=event
+                elif event.get('kind')=='ready':
+                    keep_session=error_event is None or error_event.get('recoverable',False)
+                    if error_event:
+                        from .local_session import WorkerError
+                        raise WorkerError(error_event.get('message','Local engine failed.'),memory_pressure=error_event.get('memory_pressure',False))
+                    if result_event is not None:return result_event
+            else:
+                if event.get('kind') == 'error':raise RuntimeError(event.get('message','Local engine failed.'))
+                if event.get('kind') == 'result':return event
         process.wait(timeout=15)
         details = '\n'.join(tail)[-2500:]
         raise RuntimeError(f'Local engine exited with code {process.returncode}.\n{details}')
     finally:
-        if process is not None:
+        if manager is not None:
+            if not keep_session:manager.close()
+        elif process is not None:
             if process.poll() is None:
                 import signal
                 if os.name != 'nt': os.killpg(process.pid, signal.SIGTERM)
@@ -273,7 +323,7 @@ def run_request(request, on_event=None, cancel=None, timeout=None):
             for stream in (process.stdout, process.stderr):
                 if stream: stream.close()
         path.unlink(missing_ok=True)  # Prompt text and raw logs are not retained on disk.
-        shutil.rmtree(runtime, ignore_errors=True)
+        if manager is None:shutil.rmtree(runtime, ignore_errors=True)
 
 
 def flux_image_size(width, height):

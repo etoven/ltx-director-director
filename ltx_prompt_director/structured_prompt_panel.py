@@ -69,10 +69,13 @@ class StructuredPromptPanel(QWidget):
     def subjects(self):
         owner = self.owner; state = self.state(); records = []
         for index, reference in enumerate(owner.active_reference_images()):
-            if reference:
+            reference_id = f'reference:{index}'
+            if reference and (reference_id not in state.get('covered_references', []) or state.get('subjects', {}).get(reference_id)):
                 records.append(dict(id=f'reference:{index}', name=reference.get('name', f'Reference {index + 1}'),
                                     role=reference.get('role', 'identity'), prompt=reference.get('description') or reference.get('prompt') or reference.get('notes', '')))
-        return records + copy.deepcopy(state.get('custom_subjects', []))
+        records += copy.deepcopy(state.get('custom_subjects', []))
+        order = {key: index for index, key in enumerate(state.get('subject_order', []))}
+        return sorted(records, key=lambda item: order.get(item['id'], len(order)))
 
     def refresh(self):
         owner = self.owner
@@ -84,6 +87,8 @@ class StructuredPromptPanel(QWidget):
             state.setdefault('prompts', {}); state.setdefault('sources', {}); state.setdefault('subjects', {}); state.setdefault('fields', {})
             state.setdefault('subject_sources', {})
             source_text = owner.unified_prompt.toPlainText() if owner.unified_workspace else state.get('last_render', '')
+            if state.pop('migration_source_pending', False):
+                state['last_render'] = source_text
             if 'global' not in state:
                 legacy = source_text
                 global_text, prompts = split_legacy(legacy, segments) if legacy else ('', {})

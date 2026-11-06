@@ -118,7 +118,12 @@ class RenderQueue(QObject):
                 self.changed.emit();QTimer.singleShot(0,self._advance)
         try:
             if job.started:job.started()
-            self.executor(job.operation,job.args,lambda result:finish(result),lambda error:finish(error=error),progress=progress,cancel=job.cancel)
+            def operation(*args):
+                from .local_generation import LOCAL_KEEP_LOADED
+                token=LOCAL_KEEP_LOADED.set(job.source=='local')
+                try:return job.operation(*args)
+                finally:LOCAL_KEEP_LOADED.reset(token)
+            self.executor(operation,job.args,lambda result:finish(result),lambda error:finish(error=error),progress=progress,cancel=job.cancel)
         except Exception as error:finish(error=str(error))
 
     def cancel_job(self,job_id):
@@ -137,3 +142,5 @@ class RenderQueue(QObject):
     def shutdown(self):
         self.closing=True
         for job in tuple(self.jobs):self.cancel_job(job.id)
+        from .local_session import MANAGER
+        MANAGER.release_async()

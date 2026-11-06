@@ -11082,7 +11082,8 @@ class MainWindow(QMainWindow):
                 clip['sourceData'] = data_url(clip['media_path'])
         return {
             "app": "ltx-director-director",
-            "projectVersion": 10,
+            "projectVersion": 11,
+            "promptTemplateVersion": 1,
             "videoRenderCache": copy.deepcopy(self.video_render_cache),
             "combinedSources": copy.deepcopy(self.combined_sources),
             "videoExtensions": self.video_extensions,
@@ -11122,6 +11123,8 @@ class MainWindow(QMainWindow):
         }
 
     def load_project_payload(self, payload: dict) -> None:
+        from .prompt_migration import migrate_project
+        payload = migrate_project(payload, self.workspace_definitions)
         self.prompt_template_states = copy.deepcopy(payload.get("promptTemplateStates", {}))
         self.reject_segment_prompt_review()
         from .render_cache import render_cache_from

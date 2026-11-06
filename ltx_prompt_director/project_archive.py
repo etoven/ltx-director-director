@@ -171,7 +171,7 @@ def save_project_archive(path: str | Path, payload: dict, segments: list) -> Non
                     _copy_to_archive(archive,member,stream)
                 source['archiveProject']=member
                 source.pop('projectPath',None)
-            payload["projectVersion"] = 10
+            payload["projectVersion"] = 11
             archive.writestr(MANIFEST, json.dumps(payload, separators=(",", ":"), ensure_ascii=False), compress_type=zipfile.ZIP_DEFLATED, compresslevel=6)
         os.replace(temporary.name, target)
         for frame, segment in zip(payload["frames"], segments):

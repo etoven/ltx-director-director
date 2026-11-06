@@ -8,6 +8,8 @@ Start a local video from **Video Preview → Generate locally**. Generate artwor
 
 One render runs at a time, in submission order. You can keep editing and switch projects while the queue works. Each request keeps the prompt, model settings, reference media and output size it had when submitted. Images return to the original project's segment; an edited or replaced target is preserved. Saved projects retain generated videos as their preview attachment.
 
+The last local model stays loaded between jobs, including while the queue is empty or paused. A different model or loading configuration replaces it. Active cancellation, a failed engine, memory recovery, or closing Director releases it. Each job uses its own prompt, voice and reference conditioning.
+
 Open **Render Queue** from its icon on the right rail. Select a job to see its model, dimensions, state and available progress. A failed job keeps its error in the selected-render details.
 
 ![Render queue cards with space between source labels and the scrollbar](images/render-queue-panel.png)

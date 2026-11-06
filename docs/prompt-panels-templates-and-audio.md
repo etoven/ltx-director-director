@@ -26,6 +26,8 @@ Open **Settings → Workspaces → Workspace templates** and select a MiniMax wo
 
 Choose **Preview output** to see how the layout reads with prompt content. **Save workspace** applies the template. The reset arrow restores the selected model's starting layout. Exporting a workspace includes its layout; saved projects retain their section edits and subject definitions. AI generation receives an explicit schema for the fields in the template, and the application places its response into that layout.
 
+Opening an older MiniMax project separates its saved summary, retention analysis, detailed shot descriptions, sound, music and subject definitions into their template fields. This happens locally once and is recorded when you save the project. Timeline prompts and existing template edits are preserved.
+
 ## Generate dialogue, Foley and music
 
 The audio panels are available alongside every video workspace:
