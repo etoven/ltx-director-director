@@ -32,7 +32,7 @@ The audio panels are available alongside every video workspace:
 
 | Panel | Inputs |
 | --- | --- |
-| Dialogue · IndexTTS 2.5 | Spoken script, voice sample and language |
+| Dialogue · IndexTTS 2.5 | Spoken script, voice sample, language, emotion, strength and speed |
 | Foley · Stable Audio 3 | Sound description, duration and seed |
 | Music · MiniMax Music 3 | Music description, optional tagged lyrics, duration and seed |
 
@@ -41,6 +41,10 @@ The audio panels are available alongside every video workspace:
 Open **Settings → Audio models**, or the audio section of the setup wizard, to choose existing engine environments and model files. **Prepare engine** creates a separate local runtime. **Download models** retrieves the corresponding model files. These operations run in the background.
 
 Write a prompt and choose **Generate**. **Refine prompt with AI before sampling** optionally improves the sampling input in the background using your writing model, while leaving your visible draft intact. Music refinement uses MiniMax's [Music Caption Rewriter](https://github.com/MiniMax-AI/MiniMax-Music3/tree/main/skills/music-caption-rewriter), choosing style references progressively and keeping lyrics separate from the caption.
+
+**Dialogue controls:** Leave Emotion on **Match voice sample** to retain the reference delivery, or choose an emotion and adjust its strength from 0 to 1. **Speed** ranges from 0.5× to 2×; higher values speak faster. These controls apply directly during local IndexTTS sampling.
+
+![Dialogue emotion and speed controls](images/planned-features/indextts-controls.png)
 
 Use the panel's player to listen and seek. **Export audio** saves through the existing download manager and appears in Recent exports. The music ComfyUI button in the header exports an editable Music 3 workflow with the panel's description, lyrics, duration, seed and configured model filenames. Install those models in the receiving ComfyUI instance before running it.
 

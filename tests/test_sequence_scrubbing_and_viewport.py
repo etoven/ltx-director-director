@@ -97,7 +97,7 @@ def test_internal_layout_and_native_prompt_drag_without_outer_scrollbar(tmp_path
     from ltx_prompt_director import ui
     from ltx_prompt_director.workspaces import WorkspaceStore
     app=QApplication.instance() or QApplication([])
-    store=WorkspaceStore(tmp_path/'workspaces')
+    store=WorkspaceStore(tmp_path/'workspaces');store.restore_stock()
     monkeypatch.setattr(ui,'WorkspaceStore',lambda:store)
     monkeypatch.setattr(ui,'project_library_path',lambda:tmp_path)
     monkeypatch.setattr(ui.MainWindow,'restore_startup_workspace',lambda self:None)
@@ -110,7 +110,7 @@ def test_internal_layout_and_native_prompt_drag_without_outer_scrollbar(tmp_path
         assert window.editor_root.layout().indexOf(window.intent_prompt_splitter)<0
         assert window.intent_prompt_splitter.isHidden()
         dock=window.timeline_dock;state=window.saveState()
-        dock.setFloating(True);dock.resize(620,700);QTest.qWait(60)
+        dock.setFloating(True);dock.resize(360,700);QTest.qWait(60)
         assert dock.isFloating() and dock.isVisible()
         assert window.sequence_options_scroll.horizontalScrollBar().maximum()>0
         assert window.sequence_options_scroll.isVisible()

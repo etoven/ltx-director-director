@@ -15,6 +15,8 @@ def _generate_audio(request):
     kind = request['audio_kind']; config = request['audio_config']; output = Path(request['job_dir']) / 'audio.wav'
     progress('Loading ' + {'dialog': 'IndexTTS 2.5', 'foley': 'Stable Audio 3', 'music': 'MiniMax Music 3'}[kind] + '…')
     if kind == 'dialog':
+        from .dialogue_controls import inference_options
+        options = inference_options(request)
         root = Path(config['source']).expanduser()
         sys.path.insert(0, str(root)); os.chdir(root)
         from indextts.infer_v2_5 import IndexTTS2
@@ -24,7 +26,7 @@ def _generate_audio(request):
                         device=request['profile'].get('device', 'cuda'))
         progress('Sampling dialogue…')
         tts.infer(spk_audio_prompt=request['sample'], text=request['prompt'],
-                  lang=request.get('language', 'EN'), output_path=str(output), verbose=False)
+                  lang=request.get('language', 'EN'), output_path=str(output), verbose=False, **options)
     elif kind == 'foley':
         from stable_audio_3 import StableAudioModel
         import soundfile as sf

@@ -45,6 +45,12 @@ class UnifiedEditorTests(unittest.TestCase):
         self.addCleanup(lambda: window.close() if isValid(window) else None)
         return window
 
+    def test_dialogue_emotion_and_speed_controls(self):
+        import tempfile
+        from test_dialogue_controls import test_native_dialogue_controls_preserve_default_and_capture_changes
+        with tempfile.TemporaryDirectory() as folder:
+            test_native_dialogue_controls_preserve_default_and_capture_changes(Path(folder))
+
     def test_onboarding_navigation_readiness_and_guides(self):
         from test_onboarding_design import (test_nested_navigation_status_and_stale_engine_verification,
             test_automatic_setup_preserves_manual_files_and_restores_controls,

@@ -3638,6 +3638,7 @@ class MainWindow(QMainWindow):
                                  self.current_project_name or 'Untitled project')
         self.chrome.update_metrics(max(75,min(200,self.settings.value('ui_text_scale',100,int)))/100)
         self.sync_reference_panel_visibility()
+        self.prompt_surface.sync_workspace()
         from .dock_panels import PanelRails
         from .render_widgets import render_icon
         self.panel_rails=PanelRails(self,[
@@ -6659,6 +6660,9 @@ class MainWindow(QMainWindow):
         if not hasattr(self, 'sequence_options_scroll'):
             return
         scroll = self.sequence_options_scroll
+        preferred_width = self.sequence_controls.sizeHint().width()
+        if self.sequence_options.minimumWidth() != preferred_width:
+            self.sequence_options.setMinimumWidth(preferred_width)
         bar = scroll.horizontalScrollBar()
         height = self.sequence_options.sizeHint().height() + (bar.sizeHint().height() if bar.maximum() else 0) + 2
         if scroll.height() != height:

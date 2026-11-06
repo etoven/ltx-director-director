@@ -47,7 +47,7 @@ class TemplateEditor(QWidget):
     def set_available(self,available):
         for widget in (self.palette_scroll,self.canvas_area,self.reset,self.save_button,self.status):widget.setVisible(available)
         self.note.setVisible(not available)
-        self.note.setText('LTX uses separate global and segment prompts. A unified template does not apply to this workspace.')
+        self.note.setText('Generic Prompt Refine works directly on the supplied text and does not use an output template.' if self.engine == 'minimax_prompt' else 'LTX uses separate global and segment prompts. A unified template does not apply to this workspace.')
     def set_value(self,value):
         self.preview_button.setChecked(False);self.editor.setPlainText(validate_layout(value))
     def value(self):return validate_layout(self.editor.toPlainText())

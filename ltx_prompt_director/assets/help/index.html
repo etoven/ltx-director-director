@@ -1,5 +1,5 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Director · Interactive illustrated manual</title><link rel="stylesheet" href="manual.css"></head><body>
-<aside id="sidebar"><a class="brand" href="#start">DIRECTOR<span>Interactive illustrated manual</span></a><label class="search-label" for="search">Find a feature</label><input id="search" type="search" placeholder="Search the guide…"><nav aria-label="Chapters"><a href="#start">Start here</a><a href="#setup">Setup and local generation</a><a href="#renders">Render queue and panels</a><a href="#extensions">Video extensions and mixes</a><a href="#timeline">Media and timeline</a><a href="#prompts">Prompt workflows</a><a href="#composition">Templates and audio panels</a><a href="#refinement">Refinement and audio</a><a href="#references">MiniMax references</a><a href="#effects">Effects Library</a><a href="#projects">Projects and properties</a><a href="#review">Video and project files</a><a href="#shots">Finished shot sequences</a><a href="#workspaces">Workspaces and exports</a><a href="#comfy">ComfyUI handoff</a><a href="#install">Installation</a></nav><p id="search-status" aria-live="polite"></p><button id="tour-start">Take the quick tour</button><p class="small">Available offline · Aurora 1.13.0a133<br>External provider and source links need internet.</p></aside>
+<aside id="sidebar"><a class="brand" href="#start">DIRECTOR<span>Interactive illustrated manual</span></a><label class="search-label" for="search">Find a feature</label><input id="search" type="search" placeholder="Search the guide…"><nav aria-label="Chapters"><a href="#start">Start here</a><a href="#setup">Setup and local generation</a><a href="#renders">Render queue and panels</a><a href="#extensions">Video extensions and mixes</a><a href="#timeline">Media and timeline</a><a href="#prompts">Prompt workflows</a><a href="#composition">Templates and audio panels</a><a href="#refinement">Refinement and audio</a><a href="#references">MiniMax references</a><a href="#effects">Effects Library</a><a href="#projects">Projects and properties</a><a href="#review">Video and project files</a><a href="#shots">Finished shot sequences</a><a href="#workspaces">Workspaces and exports</a><a href="#comfy">ComfyUI handoff</a><a href="#install">Installation</a></nav><p id="search-status" aria-live="polite"></p><button id="tour-start">Take the quick tour</button><p class="small">Available offline · Aurora 1.13.0a134<br>External provider and source links need internet.</p></aside>
 <main><header class="hero"><div><span class="eyebrow">YOUR CREATIVE WORKSPACE</span><h1>From first idea<br>to a directed sequence.</h1><p>A practical guide to planning, refinement, effects, local generation and production handoff.</p></div><img src="../onboarding/welcome.png" alt="Line-art director’s chair, camera and storyboard frames"></header><aside class="scope-note"><strong>Current editor scope:</strong> Segment Generate/Refine changes the selected beat only. Global acts on the full ordered sequence and rebuilds the combined prompt. The unified editor has independent Generate/Refine controls. Synchronization preserves the source side; timeline-to-combined synchronization uses the whole ordered timeline.</aside>
 <div id="sandbox"><h2>Try the scope controls</h2><p>This guide-only example shows which authored beats a refinement targets.</p><div class="beats"><button class="beat selected" data-beat="0">Opening</button><button class="beat" data-beat="1">Action</button><button class="beat" data-beat="2">Hold</button></div><label>Refine scope <select id="scope"><option value="segment">Selected segment</option><option value="global">Global sequence</option><option value="unified">Unified prompt</option></select></label><p id="scope-result" aria-live="polite"></p></div>
 <section id="start" class="chapter" data-title="Start here"><span class="eyebrow">DIRECTOR GUIDE</span><h1 id="your-complete-guide-to-director">Your complete guide to Director</h1>
@@ -709,7 +709,7 @@ retain their selected roles rather than becoming timeline endpoints.</p>
 <tbody>
 <tr>
 <td>Dialogue · IndexTTS 2.5</td>
-<td>Spoken script, voice sample and language</td>
+<td>Spoken script, voice sample, language, emotion, strength and speed</td>
 </tr>
 <tr>
 <td>Foley · Stable Audio 3</td>
@@ -724,6 +724,8 @@ retain their selected roles rather than becoming timeline endpoints.</p>
 <p><img alt="The music generator alongside prompt and timeline panels" loading="lazy" decoding="async" width="1700" height="1050" src="images/audio-panels.png" /></p>
 <p>Open <strong>Settings → Audio models</strong>, or the audio section of the setup wizard, to choose existing engine environments and model files. <strong>Prepare engine</strong> creates a separate local runtime. <strong>Download models</strong> retrieves the corresponding model files. These operations run in the background.</p>
 <p>Write a prompt and choose <strong>Generate</strong>. <strong>Refine prompt with AI before sampling</strong> optionally improves the sampling input in the background using your writing model, while leaving your visible draft intact. Music refinement uses MiniMax's <a href="https://github.com/MiniMax-AI/MiniMax-Music3/tree/main/skills/music-caption-rewriter">Music Caption Rewriter</a>, choosing style references progressively and keeping lyrics separate from the caption.</p>
+<p><strong>Dialogue controls:</strong> Leave Emotion on <strong>Match voice sample</strong> to retain the reference delivery, or choose an emotion and adjust its strength from 0 to 1. <strong>Speed</strong> ranges from 0.5× to 2×; higher values speak faster. These controls apply directly during local IndexTTS sampling.</p>
+<p><img alt="Dialogue emotion and speed controls" loading="lazy" decoding="async" width="540" height="610" src="images/indextts-controls.png" /></p>
 <p>Use the panel's player to listen and seek. <strong>Export audio</strong> saves through the existing download manager and appears in Recent exports. The music ComfyUI button in the header exports an editable Music 3 workflow with the panel's description, lyrics, duration, seed and configured model filenames. Install those models in the receiving ComfyUI instance before running it.</p>
 <h2 id="choose-the-writing-model-quickly">Choose the writing model quickly</h2>
 <p>Use the model dropdown in the application header to change the model for your next prompt request. It switches the saved choice directly.</p>
@@ -1207,14 +1209,14 @@ setting to add more. The sequence-duration setting remains independent.</p>
 <pre><code class="language-bash">python3 -m venv ~/.venvs/ltx-director
 source ~/.venvs/ltx-director/bin/activate
 python -m pip install --upgrade pip
-python -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a133-py3-none-any.whl'
+python -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a134-py3-none-any.whl'
 prompt-director
 </code></pre>
 <h3 id="windows-powershell">Windows PowerShell</h3>
 <pre><code class="language-powershell">py -m venv &quot;$env:USERPROFILE\ltx-director-venv&quot;
 &amp; &quot;$env:USERPROFILE\ltx-director-venv\Scripts\Activate.ps1&quot;
 python -m pip install --upgrade pip
-python -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a133-py3-none-any.whl'
+python -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a134-py3-none-any.whl'
 prompt-director
 </code></pre>
 <p>On first launch, Prompt Director migrates preferences, custom workspaces, projects and managed media from the previous LTX Director folders. Existing files in the new folders take priority, and the original folders are retained.</p>

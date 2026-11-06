@@ -107,8 +107,24 @@ class AudioGenerationPanel(QWidget):
         self.lyrics = QTextEdit(); self.lyrics.setAcceptRichText(False); self.lyrics.setPlaceholderText('Lyrics and [Verse] / [Chorus] tags (optional for instrumental music)')
         self.lyrics.setMaximumHeight(120)
         if kind == 'dialog':
+            from .dialogue_controls import EMOTIONS
             row = QHBoxLayout(); row.addWidget(self.sample); browse = QPushButton('Sample…'); browse.clicked.connect(self.choose_sample); row.addWidget(browse)
             form.addRow('Voice sample', row); form.addRow('Language', self.language)
+            self.emotion = QComboBox(); self.emotion.addItem('Match voice sample', '')
+            for emotion in EMOTIONS:
+                self.emotion.addItem(emotion.title(), emotion)
+            self.emotion_strength = QDoubleSpinBox(); self.emotion_strength.setRange(0, 1)
+            self.emotion_strength.setSingleStep(.05); self.emotion_strength.setDecimals(2); self.emotion_strength.setValue(.75)
+            self.emotion_strength.setToolTip('Emotion strength: 0 to 1'); self.emotion_strength.setEnabled(False)
+            emotion_row = QHBoxLayout(); emotion_row.addWidget(self.emotion, 1); emotion_row.addWidget(self.emotion_strength)
+            form.addRow('Emotion', emotion_row)
+            self.speed = QDoubleSpinBox(); self.speed.setRange(.5, 2); self.speed.setSingleStep(.1)
+            self.speed.setDecimals(2); self.speed.setValue(1); self.speed.setSuffix('×')
+            self.speed.setToolTip('Speaking speed. 1× keeps the natural pace; higher values speak faster.')
+            form.addRow('Speed', self.speed)
+            self.emotion.currentIndexChanged.connect(lambda: self.emotion_strength.setEnabled(bool(self.emotion.currentData())))
+            self.emotion.currentIndexChanged.connect(self.input_changed)
+            self.emotion_strength.valueChanged.connect(self.input_changed); self.speed.valueChanged.connect(self.input_changed)
         elif kind == 'music':
             outer.insertWidget(1, self.lyrics)
         self.duration = QDoubleSpinBox(); self.duration.setDecimals(2); self.duration.setRange(.1, 300 if kind == 'music' else 47)
@@ -148,11 +164,14 @@ class AudioGenerationPanel(QWidget):
             self.sample.setText(path)
 
     def request(self):
-        return dict(audio_kind=self.kind, audio_config=load_audio_settings(self.owner.settings)[self.kind],
+        request = dict(audio_kind=self.kind, audio_config=load_audio_settings(self.owner.settings)[self.kind],
                     prompt=self.prompt.toPlainText(), lyrics=self.lyrics.toPlainText(), sample=self.sample.text().strip(),
                     language=self.language.currentText(), duration=self.duration.value(), seed=self.seed.value(),
                     refine=self.refine.isChecked(), steps=30 if self.kind == 'music' else 8,
                     timeout=self.owner.settings.value('api_timeout', 400, int))
+        if self.kind == 'dialog':
+            request.update(emotion=self.emotion.currentData(), emotion_strength=self.emotion_strength.value(), speed=self.speed.value())
+        return request
 
     def start(self):
         if not self.prompt.toPlainText().strip():

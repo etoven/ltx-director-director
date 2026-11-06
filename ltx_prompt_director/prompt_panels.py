@@ -127,21 +127,29 @@ class DockPromptSurface(PromptSurface):
 
     def sync_workspace(self):
         owner = self.owner
+        availability = {scope: (owner.workspace_engine != 'shot_sequence'
+                        and (not owner.prompt_only_workspace or scope == 'unified')
+                        and (scope != 'unified' or owner.unified_workspace)) for scope in self.docks}
         for panel in (owner.director_panel, owner.segment_panel, owner.unified_panel, owner.prompt_splitter):
             panel.hide()
         owner.prompt_scope.hide(); owner.intent_prompt_splitter.hide(); self.hide()
-        if self.panel_workspace != owner.project_type:
+        if self.panel_workspace != owner.project_type or availability != self.panel_available:
             for scope, dock in self.docks.items():
                 if self.panel_available.get(scope):
                     self.panel_visibility[scope] = not dock.isHidden()
-                allowed = (owner.workspace_engine != 'shot_sequence'
-                           and (not owner.prompt_only_workspace or scope == 'unified')
-                           and (scope != 'unified' or owner.unified_workspace))
+                allowed = availability[scope]
                 dock.setVisible(allowed and self.panel_visibility.get(scope, True))
                 dock.toggleViewAction().setVisible(allowed)
                 dock.toggleViewAction().setEnabled(allowed)
                 self.panel_available[scope] = allowed
             self.panel_workspace = owner.project_type
+        # Native saved layouts can contain panels from a different workspace.
+        # Reapply availability after restoration without reopening closed docks.
+        for scope, dock in self.docks.items():
+            if not availability[scope]:
+                dock.hide()
+            dock.toggleViewAction().setVisible(availability[scope])
+            dock.toggleViewAction().setEnabled(availability[scope])
         for index in range(self.scope.count()):
             key = self.scope.itemData(index)
             allowed = self.panel_available.get(key, False)
