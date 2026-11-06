@@ -3389,12 +3389,17 @@ class MiniMaxPromptPanel(QFrame):
         self.reference_dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetClosable | QDockWidget.DockWidgetFeature.DockWidgetMovable)
         content = QWidget()
         refs_layout = QVBoxLayout(content)
+        self.generate_references_button = QPushButton('Generate definitions')
+        self.generate_references_button.setToolTip('Update reference definitions in Unified; preserve summary, shots, sound and music')
+        self.generate_references_button.clicked.connect(lambda: owner.prompt_surface.structured.generate_references())
+        refs_layout.addWidget(self.generate_references_button)
         self.reference_targets = []
         for index in range(4):
             target = MiniMaxReferenceSlot(index + 1, owner)
             target.changed.connect(lambda value, slot=index: owner.set_minimax_reference_image(slot, value))
             target.error.connect(lambda message: self.show_message(message, "warning"))
             target.export_requested.connect(lambda slot=index: owner.export_reference_image(slot))
+            target.generate_requested.connect(lambda slot=index: owner.prompt_surface.structured.generate_references(slot))
             refs_layout.addWidget(target)
             self.reference_targets.append(target)
         refs_layout.addStretch()
@@ -3493,6 +3498,9 @@ class MiniMaxPromptPanel(QFrame):
 
     def update_actions(self) -> None:
         self.copy_button.setEnabled(bool(self.editor.toPlainText().strip()))
+        self.generate_references_button.setEnabled(not self.busy and self.owner.unified_workspace)
+        for target in self.reference_targets:
+            target.generate_button.setEnabled(not self.busy and bool(target.value))
         self.retry_button.setEnabled(not self.busy)
         self.recover_button.setEnabled(not self.busy)
         self.copy_recovered_button.setEnabled(bool(getattr(self.owner, "pending_minimax_result", "")))
@@ -9808,11 +9816,22 @@ class MainWindow(QMainWindow):
         if self._loading:
             return
         refs = reference_slots(self.minimax_reference_images)
+        structured = self.prompt_surface.structured
+        old = refs[slot] or {}; new = value or {}
+        if any(old.get(key) != new.get(key) for key in ('kind', 'path', 'image', 'audio_only')):
+            state = structured.state()
+            related = {item['id'] for item in structured.subjects() if item.get('reference_slot') == slot}
+            related.update((f'reference:{slot}', f'reference:{slot}:audio'))
+            state['custom_subjects'] = [item for item in state.get('custom_subjects', []) if item['id'] not in related]
+            for field in ('subjects', 'subject_sources'):
+                for identity in related:state.get(field, {}).pop(identity, None)
+            state['excluded_subjects'] = [key for key in state.get('excluded_subjects', []) if key not in related]
         refs[slot] = dict(value) if value else None
         image_changed = (self.minimax_reference_images[slot] or {}) != (value or {})
         self.minimax_reference_images = reference_slots(refs)
         self.minimax_prompt_cache_key = ""
         self.mark_dirty()
+        structured.schedule()
         if self.minimax_panel:
             self.minimax_panel.refresh_references(update_images=image_changed)
             if not self.minimax_panel.busy:

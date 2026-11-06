@@ -28,6 +28,14 @@ Choose **Preview output** to see how the layout reads with prompt content. **Sav
 
 Opening an older MiniMax project separates its saved summary, retention analysis, detailed shot descriptions, sound, music and subject definitions into their template fields. This happens locally once and is recorded when you save the project. Timeline prompts and existing template edits are preserved.
 
+## Add and update reference definitions
+
+Unified Prompt includes definitions for timeline images and videos, imported image/video/audio references, and a video's paired soundtrack. Audio-only video references supply only an audio definition. Saved Video and Picture definitions stay associated with their source media.
+
+The floating **+** offers **Timeline section**, **Subject definition**, **Image reference**, **Video reference**, and **Audio reference**. Media choices open a file picker and use an available Reference Media slot within the workspace's limits. Use **×** beside a section or subject to remove it. Removing a timeline media definition keeps the timeline media; removing a timeline section removes that section. **Remove** in Reference Media removes the source reference and its paired definitions.
+
+In Reference Media, choose **Generate** or **Regenerate** for one reference, or **Generate definitions** for all definitions. These actions use your selected writing model and update the existing Unified definitions, preserving summary, retention analysis, shot prose, sound, music and timeline timing. A result is discarded if its source media or definitions changed while it was running. Providers that cannot listen to audio use your explicit notes.
+
 ## Generate dialogue, Foley and music
 
 The audio panels are available alongside every video workspace:

@@ -8,7 +8,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QBuffer, QEvent, QIODevice, QMimeData, QStandardPaths, QUrl, Qt, Signal
 from PySide6.QtGui import QAction, QDrag, QImage, QPixmap, QIcon
-from PySide6.QtWidgets import QApplication, QCheckBox, QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton, QVBoxLayout
+from PySide6.QtWidgets import QApplication, QCheckBox, QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton, QVBoxLayout, QSizePolicy
 
 from .minimax_reference import REFERENCE_ROLES
 from .reference_media import AUDIO_SUFFIXES, import_reference
@@ -19,6 +19,7 @@ class MiniMaxReferenceSlot(QFrame):
     changed = Signal(object)
     error = Signal(str)
     export_requested = Signal()
+    generate_requested = Signal()
 
     def __init__(self, number: int, owner=None):
         super().__init__()
@@ -35,6 +36,7 @@ class MiniMaxReferenceSlot(QFrame):
         layout.setContentsMargins(9, 6, 9, 6)
         row = QHBoxLayout()
         self.title = QLabel(f"REFERENCE {number} · untimed")
+        self.title.setWordWrap(True); self.title.setMinimumWidth(0)
         self.title.setObjectName("sectionLabel")
         row.addWidget(self.title, 1)
         for text, callback in (("Browse", self.browse), ("Paste", self.paste)):
@@ -49,6 +51,17 @@ class MiniMaxReferenceSlot(QFrame):
         self.clear_action.setEnabled(False)
         self.clear_action.triggered.connect(self.clear)
         layout.addLayout(row)
+        actions = QHBoxLayout()
+        self.generate_button = QPushButton('Generate')
+        self.generate_button.setAccessibleName('Generate reference definition')
+        self.generate_button.setToolTip('Generate or regenerate this reference in the existing Unified prompt')
+        self.generate_button.clicked.connect(self.generate_requested.emit)
+        self.generate_button.setEnabled(False)
+        actions.addWidget(self.generate_button)
+        self.remove_button = QPushButton('Remove')
+        self.remove_button.clicked.connect(self.clear); self.remove_button.setEnabled(False)
+        actions.addWidget(self.remove_button)
+        layout.addLayout(actions)
         body = QHBoxLayout()
         self.preview = QLabel()
         self._source_pixmap=QPixmap()
@@ -68,14 +81,17 @@ class MiniMaxReferenceSlot(QFrame):
         self.filename.hide()
         self.filename.setTextFormat(Qt.TextFormat.PlainText)
         self.filename.setMaximumWidth(300)
+        self.filename.setWordWrap(True); self.filename.setMinimumWidth(0)
         fields.addWidget(self.filename)
         self.role = QComboBox()
+        self.role.setMinimumWidth(0); self.role.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         for key, label in REFERENCE_ROLES.items():
             self.role.addItem(label, key)
         self.role.setToolTip("What this reference image should control")
         self.role.currentIndexChanged.connect(self.metadata_changed)
         fields.addWidget(self.role)
         self.notes = QLineEdit()
+        self.notes.setMinimumWidth(0)
         self.notes.setPlaceholderText("Optional: subject or reference instructions")
         self.notes.textChanged.connect(self.metadata_changed)
         fields.addWidget(self.notes)
@@ -95,6 +111,9 @@ class MiniMaxReferenceSlot(QFrame):
         self.value = dict(value) if value else None
         self.export_action.setEnabled(bool(value and (value.get("image") or value.get("path"))))
         self.clear_action.setEnabled(bool(value))
+        self.generate_button.setEnabled(bool(value) and not bool(self.owner and self.owner.ai_busy))
+        self.generate_button.setText('Regenerate' if value and value.get('description') else 'Generate')
+        self.remove_button.setEnabled(bool(value))
         self.preview.setCursor(Qt.CursorShape.OpenHandCursor if value else Qt.CursorShape.ArrowCursor)
         self.audio_only.blockSignals(True)
         self.audio_only.setVisible(bool(value and value.get("kind") == "video"))

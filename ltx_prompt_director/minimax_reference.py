@@ -57,7 +57,7 @@ def reference_slots(value: object) -> list[dict | None]:
         result[index] = {'name':str(item.get('name') or f'Reference {index+1}'),
             'role':item.get('role') if item.get('role') in REFERENCE_ROLES else 'identity',
             'notes':str(item.get('notes',''))}
-        for key in ('kind','path','image','audio_path','frame_count','archiveMedia','archiveAudio'):
+        for key in ('kind','path','image','audio_path','frame_count','archiveMedia','archiveAudio','description','audio_description'):
             if key in item:
                 result[index][key] = item[key]
         if kind == 'video':

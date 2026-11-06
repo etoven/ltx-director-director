@@ -36,8 +36,10 @@ class StructuredPromptPanel(QWidget):
         self.reveal_timer.timeout.connect(self.reveal_selected)
         outer = QHBoxLayout(self); outer.setContentsMargins(0, 0, 0, 0)
         gutter = QVBoxLayout(); outer.addLayout(gutter)
-        self.add = QPushButton('+'); self.add.setFixedWidth(32); self.add.setToolTip('Add a timeline section or subject')
+        self.add = QPushButton('+'); self.add.setFixedWidth(32); self.add.setToolTip('Add a timeline section, subject, image, video or audio reference')
         menu = QMenu(self.add); menu.addAction('Timeline section', self.add_segment); menu.addAction('Subject definition', self.add_subject)
+        for kind in ('image', 'video', 'audio'):
+            menu.addAction(kind.title() + ' reference…', lambda checked=False, kind=kind: self.add_reference(kind))
         self.add.setMenu(menu); gutter.addWidget(self.add); gutter.addStretch()
         self.scroll = QScrollArea(); self.scroll.setWidgetResizable(True); outer.addWidget(self.scroll, 1)
         self.content = QWidget(); self.parts = QVBoxLayout(self.content); self.parts.setContentsMargins(3, 3, 3, 3)
@@ -67,15 +69,8 @@ class StructuredPromptPanel(QWidget):
         return list(owner.segments)
 
     def subjects(self):
-        owner = self.owner; state = self.state(); records = []
-        for index, reference in enumerate(owner.active_reference_images()):
-            reference_id = f'reference:{index}'
-            if reference and (reference_id not in state.get('covered_references', []) or state.get('subjects', {}).get(reference_id)):
-                records.append(dict(id=f'reference:{index}', name=reference.get('name', f'Reference {index + 1}'),
-                                    role=reference.get('role', 'identity'), prompt=reference.get('description') or reference.get('prompt') or reference.get('notes', '')))
-        records += copy.deepcopy(state.get('custom_subjects', []))
-        order = {key: index for index, key in enumerate(state.get('subject_order', []))}
-        return sorted(records, key=lambda item: order.get(item['id'], len(order)))
+        from .prompt_references import subjects
+        return subjects(self.segments(), self.owner.active_reference_images(), self.state())
 
     def refresh(self):
         owner = self.owner
@@ -217,6 +212,12 @@ class StructuredPromptPanel(QWidget):
                 field.setToolTip(f'{label} time · edit to move or resize the timeline segment')
                 field.textEdited.connect(lambda _, sid=key, is_end=end: self.edit_time(sid, is_end))
                 header.addWidget(field); fields.append(field)
+        if segment or key.startswith(('reference:', 'subject:')):
+            remove = QPushButton('×'); remove.setFixedWidth(26)
+            remove.setAccessibleName('Remove ' + title)
+            remove.setToolTip('Remove timeline section' if segment else 'Remove reference or subject definition')
+            remove.clicked.connect(lambda checked=False: self.remove_part(key))
+            header.addWidget(remove)
         layout.addLayout(header)
         editor = QPlainTextEdit(); editor.setMinimumHeight(70); editor.setMaximumHeight(180)
         editor.setStyleSheet('QPlainTextEdit { background: rgba(128, 148, 170, 0.09); border: 1px solid #485360; border-radius: 4px; }')
@@ -296,6 +297,81 @@ class StructuredPromptPanel(QWidget):
         owner.refresh_timeline(len(owner.segments) - 1); owner.mark_dirty(); self.schedule()
 
     def add_subject(self):
+        if self.owner.ai_busy:return
         state = self.state(); records = state.setdefault('custom_subjects', [])
         records.append(dict(id='subject:' + uuid4().hex, name=f'Subject {len(records) + 1}', prompt='', role='identity'))
         self.owner.mark_dirty(); self.schedule()
+
+    def add_reference(self, kind):
+        if self.owner.ai_busy:return
+        owner = self.owner
+        limit = owner.workspace_definition.get('references', {}).get('untimed_slots', 0)
+        slot = next((i for i, item in enumerate(owner.minimax_reference_images[:limit]) if not item), None)
+        if slot is None:
+            self.status.setText('No reference slots available in this workspace. Remove a reference or choose a reference workspace.')
+            return
+        from .file_dialogs import choose_document_open
+        filters = dict(image='Images (*.png *.jpg *.jpeg *.webp *.bmp *.tif *.tiff)',
+                       video='Videos (*.mp4 *.webm *.mov *.mkv)', audio='Audio (*.wav *.mp3 *.flac *.ogg *.m4a *.aac *.opus)')
+        path = choose_document_open(self, 'Add ' + kind + ' reference', '', filters[kind])
+        if path:
+            owner.show_reference_images()
+            owner.minimax_panel.reference_targets[slot].load_path(path)
+
+    def remove_part(self, key):
+        if self.owner.ai_busy:return
+        owner = self.owner; state = self.state()
+        subject = next((item for item in self.subjects() if item['id'] == key), None)
+        if subject:
+            slot = subject.get('reference_slot')
+            if slot is not None:
+                # Clear the source reference as well as all its paired definitions.
+                related = [item['id'] for item in self.subjects() if item.get('reference_slot') == slot]
+                owner.set_minimax_reference_image(slot, None)
+            else:
+                related = [key]
+                if subject.get('timeline_id'):
+                    state.setdefault('excluded_subjects', []).append(key)
+            state['custom_subjects'] = [item for item in state.get('custom_subjects', []) if item['id'] not in related]
+            for field in ('subjects', 'subject_sources'):
+                for identity in related:state.get(field, {}).pop(identity, None)
+        else:
+            owner.delete_by_id(key)
+            for field in ('prompts', 'sources'):state.get(field, {}).pop(key, None)
+        owner.mark_dirty(); self.refresh()
+
+    def generate_references(self, slot=None):
+        owner = self.owner
+        if owner.ai_busy or not owner.unified_workspace:return
+        self.refresh()
+        state = self.state()
+        selected = [dict(item, prompt=state.get('subjects', {}).get(item['id'], item['prompt']))
+                    for item in self.subjects() if slot is None or item.get('reference_slot') == slot]
+        if not selected:
+            self.status.setText('Add reference media or a subject definition first.'); return
+        credentials = owner.ai_credentials()
+        if not credentials:return
+        from .prompt_references import generate_definitions
+        segments = copy.deepcopy(self.segments()); references = copy.deepcopy(owner.active_reference_images())
+        snapshot = (owner.workspace_revision, owner.current_project_id, owner.project_type, owner._active_render_group)
+        def finished(result):
+            owner.set_ai_controls_enabled(True)
+            current = (owner.workspace_revision, owner.current_project_id, owner.project_type, owner._active_render_group)
+            if current != snapshot or references != owner.active_reference_images() or [s.to_dict() for s in segments] != [s.to_dict() for s in self.segments()]:
+                self.status.setText('References changed; generated definitions were discarded.'); return
+            live = self.state()
+            if any(live.get('subjects', {}).get(item['id'], item['prompt']) != item['prompt'] for item in selected):
+                self.status.setText('Definitions changed; generated definitions were discarded.'); return
+            live.setdefault('subjects', {}).update(result)
+            for index in {item['reference_slot'] for item in selected if item.get('reference_slot') is not None}:
+                value = dict(owner.minimax_reference_images[index])
+                for item in selected:
+                    if item.get('reference_slot') == index:
+                        field = 'audio_description' if item.get('media_kind') == 'audio' and value.get('kind') == 'video' and not value.get('audio_only') else 'description'
+                        value[field] = result[item['id']]
+                owner.set_minimax_reference_image(index, value)
+            owner.mark_dirty(); self.refresh()
+            self.status.setText('Reference definitions updated.')
+        owner.start_ai_worker(generate_definitions,
+            (segments, references, selected, *credentials, owner.settings.value('api_timeout', 400, int)),
+            'Generating reference definitions…', finished, review_text=False)
