@@ -49,11 +49,13 @@ def test_queue_source_labels_stay_in_viewport_at_narrow_width_and_large_text():
     queue.shutdown();panel.close()
 
 
-def make_window():
+def make_window(*, restore_geometry=False):
     from ltx_prompt_director import ui
     with patch.object(ui.MainWindow,'restore_startup_workspace'),patch.object(ui.MainWindow,'keep_window_on_screen'):
         w=ui.MainWindow()
-    w._close_saves_queued=True;w.resize(1600,950);w.show();QTest.qWait(50)
+    w._close_saves_queued=True
+    if not restore_geometry:w.resize(1600,950)
+    w.show();QTest.qWait(50)
     return w
 
 
@@ -389,6 +391,8 @@ def test_local_video_queue_captures_prompt_and_runs_after_prior_project(tmp_path
 def test_saved_native_layout_restores_outer_rails_and_selected_panel():
     first=make_window()
     first._restoring_layout=False
+    first.showMaximized();QTest.qWait(30)
+    maximized_geometry=first.saveGeometry()
     first.panel_rails.activate(first.render_queue_dock);QTest.qWait(50)
     first.resizeDocks([first.render_queue_dock],[380],Qt.Orientation.Horizontal);QTest.qWait(20)
     from PySide6.QtWidgets import QDockWidget
@@ -397,9 +401,12 @@ def test_saved_native_layout_restores_outer_rails_and_selected_panel():
     first.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea,legacy)
     legacy.setFloating(True)
     first.project_dirty=False;first.close()
-    second=make_window()
+    first.settings.setValue('window/geometry',maximized_geometry);first.settings.sync()
+    second=make_window(restore_geometry=True)
     try:
         QTest.qWait(50)
+        assert second.isVisible()
+        assert second.settings.contains('window/geometry')
         assert not second.render_queue_dock.isHidden()
         assert second.render_queue_dock.width()>=260
         left=second.panel_rails.rails['left'];right=second.panel_rails.rails['right']

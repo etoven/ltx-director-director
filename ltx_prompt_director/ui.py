@@ -3620,8 +3620,6 @@ class MainWindow(QMainWindow):
         self._apply_theme()
         geometry = self.settings.value("window/geometry")
         state = self.settings.value("window/state")
-        if geometry:
-            self.restoreGeometry(geometry)
         if state:
             self.restoreState(state)
         else:
@@ -3658,6 +3656,11 @@ class MainWindow(QMainWindow):
         self.tabifiedDockWidgetActivated.connect(lambda *_: self.queue_project_panel_width_restore())
         QTimer.singleShot(0, self.restore_startup_workspace)
         self.update_window_title()
+        # In particular on Wayland, restoring maximized geometry before moving
+        # the toolbar into the header leaves Qt's toolbar layout in transition.
+        # Finish all chrome/dock construction before applying the saved extent.
+        if geometry:
+            self.restoreGeometry(geometry)
 
     def open_catalog_viewer(self, entry):
         entries = [self.media_catalog.tiles.item(i).data(Qt.ItemDataRole.UserRole)
