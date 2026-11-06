@@ -27,107 +27,60 @@ def window():
 def test_one_surface_keeps_documents_and_scope_actions_across_workspaces():
     w = window()
     try:
-        generic=copy.deepcopy(w.workspace_definitions['ltx'])
-        generic.update(id='panel_generic',name='Generic demo',engine='generic',prompt_mode='unified')
-        w.workspace_definitions['panel_generic']=generic
-        w.project_type_combo.addItem('Generic demo','panel_generic')
-        for mode in ('ltx', 'minimax_frames', 'minimax_references', 'panel_generic'):
-            w.set_project_type(mode)
-            w.timeline.setCurrentRow(0)
-            surface = w.prompt_surface
+        for mode in ('ltx', 'minimax_frames', 'minimax_references'):
+            w.set_project_type(mode);w.timeline.setCurrentRow(0)
+            surface=w.prompt_surface
             w.intent.setPlainText('Direct the whole sequence')
-            surface.select('segment')
-            editor = surface.editors.currentWidget()
+            editor=w.intent_segment_prompt if w.unified_workspace else w.segment_prompt
             editor.setPlainText('Authored first beat')
-            surface.select('global')
-            assert surface.editors.currentWidget() is w.intent
-            surface.select('unified')
-            production = surface.editors.currentWidget() if w.unified_workspace else w.global_prompt
-            assert (surface.scope.currentData()=='unified')==w.unified_workspace
-            production.setPlainText('Independent production draft')
-            surface.select('segment')
-            assert surface.editors.currentWidget() is editor
-            assert w.segments[0].prompt == 'Authored first beat'
-            surface.select('unified')
-            if w.unified_workspace:assert surface.editors.currentWidget() is production
-            assert production.toPlainText() == 'Independent production draft'
-            assert w.intent.toPlainText() == 'Direct the whole sequence'
-            assert all(p.isHidden() for p in (w.director_panel,w.segment_panel,w.unified_panel))
-            for scope, method in [('segment','generate_upper_prompt'),('global','refine_upper_prompt'),
-                                  ('unified','refine_combined_prompt' if w.unified_workspace else None)]:
-                surface.select(scope)
-                if method:
-                    with patch.object(w,method) as run:
-                        surface.run(scope!='segment');run.assert_called_once()
-            surface.select('segment')
-            w.timeline.setCurrentRow(1)
-            w.reload_clicked_segment(w.timeline.item(1))
-            assert surface.editors.currentWidget().toPlainText() == 'Second action'
-            state=w.capture_workspace_state()
-            w.restore_workspace_state(state)
-            assert surface.scope.currentData()==w.prompt_scope.currentData()=='segment'
-            assert surface.editors.currentWidget().toPlainText()==w.current_segment().prompt
+            assert w.segments[0].prompt=='Authored first beat'
+            assert surface.scope.isHidden()
+            for scope, method in [('segment','generate_upper_prompt'),('global','refine_upper_prompt')]:
+                with patch.object(w,method) as run:
+                    surface.run_panel(scope,scope=='global');run.assert_called_once()
+            if w.unified_workspace:
+                surface.structured.refresh()
+                assert 'Authored first beat' in w.unified_prompt.toPlainText()
+                assert 'Direct the whole sequence' in w.unified_prompt.toPlainText()
+            w.timeline.setCurrentRow(1);w.reload_clicked_segment(w.timeline.item(1))
+            assert editor.toPlainText()=='Second action'
+            state=w.capture_workspace_state();w.restore_workspace_state(state)
             assert w.segments[1].prompt=='Second action'
-            assert production.toPlainText()=='Independent production draft'
+            assert w.intent.toPlainText()=='Direct the whole sequence'
     finally:
         w.project_dirty=False;w.close()
-
 
 def test_segmented_workflows_hide_unified_and_preserve_stored_production():
     w=window()
     try:
         surface=w.prompt_surface
         w.global_prompt.setPlainText('Preserve stored production text')
-        w.settings.setValue('prompt_surface_scope/ltx','unified')
         for mode in ['minimax_frames','ltx']:
             w.set_project_type(mode)
-        index=surface.scope.findData('unified')
-        assert not surface.scope.model().item(index).isEnabled()
-        assert surface.scope.view().isRowHidden(index)
-        assert surface.scope.currentData()=='segment'
+        assert w.unified_prompt_dock.isHidden()
+        assert not w.global_prompt_dock.isHidden() and not w.segment_prompt_dock.isHidden()
         surface.select('unified')
-        assert surface.scope.currentData()=='segment'
-        surface.scope.setCurrentIndex(index)
-        assert surface.scope.currentData()=='segment'
-        for scope in ['global','segment']:
-            surface.select(scope);assert surface.scope.currentData()==scope
+        assert surface.scope.currentData()!='unified'
         assert w.global_prompt.toPlainText()=='Preserve stored production text'
-        generic=copy.deepcopy(w.workspace_definitions['ltx'])
-        generic.update(id='panel_segmented',engine='generic',prompt_mode='segmented')
-        w.workspace_definitions[generic['id']]=generic
-        w.project_type_combo.addItem('Segmented',generic['id'])
-        w.set_project_type(generic['id'])
-        assert surface.scope.view().isRowHidden(index)
         w.set_project_type('minimax_frames')
-        assert surface.scope.model().item(index).isEnabled()
-        assert not surface.scope.view().isRowHidden(index)
+        assert not w.unified_prompt_dock.isHidden()
         surface.select('unified');assert surface.scope.currentData()=='unified'
     finally:
         w.project_dirty=False;w.close()
-
 
 def test_prompt_only_scope_and_timing_overview_remain_available():
     w=window()
     try:
         w.set_project_type('minimax_references');w.resize(1400,900);w.show();QTest.qWait(60)
-        assert not w.conditioning_guide.isHidden()
-        assert not w.conditioning_height_handle.isHidden()
-        assert w.conditioning_guide.height()>0
-        for scope in ('segment','global','unified'):
-            w.prompt_surface.select(scope)
-            assert not w.conditioning_guide.isHidden()
-            assert w.prompt_surface.editors.currentWidget().isVisible()
+        assert not w.conditioning_guide.isHidden() and w.conditioning_guide.height()>0
+        assert all(dock.isVisible() for dock in w.prompt_surface.docks.values())
         w.set_project_type('minimax_prompt_refinement')
-        assert w.prompt_surface.scope.currentData()=='unified'
-        assert w.prompt_surface.editors.currentWidget() is w.unified_prompt
+        assert w.prompt_surface.unified_stack.currentWidget() is w.unified_prompt
+        assert w.global_prompt_dock.isHidden() and w.segment_prompt_dock.isHidden()
+        assert not w.unified_prompt_dock.isHidden()
         assert w.conditioning_guide.isHidden()
-        assert not w.prompt_surface.scope.model().item(0).isEnabled()
-        w.set_project_type('shot_sequence')
-        assert w.prompt_surface.isHidden()
-        assert not w.shot_sequence_panel.isHidden()
     finally:
         w.project_dirty=False;w.close()
-
 
 def test_project_browser_filters_navigation_and_view_preserve_selection():
     w=window()
@@ -192,18 +145,13 @@ def test_panel_controls_fit_reference_and_narrow_layouts():
         for scale,width,height in [(100,1400,900),(100,1080,800),(120,1400,1000)]:
             w.settings.setValue('ui_text_scale',scale);w._apply_theme();w.resize(width,height);w.show();QTest.qWait(60)
             surface=w.prompt_surface
-            for control in (surface.quick,surface.generate,surface.refine):
-                assert surface.rail.rect().contains(control.geometry())
-                assert control.height()>=control.fontMetrics().height()
-            assert surface.scope.parent() is surface
-            assert surface.scope.geometry().bottom()<surface.body.geometry().top()
-            assert surface.scope.width()>=surface.width()-24
-            assert surface.collapse in surface.scope.actions()
-            for scope,label in [('segment','SEGMENT PROMPT'),('global','GLOBAL PROMPT'),('unified','UNIFIED PROMPT')]:
-                surface.select(scope)
-                assert surface.scope.currentText()==label
-            assert surface.width()<=w.editor_root.width()
-            assert surface.editors.width()>150
+            assert surface.scope.isHidden()
+            for dock in surface.docks.values():
+                assert dock.width()>=250
+                for control in dock.findChildren(ui.QPushButton, 'promptAction'):
+                    assert control.height()>=control.fontMetrics().height()
+                    assert control.parentWidget().rect().contains(control.geometry())
+            assert surface.segment_stack.width()>150
             assert not w.conditioning_guide.isHidden()
         image=QImage(str(Path(ui.__file__).parent/'assets/icon.png'))
         assert image.hasAlphaChannel() and image.pixelColor(0,0).alpha()==0

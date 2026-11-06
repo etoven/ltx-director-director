@@ -205,14 +205,14 @@ def refine_shared_production_prompt(provider: str, model: str, api_key: str, cur
 def refine_minimax_text_prompt(provider: str, model: str, api_key: str, current_prompt: str, timeout: int = 400) -> str:
     """Refine annotated text without receiving any timeline or media context."""
     if not current_prompt.strip():
-        raise ValueError("Write or paste a MiniMax prompt before refining it.")
+        raise ValueError("Write or paste a prompt before refining it.")
     rules = render_workspace_prompt('minimax_prompt_refinement', 'refine', {
         'current_prompt': current_prompt.strip(),
     })
     from .prompt_tags import prompt_annotations
     annotations = prompt_annotations(current_prompt)
     rules += '\n\nEXPLICIT ANNOTATION EDIT REQUESTS (highest priority):\n' + (annotations or 'No annotations. Improve clarity, continuity and production readiness while preserving intent.')
-    rules += '\nApply every requested edit in the returned text, rather than merely retaining its instruction. A leading /refine annotation before the scene applies to the whole prompt unless it explicitly identifies a narrower passage. Requests such as "all this" refer to the complete prompt. Preservation rules do not block changes required by those requests. For a continuous-shot request, reconcile camera and action wording throughout the scene into one uninterrupted shot; remove contradictory cuts or shot transitions, and preserve reference alignment and sound unless explicitly asked to change them. Verify the resulting prose satisfies each request before returning.'
+    rules += '\nApply every requested edit in the returned text rather than merely retaining its instruction. A leading /refine annotation applies to the whole prompt unless it identifies a narrower passage. Preserve the author\'s model and task conventions. Verify that the resulting prompt satisfies each request before returning.'
     rules += '\nRESPONSE TRANSPORT: Return strict JSON with one nonempty "prompt" string containing the complete refined text. No segment records, timed_actions or commentary.'
     raw = _structured_raw([], provider, model, api_key, rules, timeout, schema=response_schemas.PROMPT)
     return _extract_minimax_h3_prompt(raw)
@@ -928,6 +928,47 @@ def _provider_raw(images: list[dict], provider: str, model: str, key: str, rules
 
 def _structured_raw(images, provider, model, key, rules, timeout, *, schema):
     """Bind an explicit operation contract for this worker's entire request."""
+    from .output_templates import ACTIVE_OUTPUT, template_contract, render_response
+    context = ACTIVE_OUTPUT.get()
+    if context is not None and schema.get('title') == 'combined_timeline':
+        contract = copy.deepcopy(schema)
+        contract['title'] = 'combined_template_variables'
+        contract['properties'].pop('prompt')
+        fields = template_contract(context)['properties']
+        contract['properties'].update(variables=fields['variables'], subjects=fields['subjects'])
+        contract['required'] = list(contract['properties'])
+        rules += ('\n\nOUTPUT TEMPLATE VARIABLES: The explicit JSON schema below replaces the free-form prompt '
+                  'field. Fill the named document fields in variables, subject descriptions in subjects, '
+                  'and each complete section body in segments[].prompt. Never duplicate headings or timecodes '
+                  'inside these values. Preserve the requested timeline edits. The application renders the '
+                  'workspace layout from the returned segment order and durations. Retain every subject ID.\n'
+                  + json.dumps(context, ensure_ascii=False) + '\nOUTPUT SCHEMA:\n' + json.dumps(contract))
+        with response_schemas.using(contract):
+            raw = _provider_raw(images, provider, model, key, rules, timeout)
+            try:
+                response_schemas.validate(raw)
+                value = json.loads(raw)
+                output_context = {**context, 'segments': value['segments']}
+                variables = dict(variables=value.pop('variables'), subjects=value.pop('subjects'),
+                                 segments=[dict(id=s['id'], prompt=s['prompt']) for s in value['segments']])
+                value['prompt'] = json.loads(render_response(json.dumps(variables), output_context))['prompt']
+                return json.dumps(value, ensure_ascii=False)
+            except ValueError as error:
+                raise AIResponseFormatError('Invalid combined template variables: ' + str(error)) from error
+    if context is not None and schema == response_schemas.PROMPT:
+        contract = template_contract(context)
+        rules += ('\n\nOUTPUT LAYOUT CONTRACT: Return only the JSON template variables in the supplied schema. '
+                  'Do not return a monolithic prompt or duplicate headings/timecodes in prose. '
+                  'Keep every segment and subject ID in order. Fill each named document field in variables. '
+                  'The application renders the model-specific template.\nINPUT LAYOUT AND IDENTITIES:\n'
+                  + json.dumps(context, ensure_ascii=False) + '\nEXPLICIT OUTPUT SCHEMA:\n' + json.dumps(contract))
+        with response_schemas.using(contract):
+            raw = _provider_raw(images, provider, model, key, rules, timeout)
+            try:
+                response_schemas.validate(raw)
+                return render_response(raw, context)
+            except ValueError as error:
+                raise AIResponseFormatError('Invalid production template variables: ' + str(error)) from error
     with response_schemas.using(schema):
         return _provider_raw(images, provider, model, key, rules, timeout)
 

@@ -15,6 +15,7 @@ chapters = [
  ('extensions', 'Video extensions and mixes', ROOT / 'docs/video-extensions.md'),
  ('timeline', 'Media and timeline', ROOT / 'docs/media-and-timeline.md'),
  ('prompts', 'Prompt workflows', ROOT / 'docs/unified-workflows.md'),
+ ('composition', 'Templates and audio panels', ROOT / 'docs/prompt-panels-templates-and-audio.md'),
  ('refinement', 'Refinement and audio', ROOT / 'docs/refinement-and-audio.md'),
  ('references', 'MiniMax references', ROOT / 'docs/minimax-references.md'),
  ('effects', 'Effects Library', ROOT / 'docs/effects-library.md'),

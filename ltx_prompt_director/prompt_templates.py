@@ -93,7 +93,7 @@ def stock_prompt(engine: str, kind: str) -> str:
 def render_workspace_prompt(engine: str, kind: str, values: dict) -> str:
     configured = WORKSPACE_PROMPTS.get()
     source = configured.get(kind, stock_prompt(engine, kind)) if isinstance(configured, dict) else stock_prompt(engine, kind)
-    if engine.startswith('minimax_'):
+    if engine.startswith('minimax_') and engine != 'minimax_prompt_refinement':
         source = minimax_timing_template(source)
     template = Template(source)
     result = template.safe_substitute(values)
@@ -102,4 +102,4 @@ def render_workspace_prompt(engine: str, kind: str, values: dict) -> str:
     for key in ("director_intent", "authoritative_intent", "current_prompt", "refinement_instructions", "asset_map", "intervals", "reference_map", "ordered_plan"):
         if key in values and key not in present:
             result += f"\n\n{key.replace('_', ' ').upper()}:\n{values[key]}"
-    return result + CONTENT_FIDELITY + FRAME_MOTION_GUIDANCE
+    return result + CONTENT_FIDELITY + ('' if engine == 'minimax_prompt_refinement' else FRAME_MOTION_GUIDANCE)

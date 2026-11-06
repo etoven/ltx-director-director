@@ -91,44 +91,35 @@ def test_modes_and_long_prompts_stay_within_screen_and_reset_confirms(tmp_path,m
 
 
 def test_internal_layout_and_native_prompt_drag_without_outer_scrollbar(tmp_path,monkeypatch):
-    from PySide6.QtWidgets import QScrollArea
+    from PySide6.QtCore import QSettings
+    from PySide6.QtWidgets import QApplication
+    from PySide6.QtTest import QTest
     from ltx_prompt_director import ui
     from ltx_prompt_director.workspaces import WorkspaceStore
     app=QApplication.instance() or QApplication([])
     store=WorkspaceStore(tmp_path/'workspaces')
-    store.restore_stock()
     monkeypatch.setattr(ui,'WorkspaceStore',lambda:store)
     monkeypatch.setattr(ui,'project_library_path',lambda:tmp_path)
     monkeypatch.setattr(ui.MainWindow,'restore_startup_workspace',lambda self:None)
-    window=ui.MainWindow();window.settings=QSettings(str(tmp_path/'layout.ini'),QSettings.Format.IniFormat)
+    window=ui.MainWindow();window._close_saves_queued=True
     try:
-        for dock in window.findChildren(ui.QDockWidget):dock.hide()
-        window.resize(790,780);window.show()
-        for mode in ('ltx','minimax_base_guide','minimax_prompt_refinement','shot_sequence','minimax_base_guide'):
-            window.set_project_type(mode);QTest.qWait(80)
-            assert window.project_type==mode
-            assert not isinstance(window.centralWidget(),QScrollArea)
-            assert window.centralWidget() is window.editor_root
-            assert window.screen().availableGeometry().contains(window.frameGeometry())
-            assert window.intent_prompt_splitter.minimumHeight()==0
-            if window.unified_workspace:
-                window.unified_prompt.setPlainText('A crafted production prompt. '*2000)
-                window.minimax_panel.show_message('A refinement update. '*100,'success');QTest.qWait(80)
-                point=window.minimax_panel.copy_button.mapTo(window.editor_root,QPoint(0,0))
-                assert point.y()+window.minimax_panel.copy_button.height()<=window.editor_root.height()
-                window.minimax_panel.clear_message()
-        window.set_director_intent_expanded(False);QTest.qWait(80)
-        splitter=window.prompt_splitter;before=splitter.sizes()[0]
-        handle=splitter.handle(1);point=handle.rect().center()
-        QTest.mouseMove(handle,point);QTest.qWait(20)
-        QTest.mousePress(handle,Qt.MouseButton.LeftButton,pos=point)
-        QTest.mouseMove(handle,point+QPoint(0,35));QTest.mouseRelease(handle,Qt.MouseButton.LeftButton,pos=point+QPoint(0,35))
-        QTest.qWait(80)
-        assert splitter.sizes()[0]>before+15
-        assert window.segment_prompt.height()>=32 and window.unified_prompt.height()>=32
-        fraction=window.settings.value('prompt_splitter_fraction',0,float)
-        assert 0<fraction<1
-        window.set_project_type('minimax_full_reference_guide');QTest.qWait(80)
-        assert window.settings.value('prompt_splitter_fraction',0,float)==fraction
+        window.resize(1080,900);window.show()
+        window.set_project_type('minimax_official_skill_reference');QTest.qWait(60)
+        assert window.timeline_dock.widget() is window.editor_root
+        assert window.centralWidget().height()==0
+        assert window.editor_root.layout().indexOf(window.intent_prompt_splitter)<0
+        assert window.intent_prompt_splitter.isHidden()
+        dock=window.timeline_dock;state=window.saveState()
+        dock.setFloating(True);dock.resize(620,700);QTest.qWait(60)
+        assert dock.isFloating() and dock.isVisible()
+        assert window.sequence_options_scroll.horizontalScrollBar().maximum()>0
+        assert window.sequence_options_scroll.isVisible()
+        dock.setFloating(False);assert window.restoreState(state)
+        QTest.qWait(60)
+        assert not dock.isFloating() and dock.isVisible()
+        window.set_project_type('minimax_prompt_refinement');QTest.qWait(20)
+        assert dock.isHidden()
+        window.set_project_type('ltx');QTest.qWait(20)
+        assert dock.isVisible() and window.unified_prompt_dock.isHidden()
     finally:
-        window.project_dirty=False;window._close_saves_queued=True;window.close()
+        window.project_dirty=False;window.close()

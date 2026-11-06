@@ -38,9 +38,9 @@ movie bake do not yet use these independent tracks.
 | Develop the movement of each timeline segment | **LTX Video** | Individual segment prompts and a shared global prompt, ready for Director JSON export |
 | Bring your own prompting style | **Generic workspace** | A unified or segmented editor with your own generation and refinement instructions |
 
-**One prompt panel, three scopes.** Select **Segment** to edit one beat, **Global** to direct the entire sequence, or **Unified** to edit the independent production draft. The same compact Quick Fix, Generate and Refine controls follow your choice. Global Generate builds every beat; Global Refine updates all beats and then rebuilds the MiniMax production draft. Scope switching keeps each document separate.
+**Three independent prompt panels.** Open **Segment** and **Global** from **Panels** in the header; MiniMax also provides **Unified**. Arrange or float each panel independently. Segment edits one beat; Global directs the full sequence. Unified follows one complete workspace template, with live section edits and timeline synchronization. [Templates, audio panels and model switching →](docs/prompt-panels-templates-and-audio.md)
 
-In Unified scope, Generate and Refine edit production text only. **Rewrite timeline from combined prompt**, beneath the timeline's add buttons, applies a MiniMax brief to the segments. The **up arrow** rebuilds production text from the entire ordered timeline. Both synchronization actions preserve their source. The timing overview, frame roles, inline review and media tools remain available.
+In the Unified panel, Generate and Refine edit production text only. **Rewrite timeline from combined prompt**, beneath the timeline's add buttons, applies a MiniMax brief to the segments. The **up arrow** rebuilds production text from the entire ordered timeline. Both synchronization actions preserve their source. The timing overview, frame roles, inline review and media tools remain available.
 
 **Rewrite timeline** reads the existing image checkpoints and segment JSON alongside your completed combined prompt. It retimes the original frames, updates each segment's action, and creates missing beats when needed—without rewriting the combined prompt. New visual checkpoints can use the existing artwork-generation flow. The familiar timeline resizing and review animations show exactly what changed.
 
@@ -54,9 +54,9 @@ In LTX, **Magic Build** develops the whole sequence; **Refine** and **Refine Tim
 
 **[Choose your workflow →](docs/unified-workflows.md)**
 
-Timeline workspaces share one scope-switching prompt panel. MiniMax retains its independent production draft and the conditioning/timing overview beneath the timeline. The shipped defaults include LTX Video, the two guide-based MiniMax templates, and two **Official Skill** variants labeled **MiniMax · Standard** and **MiniMax · Full**. The skill variants retain the supplied writing conventions and add variables for the detected workflow, asset map, timing, creative direction and audio options.
+Timeline workspaces provide independent dockable prompt panels. MiniMax retains its independent production draft and the conditioning/timing overview beneath the timeline. The default list contains **LTX Video**, the official skill workspaces **MiniMax · Standard** and **MiniMax · Full**, and **Generic Prompt Refine**. The skill variants retain the supplied writing conventions and add variables for the detected workflow, asset map, timing, creative direction and audio options.
 
-Refining a prompt you already have? Choose **MiniMax · Refine** for a full-size editor with no timeline. Paste your text, add inline notes and click **Refine**. It preserves your production format and uses only the text and annotations you supply.
+Refining a prompt you already have? Choose **Generic Prompt Refine** for a full-size editor with no timeline. Paste your text, add inline notes and click **Refine**. It preserves your production format and uses only the text and annotations you supply.
 
 Bring up to **four reference images, videos or audio samples** into your MiniMax workspace. Use a video’s soundtrack alone when its sound matters more than its appearance. **Export ComfyUI** turns the timeline and production prompt into the supplied MiniMax workflow, copies its media into ComfyUI’s input folder and wires the conditioning guides at their timeline times.
 

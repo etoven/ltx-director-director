@@ -8,14 +8,28 @@ import re
 from pathlib import Path
 from uuid import uuid4
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QSize
 from PySide6.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QFormLayout, QListWidget,
                               QLineEdit, QComboBox, QCheckBox, QTextEdit, QPushButton,
-                              QMessageBox, QLabel, QSpinBox, QDoubleSpinBox)
+                              QMessageBox, QLabel, QSpinBox, QDoubleSpinBox, QStackedWidget, QSizePolicy)
 
 from .workspaces import WorkspaceStore, KINDS, validate_definition
 from .spellcheck import install_spellcheck
 from .prompt_templates import stock_prompt
+
+
+class WorkspaceSectionStack(QStackedWidget):
+    def sizeHint(self):
+        return QSize(600, 470)
+
+    def minimumSizeHint(self):
+        return QSize(320, 180)
+
+    def hasHeightForWidth(self):
+        return self.currentIndex() == 0 and super().hasHeightForWidth()
+
+    def heightForWidth(self, width):
+        return super().heightForWidth(width) if self.currentIndex() == 0 else -1
 
 
 class WorkspaceEditor(QWidget):
@@ -24,9 +38,11 @@ class WorkspaceEditor(QWidget):
         self.store, self.owner = store, owner
         self.current_id = None
         outer = QVBoxLayout(self)
-        outer.addWidget(QLabel("Workspace definitions control prompt layout, references, audio and AI instructions."))
+        note = QLabel("Workspace definitions control prompt layout, references, audio and AI instructions.")
+        note.setWordWrap(True); outer.addWidget(note)
         body = QHBoxLayout()
         self.list = QListWidget()
+        self.list.setMinimumWidth(170)
         self.list.setMaximumWidth(220)
         self.list.currentRowChanged.connect(self.select)
         body.addWidget(self.list)
@@ -37,7 +53,7 @@ class WorkspaceEditor(QWidget):
         self.engine.addItem("MiniMax Frames", "minimax_frames")
         self.engine.addItem("MiniMax References", "minimax_references")
         self.engine.addItem("Generic", "generic")
-        self.engine.addItem("MiniMax Prompt Refinement", "minimax_prompt")
+        self.engine.addItem("Generic Prompt Refine", "minimax_prompt")
         self.engine.addItem("Shot Sequence", "shot_sequence")
         self.mode = QComboBox()
         self.mode.addItem("One unified prompt", "unified")
@@ -81,7 +97,16 @@ class WorkspaceEditor(QWidget):
                                ("", self.references), ("Reference kinds", self.kinds), ("Untimed media slots", self.slots),
                                ("Generation instructions", self.generate), ("Refinement instructions", self.refine)):
             form.addRow(title, control)
-        body.addLayout(form, 1)
+        self.sections = WorkspaceSectionStack()
+        self.sections.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
+        self.list.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Ignored)
+        configuration = QWidget(); configuration.setLayout(form)
+        self.sections.addWidget(configuration)
+        from .template_editor import TemplateEditor
+        self.output_template = TemplateEditor(owner)
+        self.output_template.save_requested.connect(self.save)
+        self.sections.addWidget(self.output_template)
+        body.addWidget(self.sections, 1)
         outer.addLayout(body, 1)
         buttons = QHBoxLayout()
         for title, action in (("New", self.new), ("Save / rename", self.save), ("Delete", self.delete),
@@ -89,12 +114,16 @@ class WorkspaceEditor(QWidget):
             button = QPushButton(title)
             button.clicked.connect(action)
             buttons.addWidget(button)
-        outer.addLayout(buttons)
+        outer.insertLayout(1,buttons)
         self.status = QLabel()
         self.status.setWordWrap(True)
         outer.addWidget(self.status)
         self.reload()
         self.engine.currentIndexChanged.connect(self.engine_changed)
+        self.mode.currentIndexChanged.connect(self.update_template_mode)
+
+    def update_template_mode(self):
+        self.output_template.set_available(self.mode.currentData() == 'unified')
 
     def engine_changed(self):
         if self.engine.currentData() == "shot_sequence":
@@ -145,6 +174,11 @@ class WorkspaceEditor(QWidget):
         self.populate(self.values[self.current_id])
 
     def populate(self, value):
+        from .output_templates import layout_for
+        self.output_template.engine = value['engine']
+        if value['prompt_mode'] == 'unified':
+            self.output_template.set_value(layout_for(value))
+        self.output_template.set_available(value['prompt_mode'] == 'unified')
         from .timing_limits import sequence_limit, shot_limit
         self.max_shots.setValue(shot_limit(value) or 0)
         maximum = sequence_limit(value)
@@ -170,7 +204,8 @@ class WorkspaceEditor(QWidget):
 
     def value(self):
         existing = self.values.get(self.current_id, {})
-        return validate_definition(dict(**{key: value for key, value in existing.items() if key not in {"schema_version", "id", "name", "engine", "prompt_mode", "global_prompt", "audio_generation", "references", "generation_prompts", "max_sequence_duration", "max_shots"}}, schema_version=1, id=self.identifier.text().strip(), name=self.name.text().strip(),
+        return validate_definition(dict(**{key: value for key, value in existing.items() if key not in {"schema_version", "id", "name", "engine", "prompt_mode", "global_prompt", "audio_generation", "references", "generation_prompts", "max_sequence_duration", "max_shots", "output_template"}}, schema_version=1, id=self.identifier.text().strip(), name=self.name.text().strip(),
+            output_template=self.output_template.value() if self.mode.currentData() == 'unified' else None,
             engine=self.engine.currentData(), prompt_mode=self.mode.currentData(), global_prompt=self.global_prompt.isChecked(),
             max_sequence_duration=None if self.no_length_limit.isChecked() else self.max_length.value(),
             max_shots=self.max_shots.value(),

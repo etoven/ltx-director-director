@@ -74,4 +74,4 @@ Native projects carry their workspace identity and a portable definition. Openin
 
 **Continue:** [Prompt workflows](unified-workflows.md) · [Application setup](../install.md) · [Complete feature guide](../usage.md)
 
-The shipped defaults are LTX Video, two guide-based MiniMax templates and two Official Skill variants of Standard / Keyframes and Full Reference. Upgrades replace untouched old MiniMax factory definitions and preserve custom definitions. Unified workspaces share the segment editor and keep a separate production draft below it.
+The default list contains LTX Video, the two official MiniMax skill workspaces (Standard and Full), and Generic Prompt Refine. Upgrades remove untouched redundant factory definitions while preserving customized workspaces. [Build the complete MiniMax output with nested section blocks and pill fields](prompt-panels-templates-and-audio.md). LTX keeps separate global and segment prompts.

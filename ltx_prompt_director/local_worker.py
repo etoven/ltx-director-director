@@ -473,6 +473,13 @@ def main():
     with contextlib.redirect_stdout(sys.stderr):
         try:
             kind = request['kind']
+            if kind == 'audio':
+                from .local_audio import generate_audio
+                from filelock import FileLock
+                from .local_generation import data_root
+                with FileLock(str(data_root() / 'inference.lock')):
+                    generate_audio(request)
+                return
             if kind in ('install', 'download', 'assets', 'probe'):
                 from .local_setup import setup_request
                 setup_request(request); return

@@ -17,12 +17,13 @@ def test_settings_sidebar_search_preserves_pages_and_edits():
     with window() as w, patch.object(w,'start_disk_job'):
         dialog=SettingsDialog(w.settings,w); dialog.resize(1280,956); dialog.show(); APP.processEvents()
         surface=dialog.surface
-        assert dialog.tabs.count()==5 and dialog.tabs.tabBar().isHidden()
+        assert dialog.tabs.count()==6 and dialog.tabs.tabBar().isHidden()
         assert dialog.local_models.tabs.tabBar().isHidden()
         assert surface.rail.width()==244
         assert surface.card.mapTo(surface,QPoint(0,0)).x()==286
         assert dialog.findChild(WorkspaceEditor) and dialog.findChild(ChatGPTSettingsPanel)
         assert dialog.storage_panel.export_button and dialog.storage_panel.import_button
+        assert dialog.audio_models.tabs.count()==3
         dialog.gemini.setText('settings-secret-value')
         dialog.local_models.loras['image'].add_row(dict(path='/models/ink.safetensors',trigger='ink lines',weight=.65))
         surface.subbuttons[2].click(); assert dialog.tabs.currentIndex()==1 and dialog.local_models.tabs.currentIndex()==2

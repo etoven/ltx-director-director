@@ -1,5 +1,5 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Director · Interactive illustrated manual</title><link rel="stylesheet" href="manual.css"></head><body>
-<aside id="sidebar"><a class="brand" href="#start">DIRECTOR<span>Interactive illustrated manual</span></a><label class="search-label" for="search">Find a feature</label><input id="search" type="search" placeholder="Search the guide…"><nav aria-label="Chapters"><a href="#start">Start here</a><a href="#setup">Setup and local generation</a><a href="#renders">Render queue and panels</a><a href="#extensions">Video extensions and mixes</a><a href="#timeline">Media and timeline</a><a href="#prompts">Prompt workflows</a><a href="#refinement">Refinement and audio</a><a href="#references">MiniMax references</a><a href="#effects">Effects Library</a><a href="#projects">Projects and properties</a><a href="#review">Video and project files</a><a href="#shots">Finished shot sequences</a><a href="#workspaces">Workspaces and exports</a><a href="#comfy">ComfyUI handoff</a><a href="#install">Installation</a></nav><p id="search-status" aria-live="polite"></p><button id="tour-start">Take the quick tour</button><p class="small">Available offline · Aurora 1.13.0a132<br>External provider and source links need internet.</p></aside>
+<aside id="sidebar"><a class="brand" href="#start">DIRECTOR<span>Interactive illustrated manual</span></a><label class="search-label" for="search">Find a feature</label><input id="search" type="search" placeholder="Search the guide…"><nav aria-label="Chapters"><a href="#start">Start here</a><a href="#setup">Setup and local generation</a><a href="#renders">Render queue and panels</a><a href="#extensions">Video extensions and mixes</a><a href="#timeline">Media and timeline</a><a href="#prompts">Prompt workflows</a><a href="#composition">Templates and audio panels</a><a href="#refinement">Refinement and audio</a><a href="#references">MiniMax references</a><a href="#effects">Effects Library</a><a href="#projects">Projects and properties</a><a href="#review">Video and project files</a><a href="#shots">Finished shot sequences</a><a href="#workspaces">Workspaces and exports</a><a href="#comfy">ComfyUI handoff</a><a href="#install">Installation</a></nav><p id="search-status" aria-live="polite"></p><button id="tour-start">Take the quick tour</button><p class="small">Available offline · Aurora 1.13.0a133<br>External provider and source links need internet.</p></aside>
 <main><header class="hero"><div><span class="eyebrow">YOUR CREATIVE WORKSPACE</span><h1>From first idea<br>to a directed sequence.</h1><p>A practical guide to planning, refinement, effects, local generation and production handoff.</p></div><img src="../onboarding/welcome.png" alt="Line-art director’s chair, camera and storyboard frames"></header><aside class="scope-note"><strong>Current editor scope:</strong> Segment Generate/Refine changes the selected beat only. Global acts on the full ordered sequence and rebuilds the combined prompt. The unified editor has independent Generate/Refine controls. Synchronization preserves the source side; timeline-to-combined synchronization uses the whole ordered timeline.</aside>
 <div id="sandbox"><h2>Try the scope controls</h2><p>This guide-only example shows which authored beats a refinement targets.</p><div class="beats"><button class="beat selected" data-beat="0">Opening</button><button class="beat" data-beat="1">Action</button><button class="beat" data-beat="2">Hold</button></div><label>Refine scope <select id="scope"><option value="segment">Selected segment</option><option value="global">Global sequence</option><option value="unified">Unified prompt</option></select></label><p id="scope-result" aria-live="polite"></p></div>
 <section id="start" class="chapter" data-title="Start here"><span class="eyebrow">DIRECTOR GUIDE</span><h1 id="your-complete-guide-to-director">Your complete guide to Director</h1>
@@ -17,8 +17,8 @@
 <li>Open <strong>Help → Setup wizard</strong> to choose Gemini, ChatGPT, OpenAI API or a local writing model. You can edit and organize projects before configuring AI.</li>
 <li>Choose <strong>LTX Video</strong>, <strong>MiniMax Standard / Keyframes</strong> or <strong>MiniMax Full Reference</strong> from <strong>Project type</strong>.</li>
 <li>Use <strong>Add media</strong> or drop supported images, MP4 or WebM clips onto the timeline. Use <strong>Add text</strong> for a beat described in words.</li>
-<li>Arrange the segments and set their durations. Choose <strong>Global</strong> scope, describe the sequence, and choose a total length or Auto.</li>
-<li>Use <strong>Generate</strong> in Global scope to develop all segment prompts. Choose <strong>Segment</strong> to work on one beat, or <strong>Unified</strong> to generate or refine the production draft independently.</li>
+<li>Arrange the segments and set their durations. Open the <strong>Global Prompt</strong> panel, describe the sequence, and choose a total length or Auto.</li>
+<li>Use <strong>Generate</strong> in the Global panel to develop all segment prompts. Use the <strong>Segment</strong> panel to work on one beat, or <strong>Unified</strong> to generate or refine the production draft independently.</li>
 <li>Use <strong>Save to Library</strong> to name and retain the project. Copy the MiniMax brief or use <strong>Export</strong> for LTX timeline JSON.</li>
 </ol>
 <p>AI generation is an explicit action. Switching workspaces and adding media let you prepare the plan before submitting a request.</p>
@@ -319,7 +319,7 @@
 <p>Open <strong>Media Catalog</strong> from the top toolbar. Dock it beside the timeline or float it on another display. Your image and video collection is available across every project.</p>
 <p>Import files or drop files and folders from your file manager. Browse large preview tiles, select several with Ctrl/Shift, and search names, tags, or descriptions. Right-click a selection to edit its tags and short description, move it into a catalog folder, or add it to the timeline. Create folders with <strong>New folder</strong>; select a folder first to create a subfolder. Drag tiles onto a folder to organize them, onto the timeline to insert them, or into a file manager using native file URLs.</p>
 <p>Imports copy full-resolution images and videos into Prompt Director’s working folder. Catalog tiles and timeline drags use these managed copies, so moving or deleting the original source does not break your imported media. Same-named files remain separate. Removing a catalog entry or folder keeps the media on disk.</p>
-<p>The app ships with <strong>LTX Video</strong>, <strong>MiniMax Standard / Keyframes</strong> and <strong>MiniMax Full Reference</strong>. The guide-based MiniMax templates replace the old MiniMax default. Two additional <strong>Official Skill</strong> workflows provide Standard / Keyframes and Full Reference versions adapted from the supplied prompt-writing skill files. LTX generation and refinement return video prompts and timing without requiring a separate still-image prompt. The prompt panel header switches between Segment Prompt, Global Prompt and Unified Prompt while preserving their separate drafts. Compact actions sit inside the panel. The timing overview retains its own resize and hide/reopen handle. Panels shrink within the window and prompt text scrolls within its editor.</p>
+<p>The app ships with <strong>LTX Video</strong>, <strong>MiniMax · Standard</strong>, <strong>MiniMax · Full</strong> and <strong>Generic Prompt Refine</strong>. The two MiniMax workspaces use the official prompt-writing skills. LTX has separate Global and Segment panels; MiniMax additionally provides a Unified panel. Open supported panels through <strong>Panels</strong> in the header. Each keeps its own compact actions. <a href="#composition">Arrange visual templates and generate audio</a>. The timing overview retains its own resize and hide/reopen handle. Prompt text scrolls within its editor.</p>
 <p>Media tags appear as pills on each thumbnail, matching the project cards. Press <strong>F2</strong> to rename a selected tile directly below its image; Enter saves and Escape cancels. Press <strong>Delete</strong> to remove selected catalog entries after confirmation. The managed media files remain available on disk.</p>
 <p>The reference-image panel remembers whether you opened or closed it across workspaces and restarts. Reopen it with <strong>Reference images</strong>. The project library retains its chosen dock size when changing workspaces or dock tabs. Media Catalog and video preview use the same blue border as the timeline while accepting a drop.</p>
 <p>Double-click a catalog tile, or choose <strong>View media</strong> from its context menu, to open the lightbox. Browse the current folder and search results with <strong>Previous</strong>, <strong>Next</strong>, or the arrow keys; press <strong>Esc</strong> to close. Images fit the viewer while retaining their original resolution for clipboard copy and export. Right-click an image for those actions. Videos use the project preview controls: play/pause, click-to-seek, fullscreen, video export, and right-click frame export or copy. Closing the viewer stops playback.</p>
@@ -327,7 +327,7 @@
 <p>Recent exports show small image and video previews. Use the broom button to clear the history while keeping your exported files. The panel stays open when you switch to another application, making file drags easier; clicking elsewhere in Prompt Director closes it.</p>
 <p><img alt="Full-resolution image lightbox" loading="lazy" decoding="async" width="1000" height="720" src="images/catalog-image-viewer.png" /></p>
 <p><img alt="Catalog video viewer with playback and frame tools" loading="lazy" decoding="async" width="1000" height="720" src="images/catalog-video-viewer.png" /></p>
-<p>Global timing instructions such as <code>/refine-global Resize the segments proportionally to 15 seconds</code> work through <strong>Global → Refine</strong> in LTX and MiniMax. Segment refinement can resize the selected card. Segment refinement stays on that beat. Global refinement acts on the full sequence and rebuilds the unified production prompt. Ordinary manual segment edits keep the existing unified draft until generation is requested. The compact MiniMax conditioning strip shows frame times, source trims and setup fixes; unified text edits never retime the timeline.</p>
+<p>Global timing instructions such as <code>/refine-global Resize the segments proportionally to 15 seconds</code> work through <strong>Global → Refine</strong> in LTX and MiniMax. Segment refinement can resize the selected card. Segment refinement stays on that beat. Global refinement acts on the full sequence and rebuilds the unified production prompt. Manual segment edits update the matching template section immediately. The compact MiniMax conditioning strip shows frame times, source trims and setup fixes; editing a section timecode moves or resizes its corresponding timeline entry.</p>
 <h2 id="workspace-sequence-limits">Workspace sequence limits</h2>
 <p>In <strong>Settings → Workspaces</strong>, set <strong>Maximum sequence length</strong> or select <strong>No limit</strong>. The limit covers the whole timeline: LTX defaults to 20 seconds and MiniMax to 15 seconds. Dragging or editing a duration stops at the remaining sequence budget. After refinement or Magic Build, Director shortens the final segment first; if that cannot fit the plan, all durations scale proportionally. Media and segment order remain intact. Imported plans and workspace changes use the same budget.</p>
 <p>The ComfyUI export puts the production prompt in a tall group along the left edge, with the remaining groups packed beside it.</p>
@@ -602,8 +602,8 @@ original source bytes.</p>
 <p>Director matches the actions to existing segments in order, preserves their media, resizes their durations and creates text segments for extra valid actions at the end. A whole-brief paste replaces the brief; a timed-action-only paste retains the surrounding sections.</p>
 <p>Start at zero and keep ranges continuous, ascending and nonempty. The final two digits are frames from 00 to 23. If a range is missing or invalid, unmatched cards turn gray while their media remains intact. Correct the timed block or refine the prompt to reconnect the plan.</p>
 <p><strong>Continue:</strong> <a href="#prompts">Prompt workflows</a> · <a href="#workspaces">Exports</a> · <a href="#start">Complete feature guide</a></p></section><section id="prompts" class="chapter" data-title="Prompt workflows"><span class="eyebrow">DIRECTOR GUIDE</span><h1 id="direct-every-segment-keep-the-full-prompt-in-view">Direct every segment. Keep the full prompt in view.</h1>
-<p>All timeline workspaces use one prompt panel. Its header selector offers the scopes supported by the workspace: <strong>Segment</strong> and <strong>Global</strong> for segmented LTX and Generic workflows, plus <strong>Unified</strong> for MiniMax production workflows. Each document stays separate. Select a timeline card to edit that segment, change its frame role or refine its wording and duration. The Prompt Refinement workspace opens its standalone draft in Unified scope.</p>
-<p><img alt="One prompt surface with scope controls beside the timeline and timing overview" loading="lazy" decoding="async" width="1500" height="1080" src="images/panel-overhaul.png" /></p>
+<p>Global and Segment are independent dockable panels. MiniMax additionally offers Unified Prompt; LTX does not use a unified prompt. Open them through <strong>Panels</strong> in the header and arrange them around your timeline. <a href="#composition">Define your output layout and generate audio</a>.</p>
+<p><img alt="Independent prompt panels and a compact timeline" loading="lazy" decoding="async" width="1700" height="1050" src="images/prompt-panels.png" /></p>
 <table>
 <thead>
 <tr>
@@ -617,14 +617,6 @@ original source bytes.</p>
 <td>Segment prompts and shared global direction for LTX timeline export</td>
 </tr>
 <tr>
-<td>MiniMax · Standard Guide</td>
-<td>Guide-based integrated description, soundscape and music sections</td>
-</tr>
-<tr>
-<td>MiniMax · Full Guide</td>
-<td>Guide-based subject definitions, summary, retention analysis, detailed description, soundscape and music</td>
-</tr>
-<tr>
 <td>MiniMax · Standard</td>
 <td>Supplied skill conventions for T2VA, I2VA, FL2VA and L2VA, with project variables</td>
 </tr>
@@ -635,72 +627,14 @@ original source bytes.</p>
 </tbody>
 </table>
 <h2 id="refine-a-prompt-on-its-own">Refine a prompt on its own</h2>
-<p>Choose <strong>MiniMax · Refine</strong> from Project Type. Write or paste a production prompt, then click <strong>Refine</strong>. No media or segments are required. The editor fills the workspace; timeline, conditioning, segment timing, reference media and Director’s Intent controls are hidden.</p>
+<p>Choose <strong>Generic Prompt Refine</strong> from Project Type. Write or paste a production prompt, then click <strong>Refine</strong>. No media or segments are required. The editor fills the workspace; timeline, conditioning, segment timing, reference media and Director’s Intent controls are hidden.</p>
 <p>Type <code>/</code> and use the existing annotation suggestions: <code>/refine</code> edits a nearby passage, <code>/refine-global</code> applies across the prompt, <code>/keep</code> protects a detail, <code>/avoid</code> excludes a detail and <code>/focus</code> adds emphasis. These remain editable note boxes, with the same completion and spelling features as the other prompt editors. A leading <code>/refine</code> note before the scene applies to the full prompt unless it identifies a narrower target. Completed global refinement notes are removed after a successful revision; other annotations remain. If the model returns the production text unchanged, the editor keeps your draft and annotations and reports <strong>no text changes</strong>.</p>
 <p><img alt="Standalone MiniMax prompt refinement with inline annotations" loading="lazy" decoding="async" width="1330" height="840" src="images/minimax-prompt-refinement.png" /></p>
-<p>Refinement uses only your current prompt and its inline annotations. It preserves the existing MiniMax format, stated timing, identities, dialogue and audio direction unless you request a change. Use <strong>Copy</strong> to take the result into your generation workflow. Save and reopen it as a normal project; each workspace keeps its own draft. Switching back to a timeline workspace restores its segment controls and draft.</p>
+<p>Refinement uses only your current prompt and its inline annotations. It preserves the supplied prompt's format and model conventions unless you request a change. Use <strong>Copy</strong> to take the result into your generation workflow. Save and reopen it as a normal project; each workspace keeps its own draft. Switching back to a timeline workspace restores its segment controls and draft.</p>
 <h2 id="edit-the-beats-then-develop-the-full-prompt">Edit the beats, then develop the full prompt</h2>
-<p>Choose a scope from the prompt panel header. The heading identifies the document you are editing:</p>
-<table>
-<thead>
-<tr>
-<th>Scope</th>
-<th>What you edit and generate</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Segment</td>
-<td>The selected timeline beat only</td>
-</tr>
-<tr>
-<td>Global</td>
-<td>Director's Intent for the entire sequence; Generate/Refine acts on all beats and then rebuilds the MiniMax production draft</td>
-</tr>
-<tr>
-<td>Unified</td>
-<td>The independent production text in workspaces that support a unified production draft; MiniMax uses the selected template</td>
-</tr>
-</tbody>
-</table>
-<p>The same Quick Fix, Generate and Refine controls follow the selected scope. Unified Generate rebuilds from all current segments and reference roles. Unified Refine changes the production text without rewriting the timeline. <strong>Copy</strong> copies the active document. The timing overview and its resize handle remain above the panel.</p>
-<p>Right-click the scope header and toggle <strong>Collapse prompt editor</strong> to hide or reopen the prompt body. That view preference is remembered, while the timing overview remains available.</p>
-<p>Switching scope preserves your drafts. Pasting or editing Unified text does not change the timeline. Manual timing edits update recognized MiniMax timecodes locally. Segment wording reaches the production draft through an explicit Generate/Refine or synchronization action.</p>
-<p><img alt="The scope selector in the header and compact actions beside the editor" loading="lazy" decoding="async" width="760" height="591" src="images/prompt-scope-panel.png" /></p>
-<p>MiniMax gives each recognized shot passage a soft highlight. Its boundary starts
-at the timecode (or the first shot's untimed text) and ends before the next
-<code>[Shot N]</code> label. Blank lines between shots and the sound/music sections stay
-outside the highlight.</p>
-<p>Generate and Refine include a timecode on the first shot, including when
-refining an older untimed draft. A first start frame uses <code>00:00.00</code>; a first
-end frame uses its segment end time, such as <code>00:03.00</code> for a three-second
-segment. Prompt-only refinement preserves an existing opening timecode.
-Older untimed first shots remain editable in saved projects.</p>
-<p>While you type in a selected segment's prompt box, the unified editor scrolls
-to that passage and previews its wording changes in red and green. <strong>Approve</strong>
-keeps the change in that passage only; <strong>Reject</strong> keeps the original unified
-text. Clicking away from the segment editor also rejects an unapproved
-preview. Your segment edit stays saved either way. The shot label, timecode,
-comma/space separators, other shots and their spacing stay intact. These edits
-run locally without an AI request.</p>
-<p><img alt="A live red/green review confined to the selected MiniMax shot, with Approve and Reject controls" loading="lazy" decoding="async" width="1320" height="940" src="images/segment-prompt-live-review.png" /></p>
-<p>The <strong>Generate</strong> button in <strong>Unified</strong> scope rebuilds the production brief from every current
-timeline segment, including newly split or inserted beats. Current segment
-actions, order and timing take precedence over conflicting older global notes;
-beats that share an image still retain their separate action progression.
-It transfers segment content one for one, retaining wording wherever possible
-while adapting section placement, references, dialogue markup and timing to the
-workspace format. Complete action, appearance, dialogue and sound details take
-priority over length targets. There is no 350–500-word compression target;
-the production description grows with the source material. A response that the
-provider marks as truncated is rejected rather than saved as complete.
-Across workspace Generate and Refine instructions, word and sentence targets
-are soft guidance: preserving details wins. Refinement keeps content outside
-your requested edits; an explicit request to shorten or remove content still
-authorizes that change.
-If the timeline changes while generation is running, the app keeps your draft
-and asks you to generate again from the updated sequence.</p>
-<p><img alt="Segment scope keeps the selected beat separate from the saved production draft" loading="lazy" decoding="async" width="760" height="591" src="images/prompt-scope-panel.png" /></p>
+<p>Use the Segment panel for the selected timeline entry and Global for the entire sequence. Each panel has its own Generate and Refine controls. Unified follows the full document layout saved under <strong>Settings → Workspaces → Workspace templates</strong>.</p>
+<p>Typing in Segment updates its corresponding Unified section locally. Reordering a segment moves that section. Click any timeline entry to reveal its Unified section, including clicking the selected entry again after scrolling away. Section timecodes move or resize the timeline entry. <strong>+</strong> beside Unified adds a timeline section or subject definition.</p>
+<p>The template defines the headings, spacing and section order. Edit its shaded fields in Unified. Generate and Refine fill explicitly named template variables; fixed document text remains intact. Complete authored action, appearance, dialogue and sound details take priority over word-count guidance. Prompt-only refinement retains its standalone editor and annotations.</p>
 <h2 id="apply-a-saved-quick-fix">Apply a saved Quick Fix</h2>
 <p>Use <strong>Quick Fix</strong> beside Generate inside the active prompt panel. A preset's
 <strong>Show in</strong> setting controls menu availability: <strong>Segment</strong> lists it in the
@@ -723,7 +657,7 @@ Existing presets without a category use <strong>General</strong>. New installati
 <p><img alt="Quick Fix follows the active prompt scope" loading="lazy" decoding="async" width="760" height="591" src="images/prompt-scope-panel.png" /></p>
 <p><img alt="Editing the name, target and instruction of a Quick Fix preset" loading="lazy" decoding="async" width="560" height="440" src="images/quick-fix-presets.png" /></p>
 <h2 id="apply-a-production-brief-to-the-timeline">Apply a production brief to the timeline</h2>
-<p>In <strong>Unified</strong> scope, <strong>Generate</strong> and <strong>Refine</strong> edit only the production text. To apply a MiniMax brief to your sequence, click <strong>Rewrite timeline from combined prompt</strong> in the timeline’s right-hand rail, below <strong>＋</strong> and <strong>T＋</strong>. It aligns segment wording and timing to the complete brief and presents the timeline changes for review. Your combined prompt stays unchanged.</p>
+<p>In the <strong>Unified</strong> panel, <strong>Generate</strong> and <strong>Refine</strong> edit only the production text. To apply a MiniMax brief to your sequence, click <strong>Rewrite timeline from combined prompt</strong> in the timeline’s right-hand rail, below <strong>＋</strong> and <strong>T＋</strong>. It aligns segment wording and timing to the complete brief and presents the timeline changes for review. Your combined prompt stays unchanged.</p>
 <p><img alt="Timeline controls, including the separate rewrite action beneath the add buttons" loading="lazy" decoding="async" width="777" height="409" src="images/timeline-navigation.png" /></p>
 <h2 id="adjust-timing-through-the-shared-editor">Adjust timing through the shared editor</h2>
 <p><strong>Refine</strong> in <strong>Segment</strong> scope improves the selected beat and can resize that segment when its action or dialogue needs a different duration. <strong>Refine Timing</strong> changes its duration while preserving its wording. Other segments and the combined production text remain unchanged.</p>
@@ -745,7 +679,55 @@ retain their selected roles rather than becoming timeline endpoints.</p>
 <p><strong>Director’s Intent</strong> is available in <strong>Global</strong> scope. Prompt options and inline refinement notes remain available across timeline workspaces. Prompt Refinement uses only its standalone prompt and annotations. Switching scope or workspace does not submit an AI request. Projects retain segment prompts, global direction and each workspace’s production draft. Existing review, copy, synchronization and media tools remain available.</p>
 <p><strong>Continue:</strong> <a href="#references">Reference images</a> · <a href="#workspaces">Custom workspaces and exports</a> · <a href="#start">Complete feature guide</a></p>
 <p>The Official Skill variants are additional defaults. They receive the detected workflow, duration, asset map, Director’s Intent, global direction, sound/dialogue/music options, and current prompt and instructions during refinement. Their worked-example subjects and timings are format illustrations, never preset content for your scene.</p>
-<p>For two end-frame segments lasting 3.0 and 7.5 seconds, the condition values are <strong>3.0</strong> and <strong>10.5</strong>. End frames use the cumulative segment ending time; start frames use the cumulative segment starting time. These are absolute target-video times, not each segment’s duration or a frame count. The strip is a setup guide; it does not modify external ComfyUI nodes.</p></section><section id="refinement" class="chapter" data-title="Refinement and audio"><span class="eyebrow">DIRECTOR GUIDE</span><h1 id="turn-a-draft-into-direction">Turn a draft into direction.</h1>
+<p>For two end-frame segments lasting 3.0 and 7.5 seconds, the condition values are <strong>3.0</strong> and <strong>10.5</strong>. End frames use the cumulative segment ending time; start frames use the cumulative segment starting time. These are absolute target-video times, not each segment’s duration or a frame count. The strip is a setup guide; it does not modify external ComfyUI nodes.</p></section><section id="composition" class="chapter" data-title="Templates and audio panels"><span class="eyebrow">DIRECTOR GUIDE</span><h1 id="arrange-your-prompt-documents-and-build-audio-alongside-them">Arrange your prompt documents and build audio alongside them</h1>
+<p>Open <strong>Panels</strong> in the application header to show <strong>Global Prompt</strong>, <strong>Segment Prompt</strong>, <strong>Unified Prompt</strong>, <strong>Timeline</strong>, or an audio generator. LTX Video offers Global and Segment panels. MiniMax also offers Unified Prompt. Each supported prompt is its own dockable panel. Drag its heading to rearrange it, float it into a separate window, or close it and reopen it through Panels.</p>
+<p><img alt="Independent prompt documents and a compact timeline ruler" loading="lazy" decoding="async" width="1700" height="1050" src="images/prompt-panels.png" /></p>
+<p>The Timeline is also a native dock: float, resize, close or restore it through <strong>Panels</strong>. It keeps the ruler, audio strips, conditioning overview and sequence options together. The options row scrolls horizontally when the panel is narrow.</p>
+<p>Global describes the whole sequence. Segment edits the selected timeline entry. Each has its own Generate and Refine controls. The Unified Prompt presents the output in your workspace's template, with shaded editable areas and fixed surrounding text.</p>
+<p>Typing in Segment updates its matching Unified section immediately, without an AI request. Moving a timeline entry moves its section; changing its duration updates its timecodes. Click a timeline entry to scroll Unified to that section. Clicking the same entry again brings it back into view after you scroll elsewhere.</p>
+<p>Use <strong>+</strong> at the left of Unified to add a timeline section or subject definition. A new timeline section also creates a text entry on the timeline. Edit a section's start or end time to move its boundary or resize it, within the workspace's duration limits. Editing section text updates the segment prompt and its text preview.</p>
+<h2 id="define-the-complete-output-in-one-canvas">Define the complete output in one canvas</h2>
+<p>Open <strong>Settings → Workspaces → Workspace templates</strong> and select a MiniMax workspace. Arrange the complete output in a single visual canvas. The default install contains <strong>MiniMax · Standard</strong>, <strong>MiniMax · Full</strong>, <strong>Generic Prompt Refine</strong> and <strong>LTX Video</strong>. Unified templates apply to the MiniMax workspaces; LTX retains its separate global and segment formats, while Generic Prompt Refine works directly on the text you supply.</p>
+<p><img alt="Pill fields and interlocking, nested section containers" loading="lazy" decoding="async" width="1280" height="956" src="images/workspace-templates.png" /></p>
+<ul>
+<li>Add a <strong>Section</strong> block and type the heading you want in the output.</li>
+<li>Drop a <strong>Global direction</strong>, <strong>Sound</strong>, <strong>Music</strong>, or <strong>Named field</strong> pill into a section. Named fields can be renamed through their context menu.</li>
+<li>Place <strong>Each subject</strong> or <strong>Each segment</strong> inside a section. Their contents repeat for the corresponding references or ordered timeline entries.</li>
+<li>Put <strong>Subject details</strong> and <strong>Segment prompt</strong> into their matching repeat groups. Timing pills belong inside <strong>Each segment</strong>. Matching sockets highlight while you drag; incompatible placements are rejected.</li>
+<li>Type literal wording around pills in a text slot. Use <strong>Text</strong> or <strong>Blank line</strong> for additional instructions and spacing. Drag an existing pill to reposition it, or drag a container's grip to move the whole nested group.</li>
+</ul>
+<p>Choose <strong>Preview output</strong> to see how the layout reads with prompt content. <strong>Save workspace</strong> applies the template. The reset arrow restores the selected model's starting layout. Exporting a workspace includes its layout; saved projects retain their section edits and subject definitions. AI generation receives an explicit schema for the fields in the template, and the application places its response into that layout.</p>
+<h2 id="generate-dialogue-foley-and-music">Generate dialogue, Foley and music</h2>
+<p>The audio panels are available alongside every video workspace:</p>
+<table>
+<thead>
+<tr>
+<th>Panel</th>
+<th>Inputs</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Dialogue · IndexTTS 2.5</td>
+<td>Spoken script, voice sample and language</td>
+</tr>
+<tr>
+<td>Foley · Stable Audio 3</td>
+<td>Sound description, duration and seed</td>
+</tr>
+<tr>
+<td>Music · MiniMax Music 3</td>
+<td>Music description, optional tagged lyrics, duration and seed</td>
+</tr>
+</tbody>
+</table>
+<p><img alt="The music generator alongside prompt and timeline panels" loading="lazy" decoding="async" width="1700" height="1050" src="images/audio-panels.png" /></p>
+<p>Open <strong>Settings → Audio models</strong>, or the audio section of the setup wizard, to choose existing engine environments and model files. <strong>Prepare engine</strong> creates a separate local runtime. <strong>Download models</strong> retrieves the corresponding model files. These operations run in the background.</p>
+<p>Write a prompt and choose <strong>Generate</strong>. <strong>Refine prompt with AI before sampling</strong> optionally improves the sampling input in the background using your writing model, while leaving your visible draft intact. Music refinement uses MiniMax's <a href="https://github.com/MiniMax-AI/MiniMax-Music3/tree/main/skills/music-caption-rewriter">Music Caption Rewriter</a>, choosing style references progressively and keeping lyrics separate from the caption.</p>
+<p>Use the panel's player to listen and seek. <strong>Export audio</strong> saves through the existing download manager and appears in Recent exports. The music ComfyUI button in the header exports an editable Music 3 workflow with the panel's description, lyrics, duration, seed and configured model filenames. Install those models in the receiving ComfyUI instance before running it.</p>
+<h2 id="choose-the-writing-model-quickly">Choose the writing model quickly</h2>
+<p>Use the model dropdown in the application header to change the model for your next prompt request. It switches the saved choice directly.</p>
+<p>In an effect's details, <strong>Prompt refinement model</strong> can select a particular writing model for that effect. <strong>Use current model (any model)</strong> follows the toolbar choice. Existing and imported effects without a saved model preference use the current model.</p></section><section id="refinement" class="chapter" data-title="Refinement and audio"><span class="eyebrow">DIRECTOR GUIDE</span><h1 id="turn-a-draft-into-direction">Turn a draft into direction.</h1>
 <h2 id="put-the-creative-intent-into-words">Put the creative intent into words</h2>
 <p>A reference image shows a moment. <strong>Director’s Intent</strong> tells the AI how the sequence should move: the performance, the camera path, the emotional pace and what should stay consistent. Write it once and keep it visible across the stock workspaces.</p>
 <p>For the Aurora example: “Follow the traveler at walking pace. Preserve the mountain setting, cool blue light and warm lantern glow. End with a quiet moment at the horizon.” A useful intent describes what happens between the images, as well as the result you want to reach.</p>
@@ -1213,7 +1195,7 @@ setting to add more. The sequence-duration setting remains independent.</p>
 <p>Choose <strong>Save / rename</strong> to keep the definition, <strong>Export</strong> to share or reuse it, and <strong>Import</strong> to load a definition JSON. An import with a matching ID replaces that local definition. <strong>Restore stock</strong> brings back the included definitions while preserving custom definitions with other IDs. <strong>Delete</strong> removes the selected definition.</p>
 <p>Native projects carry their workspace identity and a portable definition. Opening a project can install its definition when it is missing locally; an existing local definition with the same ID takes precedence. This lets you carry a setup with the project while continuing to manage your local templates.</p>
 <p><strong>Continue:</strong> <a href="#prompts">Prompt workflows</a> · <a href="#install">Application setup</a> · <a href="#start">Complete feature guide</a></p>
-<p>The shipped defaults are LTX Video, two guide-based MiniMax templates and two Official Skill variants of Standard / Keyframes and Full Reference. Upgrades replace untouched old MiniMax factory definitions and preserve custom definitions. Unified workspaces share the segment editor and keep a separate production draft below it.</p></section><section id="comfy" class="chapter" data-title="ComfyUI handoff"><span class="eyebrow">DIRECTOR GUIDE</span><h1 id="comfyui-export-artwork">ComfyUI export artwork</h1>
+<p>The default list contains LTX Video, the two official MiniMax skill workspaces (Standard and Full), and Generic Prompt Refine. Upgrades remove untouched redundant factory definitions while preserving customized workspaces. <a href="#composition">Build the complete MiniMax output with nested section blocks and pill fields</a>. LTX keeps separate global and segment prompts.</p></section><section id="comfy" class="chapter" data-title="ComfyUI handoff"><span class="eyebrow">DIRECTOR GUIDE</span><h1 id="comfyui-export-artwork">ComfyUI export artwork</h1>
 <p>The ComfyUI export action uses the official Comfy logo from <a href="https://github.com/Comfy-Org/ComfyUI_frontend/blob/main/public/assets/images/comfy-logo-single.svg">Comfy-Org/ComfyUI_frontend</a>, used to identify the export destination. Source repository <a href="https://github.com/Comfy-Org/ComfyUI_frontend/blob/main/LICENSE">license</a>. The mark identifies ComfyUI; this application is Prompt Director.</p>
 <p>The packaged graph is adapted from the user-supplied MiniMax workflow. Its source media names, editor previews and scene prompt are removed; export fills them from the current project.</p></section><section id="install" class="chapter" data-title="Installation"><span class="eyebrow">DIRECTOR GUIDE</span><h1 id="start-directing-with-prompt-director">Start directing with Prompt Director.</h1>
 <h2 id="your-desktop-workspace-for-ai-video-planning">Your desktop workspace for AI video planning</h2>
@@ -1225,14 +1207,14 @@ setting to add more. The sequence-duration setting remains independent.</p>
 <pre><code class="language-bash">python3 -m venv ~/.venvs/ltx-director
 source ~/.venvs/ltx-director/bin/activate
 python -m pip install --upgrade pip
-python -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a132-py3-none-any.whl'
+python -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a133-py3-none-any.whl'
 prompt-director
 </code></pre>
 <h3 id="windows-powershell">Windows PowerShell</h3>
 <pre><code class="language-powershell">py -m venv &quot;$env:USERPROFILE\ltx-director-venv&quot;
 &amp; &quot;$env:USERPROFILE\ltx-director-venv\Scripts\Activate.ps1&quot;
 python -m pip install --upgrade pip
-python -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a132-py3-none-any.whl'
+python -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a133-py3-none-any.whl'
 prompt-director
 </code></pre>
 <p>On first launch, Prompt Director migrates preferences, custom workspaces, projects and managed media from the previous LTX Director folders. Existing files in the new folders take priority, and the original folders are retained.</p>

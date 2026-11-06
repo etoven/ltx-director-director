@@ -3,7 +3,7 @@ import json
 from PySide6.QtCore import Qt, QObject, QTimer, QSize
 from PySide6.QtGui import QColor, QIcon, QPainter
 from PySide6.QtWidgets import (QDockWidget, QFrame, QHBoxLayout, QLabel, QMenu,
-    QMainWindow, QSizePolicy, QTabBar, QTabWidget, QToolButton, QVBoxLayout, QWidget)
+    QMainWindow, QSizePolicy, QTabBar, QTabWidget, QToolBar, QToolButton, QVBoxLayout, QWidget)
 
 LEFT=Qt.DockWidgetArea.LeftDockWidgetArea
 RIGHT=Qt.DockWidgetArea.RightDockWidgetArea
@@ -113,16 +113,19 @@ class DockHeader(QWidget):
         menu.exec(self.mapToGlobal(point))
 
 
-class IconRail(QDockWidget):
+class IconRail(QToolBar):
     def __init__(self,manager,side):
-        super().__init__(manager.owner);self.setObjectName('panelIconRailDock'+side)
-        self.side=side;self.setAllowedAreas(LEFT|RIGHT);self.setFeatures(QDockWidget.DockWidgetFeature.NoDockWidgetFeatures)
-        header=QWidget();header.setFixedHeight(0);self.setTitleBarWidget(header)
+        super().__init__(manager.owner)
+        self.setObjectName('fixedPanelIconRail'+side)
+        self.setMovable(False)
+        self.setFloatable(False)
+        self.setAllowedAreas(Qt.ToolBarArea.LeftToolBarArea if side=='left' else Qt.ToolBarArea.RightToolBarArea)
         self.toggleViewAction().setVisible(False)
         self.rail=QFrame();self.rail.setObjectName('panelIconRail')
+        self.rail.setSizePolicy(QSizePolicy.Policy.Preferred,QSizePolicy.Policy.Expanding)
         self.icons=QVBoxLayout(self.rail);self.icons.setContentsMargins(3,0,3,0);self.icons.setSpacing(3)
         self.chevron=QToolButton();self.chevron.setObjectName('railChevron');self.chevron.setText('»' if side=='left' else '«');self.chevron.setToolTip('Expand panels')
-        self.chevron.clicked.connect(lambda:manager.toggle_column(side));self.icons.addWidget(self.chevron);self.icons.addStretch();self.setWidget(self.rail)
+        self.chevron.clicked.connect(lambda:manager.toggle_column(side));self.icons.addWidget(self.chevron);self.icons.addStretch();self.addWidget(self.rail)
 
 
 class PanelRails(QObject):
@@ -150,8 +153,8 @@ class PanelRails(QObject):
             button.clicked.connect(lambda checked=False,d=dock:self.activate(d));self.buttons[dock]=button
             dock.visibilityChanged.connect(self.schedule);dock.dockLocationChanged.connect(self.schedule);dock.topLevelChanged.connect(self.schedule);dock.toggleViewAction().changed.connect(self.schedule)
         for side,rail in self.rails.items():
-            if not (migrated and owner.restoreDockWidget(rail)):
-                owner.addDockWidget(LEFT if side=='left' else RIGHT,rail)
+            # Rails are window chrome. Never restore the old dock placeholders.
+            owner.addToolBar(Qt.ToolBarArea.LeftToolBarArea if side=='left' else Qt.ToolBarArea.RightToolBarArea,rail)
         if not migrated:
             saved=owner.settings.value('window/state')
             if saved is not None:owner.settings.setValue('window/state_before_icon_rails',saved)
@@ -160,12 +163,8 @@ class PanelRails(QObject):
                 area=LEFT if side=='left' else RIGHT
                 group=[d for _,_,d,default in entries if default==side and not d.isFloating() and owner.dockWidgetArea(d) in (LEFT,RIGHT)]
                 if not group:continue
-                # Split rails before tabifying content: Qt otherwise adds the
-                # rail as another tab instead of placing it outside the group.
                 for dock in group:owner.removeDockWidget(dock)
                 anchor=group[0];owner.addDockWidget(area,anchor)
-                if side=='left':owner.splitDockWidget(self.rails[side],anchor,Qt.Orientation.Horizontal)
-                else:owner.splitDockWidget(anchor,self.rails[side],Qt.Orientation.Horizontal)
                 for dock in group[1:]:owner.tabifyDockWidget(anchor,dock)
                 for dock in group:dock.setVisible(opened[dock])
                 selected=next((d for d in group if opened[d]),None)

@@ -4,7 +4,7 @@ from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QPixmap, QDesktopServices, QFont, QFontDatabase
 from PySide6.QtWidgets import (QDialog, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QListWidget, QStackedWidget, QPushButton, QComboBox, QLineEdit, QCheckBox,
-    QFormLayout, QScrollArea, QFrame, QProgressBar, QSizePolicy, QDialogButtonBox)
+    QFormLayout, QScrollArea, QFrame, QProgressBar, QSizePolicy, QDialogButtonBox, QTabWidget)
 from .ai import GEMINI_MODELS
 from .artwork_tools import IMAGE_MODEL_CHOICES
 from .chatgpt_widgets import ChatGPTSettingsPanel
@@ -190,7 +190,12 @@ class OnboardingWizard(QDialog):
     def build_local(self):
         layout = self.page()
         self.local = WizardLocalModelsPanel(self.owner, self.local_tasks)
-        layout.addWidget(self.local)
+        sections = QTabWidget()
+        sections.addTab(self.local, 'Video, images and writing')
+        from .audio_widgets import AudioModelsPanel
+        self.audio_models = AudioModelsPanel(self.owner)
+        sections.addTab(self.audio_models, 'Dialogue, Foley and music')
+        layout.addWidget(sections)
 
     def local_tasks(self):
         tasks = []
@@ -291,7 +296,6 @@ class OnboardingWizard(QDialog):
         row = self.steps.currentRow()
         if row == len(STEPS) - 1 and delta > 0: self.finish(); return
         row += delta
-        if row == 3 and not self.needs_local(): row += delta
         self.steps.setCurrentRow(max(0, min(len(STEPS) - 1, row)))
 
     def go(self, row):
@@ -362,6 +366,7 @@ class OnboardingWizard(QDialog):
             if self.remember.isChecked(): self.settings.setValue(key + '_key', value)
             else: self.settings.remove(key + '_key')
         save_profile(self.settings, self.local.value())
+        self.audio_models.save()
         self.settings.setValue('onboarding/quick_start_complete', self.progress_checks[2].isChecked())
         self.settings.setValue('onboarding/seen', True); self.settings.sync()
         self.owner.update_provider_button(); self.accept()

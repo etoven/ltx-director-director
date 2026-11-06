@@ -15,6 +15,18 @@ from ltx_prompt_director.inline_cues import NOTE_TAG
 from ltx_prompt_director.prompt_tags import render_prompt_notes
 
 
+def production_response(text):
+    """Provider fixture for the explicit production-variable wire contract."""
+    import json
+    from ltx_prompt_director.output_templates import ACTIVE_OUTPUT, root_fields
+    context = ACTIVE_OUTPUT.get()
+    if context is None:
+        return json.dumps({'prompt': text})
+    return json.dumps(dict(variables={name: text if name == 'global_prompt' else '' for name in root_fields(context['layout'])},
+        subjects=[dict(id=x['id'], prompt=x.get('prompt', '')) for x in context['subjects']],
+        segments=[dict(id=x['id'], prompt=x['prompt']) for x in context['segments']]))
+
+
 class UnifiedEditorTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -282,14 +294,14 @@ class UnifiedEditorTests(unittest.TestCase):
                     first = pool.call_args.args[0]
                     w.apply_quick_fix(STARTERS[0], 'segment')
                     self.assertEqual(pool.call_count, 1)
-                    self.assertEqual(w.minimax_prompt_text, combined)
+                    self.assertIn(combined, w.minimax_prompt_text)
                     self.assertIn(STARTERS[0]['prompt'], first.args[0][0].prompt)
                     with patch.object(ai, '_provider_raw', return_value=json.dumps({'prompt': 'A steady tracking shot.', 'duration': 2.5})):
                         first.signals.finished.emit(first.operation(*first.args))
                     self.assertEqual(pool.call_count, 1)
                 self.assertEqual(w.segments[0].prompt, 'A steady tracking shot.')
                 self.assertEqual(w.segments[1].to_dict(), neighbor)
-                self.assertEqual(w.minimax_prompt_text, combined)
+                self.assertIn(combined, w.minimax_prompt_text)
                 expected_editor = w.intent_segment_prompt if w.unified_workspace else w.segment_prompt
                 self.assertEqual(w.paragraph_review.editor, expected_editor)
                 w.paragraph_review.resolve_all(False)
@@ -415,32 +427,27 @@ class UnifiedEditorTests(unittest.TestCase):
                          [['Start 0.00s', 'End 0.50s'], ['Start 0.50s', 'End 2.50s'], ['Start 2.50s', 'End 5.50s']])
 
     def test_editor_specific_generate_and_refine_buttons_do_not_move(self):
-        from PySide6.QtWidgets import QPushButton
         w = self.make_window("ltx")
-        self.assertGreaterEqual(w.segment_header.indexOf(w.magic_button), 0)
-        self.assertGreaterEqual(w.segment_header.indexOf(w.prompt_refine_button), 0)
-        self.assertTrue(w.combined_generate_button.isHidden())
-        self.assertTrue(w.combined_refine_button.isHidden())
-        w.set_project_type("minimax_frames")
-        self.assertGreaterEqual(w.director_intent_row.indexOf(w.magic_button), 0)
-        self.assertGreaterEqual(w.director_intent_row.indexOf(w.prompt_refine_button), 0)
-        self.assertGreaterEqual(w.minimax_panel.header.indexOf(w.combined_generate_button), 0)
-        self.assertGreaterEqual(w.minimax_panel.header.indexOf(w.combined_refine_button), 0)
-        self.assertNotEqual(w.magic_button, w.combined_generate_button)
-        self.assertTrue(w.combined_generate_button.isHidden())
-        self.assertFalse(w.prompt_surface.generate.isHidden())
-        self.assertTrue(w.combined_refine_button.isHidden())
-        self.assertFalse(w.prompt_surface.refine.isHidden())
-        self.assertEqual(w.magic_button.text(), "Generate")
-        self.assertEqual(w.prompt_refine_button.text(), "Refine")
-        w.set_project_type("minimax_prompt_refinement")
-        self.assertTrue(w.magic_button.isHidden())
-        self.assertTrue(w.prompt_refine_button.isHidden())
-        self.assertGreaterEqual(w.minimax_panel.header.indexOf(w.combined_generate_button), 0)
-        w.set_project_type("ltx")
-        self.assertGreaterEqual(w.segment_header.indexOf(w.magic_button), 0)
-        self.assertGreaterEqual(w.segment_header.indexOf(w.prompt_refine_button), 0)
-        self.assertEqual(len(w.findChildren(QPushButton, "promptAction")), 4)
+        w.show(); self.app.processEvents()
+        global_actions = w.prompt_surface.actions['global']
+        segment_actions = w.prompt_surface.actions['segment']
+        self.assertTrue(w.unified_prompt_dock.isHidden())
+        self.assertIsNot(global_actions[1], segment_actions[1])
+        self.assertEqual(segment_actions[1].text(), 'Generate')
+        self.assertEqual(segment_actions[2].text(), 'Refine')
+        w.set_project_type('minimax_frames')
+        for dock in w.prompt_surface.docks.values():
+            self.assertFalse(dock.isHidden())
+        self.assertIs(w.intent_segment_prompt.parentWidget(), w.prompt_surface.segment_stack)
+        self.assertIs(w.prompt_surface.actions['segment'], segment_actions)
+        w.set_project_type('minimax_prompt_refinement')
+        self.assertTrue(w.global_prompt_dock.isHidden())
+        self.assertTrue(w.segment_prompt_dock.isHidden())
+        self.assertFalse(w.unified_prompt_dock.isHidden())
+        self.assertTrue(w.prompt_surface.actions['unified'][1].isHidden())
+        w.set_project_type('ltx')
+        self.assertTrue(w.unified_prompt_dock.isHidden())
+        self.assertFalse(w.segment_prompt_dock.isHidden())
 
     def test_sync_button_follows_unified_timeline_capability(self):
         w = self.make_window("ltx")
@@ -503,35 +510,23 @@ class UnifiedEditorTests(unittest.TestCase):
 
     def test_timeline_click_keeps_chosen_prompt_scope_including_reselected_card(self):
         from PySide6.QtTest import QTest
-        w = self.make_window("minimax_frames")
-        w.intent.setPlainText("Keep the whole-sequence direction")
-        w.global_prompt.setPlainText("Keep the global prompt")
-        w.unified_prompt.setPlainText("Keep the production draft")
+        w = self.make_window('minimax_frames')
+        w.intent.setPlainText('Keep the whole-sequence direction')
         before = [segment.to_dict() for segment in w.segments]
-        w.show()
-        self.app.processEvents()
+        w.show(); self.app.processEvents()
         for scope in ('global', 'unified', 'segment'):
             w.prompt_surface.select(scope)
-            editor = w.prompt_surface.editors.currentWidget()
             for row in (1, 1, 0):
-                item = w.timeline.item(row)
-                w.timeline.scrollToItem(item)
-                self.app.processEvents()
-                QTest.mouseClick(w.timeline.viewport(), Qt.MouseButton.LeftButton,
-                                pos=w.timeline.visualItemRect(item).center())
+                item = w.timeline.item(row); w.timeline.scrollToItem(item); self.app.processEvents()
+                QTest.mouseClick(w.timeline.viewport(), Qt.MouseButton.LeftButton, pos=w.timeline.visualItemRect(item).center())
+                QTest.qWait(30)
                 self.assertEqual(w.timeline.currentRow(), row)
-                self.assertEqual(w.prompt_surface.scope.currentData(), scope)
-                self.assertEqual(w.prompt_scope.currentData(), 'segment' if scope == 'segment' else 'global')
-                if scope == 'segment':
-                    self.assertEqual(w.intent_segment_prompt.toPlainText(), w.segments[row].prompt)
-                self.assertIs(w.prompt_surface.editors.currentWidget(), editor)
+                for dock in w.prompt_surface.docks.values():
+                    self.assertFalse(dock.isHidden())
+                self.assertEqual(w.intent_segment_prompt.toPlainText(), w.segments[row].prompt)
+                self.assertIn(w.segments[row].prompt, w.unified_prompt.toPlainText())
         self.assertEqual([segment.to_dict() for segment in w.segments], before)
-        self.assertEqual(w.intent.toPlainText(), "Keep the whole-sequence direction")
-        self.assertEqual(w.global_prompt.toPlainText(), "Keep the global prompt")
-        self.assertEqual(w.unified_prompt.toPlainText(), "Keep the production draft")
-        w.prompt_scope.setCurrentIndex(w.prompt_scope.findData("global"))
-        w.refresh_timeline(1)
-        self.assertEqual(w.prompt_scope.currentData(), "global")
+        self.assertEqual(w.intent.toPlainText(), 'Keep the whole-sequence direction')
 
     def test_comfy_export_video_combine_uses_project_name(self):
         import tempfile
@@ -784,31 +779,20 @@ class UnifiedEditorTests(unittest.TestCase):
     def test_minimax_director_intent_selector_shows_selected_segment(self):
         w = self.make_window('minimax_frames')
         w.intent.setPlainText("Original director's intent")
-        w.unified_prompt.setPlainText("My unified production prompt")
         w.prompt_surface.select('global')
-        self.assertIs(w.prompt_surface.editors.currentWidget(), w.intent)
-        self.assertEqual(w.prompt_scope.currentData(), "global")
-        w.prompt_scope.setCurrentIndex(1)
-        self.assertIs(w.prompt_surface.editors.currentWidget(), w.intent_segment_prompt)
-        self.assertEqual(w.intent_segment_prompt.toPlainText(), "First action")
-        self.assertTrue(w.segment_panel.isHidden())
-        self.assertEqual(w.director_intent_label.text(), "SEGMENT PROMPT")
-        w.intent_segment_prompt.setPlainText(
-            "First action\\n/refine More deliberate transformation"
-        )
-        self.assertIn("/refine", w.segments[0].prompt)
+        self.assertIs(w.intent_segment_prompt.parentWidget(), w.prompt_surface.segment_stack)
+        self.assertEqual(w.intent_segment_prompt.toPlainText(), 'First action')
+        w.intent_segment_prompt.setPlainText('First action\n/refine More deliberate transformation')
+        self.assertIn('/refine', w.segments[0].prompt)
         w.timeline.setCurrentRow(1)
-        self.assertEqual(w.intent_segment_prompt.toPlainText(), "Second action")
-        w.intent_segment_prompt.setPlainText("Second rewritten action")
-        self.assertEqual(w.segments[1].prompt, "Second rewritten action")
+        self.assertEqual(w.intent_segment_prompt.toPlainText(), 'Second action')
+        w.intent_segment_prompt.setPlainText('Second rewritten action')
+        self.assertEqual(w.segments[1].prompt, 'Second rewritten action')
         w.timeline.setCurrentRow(0)
-        self.assertIn("/refine", w.intent_segment_prompt.toPlainText())
-        w.prompt_scope.setCurrentIndex(0)
-        w.prompt_surface.select('global')
-        self.assertIs(w.prompt_surface.editors.currentWidget(), w.intent)
+        self.assertIn('/refine', w.intent_segment_prompt.toPlainText())
         self.assertEqual(w.intent.toPlainText(), "Original director's intent")
-        self.assertEqual(w.unified_prompt.toPlainText(), "My unified production prompt")
-        self.assertEqual(w.combined_focus if hasattr(w, "combined_focus") else "all", "all")
+        self.app.processEvents()
+        self.assertIn('Second rewritten action', w.unified_prompt.toPlainText())
 
     def test_workspace_picker_is_on_global_toolbar_without_a_wasted_row(self):
         w = self.make_window('minimax_frames')
@@ -829,7 +813,7 @@ class UnifiedEditorTests(unittest.TestCase):
         self.assertTrue(w.workflow_label.isHidden())
         self.assertEqual(w.project_type_combo.accessibleName(), "Project type")
         self.assertFalse(any(
-            x.text() == "PROJECT TYPE" for x in w.centralWidget().findChildren(QLabel)
+            x.text() == "PROJECT TYPE" for x in w.editor_root.findChildren(QLabel)
         ))
         before = w.project_type
         w.project_type_combo.setCurrentIndex(w.project_type_combo.findData('ltx'))
@@ -846,14 +830,12 @@ class UnifiedEditorTests(unittest.TestCase):
         self.app.processEvents()
         w.set_director_intent_expanded(True)
         self.app.processEvents()
-        panel = w.prompt_surface.content
-        stack = w.prompt_surface.editors
-        label = w.director_intent_label
-        selector = w.prompt_surface.scope
+        panel = w.segment_prompt_dock.widget()
+        stack = w.prompt_surface.segment_stack
         self.assertGreaterEqual(stack.geometry().top(), 0)
-        self.assertGreaterEqual(stack.width(), panel.width() - w.prompt_surface.rail.width() - 32)
-        self.assertTrue(label.isHidden())  # Picker already identifies the editor.
-        self.assertFalse(selector.isHidden())
+        self.assertGreaterEqual(stack.width(), panel.width() - 32)
+        self.assertTrue(w.prompt_surface.scope.isHidden())
+        self.assertFalse(w.segment_prompt_dock.isHidden())
         options = [w.options_row.itemAt(i).widget()
                    for i in range(w.options_row.count())]
         self.assertEqual(
@@ -869,7 +851,7 @@ class UnifiedEditorTests(unittest.TestCase):
         self.assertFalse(hasattr(w, "planning_row"))
         self.assertFalse(w.voice_options_button.isEnabled())
         self.assertFalse(w.voice_options_button.isHidden())
-        self.assertGreaterEqual(w.prompt_surface.scope.width(), w.prompt_surface.width() - 80)
+        self.assertTrue(w.prompt_surface.scope.isHidden())
         w.prompt_scope.setCurrentIndex(1)
         self.assertIs(stack.currentWidget(), w.intent_segment_prompt)
         w.intent_segment_prompt.setPlainText("A wide editor\\n/refine Keep scene continuity")
@@ -896,12 +878,12 @@ class UnifiedEditorTests(unittest.TestCase):
         w.show()
         self.app.processEvents()
         self.assertIs(w.options_row, w.sequence_controls)
-        self.assertGreaterEqual(w.prompt_surface.scope.width(), w.prompt_surface.width() - 80)
+        self.assertTrue(w.prompt_surface.scope.isHidden())
         self.assertGreaterEqual(w.conditioning_guide.height(), 96)
         self.assertEqual(w.start_button.text(), "Start")
         self.assertEqual(w.end_button.text(), "End")
-        self.assertIs(w.prompt_surface.editors.currentWidget().parent(), w.prompt_surface.editors)
-        self.assertIn("chars", w.unified_count.text())
+        self.assertIs(w.intent_segment_prompt.parentWidget(), w.prompt_surface.segment_stack)
+        self.assertIn("character", w.unified_count.text())
         self.assertEqual(w.minimax_panel.header.indexOf(w.unified_count),
                          w.minimax_panel.header.indexOf(w.minimax_panel.prompt_label) + 1)
         self.assertEqual(w.minimax_panel.header.indexOf(w.minimax_panel.copy_button),
@@ -913,7 +895,7 @@ class UnifiedEditorTests(unittest.TestCase):
         self.assertEqual(w.length_label.text(), "Len")
         self.assertTrue(w.length_label.isHidden())
         self.assertNotIn("DURATION", [label.text() for label
-                         in w.centralWidget().findChildren(QLabel) if label.isVisible()])
+                         in w.editor_root.findChildren(QLabel) if label.isVisible()])
         self.assertIn("Auto-fit", w.timeline_fit_button.toolTip())
         self.assertEqual(w.timeline_fit_button.accessibleName(), "Fit timeline")
 
@@ -942,7 +924,7 @@ class UnifiedEditorTests(unittest.TestCase):
         self.assertEqual(w.timeline_fit_button.text(), "")
         self.assertEqual(w.timeline_fit_button.toolButtonStyle(), Qt.ToolButtonStyle.ToolButtonIconOnly)
         self.assertFalse(w.timeline_fit_button.icon().isNull())
-        self.assertGreaterEqual(w.timeline_fit_button.height(), 30)
+        self.assertGreaterEqual(w.timeline_fit_button.height(), 24)
         self.assertIn("Auto-fit", w.timeline_fit_button.toolTip())
 
         self.assertIs(w.ai_timeline_status.parent(), w.statusBar())
@@ -1062,7 +1044,7 @@ class UnifiedEditorTests(unittest.TestCase):
         self.assertFalse(w.minimax_panel.cache_state.property("active"))
 
     def test_finished_unified_refinement_exposes_inline_paragraph_review(self):
-        w = self.make_window('minimax_frames')
+        w = self.make_window('minimax_prompt_refinement')
         w.resize(1150, 870)
         w.show()
         self.app.processEvents()
@@ -1201,19 +1183,19 @@ class UnifiedEditorTests(unittest.TestCase):
             self.assertTrue(w.refine_timing_button.isHidden())
             self.assertIsNone(w.magic_button.menu())
             self.assertFalse(w.requested_length.isHidden())
-            self.assertFalse(w.prompt_surface.scope.isHidden())
+            self.assertTrue(w.prompt_surface.scope.isHidden())
             self.assertTrue(w.segment_panel.isHidden())
             self.assertTrue(w.unified_panel.isHidden())
-            self.assertFalse(w.prompt_surface.isHidden())
+            self.assertFalse(w.unified_prompt_dock.isHidden())
             self.assertFalse(hasattr(w, "copy_image_prompt"))
             self.assertFalse(w.references_button.isHidden())
             w.show_reference_images()
             self.assertFalse(w.minimax_panel.reference_dock.isHidden())
-            w.project_type_combo.setCurrentIndex(1)
+            w.set_project_type('minimax_frames')
             self.assertTrue(w.minimax_panel.reference_dock.isHidden())
             self.assertTrue(w.references_button.isHidden())
             self.assertEqual(w.minimax_panel.workflow_label.text(), 'Conditioning frames')
-            w.project_type_combo.setCurrentIndex(0)
+            w.set_project_type('ltx')
             self.assertTrue(w.minimax_panel.reference_dock.isHidden())
             self.assertTrue(w.references_button.isHidden())
             self.assertFalse(w.hdr.isHidden())
@@ -1401,15 +1383,14 @@ class UnifiedEditorTests(unittest.TestCase):
     def test_minimax_has_one_visible_prompt_editor_and_ai_toolbar(self):
         from PySide6.QtWidgets import QPushButton
         w = self.make_window('minimax_frames')
-        self.assertTrue(w.segment_panel.isHidden())
-        self.assertTrue(w.unified_panel.isHidden())
-        self.assertFalse(w.prompt_surface.isHidden())
-        self.assertTrue(w.director_intent_row.indexOf(w.magic_button) >= 0)
-        self.assertTrue(w.director_intent_row.indexOf(w.prompt_refine_button) >= 0)
-        self.assertTrue(w.director_intent_row.indexOf(w.prompt_scope) >= 0)
-        self.assertGreaterEqual(w.minimax_panel.header.indexOf(w.combined_generate_button), 0)
-        self.assertGreaterEqual(w.minimax_panel.header.indexOf(w.combined_refine_button), 0)
-        self.assertEqual(len(w.findChildren(QPushButton, 'promptAction')), 4)
+        self.assertTrue(w.prompt_surface.isHidden())
+        self.assertTrue(w.prompt_surface.scope.isHidden())
+        for scope, dock in w.prompt_surface.docks.items():
+            self.assertFalse(dock.isHidden())
+            self.assertEqual(len(dock.findChildren(QPushButton, 'promptAction')), 3)
+        self.assertIs(w.intent.parentWidget().parentWidget(), w.global_prompt_dock)
+        self.assertIs(w.intent_segment_prompt.parentWidget(), w.prompt_surface.segment_stack)
+        self.assertIs(w.prompt_surface.structured.parentWidget(), w.prompt_surface.unified_stack)
 
     def test_timeline_plan_rewrite_typing_matches_prompt_and_rolls_back(self):
         w = self.make_window("minimax_frames")
@@ -1574,12 +1555,12 @@ class UnifiedEditorTests(unittest.TestCase):
         w.resize(1280, 820)
         w.show()
         self.app.processEvents()
-        self.assertIs(w.segment_ai_marquee.parent(), w.prompt_surface.body)
+        self.assertIs(w.segment_ai_marquee.parent(), w.segment_prompt_dock.widget())
         w.set_ai_controls_enabled(False)
         self.app.processEvents()
         self.assertFalse(w.segment_ai_marquee.isHidden())
         self.assertGreater(w.segment_ai_marquee.width(), 100)
-        self.assertGreaterEqual(w.segment_ai_marquee.width(), w.prompt_surface.body.width() - 20)
+        self.assertGreaterEqual(w.segment_ai_marquee.width(), w.segment_prompt_dock.widget().width() - 20)
         w.set_ai_controls_enabled(True)
         self.assertTrue(w.segment_ai_marquee.isHidden())
 
@@ -1966,14 +1947,13 @@ class UnifiedEditorTests(unittest.TestCase):
 
     def test_combined_generate_and_refine_never_rewrite_timeline_for_any_provider(self):
         import json
+        w = self.make_window("minimax_frames")
+        w.resize(1150, 850); w.show(); self.app.processEvents()
         for provider, model in (("openai", "gpt-6"), ("gemini", "gemini-3.5-flash-lite")):
             for kind in ("minimax_frames", "minimax_references"):
                 for refine in (False, True):
                     with self.subTest(provider=provider, kind=kind, refine=refine):
-                        w = self.make_window(kind)
-                        w.resize(1150, 850)
-                        w.show()
-                        self.app.processEvents()
+                        w.set_project_type(kind)
                         w.unified_prompt.setPlainText("Existing production brief")
                         before = [segment.to_dict() for segment in w.segments]
                         with (patch.object(w, "ai_credentials", return_value=(provider, model, "key")),
@@ -1983,20 +1963,21 @@ class UnifiedEditorTests(unittest.TestCase):
                         # Exercise the actual production rules and extractor. Even
                         # unsolicited timeline records cannot enter the segment path.
                         response = json.dumps({"prompt": "Updated production brief", "segments": []})
-                        with patch.object(ai, "_provider_raw", return_value=response) as raw:
+                        with patch.object(ai, "_provider_raw", side_effect=lambda *_: production_response("Updated production brief")) as raw:
                             result = worker.operation(*worker.args)
                         self.assertIn(ai.UNIFIED_PROMPT_TRANSPORT, raw.call_args.args[4])
                         self.assertNotIn("ADDITIVE STRUCTURED SEGMENT JSON CONTRACT", raw.call_args.args[4])
                         self.assertFalse(getattr(w, "ai_plan_stream_active", False))
                         self.assertIs(w.ai_request_editor, w.unified_prompt)
                         worker.signals.finished.emit(result)
-                        self.assertEqual(w.minimax_prompt_text, "Updated production brief")
+                        self.assertIn("Updated production brief", w.minimax_prompt_text)
                         self.assertEqual([segment.to_dict() for segment in w.segments], before)
-                        self.assertIs(w.paragraph_review.editor, w.unified_prompt)
-                        w.paragraph_review.finish()
+                        self.assertEqual(w.paragraph_review.pending_count, 0)
+                        w.prompt_surface.structured.refresh()
+                        self.assertIn("Updated production brief", w.unified_prompt.toPlainText())
                         w._close_saves_queued = True
                         w.project_dirty = False
-                        w.close()
+
 
 
     def test_combined_generate_sends_every_current_split_edited_and_inserted_beat(self):
@@ -2033,10 +2014,10 @@ class UnifiedEditorTests(unittest.TestCase):
                 worker = pool.call_args.args[0]
                 self.assertEqual([s.id for s in worker.args[0]], [s.id for s in w.segments])
                 self.assertTrue(all(a is not b for a, b in zip(worker.args[0], w.segments)))
-                with patch.object(ai, "_provider_raw", return_value='{"prompt":"All current actions combined."}') as raw:
+                with patch.object(ai, "_provider_raw", side_effect=lambda *_: production_response("All current actions combined.")) as raw:
                     result = worker.operation(*worker.args)
                 rules = raw.call_args.args[4]
-                plan = json.loads(rules.rsplit("\n", 1)[1])
+                plan = json.loads(rules.split("\n\nOUTPUT LAYOUT CONTRACT:")[0].rsplit("\n", 1)[1])
                 self.assertEqual([r["id"] for r in plan], [s.id for s in w.segments])
                 self.assertEqual([r["prompt"] for r in plan], [s.prompt for s in w.segments])
                 self.assertEqual([(r["start"], r["end"]) for r in plan], [(0, 2), (2, 3), (3, 5)])
@@ -2045,7 +2026,7 @@ class UnifiedEditorTests(unittest.TestCase):
                 self.assertNotIn("DELETED SHOT", rules)
                 self.assertNotIn("OBSOLETE COMBINED DRAFT", rules)
                 worker.signals.finished.emit(result)
-                self.assertEqual(w.minimax_prompt_text, "All current actions combined.")
+                self.assertIn("All current actions combined.", w.minimax_prompt_text)
                 self.assertEqual([s.to_dict() for s in w.segments], expected)
                 w.paragraph_review.finish()
                 w.close()
@@ -2162,7 +2143,8 @@ class UnifiedEditorTests(unittest.TestCase):
         loop.exec()
         deadline.stop()
         self.assertEqual(threads, [self.app.thread()])
-        self.assertEqual(w.unified_prompt.toPlainText(), 'Background draft')
+        self.assertIn('Background draft', w.unified_prompt.toPlainText())
+        self.assertIn('overall_soundscape:', w.unified_prompt.toPlainText())
 
 
     def test_save_on_main_window_close_preserves_manual_edits(self):

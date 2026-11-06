@@ -130,6 +130,8 @@ class ChatGPTSettingsPanel(QWidget):
         if kind == "signin":
             self._refresh_models()
         elif kind == "models":
+            import json
+            self.settings.setValue('chatgpt_models_cache', json.dumps(result))
             previous = str(self.settings.value("chatgpt_model", ""))
             self.model.blockSignals(True)
             self.model.clear()

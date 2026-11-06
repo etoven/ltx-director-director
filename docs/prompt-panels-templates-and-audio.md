@@ -1,0 +1,51 @@
+# Arrange your prompt documents and build audio alongside them
+
+Open **Panels** in the application header to show **Global Prompt**, **Segment Prompt**, **Unified Prompt**, **Timeline**, or an audio generator. LTX Video offers Global and Segment panels. MiniMax also offers Unified Prompt. Each supported prompt is its own dockable panel. Drag its heading to rearrange it, float it into a separate window, or close it and reopen it through Panels.
+
+![Independent prompt documents and a compact timeline ruler](images/planned-features/prompt-panels.png)
+
+The Timeline is also a native dock: float, resize, close or restore it through **Panels**. It keeps the ruler, audio strips, conditioning overview and sequence options together. The options row scrolls horizontally when the panel is narrow.
+
+Global describes the whole sequence. Segment edits the selected timeline entry. Each has its own Generate and Refine controls. The Unified Prompt presents the output in your workspace's template, with shaded editable areas and fixed surrounding text.
+
+Typing in Segment updates its matching Unified section immediately, without an AI request. Moving a timeline entry moves its section; changing its duration updates its timecodes. Click a timeline entry to scroll Unified to that section. Clicking the same entry again brings it back into view after you scroll elsewhere.
+
+Use **+** at the left of Unified to add a timeline section or subject definition. A new timeline section also creates a text entry on the timeline. Edit a section's start or end time to move its boundary or resize it, within the workspace's duration limits. Editing section text updates the segment prompt and its text preview.
+
+## Define the complete output in one canvas
+
+Open **Settings → Workspaces → Workspace templates** and select a MiniMax workspace. Arrange the complete output in a single visual canvas. The default install contains **MiniMax · Standard**, **MiniMax · Full**, **Generic Prompt Refine** and **LTX Video**. Unified templates apply to the MiniMax workspaces; LTX retains its separate global and segment formats, while Generic Prompt Refine works directly on the text you supply.
+
+![Pill fields and interlocking, nested section containers](images/planned-features/workspace-templates.png)
+
+- Add a **Section** block and type the heading you want in the output.
+- Drop a **Global direction**, **Sound**, **Music**, or **Named field** pill into a section. Named fields can be renamed through their context menu.
+- Place **Each subject** or **Each segment** inside a section. Their contents repeat for the corresponding references or ordered timeline entries.
+- Put **Subject details** and **Segment prompt** into their matching repeat groups. Timing pills belong inside **Each segment**. Matching sockets highlight while you drag; incompatible placements are rejected.
+- Type literal wording around pills in a text slot. Use **Text** or **Blank line** for additional instructions and spacing. Drag an existing pill to reposition it, or drag a container's grip to move the whole nested group.
+
+Choose **Preview output** to see how the layout reads with prompt content. **Save workspace** applies the template. The reset arrow restores the selected model's starting layout. Exporting a workspace includes its layout; saved projects retain their section edits and subject definitions. AI generation receives an explicit schema for the fields in the template, and the application places its response into that layout.
+
+## Generate dialogue, Foley and music
+
+The audio panels are available alongside every video workspace:
+
+| Panel | Inputs |
+| --- | --- |
+| Dialogue · IndexTTS 2.5 | Spoken script, voice sample and language |
+| Foley · Stable Audio 3 | Sound description, duration and seed |
+| Music · MiniMax Music 3 | Music description, optional tagged lyrics, duration and seed |
+
+![The music generator alongside prompt and timeline panels](images/planned-features/audio-panels.png)
+
+Open **Settings → Audio models**, or the audio section of the setup wizard, to choose existing engine environments and model files. **Prepare engine** creates a separate local runtime. **Download models** retrieves the corresponding model files. These operations run in the background.
+
+Write a prompt and choose **Generate**. **Refine prompt with AI before sampling** optionally improves the sampling input in the background using your writing model, while leaving your visible draft intact. Music refinement uses MiniMax's [Music Caption Rewriter](https://github.com/MiniMax-AI/MiniMax-Music3/tree/main/skills/music-caption-rewriter), choosing style references progressively and keeping lyrics separate from the caption.
+
+Use the panel's player to listen and seek. **Export audio** saves through the existing download manager and appears in Recent exports. The music ComfyUI button in the header exports an editable Music 3 workflow with the panel's description, lyrics, duration, seed and configured model filenames. Install those models in the receiving ComfyUI instance before running it.
+
+## Choose the writing model quickly
+
+Use the model dropdown in the application header to change the model for your next prompt request. It switches the saved choice directly.
+
+In an effect's details, **Prompt refinement model** can select a particular writing model for that effect. **Use current model (any model)** follows the toolbar choice. Existing and imported effects without a saved model preference use the current model.

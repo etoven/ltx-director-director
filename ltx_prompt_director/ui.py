@@ -2503,6 +2503,9 @@ class SettingsDialog(QDialog):
         from .storage_widgets import StorageSettingsPanel
         self.storage_panel=StorageSettingsPanel(parent,tabs)
         scroll_page(self.storage_panel,"Storage and backups")
+        from .audio_widgets import AudioModelsPanel
+        self.audio_models = AudioModelsPanel(parent)
+        scroll_page(self.audio_models, 'Audio models')
         self.resize(1280, 956); self.setMinimumSize(1040, 680)
         self.provider = QComboBox()
         self.provider.addItems(["gemini", "openai", "chatgpt", "local"])
@@ -2632,6 +2635,7 @@ class SettingsDialog(QDialog):
             QMessageBox.warning(self, "Invalid project tags", str(error))
             return
         save_profile(self.settings, self.local_models.value())
+        self.audio_models.save()
         self.settings.setValue("provider", self.provider.currentText())
         self.settings.setValue("gemini_model", self.model.currentText())
         self.settings.setValue("openai_model", self.openai_model.currentText())
@@ -3522,6 +3526,7 @@ class MainWindow(QMainWindow):
         self.project_dirty = False
         self.project_sessions: dict[str, dict] = {}
         self.minimax_prompt_text = ""
+        self.prompt_template_states = {}
         self.minimax_refinement_instructions = ""
         self.minimax_prompt_cache_key = ""
         self.minimax_prompt_updated_at = ""
@@ -3637,11 +3642,13 @@ class MainWindow(QMainWindow):
         from .render_widgets import render_icon
         self.panel_rails=PanelRails(self,[
             ('Projects',toolbar_icon('projects'),self.project_dock,'left'),
+            ('Timeline',toolbar_icon('preview'),self.timeline_dock,'right'),
             ('Effects Library',toolbar_icon('catalog'),self.effects_dock,'left'),
             ('Media Catalog',toolbar_icon('library-catalog'),self.catalog_dock,'left'),
             ('Reference Media',toolbar_icon('references'),self.minimax_panel.reference_dock,'right'),
             ('Video Preview',toolbar_icon('preview'),self.project_preview_dock,'right'),
             ('Image Generation',prompt_action_icon('action-generate'),self.image_generation_dock,'right'),
+            *[(dock.windowTitle(), toolbar_icon('downloads'), dock, 'right') for dock in self.audio_generation_docks.values()],
             ('Project Files',toolbar_icon('project-files'),self.project_files_dock,'right'),
             ('Properties',toolbar_icon('settings'),self.project_properties_dock,'right'),
             ('Render Queue',render_icon('queue'),self.render_queue_dock,'right'),
@@ -3778,9 +3785,8 @@ class MainWindow(QMainWindow):
         downloads_toolbar_action = toolbar.addWidget(self.downloads_button)
         self.download_tray = DownloadTray(self.settings, self)
         self.download_tray.folder_button.clicked.connect(self.open_download_folder)
-        self.provider_button = QPushButton()
-        self.provider_button.setObjectName("toolbarButton")
-        self.provider_button.clicked.connect(self.open_settings)
+        from .model_picker import ModelPicker
+        self.provider_button = ModelPicker(self)
         self.update_provider_button()
         toolbar.addWidget(self.provider_button)
         toolbar.addSeparator()
@@ -3815,6 +3821,27 @@ class MainWindow(QMainWindow):
         help_menu.addAction("Interactive illustrated manual", self.open_interactive_help)
         help_menu.addAction("Setup wizard…", self.show_onboarding)
         help_menu.addAction("Image generation panel", lambda: self.image_generation_dock.show())
+        panels_menu = QMenu('Panels', toolbar)
+        for dock in self.prompt_surface.docks.values() if hasattr(self, 'prompt_surface') else ():
+            panels_menu.addAction(dock.toggleViewAction())
+        # These panels are created later in the UI build. Resolve them on opening.
+        def populate_panels_menu():
+            panels_menu.clear()
+            panels_menu.addAction(self.timeline_dock.toggleViewAction())
+            for dock in self.prompt_surface.docks.values():
+                panels_menu.addAction(dock.toggleViewAction())
+            panels_menu.addSeparator()
+            for dock in self.audio_generation_docks.values():
+                panels_menu.addAction(dock.toggleViewAction())
+        panels_menu.aboutToShow.connect(populate_panels_menu)
+        panel_button = QToolButton(toolbar); panel_button.setText('Panels')
+        panel_button.setObjectName('panelsMenuButton')
+        panel_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup); panel_button.setMenu(panels_menu)
+        toolbar.addWidget(panel_button)
+        self.music_comfy_export_action = QAction(QIcon(str(files('ltx_prompt_director').joinpath('assets/comfyui-logo.svg'))), 'Export music to ComfyUI', self)
+        self.music_comfy_export_action.setToolTip('Export the music panel as an editable ComfyUI workflow')
+        self.music_comfy_export_action.triggered.connect(lambda: self.audio_generation_panels['music'].export_workflow())
+        toolbar.insertAction(self.comfy_export_action, self.music_comfy_export_action)
         help_button.setMenu(help_menu); toolbar.addWidget(help_button)
 
         root = QWidget()
@@ -3827,6 +3854,8 @@ class MainWindow(QMainWindow):
         timeline_layout = QVBoxLayout(timeline_shell)
         timeline_layout.setContentsMargins(0, 0, 0, 0)
         timeline_layout.setSpacing(0)
+        timeline_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        timeline_shell.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
         # Output size stays in the project toolbar; navigation sits by the ruler.
         self.output_size_control = QFrame()
         self.output_size_control.setToolTip("Output resolution (width × height, pixels)")
@@ -4048,7 +4077,17 @@ class MainWindow(QMainWindow):
             lambda yes: self.resolve_all_segment_reviews(True) if yes else None)
         self.timeline_deny_all.toggled.connect(
             lambda yes: self.resolve_all_segment_reviews(False) if yes else None)
-        outer.addLayout(self.sequence_controls)
+        self.sequence_options = QWidget()
+        self.sequence_options.setLayout(self.sequence_controls)
+        self.sequence_options_scroll = QScrollArea()
+        self.sequence_options_scroll.setObjectName('sequenceOptionsScroll')
+        self.sequence_options_scroll.setWidgetResizable(True)
+        self.sequence_options_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.sequence_options_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.sequence_options_scroll.setWidget(self.sequence_options)
+        self.sequence_options_scroll.setMinimumWidth(0)
+        self.sequence_options_scroll.horizontalScrollBar().rangeChanged.connect(self.fit_sequence_options)
+        outer.addWidget(self.sequence_options_scroll)
 
         director_panel = QFrame()
         self.director_panel = director_panel
@@ -4419,11 +4458,14 @@ class MainWindow(QMainWindow):
         self.intent_prompt_splitter.handle(1).setToolTip("Drag to resize Director's Intent; drag up to collapse, down to reopen")
         self.intent_prompt_splitter.handle(1).setAccessibleName("Resize or collapse Director's Intent")
         self.intent_prompt_splitter.splitterMoved.connect(self.director_intent_splitter_moved)
-        from .panel_design import PromptSurface
-        self.prompt_surface = PromptSurface(self)
+        from .prompt_panels import DockPromptSurface
+        self.prompt_surface = DockPromptSurface(self)
         self.intent_prompt_splitter.addWidget(self.prompt_surface)
         self.intent_prompt_splitter.setStretchFactor(2, 1)
-        outer.addWidget(self.intent_prompt_splitter, 1)
+        # Legacy controllers remain available to existing action routes. Their
+        # empty splitter must never participate in the visible timeline layout.
+        self.intent_prompt_splitter.setParent(self)
+        self.intent_prompt_splitter.hide()
         self.restore_director_intent_splitter()
         QTimer.singleShot(0, self.restore_director_intent_splitter)
         self.shot_sequence_panel = ShotSequencePanel(self, ProjectPreviewPanel, root)
@@ -4438,13 +4480,31 @@ class MainWindow(QMainWindow):
         root.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Ignored)
         outer.setSizeConstraint(QLayout.SizeConstraint.SetNoConstraint)
         root.installEventFilter(self)
-        self.setCentralWidget(root)
+        self.timeline_dock = QDockWidget('Timeline', self)
+        self.timeline_dock.setObjectName('timelineDock')
+        self.timeline_dock.setProperty('adobePanel', True)
+        self.timeline_dock.setWidget(root)
+        self.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, self.timeline_dock)
+        # Retain a centre column for Qt's side-dock sizing, without a visible
+        # central surface competing with the timeline and prompt docks.
+        anchor = QWidget(); anchor.setObjectName('dockLayoutAnchor')
+        anchor.setMinimumWidth(320); anchor.setFixedHeight(0)
+        anchor.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setCentralWidget(anchor)
+        self.setCorner(Qt.Corner.TopLeftCorner, Qt.DockWidgetArea.LeftDockWidgetArea)
+        self.setCorner(Qt.Corner.TopRightCorner, Qt.DockWidgetArea.RightDockWidgetArea)
+        self.setCorner(Qt.Corner.BottomLeftCorner, Qt.DockWidgetArea.LeftDockWidgetArea)
+        self.setCorner(Qt.Corner.BottomRightCorner, Qt.DockWidgetArea.RightDockWidgetArea)
+        self.timeline_dock.visibilityChanged.connect(self.save_window_panel_state)
+        self.timeline_dock.topLevelChanged.connect(self.save_window_panel_state)
         self.setStatusBar(QStatusBar())
         self.statusBar().addPermanentWidget(self.ai_timeline_status)
         self.apply_project_type_ui()
         self.update_summary()
 
     def _build_local_generation_ui(self):
+        from .audio_widgets import build_audio_docks
+        build_audio_docks(self)
         import threading
         self._local_video_cancel = threading.Event()
         self._video_key_aliases = {}
@@ -5315,6 +5375,8 @@ class MainWindow(QMainWindow):
         self.prompt_scope.setFixedWidth(metric(94))
         self.prompt_scope.setFixedHeight(metric(28))
         self.ruler.setFixedHeight(metric(28))
+        self.ruler_spacer.setFixedHeight(metric(28))
+        self.timeline_navigation.setFixedHeight(metric(28))
         self.timeline_height_handle.set_scale(scale)
         self.conditioning_height_handle.set_scale(scale)
         self.project_list.setSpacing(metric(4))
@@ -6002,6 +6064,7 @@ class MainWindow(QMainWindow):
             "renderGroupOptions": copy.deepcopy(self.render_group_options),
             "activeRenderGroup": self._active_render_group,
             "conditioningAudio": {'enabled': self.audio_panel.enabled.isChecked(), 'clips': self.audio_panel.records()},
+            "promptTemplateStates": copy.deepcopy(self.prompt_template_states),
             "globalPrompt": self.global_prompt.toPlainText(),
             "directorIntent": self.intent.toPlainText(),
             "requestedLength": self.requested_length.value(),
@@ -6038,6 +6101,7 @@ class MainWindow(QMainWindow):
         self.shot_sequence_settings = shot_settings(state.get("shotSequence"))
         self._loading = True
         self.workspace_revision += 1
+        self.prompt_template_states = copy.deepcopy(state.get("promptTemplateStates", {}))
         self.segments = state.get("segments", [])
         from .render_cache import render_cache_from
         self.video_render_cache = render_cache_from(state.get('videoRenderCache'))
@@ -6438,6 +6502,8 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         self.audio_panel.transport.pause()
+        for panel in getattr(self, 'audio_generation_panels', {}).values():
+            panel.dispose()
         if hasattr(self,'timeline_preview'):self.timeline_preview.cancel()
         if hasattr(self,'render_queue'):self.render_queue.shutdown()
         self.reject_segment_prompt_review()
@@ -6546,6 +6612,11 @@ class MainWindow(QMainWindow):
                 if kind == QEvent.Type.Drop:
                     watched.setStyleSheet("")
                     if allowed:
+                        part_id = getattr(self, '_effect_part_segments', {}).get(watched)
+                        if part_id:
+                            part_row = next((i for i, segment in enumerate(self.segments) if segment.id == part_id), -1)
+                            if part_row >= 0:
+                                self.timeline.setCurrentRow(part_row)
                         if row >= 0: self.timeline.setCurrentRow(row)
                         if editor == 'global':
                             self.prompt_surface.select('global')
@@ -6566,6 +6637,7 @@ class MainWindow(QMainWindow):
         self._fitting_panels=True
         try:
             self.toolbar_brand_action.setVisible(self.width()>=1450)
+            self.fit_sequence_options()
             self.editor_root.layout().activate()
             timeline_resized=False
             if not self.timeline_shell.isHidden():
@@ -6577,13 +6649,26 @@ class MainWindow(QMainWindow):
                     self.add_tile_wrap.setFixedHeight(height)
                     self.update_timeline_layout()
             self.editor_root.layout().activate()
+            if self.editor_root.maximumHeight() != 16777215:
+                self.editor_root.setMaximumHeight(16777215)
             if timeline_resized:
                 self.set_director_intent_expanded(self.settings.value('director_intent_expanded',True,bool),persist=False)
         finally:self._fitting_panels=False
 
+    def fit_sequence_options(self, *_):
+        if not hasattr(self, 'sequence_options_scroll'):
+            return
+        scroll = self.sequence_options_scroll
+        bar = scroll.horizontalScrollBar()
+        height = self.sequence_options.sizeHint().height() + (bar.sizeHint().height() if bar.maximum() else 0) + 2
+        if scroll.height() != height:
+            scroll.setFixedHeight(height)
+
     def mark_dirty(self, *_args) -> None:
         if self._loading:
             return
+        if hasattr(self, "prompt_surface"):
+            self.prompt_surface.schedule_sync()
         self._edit_serial += 1
         was_dirty = self.project_dirty
         self.project_dirty = True
@@ -6620,6 +6705,7 @@ class MainWindow(QMainWindow):
         self.segment_prompt.clear()
         self.global_prompt.clear()
         self.minimax_prompt_text = ""
+        self.prompt_template_states = {}
         self.minimax_refinement_instructions = ""
         self.minimax_prompt_cache_key = ""
         self.minimax_prompt_updated_at = ""
@@ -6753,11 +6839,15 @@ class MainWindow(QMainWindow):
 
     def maximum_safe_timeline_height(self) -> int:
         """Keep timeline growth inside the current desktop-sized client area."""
-        if not hasattr(self, "timeline") or not self.centralWidget():
+        if not hasattr(self, "timeline"):
             return 430
-        central = self.centralWidget()
+        central = self.editor_root
         current = max(1, self.timeline.height())
         other_minimum = max(0, self.editor_root.minimumSizeHint().height() - current)
+        if hasattr(getattr(self, 'prompt_surface', None), 'structured'):
+            header = self.menuWidget().height() if self.menuWidget() else 90
+            available = self.height() - header - self.statusBar().height() - other_minimum - 160
+            return max(184, min(430, available))
         available_client_height = central.height()
         screen = self.screen() or QApplication.primaryScreen()
         if screen:
@@ -6765,7 +6855,7 @@ class MainWindow(QMainWindow):
             desktop_client_height = max(0, screen.availableGeometry().height() - window_overhead)
             available_client_height = min(available_client_height, desktop_client_height)
         reserve=min(100,max(40,round(available_client_height*.14)))
-        return max(96, min(430, available_client_height - other_minimum - reserve))
+        return max(184, min(430, available_client_height - other_minimum - reserve))
 
     def set_timeline_height(self, value: int) -> None:
         value = max(184, min(int(value), 430))
@@ -7279,7 +7369,7 @@ class MainWindow(QMainWindow):
     def save_prompt(self) -> None:
         if self._loading or self.prompt_only_workspace:
             return
-        if self.prompt_scope.currentData() == "global":
+        if self.prompt_scope.currentData() == "global" and not hasattr(self, "prompt_surface"):
             self.global_prompt.blockSignals(True)
             self.global_prompt.setPlainText(self.segment_prompt.toPlainText())
             self.global_prompt.blockSignals(False)
@@ -7640,6 +7730,9 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Review split: approve any part to keep all parts, or deny to restore the original segment.")
 
     def focus_segment_prompt(self) -> None:
+        if hasattr(self, 'prompt_surface'):
+            self.prompt_surface.docks['segment'].show()
+            self.prompt_surface.docks['segment'].raise_()
         self.prompt_scope.setCurrentIndex(1)
         (self.intent_segment_prompt if self.unified_workspace
          else self.segment_prompt).setFocus()
@@ -7878,7 +7971,8 @@ class MainWindow(QMainWindow):
         return "\n\n".join(line for line in lines if line)
 
     def ai_credentials(self) -> tuple[str, str, object] | None:
-        provider = self.settings.value("provider", "gemini")
+        override = getattr(self, '_effect_ai_choice', None) or {}
+        provider = override.get('provider') or self.settings.value("provider", "gemini")
         if provider == "local":
             profile = load_profile(self.settings)
             try: validate_profile(profile, "text")
@@ -7890,11 +7984,11 @@ class MainWindow(QMainWindow):
             return "local", profile["llm_model"], profile
         if provider == "chatgpt":
             profile = self.chatgpt_auth.active_profile()
-            model = str(self.settings.value("chatgpt_model", ""))
+            model = str(override.get('model') or self.settings.value("chatgpt_model", ""))
             if not (profile and profile["connected"] and profile["enabled"] and model):
                 self.open_settings()
                 profile = self.chatgpt_auth.active_profile()
-                model = str(self.settings.value("chatgpt_model", ""))
+                model = str(override.get('model') or self.settings.value("chatgpt_model", ""))
             if not (profile and profile["connected"] and profile["enabled"] and model):
                 return None
             # Access tokens are refreshed by the AI worker to avoid blocking Qt.
@@ -7906,6 +8000,7 @@ class MainWindow(QMainWindow):
         if not key:
             return None
         return provider, (
+            override['model'] if override.get('model') else
             self.settings.value("openai_model", "gpt-5.4-mini") if provider == "openai"
             else self.settings.value("gemini_model", GEMINI_MODELS[0])
         ), key
@@ -7967,6 +8062,14 @@ class MainWindow(QMainWindow):
         self.effects_dock.raise_()
 
     def apply_quick_fix(self, preset: dict, editor: str) -> None:
+        previous = getattr(self, '_effect_ai_choice', None)
+        self._effect_ai_choice = preset.get('refinement_model')
+        try:
+            self._apply_quick_fix(preset, editor)
+        finally:
+            self._effect_ai_choice = previous
+
+    def _apply_quick_fix(self, preset: dict, editor: str) -> None:
         instruction = str(preset.get("prompt") or "").strip()
         if (preset.get("target") not in (editor, "both") or not instruction
                 or not self.quick_fix_available(editor)):
@@ -8081,6 +8184,7 @@ class MainWindow(QMainWindow):
                         *, review_text: bool = True) -> None:
         if self.ai_busy:
             return
+        self.ai_request_effect_choice = copy.deepcopy(getattr(self, '_effect_ai_choice', None))
         self.finish_prompt_reviews()
         self.inline_typing.finish()
         target, kind, selected_index = self.ai_editor_target(operation)
@@ -8101,7 +8205,7 @@ class MainWindow(QMainWindow):
             "MiniMax H3 Frame Generate" if operation is build_minimax_h3_prompt else
             "MiniMax H3 Reference Refine" if operation is refine_minimax_h3_reference_prompt else
             "MiniMax H3 Frame Refine" if operation is refine_minimax_h3_prompt else
-            "MiniMax Prompt Refinement" if operation is refine_minimax_text_prompt else
+            "Prompt refinement" if operation is refine_minimax_text_prompt else
             "MiniMax Timeline Sync" if operation is sync_timeline_to_prompt else
             "MiniMax Combined Sync" if operation is sync_combined_from_timeline else
             "Selected Segment Generate" if operation is generate_segment_prompt else
@@ -8119,7 +8223,12 @@ class MainWindow(QMainWindow):
         instructions = (None if self.unified_workspace and operation in {build_prompts, refine_segment_prompt, refine_global_prompt, refine_timing}
                         else copy.deepcopy(self.workspace_definition.get("generation_prompts", {})))
         maximum_shots = shot_limit(self.workspace_definition)
+        from .output_templates import ACTIVE_OUTPUT, request_context
+        template_context = (request_context(self.workspace_definition, self.prompt_surface.structured.segments(),
+                            self.prompt_surface.structured.subjects())
+                            if self.unified_workspace and not self.prompt_only_workspace else None)
         def workspace_operation(*values):
+            output_token = ACTIVE_OUTPUT.set(template_context)
             token = WORKSPACE_INSTRUCTIONS.set(instructions)
             shot_token = SHOT_COUNT_LIMIT.set(maximum_shots)
             stream_token = STREAM_SINK.set(worker.signals.stream.emit)
@@ -8129,6 +8238,7 @@ class MainWindow(QMainWindow):
                 STREAM_SINK.reset(stream_token)
                 SHOT_COUNT_LIMIT.reset(shot_token)
                 WORKSPACE_INSTRUCTIONS.reset(token)
+                ACTIVE_OUTPUT.reset(output_token)
         worker = MagicWorker(workspace_operation, args, retries, retry_cooldown, activity)
         # Internal/custom worker calls may legitimately have no model args.
         model = (
@@ -8226,7 +8336,12 @@ class MainWindow(QMainWindow):
             return
         if getattr(self, "active_live_panel", None) is not None:
             self.active_live_panel.finish(True)
-        self.ai_finished_callback(result)
+        previous_effect_choice = getattr(self, '_effect_ai_choice', None)
+        self._effect_ai_choice = getattr(self, 'ai_request_effect_choice', None)
+        try:
+            self.ai_finished_callback(result)
+        finally:
+            self._effect_ai_choice = previous_effect_choice
         if (getattr(self, "ai_review_text", True) and review_editor is not None
                 and review_editor.isVisible() and not self.ai_busy
                 and self.ai_request_is_current()):
@@ -8515,7 +8630,8 @@ class MainWindow(QMainWindow):
             for key, item in (drafts.items() if isinstance(drafts, dict) else [])
             if isinstance(item, dict)
         }
-        aliases = {'minimax_frames': 'minimax_base_guide', 'minimax_references': 'minimax_full_reference_guide'}
+        aliases = {'minimax_frames': 'minimax_official_skill_base', 'minimax_references': 'minimax_official_skill_reference',
+                   'minimax_base_guide': 'minimax_official_skill_base', 'minimax_full_reference_guide': 'minimax_official_skill_reference'}
         for old, new in aliases.items():
             old_key = old.removeprefix('minimax_')
             if new not in self.minimax_drafts and old_key in self.minimax_drafts:
@@ -8600,7 +8716,8 @@ class MainWindow(QMainWindow):
     def set_project_type(self, project_type: str) -> None:
         self.reject_segment_prompt_review()
         if project_type not in self.workspace_definitions:
-            project_type = {'minimax_frames': 'minimax_base_guide', 'minimax_references': 'minimax_full_reference_guide'}.get(project_type, project_type)
+            project_type = {'minimax_frames': 'minimax_official_skill_base', 'minimax_references': 'minimax_official_skill_reference',
+                            'minimax_base_guide': 'minimax_official_skill_base', 'minimax_full_reference_guide': 'minimax_official_skill_reference'}.get(project_type, project_type)
         if project_type not in self.workspace_definitions or project_type == self.project_type:
             return
         if getattr(self, "duration_animation", None):
@@ -8677,7 +8794,7 @@ class MainWindow(QMainWindow):
         if hasattr(self, "paragraph_review"):
             self.finish_prompt_reviews()
         self.minimax_panel.prompt_label.setText("PROMPT REFINEMENT" if prompt_only else "UNIFIED PROMPT")
-        self.unified_prompt.setPlaceholderText("Write or paste a MiniMax prompt. Use / to add refinement annotations…" if prompt_only else
+        self.unified_prompt.setPlaceholderText("Write or paste a prompt for any model. Use / to add refinement annotations…" if prompt_only else
             "Generate the unified prompt from your segments, or write and refine your own…")
         self.references_button.setVisible(refs)
         self.minimax_panel.reference_dock.toggleViewAction().setVisible(refs)
@@ -8701,7 +8818,7 @@ class MainWindow(QMainWindow):
         self.prompt_refine_button.setToolTip(
             "Segment: refine only the selected segment. Global: refine every segment "
             "from Director's Intent, then rebuild the combined prompt.")
-        self.comfy_export_action.setVisible(self.workspace_engine in {"minimax_frames","minimax_references","minimax_prompt"})
+        self.comfy_export_action.setVisible(self.workspace_engine in {"minimax_frames","minimax_references"})
         self.workflow_export_action.setVisible(ltx)
         self.timeline_import_action.setVisible(not prompt_only)
         self.delete_segment_action.setVisible(not prompt_only)
@@ -8729,7 +8846,7 @@ class MainWindow(QMainWindow):
             for i in range(self.sequence_controls.count()):
                 widget=self.sequence_controls.itemAt(i).widget()
                 if widget:widget.setVisible(not sequence and not prompt_only and (audio or widget not in (self.sfx,self.spoken_dialog,self.reduce_music,self.voice_options_button)))
-            self.intent_prompt_splitter.setVisible(not sequence)
+            self.intent_prompt_splitter.hide()
             if sequence:
                 self.segment_quick_fix_button.hide()
                 self.combined_quick_fix_button.hide()
@@ -8748,6 +8865,17 @@ class MainWindow(QMainWindow):
                 self.shot_sequence_panel.deactivate()
         if hasattr(self, 'prompt_surface'):
             self.prompt_surface.sync_workspace()
+        if hasattr(self, 'timeline_dock'):
+            available = not prompt_only
+            previous = getattr(self, '_timeline_dock_available', True)
+            if not available and previous:
+                self._timeline_dock_was_open = not self.timeline_dock.isHidden()
+                self.timeline_dock.hide()
+            elif available and not previous:
+                self.timeline_dock.setVisible(getattr(self, '_timeline_dock_was_open', True))
+            self._timeline_dock_available = available
+            self.timeline_dock.toggleViewAction().setVisible(available)
+            self.timeline_dock.toggleViewAction().setEnabled(available)
         if hasattr(self, 'audio_panel'):
             self.audio_main_layout.removeWidget(self.audio_panel)
             self.shot_sequence_panel.audio_layout.removeWidget(self.audio_panel)
@@ -8757,6 +8885,9 @@ class MainWindow(QMainWindow):
                 self.audio_main_layout.insertWidget(self.audio_main_layout.indexOf(self.timeline_shell) + 1, self.audio_panel)
             self.audio_panel.show()
             self.sync_audio_timeline()
+        if hasattr(self, 'editor_root'):
+            self.editor_root.layout().invalidate()
+            QTimer.singleShot(0, self.fit_internal_panels)
 
     def sync_audio_timeline(self):
         if not hasattr(self, 'audio_panel'):
@@ -9017,7 +9148,7 @@ class MainWindow(QMainWindow):
             return
         show_segment = (
             self.unified_workspace and not self.prompt_only_workspace
-            and self.prompt_scope.currentData() == "segment"
+            and (hasattr(getattr(self, 'prompt_surface', None), 'docks') or self.prompt_scope.currentData() == "segment")
         )
         self.director_intent_stack.setCurrentIndex(1 if show_segment else 0)
         self.director_intent_label.setText(
@@ -9502,11 +9633,21 @@ class MainWindow(QMainWindow):
         self.sync_minimax_panel(cache_state)
         if hasattr(self, 'prompt_surface'):
             self.prompt_surface.select('unified')
-        self.minimax_panel.focus_prompt_editor()
+            self.prompt_surface.docks['unified'].show()
+            self.prompt_surface.docks['unified'].raise_()
+            if self.prompt_only_workspace:
+                self.unified_prompt.setFocus()
+            elif self.prompt_surface.structured.rows:
+                next(iter(self.prompt_surface.structured.rows.values()))[0].setFocus()
+        else:
+            self.minimax_panel.focus_prompt_editor()
         return self.minimax_panel
 
     def retime_unified_prompt(self) -> None:
         """Follow timeline edits locally without regenerating the production draft."""
+        if hasattr(getattr(self, 'prompt_surface', None), 'structured') and not self.prompt_only_workspace:
+            self.prompt_surface.structured.schedule()
+            return
         if self._loading or self.ai_busy or not self.unified_workspace or self.prompt_only_workspace:
             return
         self.reject_segment_prompt_review()
@@ -9521,6 +9662,12 @@ class MainWindow(QMainWindow):
 
     def highlight_selected_prompt_timecode(self, *, scroll: bool = False) -> None:
         """Emphasize the selected beat; navigate the caret only on an explicit click."""
+        if hasattr(getattr(self, 'prompt_surface', None), 'structured') and not self.prompt_only_workspace:
+            if scroll:
+                self.prompt_surface.structured.request_reveal()
+            else:
+                self.prompt_surface.structured.schedule()
+            return
         if not hasattr(self, 'unified_prompt'):
             return
         if not self.unified_workspace or self.prompt_only_workspace:
@@ -9576,6 +9723,9 @@ class MainWindow(QMainWindow):
             review.reject()
 
     def preview_segment_in_unified(self, editor) -> None:
+        if hasattr(getattr(self, 'prompt_surface', None), 'structured') and not self.prompt_only_workspace:
+            self.prompt_surface.structured.schedule()
+            return
         if (self._loading or self.ai_busy or not self.unified_workspace or self.prompt_only_workspace
                 or self.prompt_scope.currentData() != 'segment'
                 or not self.workspace_engine.startswith('minimax_') or not editor.hasFocus()):
@@ -9720,7 +9870,7 @@ class MainWindow(QMainWindow):
         if not self.minimax_prompt_text.strip():
             return
         QApplication.clipboard().setText(self.minimax_prompt_text)
-        message = "MiniMax H3 prompt copied to clipboard"
+        message = "Prompt copied to clipboard" if self.prompt_only_workspace else "MiniMax H3 prompt copied to clipboard"
         self.minimax_panel.show_message(message, "success")
 
     def generate_minimax_prompt_frames(self) -> None:
@@ -10869,6 +11019,7 @@ class MainWindow(QMainWindow):
             self.audio_panel.import_ltx(payload.get('timeline', {}).get('audioSegments', []), fps, comfy_input)
             self.minimax_reference_images = [None] * 4
             self.minimax_prompt_text = ""
+            self.prompt_template_states = {}
             self.minimax_refinement_instructions = ""
             self.minimax_prompt_cache_key = ""
             self.minimax_prompt_updated_at = ""
@@ -10924,6 +11075,7 @@ class MainWindow(QMainWindow):
             "workspaceDefinition": copy.deepcopy(self.workspace_definition),
             "shotSequence": dict(self.shot_sequence_settings),
             "downloadDirectory": self.download_directory,
+            "promptTemplateStates": copy.deepcopy(self.prompt_template_states),
             "globalPrompt": self.global_prompt.toPlainText(),
             "directorIntent": self.intent.toPlainText(),
             "directionOptions": {
@@ -10952,6 +11104,7 @@ class MainWindow(QMainWindow):
         }
 
     def load_project_payload(self, payload: dict) -> None:
+        self.prompt_template_states = copy.deepcopy(payload.get("promptTemplateStates", {}))
         self.reject_segment_prompt_review()
         from .render_cache import render_cache_from
         self.video_render_cache=copy.deepcopy(render_cache_from(payload.get('library',{}).get('videoRenderCache'),payload.get('videoRenderCache')))

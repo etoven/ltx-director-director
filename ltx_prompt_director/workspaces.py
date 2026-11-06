@@ -12,6 +12,8 @@ from PySide6.QtCore import QStandardPaths
 from .timing_limits import sequence_limit, shot_limit
 
 SCHEMA_VERSION = 1
+FACTORY_IDS = frozenset({'ltx', 'minimax_official_skill_base', 'minimax_official_skill_reference', 'minimax_prompt_refinement'})
+PREVIOUS_REFINEMENT_DIGEST = 'b2c4c7c9c53dd41c5cf3440742c9effcb7de352b63d945b8d73171807fe09977'
 KINDS = {"image", "video", "start", "end", "identity", "style", "scene", "object", "composition", "wardrobe", "voice", "sound", "motion"}
 
 
@@ -80,6 +82,11 @@ def validate_definition(value: dict) -> dict:
     if type(shots) is not int or shots < 0:
         raise ValueError("Maximum shots must be a nonnegative integer; use 0 for unlimited.")
     value["max_shots"] = shots
+    from .output_templates import default_layout, validate_layout
+    if value['prompt_mode'] == 'unified':
+        value['output_template'] = validate_layout(value.get('output_template', default_layout(value['engine'])))
+    else:
+        value.pop('output_template', None)
     return value
 
 
@@ -166,6 +173,22 @@ class WorkspaceStore:
             if not (self.root / "shot_sequence.json").exists():
                 self.save(json.loads(source.read_text()))
             sequence_marker.touch()
+        compact_marker = self.root / '.stock-official-compact-v1'
+        if not compact_marker.exists():
+            self.retire_redundant_defaults()
+            import hashlib
+            refinement = self.root / 'minimax_prompt_refinement.json'
+            if refinement.is_file():
+                try:
+                    previous = json.loads(refinement.read_text(encoding='utf-8'))
+                    previous.pop('output_template', None)
+                    digest = hashlib.sha256(json.dumps(previous, sort_keys=True).encode()).hexdigest()
+                    if digest == PREVIOUS_REFINEMENT_DIGEST:
+                        stock = files('ltx_prompt_director').joinpath('workspace_templates/minimax_prompt_refinement.json')
+                        self.save(json.loads(stock.read_text(encoding='utf-8')))
+                except (OSError, ValueError):
+                    pass
+            compact_marker.touch()
         self.errors: list[str] = []
 
     def load(self) -> dict[str, dict]:
@@ -200,7 +223,25 @@ class WorkspaceStore:
     def restore_stock(self, overwrite: bool = True) -> None:
         stock = files("ltx_prompt_director").joinpath("workspace_templates")
         for path in stock.iterdir():
-            if path.name.endswith(".json"):
+            if path.name.endswith(".json") and path.name.removesuffix('.json') in FACTORY_IDS:
                 value = validate_definition(json.loads(path.read_text(encoding="utf-8")))
                 if overwrite or not (self.root / path.name).exists():
                     self.save(value)
+
+    def retire_redundant_defaults(self):
+        """Remove only unchanged retired defaults; authored variants remain usable."""
+        from .output_templates import default_layout
+        for key in ('minimax_base_guide', 'minimax_full_reference_guide', 'shot_sequence'):
+            path = self.root / (key + '.json')
+            if not path.is_file():
+                continue
+            try:
+                actual = json.loads(path.read_text(encoding='utf-8'))
+                stock = json.loads(files('ltx_prompt_director').joinpath('workspace_templates/' + key + '.json').read_text(encoding='utf-8'))
+                layout = actual.pop('output_template', None)
+                if layout is not None and layout != default_layout(actual.get('engine', 'ltx')):
+                    continue
+                if actual == stock:
+                    path.unlink()
+            except (OSError, ValueError):
+                pass

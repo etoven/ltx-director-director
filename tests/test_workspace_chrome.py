@@ -314,7 +314,6 @@ def test_stacked_tab_groups_and_selected_members_restore_after_restart():
         preview,properties=first.project_preview_dock,first.project_properties_dock
         files,queue=first.project_files_dock,first.render_queue_dock
         first.addDockWidget(right,preview)
-        first.splitDockWidget(preview,rails.rails['right'],Qt.Orientation.Horizontal)
         first.splitDockWidget(preview,files,Qt.Orientation.Vertical)
         first.tabifyDockWidget(preview,properties);first.tabifyDockWidget(files,queue)
         for dock in (preview,properties,files,queue):dock.show()
@@ -392,6 +391,11 @@ def test_saved_native_layout_restores_outer_rails_and_selected_panel():
     first._restoring_layout=False
     first.panel_rails.activate(first.render_queue_dock);QTest.qWait(50)
     first.resizeDocks([first.render_queue_dock],[380],Qt.Orientation.Horizontal);QTest.qWait(20)
+    from PySide6.QtWidgets import QDockWidget
+    legacy=QDockWidget("Legacy rail",first)
+    legacy.setObjectName("panelIconRailDockright")
+    first.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea,legacy)
+    legacy.setFloating(True)
     first.project_dirty=False;first.close()
     second=make_window()
     try:
@@ -400,10 +404,12 @@ def test_saved_native_layout_restores_outer_rails_and_selected_panel():
         assert second.render_queue_dock.width()>=260
         left=second.panel_rails.rails['left'];right=second.panel_rails.rails['right']
         assert not left.isHidden() and not right.isHidden()
-        assert left.x()<second.project_dock.x()
+        assert left.x()<second.centralWidget().mapTo(second,QPoint()).x()
         assert right.x()>second.render_queue_dock.x()
-        assert second.render_queue_dock not in second.tabifiedDockWidgets(right)
-        assert second.project_dock not in second.tabifiedDockWidgets(left)
+        assert second.findChild(QDockWidget,"panelIconRailDockright") is None
+        assert second.toolBarArea(left)==Qt.ToolBarArea.LeftToolBarArea
+        assert second.toolBarArea(right)==Qt.ToolBarArea.RightToolBarArea
+        assert all(not rail.isMovable() and not rail.isFloatable() for rail in (left,right))
     finally:second.project_dirty=False;second.close()
 
 

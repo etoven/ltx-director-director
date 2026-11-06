@@ -1,84 +1,32 @@
 # Direct every segment. Keep the full prompt in view.
 
-All timeline workspaces use one prompt panel. Its header selector offers the scopes supported by the workspace: **Segment** and **Global** for segmented LTX and Generic workflows, plus **Unified** for MiniMax production workflows. Each document stays separate. Select a timeline card to edit that segment, change its frame role or refine its wording and duration. The Prompt Refinement workspace opens its standalone draft in Unified scope.
+Global and Segment are independent dockable panels. MiniMax additionally offers Unified Prompt; LTX does not use a unified prompt. Open them through **Panels** in the header and arrange them around your timeline. [Define your output layout and generate audio](prompt-panels-templates-and-audio.md).
 
-![One prompt surface with scope controls beside the timeline and timing overview](images/panel-overhaul.png)
+![Independent prompt panels and a compact timeline](images/planned-features/prompt-panels.png)
 
 | Workspace | Production format |
 | --- | --- |
 | LTX Video | Segment prompts and shared global direction for LTX timeline export |
-| MiniMax · Standard Guide | Guide-based integrated description, soundscape and music sections |
-| MiniMax · Full Guide | Guide-based subject definitions, summary, retention analysis, detailed description, soundscape and music |
 | MiniMax · Standard | Supplied skill conventions for T2VA, I2VA, FL2VA and L2VA, with project variables |
 | MiniMax · Full | Supplied six-section reference skill, including companion camera, speech and sound rules |
 
 ## Refine a prompt on its own
 
-Choose **MiniMax · Refine** from Project Type. Write or paste a production prompt, then click **Refine**. No media or segments are required. The editor fills the workspace; timeline, conditioning, segment timing, reference media and Director’s Intent controls are hidden.
+Choose **Generic Prompt Refine** from Project Type. Write or paste a production prompt, then click **Refine**. No media or segments are required. The editor fills the workspace; timeline, conditioning, segment timing, reference media and Director’s Intent controls are hidden.
 
 Type `/` and use the existing annotation suggestions: `/refine` edits a nearby passage, `/refine-global` applies across the prompt, `/keep` protects a detail, `/avoid` excludes a detail and `/focus` adds emphasis. These remain editable note boxes, with the same completion and spelling features as the other prompt editors. A leading `/refine` note before the scene applies to the full prompt unless it identifies a narrower target. Completed global refinement notes are removed after a successful revision; other annotations remain. If the model returns the production text unchanged, the editor keeps your draft and annotations and reports **no text changes**.
 
 ![Standalone MiniMax prompt refinement with inline annotations](images/minimax-prompt-refinement.png)
 
-Refinement uses only your current prompt and its inline annotations. It preserves the existing MiniMax format, stated timing, identities, dialogue and audio direction unless you request a change. Use **Copy** to take the result into your generation workflow. Save and reopen it as a normal project; each workspace keeps its own draft. Switching back to a timeline workspace restores its segment controls and draft.
+Refinement uses only your current prompt and its inline annotations. It preserves the supplied prompt's format and model conventions unless you request a change. Use **Copy** to take the result into your generation workflow. Save and reopen it as a normal project; each workspace keeps its own draft. Switching back to a timeline workspace restores its segment controls and draft.
 
 ## Edit the beats, then develop the full prompt
 
-Choose a scope from the prompt panel header. The heading identifies the document you are editing:
+Use the Segment panel for the selected timeline entry and Global for the entire sequence. Each panel has its own Generate and Refine controls. Unified follows the full document layout saved under **Settings → Workspaces → Workspace templates**.
 
-| Scope | What you edit and generate |
-| --- | --- |
-| Segment | The selected timeline beat only |
-| Global | Director's Intent for the entire sequence; Generate/Refine acts on all beats and then rebuilds the MiniMax production draft |
-| Unified | The independent production text in workspaces that support a unified production draft; MiniMax uses the selected template |
+Typing in Segment updates its corresponding Unified section locally. Reordering a segment moves that section. Click any timeline entry to reveal its Unified section, including clicking the selected entry again after scrolling away. Section timecodes move or resize the timeline entry. **+** beside Unified adds a timeline section or subject definition.
 
-The same Quick Fix, Generate and Refine controls follow the selected scope. Unified Generate rebuilds from all current segments and reference roles. Unified Refine changes the production text without rewriting the timeline. **Copy** copies the active document. The timing overview and its resize handle remain above the panel.
-
-Right-click the scope header and toggle **Collapse prompt editor** to hide or reopen the prompt body. That view preference is remembered, while the timing overview remains available.
-
-Switching scope preserves your drafts. Pasting or editing Unified text does not change the timeline. Manual timing edits update recognized MiniMax timecodes locally. Segment wording reaches the production draft through an explicit Generate/Refine or synchronization action.
-
-![The scope selector in the header and compact actions beside the editor](images/prompt-scope-panel.png)
-
-MiniMax gives each recognized shot passage a soft highlight. Its boundary starts
-at the timecode (or the first shot's untimed text) and ends before the next
-`[Shot N]` label. Blank lines between shots and the sound/music sections stay
-outside the highlight.
-
-Generate and Refine include a timecode on the first shot, including when
-refining an older untimed draft. A first start frame uses `00:00.00`; a first
-end frame uses its segment end time, such as `00:03.00` for a three-second
-segment. Prompt-only refinement preserves an existing opening timecode.
-Older untimed first shots remain editable in saved projects.
-
-While you type in a selected segment's prompt box, the unified editor scrolls
-to that passage and previews its wording changes in red and green. **Approve**
-keeps the change in that passage only; **Reject** keeps the original unified
-text. Clicking away from the segment editor also rejects an unapproved
-preview. Your segment edit stays saved either way. The shot label, timecode,
-comma/space separators, other shots and their spacing stay intact. These edits
-run locally without an AI request.
-
-![A live red/green review confined to the selected MiniMax shot, with Approve and Reject controls](images/segment-prompt-live-review.png)
-
-The **Generate** button in **Unified** scope rebuilds the production brief from every current
-timeline segment, including newly split or inserted beats. Current segment
-actions, order and timing take precedence over conflicting older global notes;
-beats that share an image still retain their separate action progression.
-It transfers segment content one for one, retaining wording wherever possible
-while adapting section placement, references, dialogue markup and timing to the
-workspace format. Complete action, appearance, dialogue and sound details take
-priority over length targets. There is no 350–500-word compression target;
-the production description grows with the source material. A response that the
-provider marks as truncated is rejected rather than saved as complete.
-Across workspace Generate and Refine instructions, word and sentence targets
-are soft guidance: preserving details wins. Refinement keeps content outside
-your requested edits; an explicit request to shorten or remove content still
-authorizes that change.
-If the timeline changes while generation is running, the app keeps your draft
-and asks you to generate again from the updated sequence.
-
-![Segment scope keeps the selected beat separate from the saved production draft](images/prompt-scope-panel.png)
+The template defines the headings, spacing and section order. Edit its shaded fields in Unified. Generate and Refine fill explicitly named template variables; fixed document text remains intact. Complete authored action, appearance, dialogue and sound details take priority over word-count guidance. Prompt-only refinement retains its standalone editor and annotations.
 
 ## Apply a saved Quick Fix
 
@@ -110,7 +58,7 @@ Existing presets without a category use **General**. New installations include
 
 ## Apply a production brief to the timeline
 
-In **Unified** scope, **Generate** and **Refine** edit only the production text. To apply a MiniMax brief to your sequence, click **Rewrite timeline from combined prompt** in the timeline’s right-hand rail, below **＋** and **T＋**. It aligns segment wording and timing to the complete brief and presents the timeline changes for review. Your combined prompt stays unchanged.
+In the **Unified** panel, **Generate** and **Refine** edit only the production text. To apply a MiniMax brief to your sequence, click **Rewrite timeline from combined prompt** in the timeline’s right-hand rail, below **＋** and **T＋**. It aligns segment wording and timing to the complete brief and presents the timeline changes for review. Your combined prompt stays unchanged.
 
 ![Timeline controls, including the separate rewrite action beneath the add buttons](images/timeline-navigation.png)
 

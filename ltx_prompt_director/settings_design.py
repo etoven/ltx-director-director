@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (QWidget, QFrame, QLabel, QPushButton, QLineEdit,
 from .onboarding_design import StatusBadge
 from .workspace_style import load_workspace_font
 
-PAGES = ('Application', 'Local models', 'ChatGPT plan', 'Workspaces', 'Storage and backups')
+PAGES = ('Application', 'Local models', 'ChatGPT plan', 'Workspaces', 'Storage and backups', 'Audio models')
 SECTIONS = ('Engine', 'Video · H3', 'Images · Flux', 'Writing · local')
 DESCRIPTIONS = (
     'Choose your providers, artwork defaults, editor preferences and project labels.',
@@ -16,6 +16,7 @@ DESCRIPTIONS = (
     'Connect your ChatGPT account and choose an available writing model.',
     'Create, customize and exchange the workspaces used by your projects.',
     'Manage cached previews, back up your complete setup and restore saved configurations.',
+    'Set up IndexTTS 2.5 dialogue, Stable Audio 3 Foley, and MiniMax Music 3 independently.',
 )
 
 
@@ -99,6 +100,13 @@ class SettingsSurface(QWidget):
                     self.subbuttons.append(item); self.badges.append(badge)
                 branch=QWidget(); branch_layout=QHBoxLayout(branch); branch_layout.setContentsMargins(round(16*scale),0,0,0); branch_layout.addWidget(self.substeps)
                 nav.addWidget(branch)
+            if index == 3:
+                workspace_substeps = QWidget(); workspace_substeps.setObjectName('settingsSubsteps')
+                workspace_sub = QVBoxLayout(workspace_substeps); workspace_sub.setContentsMargins(round(34*scale), 0, 0, 0)
+                for section, name in enumerate(('Configuration', 'Workspace templates')):
+                    item = QPushButton('· ' + name); item.setObjectName('settingsNav'); item.setProperty('substep', True)
+                    item.clicked.connect(lambda _, i=section: self.select_workspace_section(i)); workspace_sub.addWidget(item)
+                nav.addWidget(workspace_substeps)
         self.no_results=QLabel('No matching settings'); self.no_results.setWordWrap(True); self.no_results.hide(); nav.addWidget(self.no_results)
         nav.addStretch()
         accent=QFrame(); accent.setFixedHeight(5); accent.setStyleSheet('background:#455569;border-radius:2px')
@@ -159,6 +167,10 @@ class SettingsSurface(QWidget):
         if section is not None:self.panel.tabs.setCurrentIndex(section)
         self.tabs.setCurrentIndex(page); self.refresh_navigation()
 
+    def select_workspace_section(self, section):
+        self.select(3)
+        self.tabs.widget(3).widget().sections.setCurrentIndex(section)
+
     def local_changed(self,index):
         if index:self.panel.task.setCurrentIndex(self.panel.task.findData(('','video','image','text')[index]))
         self.section_title.setText(SECTIONS[index]); self.refresh_navigation(); self.schedule_size()
@@ -199,7 +211,7 @@ class SettingsSurface(QWidget):
     def build_search_index(self):
         def labels(widget):return ' '.join(label.text() for label in widget.findChildren(QLabel)).casefold()
         self.local_search=[(name+' '+labels(self.panel.tabs.widget(i))+' '+('seed sampler resolution preview references lora trigger weight' if i==1 else 'lora trigger weight artwork' if i==2 else 'python device offload sampling' if i==0 else 'qwen llm instruction')).casefold() for i,name in enumerate(SECTIONS)]
-        return [(title+' '+labels(self.tabs.widget(i))).casefold() for i,title in enumerate(PAGES)]
+        return [(title+' '+labels(self.tabs.widget(i)) + (' IndexTTS dialogue Foley Stable Audio MiniMax Music 3' if title == 'Audio models' else '')).casefold() for i,title in enumerate(PAGES)]
 
     def matches(self,text):
         return all(word in text for word in self.search.text().casefold().split())

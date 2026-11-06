@@ -45,6 +45,19 @@ class EffectDialog(QDialog):
         form.addRow('Name', self.name)
         form.addRow('Category', self.category)
         form.addRow('Apply to', self.target)
+        self.refinement_model = QComboBox()
+        self.refinement_model.addItem('Use current model (any model)', None)
+        picker = owner.provider_button
+        for index in range(picker.count()):
+            provider, model = picker.itemData(index)
+            self.refinement_model.addItem(picker.itemText(index), dict(provider=provider, model=model))
+        saved = self.entry.get('refinement_model')
+        index = self.refinement_model.findData(saved)
+        if saved and index < 0:
+            self.refinement_model.addItem(saved.get('provider', '') + ' · ' + saved.get('model', ''), saved)
+            index = self.refinement_model.count() - 1
+        self.refinement_model.setCurrentIndex(max(0, index))
+        form.addRow('Prompt refinement model', self.refinement_model)
         form.addRow('', self.menu)
         form.addRow('Refinement instruction', self.prompt)
         for label, field, filt in [('Thumbnail', self.thumbnail, 'Images (*.png *.jpg *.webp *.gif)'),
@@ -126,6 +139,7 @@ class EffectDialog(QDialog):
             QMessageBox.information(self, 'Effect', 'Enter a name and refinement instruction.'); return
         preview = self.preview.text().strip()
         self.entry.update(name=self.name.text().strip(), category=self.category.text().strip() or 'General',
+            refinement_model=self.refinement_model.currentData(),
             target=self.target.currentData(), show_in_menu=self.menu.isChecked(),
             prompt=self.prompt.toPlainText().strip(), thumbnail=self.thumbnail.text().strip(), preview=preview)
         if Path(preview).suffix.lower() in AUDIO_SUFFIXES:

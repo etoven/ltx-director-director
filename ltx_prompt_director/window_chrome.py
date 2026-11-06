@@ -103,7 +103,9 @@ class WindowChrome(QObject):
         self.utility_commands.setMovable(False);self.utility_commands.setIconSize(toolbar.iconSize())
         for action in self.original_actions:
             widget=toolbar.widgetForAction(action)
-            if action.text().replace('&','')=='Settings' or (widget and widget.toolTip()=='Help and setup'):
+            if (action.text().replace('&','')=='Settings' or
+                    (widget and (widget.toolTip()=='Help and setup' or widget is getattr(owner, 'provider_button', None)
+                                 or widget.objectName() == 'panelsMenuButton'))):
                 toolbar.removeAction(action);self.utility_commands.addAction(action)
         trailing_layout.addWidget(self.utility_commands)
         self.drag_targets.update((self.trailing,self.utility_commands))
