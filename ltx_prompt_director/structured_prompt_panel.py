@@ -122,6 +122,21 @@ class StructuredPromptPanel(QWidget):
                 state['subject_sources'][subject['id']] = subject['prompt']
                 state['subjects'].setdefault(subject['id'], subject['prompt'])
                 subject['prompt'] = state['subjects'][subject['id']]
+            from .prompt_references import reference_roster
+            roster = reference_roster(subjects)
+            previous_roster = state.get('reference_inventory')
+            if previous_roster is not None and previous_roster != roster:
+                changes = state.setdefault('reference_changes', [])
+                old = {item['id']: item for item in previous_roster}; new = {item['id']: item for item in roster}
+                changed = {key for key in old.keys() | new.keys() if old.get(key) != new.get(key)}
+                before = [item for item in previous_roster if item['id'] in changed]
+                after = [item for item in roster if item['id'] in changed]
+                if (changes and before and after and changes[-1]['after'] == before
+                        and {item['id'] for item in changes[-1]['before']} == {item['id'] for item in after}):
+                    changes[-1]['after'] = after
+                else:changes.append(dict(before=before, after=after))
+                state['reference_changes'] = changes[-64:]
+            state['reference_inventory'] = copy.deepcopy(roster)
             records = [{**s.to_dict(), 'prompt': state['prompts'][s.id]} for s in segments]
             text = render(layout, state['global'], records, subjects, state['fields'])
             state['last_render'] = text
@@ -375,3 +390,47 @@ class StructuredPromptPanel(QWidget):
         owner.start_ai_worker(generate_definitions,
             (segments, references, selected, *credentials, owner.settings.value('api_timeout', 400, int)),
             'Generating reference definitions…', finished, review_text=False)
+
+    def reassessment_document(self):
+        state = self.state()
+        document = {'global': state.get('global', '')}
+        document.update({'field:' + key: value for key, value in state.get('fields', {}).items()})
+        document.update({s.id: state.get('prompts', {}).get(s.id, s.prompt) for s in self.segments()})
+        document.update({item['id']: state.get('subjects', {}).get(item['id'], item['prompt']) for item in self.subjects()})
+        return document
+
+    def reassess_references(self):
+        owner = self.owner
+        if owner.ai_busy or not owner.unified_workspace:return
+        self.refresh()
+        credentials = owner.ai_credentials()
+        if not credentials:return
+        from .prompt_references import reassess_references, reference_roster
+        document = copy.deepcopy(self.reassessment_document())
+        roster = reference_roster([dict(item, prompt=document[item['id']]) for item in self.subjects()])
+        references = copy.deepcopy(owner.active_reference_images())
+        segments = [s.to_dict() for s in self.segments()]
+        snapshot = (owner.workspace_revision, owner.current_project_id, owner.project_type, owner._active_render_group)
+        changes = copy.deepcopy(self.state().get('reference_changes', []))
+        def finished(updates):
+            owner.set_ai_controls_enabled(True)
+            current = (owner.workspace_revision, owner.current_project_id, owner.project_type, owner._active_render_group)
+            if snapshot == current:self.refresh()
+            if (snapshot != current or references != owner.active_reference_images() or
+                    segments != [s.to_dict() for s in self.segments()] or document != self.reassessment_document()):
+                self.status.setText('Prompt or references changed; reassessment was discarded.'); return
+            if not isinstance(updates, dict) or not set(updates) <= set(document) or not all(isinstance(value, str) for value in updates.values()):
+                self.status.setText('Invalid reassessment; the original prompt was preserved.'); return
+            state = self.state()
+            state['reference_reassessment_backup'] = {key: document[key] for key in updates}
+            for key, text in updates.items():
+                if key == 'global':state['global'] = text
+                elif key.startswith('field:'):state['fields'][key.removeprefix('field:')] = text
+                elif key.startswith(('reference:', 'subject:')):state['subjects'][key] = text
+                else:state['prompts'][key] = text
+            owner.mark_dirty(); self.refresh()
+            state['reference_changes'] = []
+            self.status.setText(f'References reassessed · {len(updates)} fields updated.' if updates else 'References are consistent; prompt unchanged.')
+        owner.start_ai_worker(reassess_references,
+            (document, roster, changes, *credentials, owner.settings.value('api_timeout', 400, int)),
+            'Reassessing reference usage with minimal prompt edits…', finished, review_text=False)

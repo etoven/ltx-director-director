@@ -27,7 +27,9 @@ def subjects(segments, references, state):
             if saved:bound.add(saved['id'])
             record.update(reference_slot=slot, timeline_id=source.id if slot is None else None,
                           media_kind='audio' if label.startswith('Audio') else item['kind'], label=label,
-                          notes=source.get('notes', '') if isinstance(source, dict) else source.prompt)
+                          notes=source.get('notes', '') if isinstance(source, dict) else source.prompt,
+                          source_name=source.get('name', '') if isinstance(source, dict) else source.name,
+                          source_path=source.get('path', '') if isinstance(source, dict) else source.media_path)
             if record['id'] not in state.get('excluded_subjects', []):records.append(record)
     records.extend(item for item in custom if item['id'] not in bound and item['id'] not in state.get('excluded_subjects', []))
     order = {key: index for index, key in enumerate(state.get('subject_order', []))}
@@ -65,3 +67,53 @@ def generate_definitions(segments, references, selected, provider, model, key, t
     if len({row['id'] for row in result}) != len(selected) or {row['id'] for row in result} != {row['id'] for row in selected}:
         raise ai.AIResponseFormatError('Reference definitions did not preserve the requested IDs.')
     return {row['id']: row['prompt'] for row in result}
+
+
+def reference_roster(records):
+    return [{key: item[key] for key in ('id', 'label', 'name', 'media_kind', 'role', 'notes', 'prompt', 'source_name', 'source_path') if key in item}
+            for item in records]
+
+
+def apply_reference_edits(document, edits):
+    """Apply non-overlapping literal patches against the unchanged source fields."""
+    from .ai import AIResponseFormatError
+    spans = {}
+    for edit in edits:
+        key, before, after = edit['field'], edit['before'], edit['after']
+        if key not in document or not before or document[key].count(before) != 1:
+            raise AIResponseFormatError('Reference edit did not identify one exact passage in an existing field.')
+        start = document[key].index(before); end = start + len(before)
+        if any(start < old_end and end > old_start for old_start, old_end, _ in spans.get(key, [])):
+            raise AIResponseFormatError('Reference edits overlap; the original prompt was preserved.')
+        spans.setdefault(key, []).append((start, end, after))
+    updated = {}
+    for key, patches in spans.items():
+        text = document[key]
+        for start, end, after in sorted(patches, reverse=True):text = text[:start] + after + text[end:]
+        if text != document[key]:updated[key] = text
+    return updated
+
+
+def reassess_references(document, roster, changes, provider, model, key, timeout):
+    from . import ai, response_schemas as schemas
+    schema = schemas.named('reference_reassessment', schemas.record(edits=dict(type='array', minItems=0,
+        items=schemas.record(field=schemas.text('Exact editable field ID'),
+            before=schemas.text('Smallest exact source passage that occurs once in that field'),
+            after=schemas.text('Replacement passage; empty to remove only an obsolete clause', empty=True)))))
+    rules = ('Reassess reference usage in the EXISTING Unified production prompt. Return only minimal literal edits, '
+             'never a rewritten prompt. CURRENT REFERENCES is the authoritative inventory; REFERENCE CHANGES records '
+             'earlier labels and definitions, including removed or replaced sources. Reconcile reference mentions '
+             'throughout all supplied editable fields: subject definitions, summary, retention, detailed shot prose, '
+             'sound and music. Remove obsolete source attributions and dependencies on deleted media. Correct '
+             'renumbered labels by source identity, never attach a deleted reference to another asset that inherited '
+             'its label. When earlier history is unavailable, remove citations to absent sources without inventing '
+             'a replacement. Preserve every unrelated word verbatim. Preserve dialogue, language, speaker identity, '
+             'actions, timing and explicitly requested sounds; removing a voice file does not cancel dialogue. '
+             'Do not invent media, unheard audio, subjects, shots, fields, or new creative content. Use definitions '
+             'and explicit notes only. Each before snippet must match once in its specified field; include just '
+             'enough context to disambiguate it. Do not overlap edits. Return an empty edits array if consistent.\n'
+             + json.dumps(dict(current_references=roster, reference_changes=changes, editable_fields=document), ensure_ascii=False)
+             + '\nOUTPUT SCHEMA:\n' + json.dumps(schema))
+    raw = ai._structured_raw([], provider, model, key, rules, timeout, schema=schema)
+    with schemas.using(schema):schemas.validate(raw)
+    return apply_reference_edits(document, json.loads(raw)['edits'])

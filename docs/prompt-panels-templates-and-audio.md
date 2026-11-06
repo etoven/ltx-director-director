@@ -36,6 +36,8 @@ The floating **+** offers **Timeline section**, **Subject definition**, **Image 
 
 In Reference Media, choose **Generate** or **Regenerate** for one reference, or **Generate definitions** for all definitions. These actions use your selected writing model and update the existing Unified definitions, preserving summary, retention analysis, shot prose, sound, music and timeline timing. A result is discarded if its source media or definitions changed while it was running. Providers that cannot listen to audio use your explicit notes.
 
+After removing, replacing or changing references, choose **Reassess references** to reconcile their use throughout the existing Unified prompt. It makes small edits to reference mentions in the summary, retention analysis, shot descriptions, sound, music and definitions. Deleted voice references lose their source attribution while spoken dialogue and unrelated wording stay intact. Reference-change history distinguishes a removed file from a remaining file that inherits its number. This is a separate, explicit action; generating definitions does not reassess the rest of the prompt.
+
 ## Generate dialogue, Foley and music
 
 The audio panels are available alongside every video workspace:

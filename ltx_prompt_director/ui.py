@@ -3393,6 +3393,10 @@ class MiniMaxPromptPanel(QFrame):
         self.generate_references_button.setToolTip('Update reference definitions in Unified; preserve summary, shots, sound and music')
         self.generate_references_button.clicked.connect(lambda: owner.prompt_surface.structured.generate_references())
         refs_layout.addWidget(self.generate_references_button)
+        self.reassess_references_button = QPushButton('Reassess references')
+        self.reassess_references_button.setToolTip('Reconcile reference mentions throughout the existing Unified prompt with minimal wording changes, including deleted references')
+        self.reassess_references_button.clicked.connect(lambda: owner.prompt_surface.structured.reassess_references())
+        refs_layout.addWidget(self.reassess_references_button)
         self.reference_targets = []
         for index in range(4):
             target = MiniMaxReferenceSlot(index + 1, owner)
@@ -3499,6 +3503,7 @@ class MiniMaxPromptPanel(QFrame):
     def update_actions(self) -> None:
         self.copy_button.setEnabled(bool(self.editor.toPlainText().strip()))
         self.generate_references_button.setEnabled(not self.busy and self.owner.unified_workspace)
+        self.reassess_references_button.setEnabled(not self.busy and self.owner.unified_workspace)
         for target in self.reference_targets:
             target.generate_button.setEnabled(not self.busy and bool(target.value))
         self.retry_button.setEnabled(not self.busy)
@@ -8268,6 +8273,8 @@ class MainWindow(QMainWindow):
         worker = MagicWorker(workspace_operation, args, retries, retry_cooldown, activity)
         # Internal/custom worker calls may legitimately have no model args.
         model = (
+            str(args[4]) if getattr(operation, '__name__', '') == 'generate_definitions' else
+            str(args[4]) if getattr(operation, '__name__', '') == 'reassess_references' else
             str(args[5]) if operation is divide_segment_prompt else
             str(args[1]) if len(args) >= 2 and isinstance(args[0], str) else
             str(args[2]) if len(args) >= 3 else
@@ -9835,7 +9842,7 @@ class MainWindow(QMainWindow):
         if self.minimax_panel:
             self.minimax_panel.refresh_references(update_images=image_changed)
             if not self.minimax_panel.busy:
-                self.minimax_panel.set_cache_state("References changed · generate when ready")
+                self.minimax_panel.set_cache_state("References changed · reassess prompt usage")
 
 
 

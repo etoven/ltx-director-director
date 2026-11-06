@@ -8,7 +8,7 @@ from PySide6.QtWidgets import QApplication, QPushButton
 from ltx_prompt_director import ai, ui
 from ltx_prompt_director.models import Segment
 from ltx_prompt_director.media import data_url
-from ltx_prompt_director.prompt_references import subjects, generate_definitions
+from ltx_prompt_director.prompt_references import subjects, generate_definitions, reassess_references, apply_reference_edits
 
 
 def test_reference_contract_and_migrated_media_identities(monkeypatch):
@@ -36,6 +36,32 @@ def test_reference_contract_and_migrated_media_identities(monkeypatch):
     assert generate_definitions(segments,refs,[custom],'local','model','key',10)[custom['id']]=='Blue coat definition'
     monkeypatch.setattr(ai,'_structured_raw',lambda *a,**k:json.dumps(dict(definitions=[dict(id='wrong',prompt='Wrong scope')])) )
     with pytest.raises(ai.AIResponseFormatError):generate_definitions(segments,refs,[records[1]],'openai','model','key',10)
+
+
+def test_reassessment_replaces_only_exact_nonoverlapping_passages(monkeypatch):
+    original = {'global': 'Quiet scene. Voice from <Audio2>. Keep blue lighting.',
+                'shot': 'She says <d>Good evening.</d> using <Audio2>. Then turns.',
+                'field:sound': 'Rain and a door creak. Match <Audio2>.', 'field:music': 'No music.'}
+    edits = [dict(field='global',before=' Voice from <Audio2>.',after=''),
+             dict(field='shot',before=' using <Audio2>',after=''),
+             dict(field='field:sound',before=' Match <Audio2>.',after='')]
+    captured = {}
+    def respond(inputs,*args,**kwargs):
+        assert inputs == []
+        captured['rules'] = args[3]
+        return json.dumps(dict(edits=edits))
+    monkeypatch.setattr(ai,'_structured_raw',respond)
+    updated = reassess_references(original,[],[dict(before=[dict(id='reference:2',label='Audio2')],after=[])],
+                                  'gemini','model','key',10)
+    assert updated == {'global':'Quiet scene. Keep blue lighting.', 'shot':'She says <d>Good evening.</d>. Then turns.',
+                       'field:sound':'Rain and a door creak.'}
+    assert original['field:music']=='No music.' and '<Audio2>' in original['global']
+    assert 'renumbered labels by source identity' in captured['rules']
+    with pytest.raises(ai.AIResponseFormatError):apply_reference_edits(original,[dict(field='missing',before='Quiet',after='')])
+    with pytest.raises(ai.AIResponseFormatError):apply_reference_edits(original,[dict(field='global',before='Not present',after='')])
+    with pytest.raises(ai.AIResponseFormatError):apply_reference_edits(original,[edits[0],edits[0]])
+    monkeypatch.setattr(ai,'_structured_raw',lambda *a,**k:'{"edits":[]}')
+    assert reassess_references(original,[],[],'gemini','model','key',10)=={}
 
 
 def test_native_add_generate_remove_and_project_roundtrip(tmp_path,monkeypatch):
@@ -86,6 +112,36 @@ def test_native_add_generate_remove_and_project_roundtrip(tmp_path,monkeypatch):
         w.set_minimax_reference_image(0,{**fixtures['image'],'notes':'Changed since request'})
         finish({s['id']:'STALE' for s in args[2]})
         assert 'STALE' not in w.unified_prompt.toPlainText()
+        # Reassess usage throughout Unified after deleting an audio source.
+        state = panel.state(); sid = w.segments[0].id
+        state['global'] = 'Quiet scene. Voice from <Audio2>. Keep blue lighting.'
+        state['prompts'][sid] = 'She says <d>Good evening.</d> using <Audio2>. Then turns.'
+        state['fields']['sound'] = 'Rain and a door creak. Match <Audio2>.'
+        panel.refresh()
+        timeline_before = copy.deepcopy([s.to_dict() for s in w.segments])
+        w.minimax_panel.reference_targets[2].remove_button.click();panel.refresh()
+        assert '<Audio2>' in w.unified_prompt.toPlainText()
+        assert w.minimax_panel.reassess_references_button.isEnabled()
+        w.minimax_panel.reassess_references_button.click();args,finish=calls[-1]
+        document,roster,changes=args[:3]
+        assert not any(item.get('label')=='Audio2' for item in roster)
+        assert any(any(item.get('label')=='Audio2' for item in change['before']) for change in changes)
+        patches=[dict(field='global',before=' Voice from <Audio2>.',after=''),
+                 dict(field=sid,before=' using <Audio2>',after=''),
+                 dict(field='field:sound',before=' Match <Audio2>.',after='')]
+        finish(apply_reference_edits(document,patches))
+        assert '<Audio2>' not in w.unified_prompt.toPlainText()
+        assert panel.state()['global']=='Quiet scene. Keep blue lighting.'
+        assert panel.state()['prompts'][sid]=='She says <d>Good evening.</d>. Then turns.'
+        assert panel.state()['fields']['sound']=='Rain and a door creak.'
+        assert panel.state()['reference_changes']==[]
+        assert [s.to_dict() for s in w.segments]==timeline_before
+        w.load_project_payload(w.project_payload(include_media=False));panel.refresh()
+        assert '<Audio2>' not in w.unified_prompt.toPlainText() and '<d>Good evening.</d>' in w.unified_prompt.toPlainText()
+        panel.reassess_references();args,finish=calls[-1]
+        panel.rows['global'][0].setPlainText('New user summary')
+        finish({'global':'STALE reassessment'})
+        assert panel.state()['global']=='New user summary' and 'STALE reassessment' not in w.unified_prompt.toPlainText()
         # Explicit Remove in Reference Media clears paired definitions too.
         w.minimax_panel.reference_targets[1].remove_button.click();panel.refresh()
         assert w.minimax_reference_images[1] is None and 'All Video1' not in w.unified_prompt.toPlainText()
@@ -97,8 +153,8 @@ def test_native_add_generate_remove_and_project_roundtrip(tmp_path,monkeypatch):
         added=w.segments[-1]
         next(b for b in panel.rows[added.id][0].parentWidget().findChildren(QPushButton) if b.text()=='×').click()
         assert added not in w.segments
-        assert panel.state()['fields']['sound']=='Keep sound' and panel.state()['fields']['music']=='Keep music'
+        assert panel.state()['fields']['sound']=='Rain and a door creak.' and panel.state()['fields']['music']=='Keep music'
         w.resize(1400,900);w.show();app.processEvents();panel.reveal_timer.stop();panel.scroll.verticalScrollBar().setValue(0)
-        w.grab().save('/tmp/director-a139-references.png')
+        w.grab().save('/tmp/director-a140-references.png')
     finally:
         w.project_dirty=False;w._close_saves_queued=True;w.close()
