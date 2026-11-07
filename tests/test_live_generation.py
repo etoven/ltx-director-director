@@ -42,6 +42,32 @@ class StreamResponse:
 
 
 class ProviderStreams(unittest.TestCase):
+    def test_streams_decode_utf8_even_when_http_defaults_to_latin1(self):
+        text = 'At 00:11.25 – 00:15.00, “café” — 日本語 🎬'
+        streams = {
+            "openai": [
+                {"type": "response.output_text.delta", "delta": text},
+                {"type": "response.completed", "response": {}},
+            ],
+            "gemini": [{"candidates": [{"content": {"parts": [{"text": text}]},
+                                          "finishReason": "STOP"}]}],
+        }
+        for provider, events in streams.items():
+            with self.subTest(provider=provider):
+                response = ai.requests.Response()
+                response.status_code = 200
+                response.encoding = "ISO-8859-1"
+                response._content = ("\n".join(
+                    "data: " + json.dumps(event, ensure_ascii=False) for event in events
+                ) + "\n").encode("utf-8")
+                response._content_consumed = True
+                with patch.object(ai.requests, "post", return_value=response):
+                    if provider == "openai":
+                        result = ai._chatgpt_stream("key", {}, 20)
+                    else:
+                        result = ai._gemini_stream([], "key", "demo", 20)
+                self.assertEqual(result, text)
+
     def test_gemini_never_accepts_a_token_limited_prompt_even_with_valid_json(self):
         candidate = {"content": {"parts": [{"text": '{"prompt":"Only the opening beat"}'}]},
                      "finishReason": "MAX_TOKENS"}

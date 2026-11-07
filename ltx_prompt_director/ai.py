@@ -1074,7 +1074,8 @@ def _gemini_stream(parts: list[dict], key: str, model: str, timeout: int) -> str
             response.raise_for_status()
             saw_payload = False
             completed = False
-            for line in response.iter_lines(decode_unicode=True):
+            # SSE is UTF-8. Requests otherwise defaults text/event-stream to Latin-1.
+            for line in response.iter_lines(decode_unicode=False):
                 if isinstance(line, bytes):
                     line = line.decode("utf-8", errors="replace")
                 if not line or not line.startswith("data:"):
@@ -1242,7 +1243,8 @@ def _chatgpt_stream(token: str, payload: dict, timeout: int) -> str:
                                  headers=headers, json=payload, timeout=timeout, stream=True)
     with response:
         response.raise_for_status()
-        for line in response.iter_lines(decode_unicode=True):
+        # Decode SSE bytes explicitly so punctuation and non-Latin text survive.
+        for line in response.iter_lines(decode_unicode=False):
             if isinstance(line, bytes):
                 line = line.decode("utf-8", errors="replace")
             if not line or not line.startswith("data: "):
