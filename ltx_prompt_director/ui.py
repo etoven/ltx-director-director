@@ -5981,9 +5981,31 @@ class MainWindow(QMainWindow):
             # The serialized disk pool saves this snapshot before it copies the archive.
             self.save_library_project(automatic=True)
         new_id = uuid4().hex
+        collection = self.current_collection
+        order_key = self.custom_order_settings_key()
+        original_order = [
+            self.project_entry_key(self.project_list.item(row).data(Qt.ItemDataRole.UserRole) or {})
+            for row in range(self.project_list.count())
+        ]
         self.statusBar().showMessage(f"Duplicating project in background: {meta.get('name', 'Untitled project')}…")
 
         def finished(clone: dict) -> None:
+            # Keep the current arrangement, including changes made while copying.
+            self.activate_custom_sort_for_drag()
+            if self.current_collection == collection:
+                order = [
+                    self.project_entry_key(self.project_list.item(row).data(Qt.ItemDataRole.UserRole) or {})
+                    for row in range(self.project_list.count())
+                ]
+            else:
+                order = json.loads(str(self.settings.value(order_key, "[]")))
+                order.extend(key for key in original_order if key not in order)
+            source_key = f"project:{project_id}"
+            clone_key = f"project:{clone['id']}"
+            order = [key for key in order if key != clone_key]
+            position = order.index(source_key) + 1 if source_key in order else len(order)
+            order.insert(position, clone_key)
+            self.settings.setValue(order_key, json.dumps(order))
             self.refresh_project_library(str(clone["id"]))
             self.statusBar().showMessage(f"Project duplicated: {clone['name']}")
 
