@@ -86,7 +86,7 @@ class MiniMaxReferenceSlot(QFrame):
         self.notes = QLineEdit()
         self.notes.setMinimumWidth(0)
         self.notes.setPlaceholderText("Optional: subject or reference instructions")
-        self.notes.textChanged.connect(self.metadata_changed)
+        self.notes.installEventFilter(self)
         fields.addWidget(self.notes)
         self.audio_only = QCheckBox("Use ref audio only")
         self.audio_only.setToolTip("Use only the uploaded video soundtrack; exclude its visual reference")
@@ -286,6 +286,9 @@ class MiniMaxReferenceSlot(QFrame):
         return mime
 
     def eventFilter(self, watched, event):
+        if (watched is getattr(self, "notes", None) and event.type() == QEvent.Type.FocusOut
+                and self.value and self.notes.text() != self.value.get("notes", "")):
+            self.metadata_changed()
         if watched is self.preview and event.type()==QEvent.Type.Resize and not self._source_pixmap.isNull():
             self.preview.setPixmap(self._source_pixmap.scaled(self.preview.size(),Qt.AspectRatioMode.KeepAspectRatio,Qt.TransformationMode.SmoothTransformation))
         if watched is self.preview:

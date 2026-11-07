@@ -212,7 +212,7 @@ def refine_shared_production_prompt(provider: str, model: str, api_key: str, cur
     return consume_global_refinements(_extract_minimax_h3_prompt(raw))
 
 
-def refine_minimax_text_prompt(provider: str, model: str, api_key: str, current_prompt: str, timeout: int = 400) -> str:
+def refine_minimax_text_prompt(provider: str, model: str, api_key: str, current_prompt: str, timeout: int = 400, intent: str = "") -> str:
     """Refine annotated text without receiving any timeline or media context."""
     if not current_prompt.strip():
         raise ValueError("Write or paste a prompt before refining it.")
@@ -221,6 +221,8 @@ def refine_minimax_text_prompt(provider: str, model: str, api_key: str, current_
     })
     from .prompt_tags import prompt_annotations
     annotations = prompt_annotations(current_prompt)
+    if intent.strip():
+        annotations = "\n\n".join(filter(None, (annotations, intent.strip())))
     rules += '\n\nEXPLICIT ANNOTATION EDIT REQUESTS (highest priority):\n' + (annotations or 'No annotations. Improve clarity, continuity and production readiness while preserving intent.')
     rules += '\nApply every requested edit in the returned text rather than merely retaining its instruction. A leading /refine annotation applies to the whole prompt unless it identifies a narrower passage. Preserve the author\'s model and task conventions. Verify that the resulting prompt satisfies each request before returning.'
     rules += '\nRESPONSE TRANSPORT: Return strict JSON with one nonempty "prompt" string containing the complete refined text. No segment records, timed_actions or commentary.'
@@ -953,8 +955,11 @@ def _structured_raw(images, provider, model, key, rules, timeout, *, schema):
         contract['required'] = list(contract['properties'])
         rules += ('\n\nOUTPUT TEMPLATE VARIABLES: The explicit JSON schema below replaces the free-form prompt '
                   'field. Fill the named document fields in variables, subject descriptions in subjects, '
-                  'and each complete section body in segments[].prompt. Never duplicate headings or timecodes '
-                  'inside these values. Preserve the requested timeline edits. The application renders the '
+                  'and each complete section body in segments[].prompt. For each shot, start directly with '
+                  'the action. Omit prefixes such as "[Shot 3] At 00:07.50," even if the input includes them. '
+                  'For named fields, return only the value. Omit labels such as "overall_soundscape:" and '
+                  '"non_diegetic_music:" even when present in the input. Preserve the requested timeline edits. '
+                  'The application renders the shot numbers and times in the '
                   'workspace layout from the returned segment order and durations. Retain every subject ID.\n'
                   + json.dumps(context, ensure_ascii=False) + '\nOUTPUT SCHEMA:\n' + json.dumps(contract))
         with response_schemas.using(contract):
@@ -972,9 +977,12 @@ def _structured_raw(images, provider, model, key, rules, timeout, *, schema):
     if context is not None and schema == response_schemas.PROMPT:
         contract = template_contract(context)
         rules += ('\n\nOUTPUT LAYOUT CONTRACT: Return only the JSON template variables in the supplied schema. '
-                  'Do not return a monolithic prompt or duplicate headings/timecodes in prose. '
-                  'Keep every segment and subject ID in order. Fill each named document field in variables. '
-                  'The application renders the model-specific template.\nINPUT LAYOUT AND IDENTITIES:\n'
+                  'Return only action prose in segments[].prompt. The template supplies shot numbers and time ranges. '
+                  'Start directly with the action. Omit prefixes such as "[Shot 3] At 00:07.50," even when '
+                  'rewriting an existing draft that contains them. Keep every segment and subject ID in order. '
+                  'Fill each named document field in variables with only its value. Omit prefixes such as '
+                  '"overall_soundscape:" and "non_diegetic_music:" even if they occur in the input. '
+                  'The application renders all headings and labels from the model-specific template.\nINPUT LAYOUT AND IDENTITIES:\n'
                   + json.dumps(context, ensure_ascii=False) + '\nEXPLICIT OUTPUT SCHEMA:\n' + json.dumps(contract))
         with response_schemas.using(contract):
             raw = _provider_raw(images, provider, model, key, rules, timeout)

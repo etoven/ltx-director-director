@@ -1,7 +1,8 @@
 """Independent dockable prompt documents, retaining existing AI action routes."""
 from PySide6.QtCore import Qt, QTimer, QEvent
 from PySide6.QtWidgets import (QDockWidget, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
-    QStackedWidget, QApplication, QToolButton, QMenu, QFrame, QLabel)
+    QStackedWidget, QApplication, QToolButton, QMenu, QFrame, QLabel,
+    QDialog, QDialogButtonBox, QPlainTextEdit)
 from .panel_design import PromptSurface
 from .structured_prompt_panel import StructuredPromptPanel
 
@@ -16,6 +17,7 @@ class DockPromptSurface(PromptSurface):
                        owner.unified_prompt, owner.global_prompt):
             self.editors.removeWidget(editor); editor.setParent(owner); editor.hide()
         self.structured = StructuredPromptPanel(owner)
+        self.refinement_toasts = {}
         self.segment_stack = QStackedWidget()
         self.segment_stack.addWidget(owner.segment_prompt); self.segment_stack.addWidget(owner.intent_segment_prompt)
         self.unified_stack = QStackedWidget()
@@ -29,10 +31,19 @@ class DockPromptSurface(PromptSurface):
             bar = QHBoxLayout(); bar.addStretch()
             quick = QPushButton('Quick Fix'); quick_menu = QMenu(quick); quick.setMenu(quick_menu)
             quick_menu.aboutToShow.connect(lambda k=scope, m=quick_menu: self.populate_panel_quick(k, m))
-            generate, refine = QPushButton('Generate'), QPushButton('Refine')
+            generate = QPushButton('Generate')
+            generate.clicked.connect(lambda _, k=scope: self.run_panel(k, False))
+            if scope == 'unified':
+                refine = QToolButton()
+                refine.setText('Refine')
+                refine.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
+                menu = QMenu(refine)
+                menu.addAction('Refine with intent…', self.refine_with_intent)
+                refine.setMenu(menu)
+            else:
+                refine = QPushButton('Refine')
             for button in (quick, generate, refine):
                 button.setObjectName('promptAction'); bar.addWidget(button)
-            generate.clicked.connect(lambda _, k=scope: self.run_panel(k, False))
             refine.clicked.connect(lambda _, k=scope: self.run_panel(k, True))
             copy = QToolButton(); copy.setText('Copy'); bar.addWidget(copy)
             copy.clicked.connect(lambda _, k=scope: QApplication.clipboard().setText(self.panel_text(k)))
@@ -49,6 +60,18 @@ class DockPromptSurface(PromptSurface):
                 self.reference_flag_button.clicked.connect(self.structured.reassess_references)
                 flag_layout.addWidget(self.reference_flag_button)
                 layout.addWidget(self.reference_flag); self.reference_flag.hide()
+            toast = QFrame(); toast.setObjectName('minimaxMessagePanel')
+            toast_layout = QHBoxLayout(toast); toast_layout.setContentsMargins(8, 5, 8, 5)
+            message = QLabel(); message.setObjectName('minimaxMessageBanner')
+            message.setTextFormat(Qt.TextFormat.PlainText); message.setWordWrap(True); message.setMinimumWidth(0)
+            retry = QPushButton('Retry')
+            retry.clicked.connect(lambda _, button=retry: self.retry_refinement(button))
+            toast_layout.addWidget(message, 1); toast_layout.addWidget(retry)
+            timer = QTimer(toast); timer.setSingleShot(True); timer.timeout.connect(toast.hide)
+            self.refinement_toasts[scope] = toast, message, retry, timer
+            layout.addWidget(toast); toast.hide()
+            if scope == 'unified':
+                layout.addWidget(owner.minimax_panel.message_panel)
             marquee = {'global': owner.director_ai_marquee, 'segment': owner.segment_ai_marquee,
                        'unified': owner.minimax_panel.ai_marquee}[scope]
             layout.addWidget(marquee)
@@ -83,8 +106,59 @@ class DockPromptSurface(PromptSurface):
                 self.owner.unified_prompt.toPlainText() if scope == 'unified' else
                 self.owner.current_segment().prompt if self.owner.current_segment() else '')
 
-    def run_panel(self, scope, refine):
+    def refine_with_intent(self):
+        dialog = QDialog(self.docks['unified'])
+        dialog.setWindowTitle('Refine with intent')
+        dialog.resize(480, 260)
+        layout = QVBoxLayout(dialog)
+        layout.addWidget(QLabel('What would you like to change in the unified prompt?'))
+        editor = QPlainTextEdit()
+        editor.setAccessibleName('Refinement instructions')
+        editor.setPlaceholderText('Describe the changes you want the model to make…')
+        layout.addWidget(editor)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        submit = buttons.button(QDialogButtonBox.StandardButton.Ok)
+        submit.setText('Refine')
+        submit.setEnabled(False)
+        editor.textChanged.connect(lambda: submit.setEnabled(bool(editor.toPlainText().strip())))
+        buttons.accepted.connect(dialog.accept); buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        editor.setFocus()
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.run_panel('unified', True, editor.toPlainText().strip())
+
+    def clear_refinement_feedback(self):
+        for toast, _, retry, timer in self.refinement_toasts.values():
+            timer.stop()
+            retry.setProperty('refinementRetry', None)
+            toast.hide()
+        self.owner.minimax_panel.clear_message()
+
+    def show_refinement_result(self, scope, text, retry_action=None):
+        toast, message, retry, timer = self.refinement_toasts[scope]
+        timer.stop()
+        message.setText(text)
+        toast.setProperty('level', 'error' if retry_action else 'success')
+        toast.style().unpolish(toast); toast.style().polish(toast)
+        retry.setVisible(retry_action is not None)
+        retry.setProperty('refinementRetry', retry_action)
+        toast.show()
+        if retry_action is None:
+            timer.start(5000)
+
+    def retry_refinement(self, button):
+        action = button.property('refinementRetry')
+        if action and not self.owner.ai_busy:
+            action()
+
+    def run_panel(self, scope, refine, intent=''):
         self.select(scope)
+        if scope == 'unified' and refine and self.owner.unified_workspace:
+            if intent:
+                self.owner.refine_minimax_prompt(intent)
+            else:
+                self.owner.refine_minimax_prompt()
+            return
         if scope == 'unified' and not self.owner.unified_workspace:
             self.run_shared_production(refine)
         else:
@@ -134,6 +208,7 @@ class DockPromptSurface(PromptSurface):
             generate.setEnabled(enabled and bool(owner.segments))
             refine.setEnabled(enabled and bool(self.panel_text(scope).strip()) and (bool(owner.segments) or owner.prompt_only_workspace))
             quick.setEnabled(refine.isEnabled())
+            self.refinement_toasts[scope][2].setEnabled(enabled)
         if hasattr(self, 'structured'):
             self.structured.schedule()
         self.update_reference_flag()
@@ -171,6 +246,7 @@ class DockPromptSurface(PromptSurface):
                 dock.toggleViewAction().setEnabled(allowed)
                 self.panel_available[scope] = allowed
             self.panel_workspace = owner.project_type
+            self.clear_refinement_feedback()
         # Native saved layouts can contain panels from a different workspace.
         # Reapply availability after restoration without reopening closed docks.
         for scope, dock in self.docks.items():

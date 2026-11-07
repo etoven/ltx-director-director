@@ -227,7 +227,7 @@ def template_contract(context):
     collect(parse_template(context['layout']))
     def description(name):
         labels = ', '.join(dict.fromkeys(headings.get(name, []))).strip(', ')
-        result = 'Complete production prose for ${' + name + '}' + (' in section ' + labels if labels else '') + '; omit template headings.'
+        result = 'Complete production prose for ${' + name + '}' + (' in section ' + labels if labels else '') + '. Return only the field value. Omit its heading and label, including any trailing colon.'
         if name == 'summary' or any('summary' in heading.lower() for heading in headings.get(name, [])):
             result += (' Write the finished narrative summary of the complete ordered sequence, including the current Global '
                        'direction and requested changes. Do not echo instructions, edit requests or raw Global notes. '
@@ -241,7 +241,7 @@ def template_contract(context):
                   prompt=schemas.text('Subject description; no template headings.', empty=True)),
                   'minItems': len(context['subjects']), 'maxItems': len(context['subjects'])},
         segments={'type': 'array', 'items': schemas.record(id=schemas.text('Exact input segment UUID, in timeline order.'),
-                  prompt=schemas.text('Complete section body; no template headings or timecodes.', empty=True)),
+                  prompt=schemas.text('Shot prose only. Omit shot numbers, headings and time prefixes supplied by the template.', empty=True)),
                   'minItems': len(context['segments']), 'maxItems': len(context['segments'])}))
 
 

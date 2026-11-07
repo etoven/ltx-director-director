@@ -7,9 +7,11 @@ import threading
 from uuid import uuid4
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPlainTextEdit,
+from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTextEdit,
     QLineEdit, QPushButton, QScrollArea, QFrame, QMenu)
 
+from .diff_review import ParagraphDiffReview
+from .spellcheck import install_spellcheck
 from .models import Segment
 from .output_templates import layout_for, render, split_legacy, parse_rendered, stamp, document_parts, root_fields
 
@@ -30,6 +32,7 @@ class StructuredPromptPanel(QWidget):
     def __init__(self, owner):
         super().__init__(); self.owner = owner; self.updating = False; self.rows = {}; self.signature = None
         self.selected_id = None
+        self.reviews = {}
         self.reveal_pending = False
         self.timer = QTimer(self); self.timer.setSingleShot(True); self.timer.setInterval(0)
         self.timer.timeout.connect(self.refresh)
@@ -76,7 +79,7 @@ class StructuredPromptPanel(QWidget):
         from .prompt_references import subjects
         return subjects(self.segments(), self.owner.active_reference_images(), self.state())
 
-    def refresh(self):
+    def refresh(self, *, refinement_baseline=None):
         owner = self.owner
         if self.updating or owner._loading or not owner.unified_workspace or owner.prompt_only_workspace or owner.workspace_engine == 'shot_sequence':
             return
@@ -114,6 +117,13 @@ class StructuredPromptPanel(QWidget):
                     state['global'], prompts = split_legacy(source_text, segments)
                     state['prompts'].update(prompts)
                     state['original_draft'] = source_text
+            if refinement_baseline is not None:
+                for segment in segments:
+                    previous = refinement_baseline.get(segment.id)
+                    revised = state['prompts'].get(segment.id)
+                    if previous is not None and revised is not None and revised != previous:
+                        segment.prompt = revised
+                        state['sources'][segment.id] = revised
             for segment in segments:
                 if state['sources'].get(segment.id) != segment.prompt:
                     state['prompts'][segment.id] = segment.prompt
@@ -185,7 +195,7 @@ class StructuredPromptPanel(QWidget):
             self.add.setEnabled(not owner.ai_busy)
             for row in self.rows.values():
                 for field in row:
-                    field.setReadOnly(owner.ai_busy)
+                    field.setReadOnly(owner.ai_busy or (field in self.reviews and self.reviews[field].editor is not None))
             selected = owner.current_segment()
             selected_id = selected.id if selected else None
             for key, row in self.rows.items():
@@ -323,9 +333,27 @@ class StructuredPromptPanel(QWidget):
             section = self.rows[segment.id][0].parentWidget()
             self.scroll.verticalScrollBar().setValue(max(0, section.y() - 4))
 
+    def review_snapshot(self):
+        return {
+            key: (self.reviews[row[0]].source_document or row[0].document()).toPlainText()
+            for key, row in self.rows.items()
+        }
+
+    def review_refinement(self, before):
+        for key, row in self.rows.items():
+            if key in before:
+                editor = row[0]
+                self.reviews[editor].begin(editor, before[key], editor.toPlainText())
+
+    def finish_reviews(self):
+        for review in self.reviews.values():
+            review.finish()
+
     def set_text(self, key, value):
         editor = self.rows[key][0]
-        if editor.toPlainText() != value:
+        review = self.reviews[editor]
+        if (review.source_document or editor.document()).toPlainText() != value:
+            review.finish()
             editor.blockSignals(True); editor.setPlainText(value); editor.blockSignals(False)
 
     def rebuild(self, specs, segments, trailing):
@@ -333,6 +361,8 @@ class StructuredPromptPanel(QWidget):
         for row in self.rows.values():
             self.owner._effect_drop_targets.pop(row[0].viewport(), None)
             getattr(self.owner, '_effect_part_segments', {}).pop(row[0].viewport(), None)
+        self.finish_reviews()
+        self.reviews.clear()
         self.rows = {}; self.headings = {}
         while self.parts.count():
             item = self.parts.takeAt(0)
@@ -363,8 +393,10 @@ class StructuredPromptPanel(QWidget):
             remove.clicked.connect(lambda checked=False: self.remove_part(key))
             header.addWidget(remove)
         layout.addLayout(header)
-        editor = QPlainTextEdit(); editor.setMinimumHeight(70); editor.setMaximumHeight(180)
-        editor.setStyleSheet('QPlainTextEdit { background: rgba(128, 148, 170, 0.09); border: 1px solid #485360; border-radius: 4px; }')
+        editor = QTextEdit(); editor.setAcceptRichText(False); editor.setMinimumHeight(70); editor.setMaximumHeight(180)
+        editor.setStyleSheet('QTextEdit { background: rgba(128, 148, 170, 0.09); border: 1px solid #485360; border-radius: 4px; }')
+        install_spellcheck(editor)
+        self.reviews[editor] = ParagraphDiffReview(editor)
         editor.setAccessibleName(title + ' text'); editor.textChanged.connect(lambda: self.edit(key))
         if hasattr(self.owner, '_effect_drop_targets'):
             self.owner._effect_drop_targets[editor.viewport()] = 'segment' if segment else 'unified'
@@ -373,6 +405,16 @@ class StructuredPromptPanel(QWidget):
                 self.owner._effect_part_segments[editor.viewport()] = key
             editor.viewport().installEventFilter(self.owner)
         layout.addWidget(editor); self.rows[key] = [editor, *fields]; self.parts.addWidget(frame)
+
+    def sync_segment_edit(self, segment):
+        state = self.state()
+        if 'global' not in state:
+            self.refresh()
+        state.setdefault('prompts', {})[segment.id] = segment.prompt
+        state.setdefault('sources', {})[segment.id] = segment.prompt
+        if segment.id in self.rows:
+            self.set_text(segment.id, segment.prompt)
+        self.schedule()
 
     def edit(self, key):
         if self.updating or self.owner.ai_busy:
