@@ -82,6 +82,9 @@ MIN_DURATION = 0.01
 PROJECT_CARD_COLOR_ROLE = int(Qt.ItemDataRole.UserRole) + 1
 
 
+COLLECTION_SEPARATOR = " › "
+
+
 def project_library_path() -> Path:
     root = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppDataLocation)
     path = Path(root) / "projects"
@@ -5457,14 +5460,18 @@ class MainWindow(QMainWindow):
         self.project_library_title.setText(self.current_collection or "Saved projects")
         visible_records = [record for record in records if record.get("collection", "") == (self.current_collection or "")]
         entries: list[dict] = [{**record, "kind": "project"} for record in visible_records]
-        if not self.current_collection:
-            collections: dict[str, list[dict]] = {}
-            for record in records:
-                if record.get("collection"):
-                    collections.setdefault(str(record["collection"]), []).append(record)
-            for name, members in collections.items():
-                members.sort(key=lambda value: value.get("savedAt", ""), reverse=True)
-                entries.append({"kind": "collection", "name": name, "description": f"{len(members)} projects", "members": members})
+        parent = (self.current_collection + COLLECTION_SEPARATOR) if self.current_collection else ""
+        collections: dict[str, list[dict]] = {}
+        for record in records:
+            path = str(record.get("collection") or "")
+            if path.startswith(parent) and path != (self.current_collection or ""):
+                child = path[len(parent):].split(COLLECTION_SEPARATOR, 1)[0]
+                if child:
+                    collections.setdefault(parent + child, []).append(record)
+        for path, members in collections.items():
+            members.sort(key=lambda value: value.get("savedAt", ""), reverse=True)
+            entries.append({"kind": "collection", "name": path.removeprefix(parent), "collection": path,
+                            "description": f"{len(members)} projects", "members": members})
         mode = self.project_sort.currentData() if hasattr(self, "project_sort") else "title_asc"
         reverse = mode == "title_desc"
         if mode in {"title_asc", "title_desc"}:
@@ -5482,7 +5489,7 @@ class MainWindow(QMainWindow):
                 members = meta["members"]
                 item = QListWidgetItem(f"{name}\n{len(members)} project{'s' if len(members) != 1 else ''}")
                 item.setBackground(QColor("#22282b"))
-                item.setData(Qt.ItemDataRole.UserRole, {"kind": "collection", "name": name, "description": meta["description"], "members": members})
+                item.setData(Qt.ItemDataRole.UserRole, meta)
                 item.setToolTip(f"Collection: {name}")
                 item.setSizeHint(QSize(self.project_icon_size + 28, self.project_icon_size + 76))
                 collection_cover = self.collection_pixmap(members[:4], self.project_icon_size)
@@ -5548,7 +5555,7 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def project_entry_key(meta: dict) -> str:
-        return f"collection:{meta.get('name', '')}" if meta.get("kind") == "collection" else f"project:{meta.get('id', '')}"
+        return f"collection:{meta.get('collection', meta.get('name', ''))}" if meta.get("kind") == "collection" else f"project:{meta.get('id', '')}"
 
     def project_state_color(self, meta: dict) -> str | None:
         colors = {tag["name"].casefold(): tag["color"] for tag in self.project_status_tags()}
@@ -5880,6 +5887,8 @@ class MainWindow(QMainWindow):
         self._project_open_timer.stop();self._pending_project_id=None
         meta = item.data(Qt.ItemDataRole.UserRole) or {}
         menu = QMenu(self)
+        if meta.get('kind') == 'project':
+            menu.addAction(self.library_surface.shot_take_action)
         if self.current_collection:
             group_action=menu.addAction('Group selected projects',self.group_selected_projects)
             group_action.setEnabled(len(self.selected_projects_in_order())>=2)
@@ -5935,6 +5944,32 @@ class MainWindow(QMainWindow):
         return [item.data(Qt.ItemDataRole.UserRole) for row in range(self.project_list.count())
                 if (item:=self.project_list.item(row)).isSelected() and not item.isHidden()
                 and (item.data(Qt.ItemDataRole.UserRole) or {}).get('kind')=='project']
+
+    def combine_as_shot_take(self) -> None:
+        members = self.selected_projects_in_order()
+        if len(members) != 2:
+            return
+        self._project_open_timer.stop()
+        self._pending_project_id = None
+        parent = (self.current_collection + COLLECTION_SEPARATOR) if self.current_collection else ""
+        used = {str(record.get("collection") or "").removeprefix(parent).split(COLLECTION_SEPARATOR, 1)[0].casefold()
+                for record in self.library_records()
+                if str(record.get("collection") or "").startswith(parent)}
+        name, number = "Shot Take", 2
+        while name.casefold() in used:
+            name = f"Shot Take ({number})"
+            number += 1
+        path = parent + name
+        for member in members:
+            self.persist_library_metadata({**member, "collection": path})
+        self.refresh_project_library()
+        for row in range(self.project_list.count()):
+            item = self.project_list.item(row)
+            meta = item.data(Qt.ItemDataRole.UserRole) or {}
+            if meta.get("kind") == "collection" and meta.get("collection") == path:
+                self.project_list.setCurrentItem(item)
+                break
+        self.statusBar().showMessage(f"Created {name}", 4000)
 
     def ordered_collection_projects(self,collection=None):
         collection=self.current_collection if collection is None else collection
@@ -6179,10 +6214,11 @@ class MainWindow(QMainWindow):
         self.queue_project_panel_width_restore()
 
     def leave_collection(self) -> None:
+        parent = (self.current_collection or "").rpartition(COLLECTION_SEPARATOR)[0] or None
         if hasattr(self, 'library_surface'):
-            self.library_surface.navigate(None)
+            self.library_surface.navigate(parent)
             return
-        self.current_collection = None
+        self.current_collection = parent
         self.refresh_project_library(preserve_scroll=False)
 
     def save_library_project(self, automatic: bool = False, source_filename: str | None = None) -> None:
@@ -6303,9 +6339,9 @@ class MainWindow(QMainWindow):
         if meta.get("kind") == "collection":
             self._open_serial += 1
             if hasattr(self, 'library_surface'):
-                self.library_surface.navigate(str(meta['name']))
+                self.library_surface.navigate(str(meta.get('collection', meta['name'])))
                 return
-            self.current_collection = str(meta["name"])
+            self.current_collection = str(meta.get("collection", meta["name"]))
             self.project_search.clear()
             self.refresh_project_library(preserve_scroll=False)
             return

@@ -188,6 +188,13 @@ class ProjectLibrarySurface:
         self.rename_action.setShortcutContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
         self.rename_action.triggered.connect(self.rename_selected)
         owner.project_list.addAction(self.rename_action)
+        self.shot_take_action = QAction('Combine as Shot Take', owner.project_list)
+        self.shot_take_action.setShortcut(QKeySequence('Ctrl+G'))
+        self.shot_take_action.setShortcutVisibleInContextMenu(True)
+        self.shot_take_action.setShortcutContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self.shot_take_action.triggered.connect(owner.combine_as_shot_take)
+        owner.project_list.addAction(self.shot_take_action)
+        owner.project_list.itemSelectionChanged.connect(self.refresh_selection)
         owner.project_list.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.delete = self.button('Delete', 'Delete selected project', owner.delete_library_project, actions, 'delete')
         self.catalog = self.button('Catalog', 'Open media catalog', lambda: (owner.catalog_dock.show(),owner.catalog_dock.raise_()), actions,'library-catalog')
@@ -243,8 +250,13 @@ class ProjectLibrarySurface:
     def refresh(self,records):
         current=self.owner.current_collection
         self.location.blockSignals(True);self.location.clear();self.location.addItem('Projects',None)
-        for name in sorted({str(r['collection']) for r in records if r.get('collection')}):
-            self.location.addItem('Projects › '+name,name)
+        from .ui import COLLECTION_SEPARATOR
+        paths = set()
+        for record in records:
+            parts = str(record.get('collection') or '').split(COLLECTION_SEPARATOR)
+            paths.update(COLLECTION_SEPARATOR.join(parts[:depth]) for depth in range(1, len(parts) + 1) if parts[0])
+        for path in sorted(paths):
+            self.location.addItem('Projects › '+path,path)
         if current and self.location.findData(current)<0:self.location.addItem('Projects › '+current,current)
         self.location.setCurrentIndex(max(0,self.location.findData(current)));self.location.blockSignals(False)
         self.owner.project_search.setPlaceholderText('Search '+(current or 'projects'))
@@ -275,17 +287,30 @@ class ProjectLibrarySurface:
     def rename_to(self,meta,name):
         name=name.strip()
         if not name or name==str(meta.get('name','')):return
-        if meta.get('kind')=='collection' and name.casefold()!=str(meta.get('name','')).casefold():
-            existing={str(self.location.itemData(i) or '').casefold() for i in range(self.location.count())}
-            if name.casefold() in existing:
+        if meta.get('kind') == 'collection':
+            from .ui import COLLECTION_SEPARATOR
+            old_path = meta.get('collection', meta['name'])
+            parent = old_path.rpartition(COLLECTION_SEPARATOR)[0]
+            if COLLECTION_SEPARATOR in name:
+                QMessageBox.warning(self.owner, 'Invalid collection name', 'Choose a name without the collection separator.')
+                return
+            path = COLLECTION_SEPARATOR.join(part for part in (parent, name) if part)
+            existing = {str(self.location.itemData(i) or '').casefold() for i in range(self.location.count())}
+            if path.casefold() != old_path.casefold() and path.casefold() in existing:
                 QMessageBox.warning(self.owner,'Collection name in use','Choose a different name to keep these collections separate.')
                 return
-        for member in meta.get('members',[]) if meta.get('kind')=='collection' else [meta]:
-            member['collection' if meta.get('kind')=='collection' else 'name']=name
-            self.owner.persist_library_metadata(member)
-        if meta.get('kind')=='collection':
-            self.history=[name if value==meta.get('name') else value for value in self.history]
-        elif str(meta.get('id'))==self.owner.current_project_id:
+            prefix = old_path + COLLECTION_SEPARATOR
+            for member in meta['members']:
+                member['collection'] = path + member['collection'][len(old_path):]
+                self.owner.persist_library_metadata(member)
+            self.history = [
+                path + value[len(old_path):] if value and (value == old_path or value.startswith(prefix)) else value
+                for value in self.history
+            ]
+        else:
+            meta['name'] = name
+            self.owner.persist_library_metadata(meta)
+        if meta.get('kind') != 'collection' and str(meta.get('id')) == self.owner.current_project_id:
             self.owner.current_project_name=name
             if self.owner.current_project_id in self.owner.project_sessions:
                 self.owner.project_sessions[self.owner.current_project_id]['name']=name
@@ -304,6 +329,7 @@ class ProjectLibrarySurface:
         visible=item is not None and not item.isHidden()
         meta=item.data(Qt.ItemDataRole.UserRole) if item else {}
         project=visible and meta.get('kind')=='project'
+        self.shot_take_action.setEnabled(len(self.owner.selected_projects_in_order()) == 2)
         self.rename.setEnabled(visible);self.rename_action.setEnabled(visible);self.delete.setEnabled(project)
         self.duplicate_action.setEnabled(project);self.details_action.setEnabled(project)
         self.archive_action.setEnabled(visible)

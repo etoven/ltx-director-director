@@ -484,3 +484,50 @@ def test_mode_switch_cannot_apply_image_through_cached_segment_alias(tmp_path):
         assert not segment.media_path and segment.prompt=='Keep the authored beat'
         assert segment.artwork_status=='awaiting'
     finally:w.current_project_id=None;w.project_sessions.clear();w.project_dirty=False;w.close()
+
+
+def test_shot_take_uses_nested_collection_navigation_and_shortcut(tmp_path):
+    import json
+    from ltx_prompt_director import ui
+
+    for ident, name, collection in (
+        ('one', 'First take', 'Scene'),
+        ('two', 'Second take', 'Scene'),
+        ('three', 'Other shot', 'Scene'),
+    ):
+        archive = tmp_path / (ident + '.LTXD')
+        archive.write_text('{}')
+        (tmp_path / (ident + '.meta.json')).write_text(json.dumps(
+            dict(id=ident, name=name, collection=collection, projectPath=str(archive))
+        ))
+
+    with patch.object(ui, 'project_library_path', return_value=tmp_path):
+        w = make_window()
+        try:
+            w.library_surface.navigate('Scene')
+            w.library_surface.clear_filters()
+            library = w.project_list
+            def entries():
+                return [library.item(row) for row in range(library.count())]
+            for item in entries():
+                item.setSelected(item.data(Qt.ItemDataRole.UserRole).get('id') in {'one', 'two'})
+            library.setFocus()
+            QTest.keyClick(library, Qt.Key.Key_G, Qt.KeyboardModifier.ControlModifier)
+            path = 'Scene' + ui.COLLECTION_SEPARATOR + 'Shot Take'
+            group = next(item for item in entries()
+                         if item.data(Qt.ItemDataRole.UserRole).get('collection') == path)
+            assert group.data(Qt.ItemDataRole.UserRole)['kind'] == 'collection'
+            assert not {'one', 'two'} & {item.data(Qt.ItemDataRole.UserRole).get('id') for item in entries()}
+            w.activate_double_clicked_project(group)
+            assert w.current_collection == path
+            assert {'one', 'two'} <= {item.data(Qt.ItemDataRole.UserRole).get('id') for item in entries()}
+            w.leave_collection()
+            assert w.current_collection == 'Scene'
+            group = next(item.data(Qt.ItemDataRole.UserRole) for item in entries()
+                         if item.data(Qt.ItemDataRole.UserRole).get('collection') == path)
+            w.library_surface.rename_to(group, 'Alternates')
+            w.library_surface.navigate('Scene' + ui.COLLECTION_SEPARATOR + 'Alternates')
+            assert {'one', 'two'} <= {item.data(Qt.ItemDataRole.UserRole).get('id') for item in entries()}
+        finally:
+            w.project_dirty = False
+            w.close()
