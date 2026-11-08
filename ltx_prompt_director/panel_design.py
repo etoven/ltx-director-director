@@ -143,7 +143,26 @@ class ProjectCardDelegate(QStyledItemDelegate):
         name = str(meta.get('name') or 'Untitled project')
         description = str(meta.get('description') or 'No description').replace('\n', ' ')
         if meta.get('kind') == 'collection': description = f"{len(meta.get('members', []))} projects"
-        painter.drawText(QRect(text.x(), text.y(), text.width(), line), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, fm.elidedText(name, Qt.TextElideMode.ElideRight, text.width()))
+        title = QRect(text.x(), text.y(), text.width(), line)
+        project_id = str(meta.get('id') or '') if meta.get('kind') == 'project' else ''
+        if project_id and self.owner.project_is_dirty(project_id):
+            dot = s(8)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor('#f3ce52'))
+            painter.drawEllipse(title.right() - dot + 1, title.y() + (line - dot) // 2, dot, dot)
+            title.adjust(0, 0, -dot - s(6), 0)
+        if project_id and project_id == self.owner.current_project_id:
+            width = fm.horizontalAdvance('Open') + s(12)
+            badge = QRect(title.right() - width + 1, title.y(), width, line)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor('#235751'))
+            painter.drawRoundedRect(badge, s(5), s(5))
+            painter.setPen(QColor('#baf5e8'))
+            painter.drawText(badge, Qt.AlignmentFlag.AlignCenter, 'Open')
+            title.adjust(0, 0, -width - s(6), 0)
+        painter.setPen(QColor('#edf0ed'))
+        painter.drawText(title, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                         fm.elidedText(name, Qt.TextElideMode.ElideRight, max(0, title.width())))
         painter.setPen(QColor('#bdc8d0'))
         painter.drawText(QRect(text.x(), text.y()+line, text.width(), line), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, fm.elidedText(description, Qt.TextElideMode.ElideRight, text.width()))
         status = 'Archive' if meta.get('archived') else str(meta.get('status') or ('Collection' if meta.get('kind') == 'collection' else 'No status'))
@@ -192,7 +211,7 @@ class ProjectLibrarySurface:
         self.shot_take_action.setShortcut(QKeySequence('Ctrl+G'))
         self.shot_take_action.setShortcutVisibleInContextMenu(True)
         self.shot_take_action.setShortcutContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
-        self.shot_take_action.triggered.connect(owner.combine_as_shot_take)
+        self.shot_take_action.triggered.connect(lambda: owner.combine_as_shot_take())
         owner.project_list.addAction(self.shot_take_action)
         owner.project_list.itemSelectionChanged.connect(self.refresh_selection)
         owner.project_list.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)

@@ -5882,16 +5882,26 @@ class MainWindow(QMainWindow):
         if not item:
             return
         from PySide6.QtCore import QItemSelectionModel
-        if not item.isSelected():self.project_list.setCurrentItem(item)
-        else:self.project_list.setCurrentItem(item,QItemSelectionModel.SelectionFlag.NoUpdate)
+        anchor = self.project_list.currentItem()
+        if not item.isSelected():
+            self.project_list.setCurrentItem(item)
+            anchor = item
+        else:
+            self.project_list.setCurrentItem(item, QItemSelectionModel.SelectionFlag.NoUpdate)
         self._project_open_timer.stop();self._pending_project_id=None
         meta = item.data(Qt.ItemDataRole.UserRole) or {}
         menu = QMenu(self)
         if meta.get('kind') == 'project':
-            menu.addAction(self.library_surface.shot_take_action)
-        if self.current_collection:
-            group_action=menu.addAction('Group selected projects',self.group_selected_projects)
-            group_action.setEnabled(len(self.selected_projects_in_order())>=2)
+            menu.addSection('Selected projects')
+            anchor_key = self.project_entry_key(anchor.data(Qt.ItemDataRole.UserRole) or {}) if anchor else ''
+            take_action = menu.addAction('Combine as Shot Take',
+                                         lambda: self.combine_as_shot_take(anchor_key))
+            take_action.setShortcut(self.library_surface.shot_take_action.shortcut())
+            take_action.setShortcutVisibleInContextMenu(True)
+            take_action.setEnabled(len(self.selected_projects_in_order()) == 2)
+            if self.current_collection:
+                group_action = menu.addAction('Group selected projects', self.group_selected_projects)
+                group_action.setEnabled(len(self.selected_projects_in_order()) >= 2)
             menu.addSeparator()
         menu.addAction(self.library_surface.rename_action)
         from .panel_design import dot_icon
@@ -5945,10 +5955,16 @@ class MainWindow(QMainWindow):
                 if (item:=self.project_list.item(row)).isSelected() and not item.isHidden()
                 and (item.data(Qt.ItemDataRole.UserRole) or {}).get('kind')=='project']
 
-    def combine_as_shot_take(self) -> None:
+    def combine_as_shot_take(self, anchor_key: str | None = None) -> None:
         members = self.selected_projects_in_order()
         if len(members) != 2:
             return
+        member_keys = {self.project_entry_key(member) for member in members}
+        if anchor_key is None:
+            anchor = self.project_list.currentItem()
+            anchor_key = self.project_entry_key(anchor.data(Qt.ItemDataRole.UserRole) or {}) if anchor else ''
+        if anchor_key not in member_keys:
+            anchor_key = self.project_entry_key(members[-1])
         self._project_open_timer.stop()
         self._pending_project_id = None
         parent = (self.current_collection + COLLECTION_SEPARATOR) if self.current_collection else ""
@@ -5960,8 +5976,19 @@ class MainWindow(QMainWindow):
             name = f"Shot Take ({number})"
             number += 1
         path = parent + name
+        take_key = self.project_entry_key({"kind": "collection", "collection": path})
+        order = []
+        for row in range(self.project_list.count()):
+            item = self.project_list.item(row)
+            key = self.project_entry_key(item.data(Qt.ItemDataRole.UserRole) or {})
+            if key == anchor_key:
+                order.append(take_key)
+            elif key not in member_keys:
+                order.append(key)
         for member in members:
             self.persist_library_metadata({**member, "collection": path})
+        self.activate_custom_sort_for_drag()
+        self.settings.setValue(self.custom_order_settings_key(), json.dumps(order))
         self.refresh_project_library()
         for row in range(self.project_list.count()):
             item = self.project_list.item(row)
@@ -6494,6 +6521,7 @@ class MainWindow(QMainWindow):
 
     def update_window_title(self) -> None:
         self.setWindowTitle(application_window_title(self.current_project_name))
+        self.project_list.viewport().update()
         self.sync_minimax_panel()
         self.update_render_controls()
 
