@@ -695,6 +695,11 @@ class ProjectListWidget(QListWidget):
             surface.layout_cards()
 
     def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.RightButton:
+            item = self.itemAt(event.position().toPoint())
+            if item is not None and item.isSelected() and len(self.selectedItems()) > 1:
+                event.accept()
+                return
         self._press_position = event.position().toPoint()
         self._drag_row = self.indexAt(self._press_position).row()
         self._reordering = False
@@ -5891,16 +5896,20 @@ class MainWindow(QMainWindow):
         self._project_open_timer.stop();self._pending_project_id=None
         meta = item.data(Qt.ItemDataRole.UserRole) or {}
         menu = QMenu(self)
+        take_action = None
+        selected_projects = self.selected_projects_in_order()
         if meta.get('kind') == 'project':
             anchor_key = self.project_entry_key(anchor.data(Qt.ItemDataRole.UserRole) or {}) if anchor else ''
-            take_action = menu.addAction('Combine as Shot Take',
-                                         lambda: self.combine_as_shot_take(anchor_key))
+            take_action = menu.addAction('Combine as Shot Take')
             take_action.setShortcut(self.library_surface.shot_take_action.shortcut())
+            take_action.setShortcutContext(Qt.ShortcutContext.WidgetShortcut)
             take_action.setShortcutVisibleInContextMenu(True)
-            take_action.setEnabled(len(self.selected_projects_in_order()) == 2)
+            take_action.setEnabled(len(selected_projects) == 2)
         if self.current_collection:
             group_action = menu.addAction('Group selected projects', self.group_selected_projects)
-            group_action.setEnabled(len(self.selected_projects_in_order()) >= 2)
+            group_action.setEnabled(len(selected_projects) >= 2)
+        if take_action is not None or self.current_collection:
+            menu.addSeparator()
         menu.addAction(self.library_surface.rename_action)
         from .panel_design import dot_icon
         is_collection = meta.get("kind") == "collection"
@@ -5946,15 +5955,19 @@ class MainWindow(QMainWindow):
         menu.addAction("Duplicate project", self.duplicate_library_project)
         menu.addAction("Edit project details", self.edit_library_project)
         menu.addAction("Delete project", self.delete_library_project)
-        menu.exec(self.project_list.viewport().mapToGlobal(point))
+        collection = self.current_collection
+        chosen = menu.exec(self.project_list.viewport().mapToGlobal(point))
+        if take_action is not None and chosen is take_action and collection == self.current_collection:
+            self.combine_as_shot_take(anchor_key, members=selected_projects)
 
     def selected_projects_in_order(self):
         return [item.data(Qt.ItemDataRole.UserRole) for row in range(self.project_list.count())
                 if (item:=self.project_list.item(row)).isSelected() and not item.isHidden()
                 and (item.data(Qt.ItemDataRole.UserRole) or {}).get('kind')=='project']
 
-    def combine_as_shot_take(self, anchor_key: str | None = None) -> None:
-        members = self.selected_projects_in_order()
+    def combine_as_shot_take(self, anchor_key: str | None = None, *, members: list[dict] | None = None) -> None:
+        if members is None:
+            members = self.selected_projects_in_order()
         if len(members) != 2:
             return
         member_keys = {self.project_entry_key(member) for member in members}

@@ -488,12 +488,14 @@ def test_mode_switch_cannot_apply_image_through_cached_segment_alias(tmp_path):
 
 def test_shot_take_uses_nested_collection_navigation_and_shortcut(tmp_path):
     import json
+    from PySide6.QtCore import QTimer
     from ltx_prompt_director import ui
 
     for ident, name, collection in (
         ('one', 'First take', 'Scene'),
         ('two', 'Second take', 'Scene'),
         ('three', 'Other shot', 'Scene'),
+        ('four', 'Another shot', 'Scene'),
     ):
         archive = tmp_path / (ident + '.LTXD')
         archive.write_text('{}')
@@ -509,10 +511,29 @@ def test_shot_take_uses_nested_collection_navigation_and_shortcut(tmp_path):
             library = w.project_list
             def entries():
                 return [library.item(row) for row in range(library.count())]
-            for item in entries():
-                item.setSelected(item.data(Qt.ItemDataRole.UserRole).get('id') in {'one', 'two'})
-            library.setFocus()
-            QTest.keyClick(library, Qt.Key.Key_G, Qt.KeyboardModifier.ControlModifier)
+            by_id = {item.data(Qt.ItemDataRole.UserRole).get('id'): item for item in entries()}
+            library.setCurrentItem(by_id['two'])
+            by_id['one'].setSelected(True)
+            clicks = []
+
+            def click_combine():
+                menu = APP.activePopupWidget()
+                if not isinstance(menu, QMenu):
+                    return
+                actions = menu.actions()
+                take, group, separator, rename = actions[:4]
+                clicks.append((take.text(), group.text(), separator.isSeparator(), rename.text()))
+                menu.setActiveAction(take)
+                QTest.keyClick(menu, Qt.Key.Key_Return)
+                menu.close()
+
+            point = library.visualItemRect(by_id['one']).center()
+            QTest.mouseClick(library.viewport(), Qt.MouseButton.RightButton, pos=point)
+            assert library.currentItem() is by_id['two']
+            assert len(library.selectedItems()) == 2
+            QTimer.singleShot(0, click_combine)
+            w.project_library_menu(point)
+            assert clicks == [('Combine as Shot Take', 'Group selected projects', True, 'Rename')]
             path = 'Scene' + ui.COLLECTION_SEPARATOR + 'Shot Take'
             group = next(item for item in entries()
                          if item.data(Qt.ItemDataRole.UserRole).get('collection') == path)
@@ -528,6 +549,17 @@ def test_shot_take_uses_nested_collection_navigation_and_shortcut(tmp_path):
             w.library_surface.rename_to(group, 'Alternates')
             w.library_surface.navigate('Scene' + ui.COLLECTION_SEPARATOR + 'Alternates')
             assert {'one', 'two'} <= {item.data(Qt.ItemDataRole.UserRole).get('id') for item in entries()}
+            w.leave_collection()
+            by_id = {item.data(Qt.ItemDataRole.UserRole).get('id'): item for item in entries()}
+            library.setCurrentItem(by_id['four'])
+            by_id['three'].setSelected(True)
+            library.setFocus()
+            QTest.keyClick(library, Qt.Key.Key_G, Qt.KeyboardModifier.ControlModifier)
+            assert {json.loads((tmp_path / (ident + '.meta.json')).read_text())['collection']
+                    for ident in ('three', 'four')} == {path}
+            assert {file.name for file in tmp_path.glob('*.LTXD') if not file.name.startswith('shots-')} == {
+                'one.LTXD', 'two.LTXD', 'three.LTXD', 'four.LTXD',
+            }
         finally:
             w.project_dirty = False
             w.close()
