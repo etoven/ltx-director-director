@@ -210,7 +210,7 @@ class ProjectLibrarySurface:
         self.shot_take_action = QAction('Combine as Shot Take', owner.project_list)
         self.shot_take_action.setShortcut(QKeySequence('Ctrl+G'))
         self.shot_take_action.setShortcutVisibleInContextMenu(True)
-        self.shot_take_action.setShortcutContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self.shot_take_action.setShortcutContext(Qt.ShortcutContext.WindowShortcut)
         self.shot_take_action.triggered.connect(lambda: owner.combine_as_shot_take())
         owner.project_list.addAction(self.shot_take_action)
         owner.project_list.itemSelectionChanged.connect(self.refresh_selection)
@@ -348,7 +348,7 @@ class ProjectLibrarySurface:
         visible=item is not None and not item.isHidden()
         meta=item.data(Qt.ItemDataRole.UserRole) if item else {}
         project=visible and meta.get('kind')=='project'
-        self.shot_take_action.setEnabled(len(self.owner.selected_projects_in_order()) == 2)
+        self.shot_take_action.setEnabled(len(self.owner.selected_projects_in_order()) >= 2)
         self.rename.setEnabled(visible);self.rename_action.setEnabled(visible);self.delete.setEnabled(project)
         self.duplicate_action.setEnabled(project);self.details_action.setEnabled(project)
         self.archive_action.setEnabled(visible)

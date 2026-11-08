@@ -18,7 +18,7 @@ from importlib.resources import files
 from pathlib import Path
 from uuid import uuid4
 
-from PySide6.QtCore import QBuffer, QIODevice, QDateTime, QEasingCurve, QEvent, QEventLoop, QObject, QRunnable, QPoint, QRectF, QSettings, QSize, QStandardPaths, Qt, QThreadPool, QTimer, QUrl, QVariantAnimation, Signal, Slot
+from PySide6.QtCore import QBuffer, QIODevice, QDateTime, QEasingCurve, QEvent, QEventLoop, QItemSelectionModel, QObject, QRunnable, QPoint, QRectF, QSettings, QSize, QStandardPaths, Qt, QThreadPool, QTimer, QUrl, QVariantAnimation, Signal, Slot
 from PySide6.QtGui import QAction, QActionGroup, QBrush, QColor, QCursor, QIcon, QImageReader, QPainter, QPen, QPixmap, QPalette, QTextCharFormat, QTextCursor, QTextOption
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer, QVideoFrame
 from PySide6.QtMultimediaWidgets import QVideoWidget
@@ -696,10 +696,8 @@ class ProjectListWidget(QListWidget):
 
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.RightButton:
-            item = self.itemAt(event.position().toPoint())
-            if item is not None and item.isSelected() and len(self.selectedItems()) > 1:
-                event.accept()
-                return
+            event.accept()
+            return
         self._press_position = event.position().toPoint()
         self._drag_row = self.indexAt(self._press_position).row()
         self._reordering = False
@@ -736,6 +734,9 @@ class ProjectListWidget(QListWidget):
         event.accept()
 
     def mouseReleaseEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.RightButton:
+            event.accept()
+            return
         was_reordering = self._reordering
         self._press_position = None
         self._drag_row = -1
@@ -5451,6 +5452,10 @@ class MainWindow(QMainWindow):
     def refresh_project_library(self, select_id: str | None = None, preserve_scroll: bool = True) -> None:
         self._refreshing_project_library = True
         selected = select_id or self.current_project_id
+        selection = self.selected_projects_in_order() if preserve_scroll else []
+        selected_keys = {self.project_entry_key(meta) for meta in selection} if len(selection) > 1 else set()
+        anchor = self.project_list.currentItem()
+        anchor_key = self.project_entry_key(anchor.data(Qt.ItemDataRole.UserRole)) if selected_keys and anchor else None
         previous_scroll = self.project_list.verticalScrollBar().value() if preserve_scroll else 0
         if self.project_list._scroll_animation:
             self.project_list._scroll_animation.stop()
@@ -5488,6 +5493,7 @@ class MainWindow(QMainWindow):
         self.project_list.setDragDropMode(QListWidget.DragDropMode.NoDragDrop)
         self.project_list.setMovement(QListWidget.Movement.Static)
         selected_item = None
+        restored_selection = {}
         for meta in entries:
             if meta.get("kind") == "collection":
                 name = str(meta["name"])
@@ -5535,12 +5541,20 @@ class MainWindow(QMainWindow):
             if meta.get("projectType") == "shot_sequence" and not meta.get("thumbnailData"):
                 item.setIcon(QIcon(str(files("ltx_prompt_director").joinpath("assets/shot-sequence.svg"))))
             self.project_list.addItem(item)
+            key = self.project_entry_key(meta)
+            if key in selected_keys:
+                restored_selection[key] = item
             if meta.get("id") == selected:
                 selected_item = item
         if hasattr(self, 'library_surface'):
             for row in range(self.project_list.count()):
                 self.project_list.item(row).setSizeHint(self.library_surface.card_size())
-        if selected_item:
+        if len(restored_selection) > 1:
+            current = restored_selection.get(anchor_key, next(iter(restored_selection.values())))
+            self.project_list.setCurrentItem(current, QItemSelectionModel.SelectionFlag.NoUpdate)
+            for item in restored_selection.values():
+                item.setSelected(True)
+        elif selected_item:
             self.project_list.setCurrentItem(selected_item)
         self.filter_projects(self.project_search.text())
         self._refreshing_project_library = False
@@ -5886,7 +5900,6 @@ class MainWindow(QMainWindow):
         item = self.project_list.itemAt(point)
         if not item:
             return
-        from PySide6.QtCore import QItemSelectionModel
         anchor = self.project_list.currentItem()
         if not item.isSelected():
             self.project_list.setCurrentItem(item)
@@ -5900,11 +5913,18 @@ class MainWindow(QMainWindow):
         selected_projects = self.selected_projects_in_order()
         if meta.get('kind') == 'project':
             anchor_key = self.project_entry_key(anchor.data(Qt.ItemDataRole.UserRole) or {}) if anchor else ''
+            collection = self.current_collection
             take_action = menu.addAction('Combine as Shot Take')
             take_action.setShortcut(self.library_surface.shot_take_action.shortcut())
             take_action.setShortcutContext(Qt.ShortcutContext.WidgetShortcut)
             take_action.setShortcutVisibleInContextMenu(True)
-            take_action.setEnabled(len(selected_projects) == 2)
+            take_action.setEnabled(len(selected_projects) >= 2)
+
+            def combine_selection():
+                if collection == self.current_collection:
+                    self.combine_as_shot_take(anchor_key, members=selected_projects)
+
+            take_action.triggered.connect(combine_selection)
         if self.current_collection:
             group_action = menu.addAction('Group selected projects', self.group_selected_projects)
             group_action.setEnabled(len(selected_projects) >= 2)
@@ -5955,10 +5975,7 @@ class MainWindow(QMainWindow):
         menu.addAction("Duplicate project", self.duplicate_library_project)
         menu.addAction("Edit project details", self.edit_library_project)
         menu.addAction("Delete project", self.delete_library_project)
-        collection = self.current_collection
-        chosen = menu.exec(self.project_list.viewport().mapToGlobal(point))
-        if take_action is not None and chosen is take_action and collection == self.current_collection:
-            self.combine_as_shot_take(anchor_key, members=selected_projects)
+        menu.exec(self.project_list.viewport().mapToGlobal(point))
 
     def selected_projects_in_order(self):
         return [item.data(Qt.ItemDataRole.UserRole) for row in range(self.project_list.count())
@@ -5968,7 +5985,7 @@ class MainWindow(QMainWindow):
     def combine_as_shot_take(self, anchor_key: str | None = None, *, members: list[dict] | None = None) -> None:
         if members is None:
             members = self.selected_projects_in_order()
-        if len(members) != 2:
+        if len(members) < 2:
             return
         member_keys = {self.project_entry_key(member) for member in members}
         if anchor_key is None:
