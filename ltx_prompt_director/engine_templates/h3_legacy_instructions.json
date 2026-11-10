@@ -1,0 +1,34 @@
+{
+  "minimax_frames": {
+    "generate": [
+      "2c24a810b315b26d5c85bd7ca1b514a2c92659bf4704dfebe102cb411644e94e",
+      "eb6aa1054e107371519ed94b23cdb83ee8017bf4ea65b7508e0499060ce651a3",
+      "5410b0fe1f55fde19e3657e103a24189f89faae460eaee016006908a72a3cbf4",
+      "92c6bc88475a7a6611edaf8378644f3cc29135e57b417197e03c96d060cd1092"
+    ],
+    "refine": [
+      "eead53ede3a6b134ad3097548e1a9b11a9d7b665f9a528466aa2f08916349053",
+      "5d0cc641d9c4c422ab9f3ab71001a1d6ba980df41574fcdd6a21f941ec3ccb6c",
+      "ead23eaa10a5465de6accc223c37c1bc05727a96ee7d199e6012b5f8505684ab",
+      "13050841d493a3c370f751a8a99a854c27f187f52cbc27e787dc6a0303a23ac9"
+    ]
+  },
+  "minimax_references": {
+    "generate": [
+      "5410b0fe1f55fde19e3657e103a24189f89faae460eaee016006908a72a3cbf4",
+      "50d2626b37c209834f1ce96b4bb43d6a72d71b0c50d381db99e04e95ef84d1be",
+      "0d801b17058908d8f20b2c7b2267f4ac93e2b8a7a48167c625fb95fbfee394ca",
+      "798aad3dbf0634d8fd535d0e4147ea7092a502d38467d7913f3591db9db0cbd0"
+    ],
+    "refine": [
+      "ead23eaa10a5465de6accc223c37c1bc05727a96ee7d199e6012b5f8505684ab",
+      "eead53ede3a6b134ad3097548e1a9b11a9d7b665f9a528466aa2f08916349053",
+      "5daf69f8308f6286a6d61fb2fe1c0c45876f68d4a7b51aaf84aed2ff294b7c88",
+      "3e1719f7662330b8e538215a185eb2f1c9c24b65be690d3c9df3b16960f25ddf"
+    ]
+  },
+  "layouts": {
+    "minimax_frames": "{{#section \"integrated_multimodal_description:\"}}${global_prompt}\n\n{{#subjects}}[Subject ${index}: ${name}]\n${prompt}\n\n{{/subjects}}{{#segments}}[Shot ${index}] At ${start} \u2013 ${end}\n${prompt}\n\n{{/segments}}{{/section}}{{#section \"overall_soundscape:\"}}${sound}{{/section}}{{#section \"non_diegetic_music:\"}}${music}{{/section}}",
+    "minimax_references": "{{#section \"subject_definitions:\"}}{{#subjects}}[Subject ${index}: ${name}]\n${prompt}\n\n{{/subjects}}{{/section}}{{#section \"summary:\"}}${global_prompt}{{/section}}{{#section \"retention_analysis:\"}}${retention}{{/section}}{{#section \"detailed_description:\"}}{{#segments}}[Shot ${index}] At ${start} \u2013 ${end}\n${prompt}\n\n{{/segments}}{{/section}}{{#section \"overall_soundscape:\"}}${sound}{{/section}}{{#section \"non_diegetic_music:\"}}${music}{{/section}}"
+  }
+}

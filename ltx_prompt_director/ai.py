@@ -8,7 +8,7 @@ import math
 import json
 import re
 from functools import lru_cache
-from .prompt_templates import CONTENT_FIDELITY, FRAME_MOTION_GUIDANCE, WORKSPACE_PROMPTS as WORKSPACE_INSTRUCTIONS, render_workspace_prompt
+from .prompt_templates import CONTENT_FIDELITY, FRAME_MOTION_GUIDANCE, WORKSPACE_PROMPTS as WORKSPACE_INSTRUCTIONS, WORKSPACE_ENGINE, WORKSPACE_OPERATION, render_workspace_prompt
 from pathlib import Path
 
 import requests
@@ -402,6 +402,7 @@ def generate_segment_prompt(segments: list[Segment], selected_index: int, provid
     prompt = result.get("prompt") or result.get("segmentPrompt")
     if not isinstance(prompt, str) or not prompt.strip():
         raise AIResponseFormatError("Segment generation returned no prompt; retrying.")
+    _check_segment_domain(prompt)
     return {"prompt": prompt.strip(), "imagePrompt": _image_prompt_value(result),
             "duration": _strict_duration(result.get("duration"))}
 
@@ -423,10 +424,19 @@ def refine_segment_prompt(segments: list[Segment], selected_index: int, provider
     prompt = result.get("prompt") or result.get("segmentPrompt") or result.get("segment_prompt")
     if not isinstance(prompt, str) or not prompt.strip():
         raise AIResponseFormatError("The AI returned no refined prompt. The operation will retry.")
+    _check_segment_domain(prompt)
     image_prompt = _image_prompt_value(result)
     duration = _strict_duration(result.get("duration"))
     return {"prompt": prompt.strip(), "imagePrompt": image_prompt, "duration": duration}
 
+
+
+def _check_segment_domain(prompt):
+    """Reject a whole-document response instead of applying it to one beat."""
+    if WORKSPACE_ENGINE.get() not in {'minimax_frames', 'minimax_references'}:
+        return
+    if re.search(r'(?im)^\s*(?:subject_definitions|summary|retention_analysis|detailed_description|integrated_multimodal_description|overall_soundscape|non_diegetic_music)\s*:', prompt):
+        raise AIResponseFormatError('Segment scope returned Unified production sections. Return only the selected segment action prose; the existing draft was kept.')
 
 
 def generate_global_direction(segments: list[Segment], provider: str, model: str,
@@ -826,10 +836,10 @@ def _refinement_duration_instruction(requested_total: float) -> str:
 
 def _timing_rules(segments: list[Segment], selected_index: int, intent: str, requested_total: float) -> str:
     duration_instruction = _refinement_duration_instruction(requested_total)
-    return f"""You are performing a TIMING-ONLY refinement for LTX Video 2.3.
+    return f"""You are performing a TIMING-ONLY refinement for the active video workspace.
 Analyze the complete ordered segment plan below so the selected segment still fits the sequence. Use the immediately previous and next prompts and supplied adjacent frames as the primary motion and continuity context.
 Change ONLY the duration of selected segment {selected_index + 1}. Every prompt is immutable: do not rewrite, summarize or return any prompt text. Do not change any other duration.
-Estimate the time genuinely needed for the selected prompt's action, physical progression, camera motion, Spoken Dialog and lip sync. Respect its start/end-frame role and surrounding continuity. There is no segment-duration or total sequence-length ceiling.
+Estimate the time genuinely needed for the selected prompt's action, physical progression, camera motion, Spoken Dialog and lip sync. Respect its start/end-frame role and surrounding continuity. Respect the active workspace duration limits and explicit current timing request.
 {duration_instruction}
 Director's intent and planning controls:
 {intent.strip() or 'No additional intent supplied.'}
@@ -843,11 +853,13 @@ Return strict JSON containing only: {{"duration": 5.0}}""" + FRAME_MOTION_GUIDAN
 def _prompt_refinement_rules(segments: list[Segment], selected_index: int, intent: str, requested_total: float) -> str:
     duration_instruction = _refinement_duration_instruction(requested_total)
     return render_workspace_prompt('ltx', 'refine', {
+        'current_prompt': segments[selected_index].prompt,
+        'refinement_instructions': f'Refine only segment {selected_index + 1}. ' + intent,
         'selected_segment': selected_index + 1,
         'duration_instruction': duration_instruction,
         'director_intent': intent.strip() or 'No additional intent supplied.',
         'ordered_plan': _segment_context(segments, selected_index),
-    })
+    }, domain='segment')
 
 
 def _strict_duration(value: object) -> float:
@@ -866,6 +878,13 @@ def _image_prompt_value(value: dict) -> str:
 
 
 def _rules(count: int, intent: str, sfx: bool, spoken_dialog: bool, hdr: bool, reduce_music: bool, text_count: int = 0) -> str:
+    if WORKSPACE_ENGINE.get() in {'minimax_frames', 'minimax_references'}:
+        return render_workspace_prompt(WORKSPACE_ENGINE.get(), WORKSPACE_OPERATION.get(), {
+            'director_intent': intent, 'authoritative_intent': intent,
+            'sound_effects': 'Enabled' if sfx else 'Disabled',
+            'dialogue': 'Use requested spoken lines with stable speaker IDs and <d>[Language] ...</d>.' if spoken_dialog else 'No spoken dialogue.',
+            'music': 'No background music' if reduce_music else 'Follow supplied music direction',
+        }, domain='timeline') + f'\nTIMELINE OPERATION: Return exactly {count} segment records in input order and globalPrompt. Preserve media identities. Do not return a unified production document.'
     if spoken_dialog and count == 1:
         spoken_rule = (
             "SPOKEN DIALOG IS ON: The single segment must include an appropriate clause beginning exactly `Spoken Dialog:` and containing actual audible words spoken by a visible character. "
@@ -946,6 +965,13 @@ def _structured_raw(images, provider, model, key, rules, timeout, *, schema):
     """Bind an explicit operation contract for this worker's entire request."""
     from .output_templates import ACTIVE_OUTPUT, template_contract, render_response
     context = ACTIVE_OUTPUT.get()
+    engine = WORKSPACE_ENGINE.get()
+    domain = {'selected_segment': 'segment', 'selected_segment_text': 'segment',
+              'global_direction': 'global', 'global_refinement': 'global',
+              'selected_timing': 'timing', 'ordered_sequence': 'timeline'}.get(schema.get('title'), 'unified')
+    if engine in {'minimax_frames', 'minimax_references'} and not any(
+            marker in rules for marker in ('OFFICIAL MINIMAX H3 SKILL', 'MINIMAX H3 WORK DOMAIN')):
+        rules = render_workspace_prompt(engine, WORKSPACE_OPERATION.get(), {}, domain=domain) + '\nCURRENT OPERATION (scope and transport take priority):\n' + rules
     if context is not None and schema.get('title') == 'combined_timeline':
         contract = copy.deepcopy(schema)
         contract['title'] = 'combined_template_variables'
@@ -955,8 +981,8 @@ def _structured_raw(images, provider, model, key, rules, timeout, *, schema):
         contract['required'] = list(contract['properties'])
         rules += ('\n\nOUTPUT TEMPLATE VARIABLES: The explicit JSON schema below replaces the free-form prompt '
                   'field. Fill the named document fields in variables, subject descriptions in subjects, '
-                  'and each complete section body in segments[].prompt. For each shot, start directly with '
-                  'the action. Omit prefixes such as "[Shot 3] At 00:07.50," even if the input includes them. '
+                  'and each complete section body in segments[].prompt. Follow the official shot notation when the layout '
+                  'does not supply it. Do not add a cut for each planning beat. '
                   'For named fields, return only the value. Omit labels such as "overall_soundscape:" and '
                   '"non_diegetic_music:" even when present in the input. Preserve the requested timeline edits. '
                   'The application renders the shot numbers and times in the '
@@ -977,9 +1003,9 @@ def _structured_raw(images, provider, model, key, rules, timeout, *, schema):
     if context is not None and schema == response_schemas.PROMPT:
         contract = template_contract(context)
         rules += ('\n\nOUTPUT LAYOUT CONTRACT: Return only the JSON template variables in the supplied schema. '
-                  'Return only action prose in segments[].prompt. The template supplies shot numbers and time ranges. '
-                  'Start directly with the action. Omit prefixes such as "[Shot 3] At 00:07.50," even when '
-                  'rewriting an existing draft that contains them. Keep every segment and subject ID in order. '
+                  'Return production prose in segments[].prompt. If the layout supplies shot markers, omit duplicate prefixes; '
+                  'otherwise include the official shot notation: first shot untimed, later cuts at MM:SS.mmm. '
+                  'Continuous planning beats do not require cuts. Keep every segment and subject ID in order. '
                   'Fill each named document field in variables with only its value. Omit prefixes such as '
                   '"overall_soundscape:" and "non_diegetic_music:" even if they occur in the input. '
                   'The application renders all headings and labels from the model-specific template.\nINPUT LAYOUT AND IDENTITIES:\n'
@@ -1299,6 +1325,8 @@ def _chatgpt_stream(token: str, payload: dict, timeout: int) -> str:
 
 
 def _validate(raw: str, expected: int, require_sfx: bool = False, require_spoken_dialog: bool = False) -> dict:
+    if WORKSPACE_ENGINE.get() in {'minimax_frames', 'minimax_references'}:
+        require_sfx = require_spoken_dialog = False  # H3 uses natural sound prose and <d>, not LTX clauses.
     result = _parse_json(raw)
     if expected == 1:
         result = _normalize_single_frame_result(result)

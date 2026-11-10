@@ -72,12 +72,14 @@ def default_layout(engine='ltx'):
     text = lambda value: dict(type='text', text=value)
     subjects = dict(type='subjects', children=[text('[Subject ${index}: ${name}]\n${prompt}\n\n')])
     shots = dict(type='segments', children=[text('[Shot ${index}] At ${start} – ${end}\n${prompt}\n\n')])
+    h3_shots = dict(type='segments', children=[text('${prompt}\n\n')])
     if engine == 'minimax_references':
-        return serialize_template([section('subject_definitions:', [subjects]), section('summary:', [text('${global_prompt}')]),
-            section('retention_analysis:', [text('${retention}')]), section('detailed_description:', [shots]),
+        h3_subjects = dict(type='subjects', children=[text('${prompt}\n')])
+        return serialize_template([section('subject_definitions:', [h3_subjects, text('${reference_definitions}')]), section('summary:', [text('${global_prompt}')]),
+            section('retention_analysis:', [text('${retention}')]), section('detailed_description:', [h3_shots]),
             section('overall_soundscape:', [text('${sound}')]), section('non_diegetic_music:', [text('${music}')])])
     if engine.startswith('minimax'):
-        return serialize_template([section('integrated_multimodal_description:', [text('${global_prompt}\n\n'), subjects, shots]),
+        return serialize_template([text('${global_prompt}\n\n'), section('integrated_multimodal_description:', [h3_shots]),
             section('overall_soundscape:', [text('${sound}')]), section('non_diegetic_music:', [text('${music}')])])
     return serialize_template([section('GLOBAL', [text('${global_prompt}')]), section('SUBJECTS', [subjects]),
         section('TIMELINE', [dict(type='segments', children=[text('[Segment ${index}] ${start} – ${end}\n${prompt}\n\n')])])])
@@ -214,7 +216,7 @@ def split_legacy(text, segments):
 
 
 def request_context(definition, segments, subjects):
-    return dict(layout=layout_for(definition), segments=[s.to_dict() for s in segments], subjects=copy.deepcopy(subjects))
+    return dict(layout=layout_for(definition), engine=definition.get('engine'), segments=[s.to_dict() for s in segments], subjects=copy.deepcopy(subjects))
 
 
 def template_contract(context):
@@ -228,6 +230,10 @@ def template_contract(context):
     def description(name):
         labels = ', '.join(dict.fromkeys(headings.get(name, []))).strip(', ')
         result = 'Complete production prose for ${' + name + '}' + (' in section ' + labels if labels else '') + '. Return only the field value. Omit its heading and label, including any trailing colon.'
+        if context.get('engine') == 'minimax_frames' and name == 'global_prompt':
+            return 'Official first-line keyframe alignment instruction for I2VA, FL2VA or L2VA, with exact two-decimal seconds. Empty for T2VA. Not a summary or Global input notes.'
+        if name == 'reference_definitions':
+            return 'Complete official reference definitions for labels not already defined in subjects. Use <Picture N>, <Video N>, <Audio N> or <Subject N> with their actual asset roles; no fabricated labels or duplicated definitions.'
         if name == 'summary' or any('summary' in heading.lower() for heading in headings.get(name, [])):
             result += (' Write the finished narrative summary of the complete ordered sequence, including the current Global '
                        'direction and requested changes. Do not echo instructions, edit requests or raw Global notes. '
@@ -238,10 +244,10 @@ def template_contract(context):
     return schemas.named('production_template_variables', schemas.record(
         variables=variables,
         subjects={'type': 'array', 'items': schemas.record(id=schemas.text('Exact input subject ID.'),
-                  prompt=schemas.text('Subject description; no template headings.', empty=True)),
+                  prompt=schemas.text('Complete subject definition with its actual <Subject N> label when using H3; no section headings.', empty=True)),
                   'minItems': len(context['subjects']), 'maxItems': len(context['subjects'])},
         segments={'type': 'array', 'items': schemas.record(id=schemas.text('Exact input segment UUID, in timeline order.'),
-                  prompt=schemas.text('Shot prose only. Omit shot numbers, headings and time prefixes supplied by the template.', empty=True)),
+                  prompt=schemas.text('Production prose for this timeline beat. Include official shot markers and cut timestamps only where a shot begins, unless already supplied by the layout. The first shot has no timestamp; continuous beats need no new shot. No section heading.', empty=True)),
                   'minItems': len(context['segments']), 'maxItems': len(context['segments'])}))
 
 

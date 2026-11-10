@@ -676,6 +676,7 @@ retain their selected roles rather than becoming timeline endpoints.</p>
 <p>The strip under the MiniMax timeline shows large image previews, with each shot’s timeline <strong>Start</strong> and <strong>End</strong> times together in a shaded bottom row. Video tiles show their timeline range too; source trim ranges and MiniMaxCondFrame values remain in tooltips. Untimed references show their roles. Drag the dotted handle below the strip to resize it, or double-click to hide and reopen it. The previews expand with the panel. The strip flags an opening that needs to move to zero or an ending that needs to reach the sequence total. It describes your setup; it does not move media automatically.</p>
 <p><img alt="The retained conditioning and timing overview" loading="lazy" decoding="async" width="760" height="144" src="images/panel-timing-overview.png" /></p>
 <p>Both MiniMax templates receive <code>${workflow_name}</code> and <code>${workflow_direction}</code> from the current asset setup, including I2V, FL2V and last-frame L2V. Asset labels, subjects and speakers remain distinct. Dialogue requests can add original spoken lines when none are supplied.</p>
+<p>MiniMax generation and refinement use the instructions saved in Settings → Workspaces together with the official <a href="https://github.com/MiniMax-AI/MiniMax-H3/blob/main/skills/h3-prompt-writing/SKILL.md">H3 prompt-writing skill</a>. Standard/keyframe output uses three production fields; Full Reference uses six ordered sections. The first shot has no timestamp; later cuts use MM:SS.mmm. A timeline beat can continue the same shot. Keyframe alignment is separate from cut timing. Segment and Global actions apply these conventions only to their selected editing scope.</p>
 <h2 id="keep-your-direction-and-drafts">Keep your direction and drafts</h2>
 <p><strong>Director’s Intent</strong> is available in <strong>Global</strong> scope. Prompt options and inline refinement notes remain available across timeline workspaces. Prompt Refinement uses only its standalone prompt and annotations. Switching scope or workspace does not submit an AI request. Projects retain segment prompts, global direction and each workspace’s production draft. Existing review, copy, synchronization and media tools remain available.</p>
 <p><strong>Continue:</strong> <a href="#references">Reference images</a> · <a href="#workspaces">Custom workspaces and exports</a> · <a href="#start">Complete feature guide</a></p>
@@ -970,7 +971,9 @@ filename prefix, including when you rename the exported JSON file.</p>
 <p><img alt="Project cards with independent colors, status pills and compact browser controls" loading="lazy" decoding="async" width="362" height="986" src="images/project-browser.png" /></p>
 <h2 id="save-it-with-a-name-and-a-cover">Save it with a name and a cover</h2>
 <p><strong>New Project</strong> immediately creates an empty <strong>Untitled project</strong> in the
-library. You can switch to another project and return to its working draft
+library, directly after the open project in the same collection. <strong>Duplicate project</strong>
+places an independent copy after its source. Both actions open the new project and scroll its card
+into view. You can switch to another project and return to its working draft
 before saving manually. Rename it and add a description in <strong>Properties</strong>.
 Choose <strong>Save to Library</strong> to save its content; later saves update that same
 project. In project details, choose a segment frame as its cover or upload a

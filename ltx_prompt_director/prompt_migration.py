@@ -39,10 +39,12 @@ def migrate_state(text, frames, references, definition, previous=None):
                                 ('retention_analysis', ('retention','retention_analysis'))]:
         key = next((name for name in candidates if name in available), candidates[0])
         if not fields.get(key) and heading in parts:fields[key] = parts[heading]
-    direction = parts.get('summary', parts.get('integrated_multimodal_description', ''))
+    base_h3 = definition.get('engine') == 'minimax_frames'
+    direction = parts.get('summary', '' if base_h3 else parts.get('integrated_multimodal_description', ''))
     if not state.get('global') or HEADERS.search(state['global']):
         state['global'] = '\n\n'.join(value for value in (preamble, direction) if value)
-    detail = parts.get('detailed_description', '')
+    detail = parts.get('integrated_multimodal_description' if base_h3 else 'detailed_description', '')
+    owns_shot_labels = '[Shot ${index}]' not in layout_for(definition)
     prompts = {frame['id']: '' for frame in frames}
     matches = list(SHOTS.finditer(detail))
     if matches and frames:
@@ -50,7 +52,7 @@ def migrate_state(text, frames, references, definition, previous=None):
         for i, match in enumerate(matches):
             end = matches[i+1].start() if i+1 < len(matches) else len(detail)
             index = min(max(0, int(match[1])-1), len(frames)-1)
-            body = detail[match.end():end].strip()
+            body = detail[match.start() if owns_shot_labels else match.end():end].strip()
             if i == 0 and introduction:body = introduction + '\n\n' + body
             key = frames[index]['id'];prompts[key] = '\n\n'.join(x for x in (prompts[key], body) if x)
     elif detail and frames:

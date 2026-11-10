@@ -3587,6 +3587,7 @@ class MainWindow(QMainWindow):
         self._closing_progress = None
         self._closing_total = 0
         self._open_serial = 0
+        self._revealed_project_id: str | None = None
         self._timeline_signature = ()
         self._loading = True
         self.setDockNestingEnabled(True)
@@ -5449,10 +5450,13 @@ class MainWindow(QMainWindow):
             for control in (self.prompt_surface.quick,self.prompt_surface.generate,self.prompt_surface.refine,self.prompt_surface.scope):
                 control.setFixedHeight(max(metric(23),control.fontMetrics().height()+metric(5)))
 
-    def refresh_project_library(self, select_id: str | None = None, preserve_scroll: bool = True) -> None:
+    def refresh_project_library(self, select_id: str | None = None, preserve_scroll: bool = True, *,
+                                reveal: bool = False) -> None:
         self._refreshing_project_library = True
         selected = select_id or self.current_project_id
-        selection = self.selected_projects_in_order() if preserve_scroll else []
+        if reveal:
+            self._revealed_project_id = selected
+        selection = self.selected_projects_in_order() if preserve_scroll and not reveal else []
         selected_keys = {self.project_entry_key(meta) for meta in selection} if len(selection) > 1 else set()
         anchor = self.project_list.currentItem()
         anchor_key = self.project_entry_key(anchor.data(Qt.ItemDataRole.UserRole)) if selected_keys and anchor else None
@@ -5556,10 +5560,19 @@ class MainWindow(QMainWindow):
                 item.setSelected(True)
         elif selected_item:
             self.project_list.setCurrentItem(selected_item)
-        self.filter_projects(self.project_search.text())
+        self.filter_projects(self.project_search.text(), keep_revealed=True)
         self._refreshing_project_library = False
         self.sync_project_properties()
-        QTimer.singleShot(0, lambda value=previous_scroll: self.project_list.verticalScrollBar().setValue(value))
+        if reveal and selected_item is not None:
+            self.project_list.scrollToItem(selected_item)
+
+            def scroll_to_project():
+                if self.project_list.currentItem() is selected_item and not selected_item.isHidden():
+                    self.project_list.scrollToItem(selected_item)
+
+            QTimer.singleShot(0, scroll_to_project)
+        else:
+            QTimer.singleShot(0, lambda: self.project_list.verticalScrollBar().setValue(previous_scroll))
 
     def sync_project_properties(self) -> None:
         if not hasattr(self, "project_properties_panel") or getattr(self, "_refreshing_project_library", False):
@@ -5587,9 +5600,9 @@ class MainWindow(QMainWindow):
     def custom_order_settings_key(self) -> str:
         return f"project_custom_order/{self.current_collection or '__root__'}"
 
-    def custom_project_order(self) -> list[str]:
+    def custom_project_order(self, order_key: str | None = None) -> list[str]:
         try:
-            value = json.loads(str(self.settings.value(self.custom_order_settings_key(), "[]")))
+            value = json.loads(str(self.settings.value(order_key or self.custom_order_settings_key(), "[]")))
             return value if isinstance(value, list) else []
         except (ValueError, TypeError):
             return []
@@ -5597,10 +5610,21 @@ class MainWindow(QMainWindow):
     def save_custom_project_order(self) -> None:
         if not hasattr(self, "project_sort") or self.project_sort.currentData() != "custom":
             return
-        order = []
-        for row in range(self.project_list.count()):
-            order.append(self.project_entry_key(self.project_list.item(row).data(Qt.ItemDataRole.UserRole) or {}))
-        self.settings.setValue(self.custom_order_settings_key(), json.dumps(order))
+        self.settings.setValue(self.custom_order_settings_key(), json.dumps(self.project_card_order()))
+
+    def project_card_order(self) -> list[str]:
+        return [
+            self.project_entry_key(self.project_list.item(row).data(Qt.ItemDataRole.UserRole) or {})
+            for row in range(self.project_list.count())
+        ]
+
+    def insert_project_in_order(self, project_id: str, anchor_id: str, order_key: str, order: list[str]) -> None:
+        project_key = f"project:{project_id}"
+        anchor_key = f"project:{anchor_id}"
+        order = [key for key in order if key != project_key]
+        position = order.index(anchor_key) + 1 if anchor_key in order else len(order)
+        order.insert(position, project_key)
+        self.settings.setValue(order_key, json.dumps(order))
 
     def project_sort_changed(self) -> None:
         self.settings.setValue("project_sort_mode", self.project_sort.currentData())
@@ -5609,12 +5633,12 @@ class MainWindow(QMainWindow):
     def activate_custom_sort_for_drag(self) -> None:
         if self.project_search.text():
             self.project_search.clear()
+        self.activate_custom_project_sort()
+
+    def activate_custom_project_sort(self) -> None:
         if self.project_sort.currentData() == "custom":
             return
-        current_order = []
-        for row in range(self.project_list.count()):
-            current_order.append(self.project_entry_key(self.project_list.item(row).data(Qt.ItemDataRole.UserRole) or {}))
-        self.settings.setValue(self.custom_order_settings_key(), json.dumps(current_order))
+        self.settings.setValue(self.custom_order_settings_key(), json.dumps(self.project_card_order()))
         self.project_sort.blockSignals(True)
         self.project_sort.setCurrentIndex(self.project_sort.findData("custom"))
         self.project_sort.blockSignals(False)
@@ -5696,7 +5720,9 @@ class MainWindow(QMainWindow):
         painter.end()
         return result
 
-    def filter_projects(self, query: str) -> None:
+    def filter_projects(self, query: str, *, keep_revealed: bool = False) -> None:
+        if not keep_revealed:
+            self._revealed_project_id = None
         terms = query.casefold().split()
         selected = {key for key, button in self.project_filter_buttons.items() if button.isChecked()}
         statuses = {tag["name"].casefold(): tag["name"] for tag in self.project_status_tags()}
@@ -5722,7 +5748,8 @@ class MainWindow(QMainWindow):
             if meta.get("kind") == "collection":
                 item.setHidden(not any(visible(member) for member in meta.get("members", [])))
             else:
-                item.setHidden(not visible(meta))
+                revealed = meta.get("id") == self._revealed_project_id == self.current_project_id
+                item.setHidden(not (revealed or visible(meta)))
         if hasattr(self,'library_surface'):
             self.library_surface.refresh_selection()
 
@@ -6067,37 +6094,33 @@ class MainWindow(QMainWindow):
         if not meta or meta.get("kind") != "project":
             return
         project_id = str(meta["id"])
+        self._project_open_timer.stop()
+        self._pending_project_id = None
+        self._open_serial += 1
+        request = self._open_serial
         if project_id == self.current_project_id and self.project_dirty:
             # The serialized disk pool saves this snapshot before it copies the archive.
             self.save_library_project(automatic=True)
         new_id = uuid4().hex
         collection = self.current_collection
         order_key = self.custom_order_settings_key()
-        original_order = [
-            self.project_entry_key(self.project_list.item(row).data(Qt.ItemDataRole.UserRole) or {})
-            for row in range(self.project_list.count())
-        ]
+        original_order = self.project_card_order()
         self.statusBar().showMessage(f"Duplicating project in background: {meta.get('name', 'Untitled project')}…")
 
         def finished(clone: dict) -> None:
             # Keep the current arrangement, including changes made while copying.
-            self.activate_custom_sort_for_drag()
+            self.activate_custom_project_sort()
             if self.current_collection == collection:
-                order = [
-                    self.project_entry_key(self.project_list.item(row).data(Qt.ItemDataRole.UserRole) or {})
-                    for row in range(self.project_list.count())
-                ]
+                order = self.project_card_order()
             else:
-                order = json.loads(str(self.settings.value(order_key, "[]")))
+                order = self.custom_project_order(order_key)
                 order.extend(key for key in original_order if key not in order)
-            source_key = f"project:{project_id}"
-            clone_key = f"project:{clone['id']}"
-            order = [key for key in order if key != clone_key]
-            position = order.index(source_key) + 1 if source_key in order else len(order)
-            order.insert(position, clone_key)
-            self.settings.setValue(order_key, json.dumps(order))
-            self.refresh_project_library(str(clone["id"]))
-            self.statusBar().showMessage(f"Project duplicated: {clone['name']}")
+            self.insert_project_in_order(new_id, project_id, order_key, order)
+            if request == self._open_serial and not self._pending_project_id and not self._close_after_jobs:
+                self.open_library_project(project_id=new_id, reveal=True)
+            else:
+                self.refresh_project_library()
+                self.statusBar().showMessage(f"Project duplicated: {clone['name']}")
 
         def failed(message: str) -> None:
             QMessageBox.critical(self, "Project duplication failed", message)
@@ -6382,7 +6405,8 @@ class MainWindow(QMainWindow):
                             (str(meta["projectPath"]), payload, snapshot, root / f"{project_id}.meta.json", copy.deepcopy(meta)),
                             saved, failed, serialized=True)
 
-    def open_library_project(self, checked: bool = False, project_id: str | None = None) -> None:
+    def open_library_project(self, checked: bool = False, project_id: str | None = None, *,
+                             reveal: bool = False) -> None:
         self._project_open_timer.stop()
         self._pending_project_id = None
         if project_id:
@@ -6431,7 +6455,11 @@ class MainWindow(QMainWindow):
                     "state": self.capture_workspace_state(),
                 }
                 self.update_window_title()
-                self.refresh_project_library(project_id)
+                if reveal:
+                    collection = str(meta.get("collection") or "") or None
+                    if self.current_collection != collection:
+                        self.library_surface.navigate(collection)
+                self.refresh_project_library(project_id, reveal=reveal)
                 self.update_project_preview()
                 self.settings.setValue("last_project_id", project_id)
                 self.queue_settings_sync()
@@ -6823,7 +6851,10 @@ class MainWindow(QMainWindow):
     def new_project(self) -> None:
         self.reject_segment_prompt_review()
         self.prompt_surface.clear_refinement_feedback()
+        self._project_open_timer.stop()
+        self._pending_project_id = None
         self._open_serial += 1
+        anchor = self.current_library_metadata()
         self.stage_current_workspace()
         if self.current_project_id:
             self.cache_current_workspace()
@@ -6867,11 +6898,11 @@ class MainWindow(QMainWindow):
         self._loading = False
         self.project_dirty = False
         self.refresh_timeline()
-        self.initialize_empty_library_project()
+        self.initialize_empty_library_project(anchor)
         self.update_window_title()
         self.statusBar().showMessage("New project ready")
 
-    def initialize_empty_library_project(self):
+    def initialize_empty_library_project(self, anchor: dict | None) -> None:
         """Give a new, empty workspace a durable library identity immediately."""
         root = project_library_path()
         project_id = uuid4().hex
@@ -6880,8 +6911,9 @@ class MainWindow(QMainWindow):
         while name.casefold() in names:
             name = f"Untitled project ({index})"
             index += 1
+        collection = (anchor.get("collection") if anchor else self.current_collection) or None
         meta = {"id": project_id, "name": name, "description": "",
-                "collection": self.current_collection or "", "projectType": self.project_type,
+                "collection": collection or "", "projectType": self.project_type,
                 "projectPath": str(root / f"{project_id}.LTXD"),
                 "savedAt": datetime.now(timezone.utc).isoformat(),
                 "segmentCount": 0, "duration": 0, "thumbnailData": "",
@@ -6898,7 +6930,13 @@ class MainWindow(QMainWindow):
         self.current_project_id = project_id
         self.current_project_name = name
         self.cache_current_workspace()
-        self.refresh_project_library(project_id)
+        if self.current_collection != collection:
+            self.library_surface.navigate(collection)
+        if anchor:
+            self.activate_custom_project_sort()
+            self.insert_project_in_order(project_id, str(anchor["id"]), self.custom_order_settings_key(),
+                                         self.project_card_order())
+        self.refresh_project_library(project_id, reveal=True)
         self.settings.setValue("last_project_id", project_id)
         self.queue_settings_sync()
 
@@ -8376,15 +8414,23 @@ class MainWindow(QMainWindow):
         # Never cover the real prompt editor with a duplicate streaming window.
         # All text edits animate inline; reasoning is in a dockable side panel.
         self.magic_overlay.hide_overlay()
-        instructions = (None if self.unified_workspace and operation in {build_prompts, refine_segment_prompt, refine_global_prompt, refine_timing}
-                        else copy.deepcopy(self.workspace_definition.get("generation_prompts", {})))
+        instructions = copy.deepcopy(self.workspace_definition.get("generation_prompts", {}))
+        instruction_engine = self.workspace_engine if self.workspace_engine in {"minimax_frames", "minimax_references"} else None
+        instruction_kind = "refine" if "refine" in operation.__name__ or "reassess" in operation.__name__ else "generate"
         maximum_shots = shot_limit(self.workspace_definition)
         from .output_templates import ACTIVE_OUTPUT, request_context
         template_context = (request_context(self.workspace_definition, self.prompt_surface.structured.segments(),
                             self.prompt_surface.structured.subjects())
-                            if self.unified_workspace and not self.prompt_only_workspace else None)
+                            if self.unified_workspace and not self.prompt_only_workspace and operation in {
+                                build_minimax_h3_prompt, build_minimax_h3_reference_prompt,
+                                refine_minimax_h3_prompt, refine_minimax_h3_reference_prompt,
+                                build_generic_prompt, refine_generic_prompt, generate_combined,
+                                sync_combined_from_timeline} else None)
         def workspace_operation(*values):
             output_token = ACTIVE_OUTPUT.set(template_context)
+            from .prompt_templates import WORKSPACE_ENGINE, WORKSPACE_OPERATION
+            engine_token = WORKSPACE_ENGINE.set(instruction_engine)
+            kind_token = WORKSPACE_OPERATION.set(instruction_kind)
             token = WORKSPACE_INSTRUCTIONS.set(instructions)
             shot_token = SHOT_COUNT_LIMIT.set(maximum_shots)
             stream_token = STREAM_SINK.set(worker.signals.stream.emit)
@@ -8394,6 +8440,8 @@ class MainWindow(QMainWindow):
                 STREAM_SINK.reset(stream_token)
                 SHOT_COUNT_LIMIT.reset(shot_token)
                 WORKSPACE_INSTRUCTIONS.reset(token)
+                WORKSPACE_ENGINE.reset(engine_token)
+                WORKSPACE_OPERATION.reset(kind_token)
                 ACTIVE_OUTPUT.reset(output_token)
         worker = MagicWorker(workspace_operation, args, retries, retry_cooldown, activity)
         # Internal/custom worker calls may legitimately have no model args.

@@ -126,6 +126,26 @@ class WorkspaceEditor(QWidget):
         self.output_template.set_available(self.mode.currentData() == 'unified')
 
     def engine_changed(self):
+        if self.engine.currentData() in {'minimax_frames', 'minimax_references'}:
+            engine = self.engine.currentData()
+            from .workspaces import upgrade_h3_instructions
+            value = dict(engine=engine, generation_prompts={
+                'generate': self.generate.toPlainText(), 'refine': self.refine.toPlainText()})
+            upgrade_h3_instructions(value)
+            for kind, editor in (('generate', self.generate), ('refine', self.refine)):
+                if any(editor.toPlainText() == stock_prompt(other, kind)
+                       for other in ('ltx', 'minimax_frames', 'minimax_references', 'generic')):
+                    editor.setPlainText(stock_prompt(engine, kind))
+                else:
+                    editor.setPlainText(value['generation_prompts'][kind])
+            self.mode.setCurrentIndex(self.mode.findData('unified'))
+            from .output_templates import default_layout
+            old_layout = self.output_template.editor.toPlainText()
+            self.output_template.engine = engine
+            if not old_layout.strip() or any(old_layout == default_layout(other)
+                    for other in ('ltx', 'generic', 'minimax_frames', 'minimax_references')):
+                self.output_template.set_value(default_layout(engine))
+            return
         if self.engine.currentData() == "shot_sequence":
             self.mode.setCurrentIndex(self.mode.findData("sequence"))
             self.global_prompt.setChecked(False);self.audio.setChecked(False)

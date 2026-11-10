@@ -23,7 +23,7 @@ non_diegetic_music: N/A'''
     migrated=migrate_project(payload,{'full':definition});state=migrated['promptTemplateStates']['full:0']
     assert state['global']=='Quiet evening.'
     assert state['fields']==dict(retention='Preserve the clip opening.',sound='Footsteps and city ambience.',music='N/A')
-    assert state['prompts']==dict(a='Scene introduction.\n\nSaved opening.',b='Saved ending.')
+    assert state['prompts']==dict(a='Scene introduction.\n\n[Shot 1] At 00:00.00, Saved opening.',b='[Shot 2] 00:02.00, Saved ending.')
     assert [item['name'] for item in state['custom_subjects']]==['Video 1','Subject 1','Audio 1']
     assert migrated['frames']==payload['frames'] and 'promptTemplateStates' not in payload
     state['global']='Edited after migration'
@@ -41,7 +41,7 @@ def test_legacy_workspace_aliases_and_inactive_render_groups():
             minimaxH3=dict(prompt='summary:\nOther group.\ndetailed_description:\n[Shot 1] Saved A.')))})
     migrated = migrate_project(payload, {workspace: definition})
     states = migrated['promptTemplateStates']
-    assert states[workspace+':0']['prompts']=={'a':'Saved A.'}
-    assert states[workspace+':1']['prompts']=={'b':'Saved B.'}
+    assert states[workspace+':0']['prompts']=={'a':'[Shot 1] Saved A.'}
+    assert states[workspace+':1']['prompts']=={'b':'[Shot 1] Saved B.'}
     assert states[workspace+':0']['global']=='Other group.'
     assert states[workspace+':1']['global']=='Active group.'

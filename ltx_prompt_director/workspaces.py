@@ -71,6 +71,7 @@ def validate_definition(value: dict) -> dict:
         raise ValueError("A generation instruction is required.")
     if not isinstance(prompts.get("refine", ""), str):
         raise ValueError("Refinement instruction must be text.")
+    upgrade_h3_instructions(value)
     if value["prompt_mode"] == "prompt_only" and not prompts.get("refine", "").strip():
         raise ValueError("Prompt-only refinement requires a refinement instruction.")
     maximum = sequence_limit(value)
@@ -88,6 +89,22 @@ def validate_definition(value: dict) -> dict:
     else:
         value.pop('output_template', None)
     return value
+
+
+def upgrade_h3_instructions(value):
+    """Repair known factory instructions, including LTX copies, without replacing authored text."""
+    engine = value.get('engine')
+    if engine not in {'minimax_frames', 'minimax_references'}:
+        return
+    import hashlib
+    from .prompt_templates import stock_prompt
+    from .output_templates import default_layout
+    legacy = json.loads(files('ltx_prompt_director').joinpath('engine_templates/h3_legacy_instructions.json').read_text())
+    for kind, source in value.get('generation_prompts', {}).items():
+        if hashlib.sha256(source.encode()).hexdigest() in legacy[engine].get(kind, []):
+            value['generation_prompts'][kind] = stock_prompt(engine, kind)
+    if value.get('output_template') == legacy['layouts'][engine]:
+        value['output_template'] = default_layout(engine)
 
 
 class WorkspaceStore:
@@ -196,10 +213,14 @@ class WorkspaceStore:
         self.errors = []
         for path in sorted(self.root.glob("*.json")):
             try:
-                value = validate_definition(json.loads(path.read_text(encoding="utf-8")))
+                original = json.loads(path.read_text(encoding="utf-8"))
+                import copy
+                value = validate_definition(copy.deepcopy(original))
                 if value["id"] != path.stem:
                     raise ValueError("Filename must match definition ID.")
                 result[value["id"]] = value
+                if value.get('engine') in {'minimax_frames', 'minimax_references'} and value != original:
+                    self.save(value)
             except (OSError, ValueError) as error:
                 self.errors.append(f"{path.name}: {error}")
         return result
