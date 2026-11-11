@@ -184,8 +184,7 @@ class ReasoningActivityDock(QDockWidget):
         super().__init__("AI ACTIVITY", owner)
         self.setObjectName("aiActivityDock")
         self.setAllowedAreas(
-            Qt.DockWidgetArea.RightDockWidgetArea |
-            Qt.DockWidgetArea.BottomDockWidgetArea
+            Qt.DockWidgetArea.AllDockWidgetAreas
         )
         self.setFeatures(
             QDockWidget.DockWidgetFeature.DockWidgetClosable |

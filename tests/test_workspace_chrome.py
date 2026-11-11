@@ -250,6 +250,121 @@ def test_native_dock_contents_survive_collapse_float_move_and_reference_capabili
     finally:w.project_dirty=False;w.close()
 
 
+def test_all_panels_allow_every_dock_position():
+    from PySide6.QtWidgets import QDockWidget
+    w=make_window()
+    try:
+        docks=w.findChildren(QDockWidget,options=Qt.FindChildOption.FindDirectChildrenOnly)
+        assert docks
+        for dock in docks:
+            assert dock.allowedAreas()==Qt.DockWidgetArea.AllDockWidgetAreas, dock.objectName()
+    finally:w.project_dirty=False;w.close()
+
+
+def test_projects_menu_can_redock_a_floating_panel_at_each_window_edge():
+    from ltx_prompt_director import dock_panels
+    w=make_window()
+    w._restoring_layout=False
+    try:
+        dock=w.project_dock
+        rails=w.panel_rails
+        for label,area in [('Dock left',Qt.DockWidgetArea.LeftDockWidgetArea),
+                           ('Dock right',Qt.DockWidgetArea.RightDockWidgetArea),
+                           ('Dock top',Qt.DockWidgetArea.TopDockWidgetArea),
+                           ('Dock bottom',Qt.DockWidgetArea.BottomDockWidgetArea)]:
+            assert dock.isAreaAllowed(area)
+            dock.setFloating(True)
+            dock.show()
+            menus=[]
+            class CapturedMenu(QMenu):
+                def exec(self,*_):menus.append(self)
+            with patch.object(dock_panels,'QMenu',CapturedMenu):
+                QTest.mouseClick(rails.headers[dock].menu,Qt.MouseButton.LeftButton)
+            next(action for action in menus[0].actions() if action.text()==label).trigger()
+            QTest.qWait(30)
+            assert not dock.isFloating()
+            assert not dock.isHidden()
+            assert w.dockWidgetArea(dock)==area
+            rails.collapse_dock(dock)
+            rails.activate(dock)
+            QTest.qWait(30)
+            assert not dock.isHidden() and w.dockWidgetArea(dock)==area
+    finally:w.project_dirty=False;w.close()
+
+
+def test_dock_position_joins_the_existing_group_and_preserves_its_peers():
+    w=make_window()
+    w._restoring_layout=False
+    try:
+        rails=w.panel_rails
+        projects,effects,catalog=w.project_dock,w.effects_dock,w.catalog_dock
+        for area in (Qt.DockWidgetArea.LeftDockWidgetArea,Qt.DockWidgetArea.RightDockWidgetArea,
+                     Qt.DockWidgetArea.TopDockWidgetArea,Qt.DockWidgetArea.BottomDockWidgetArea):
+            for _,_,dock,_ in rails.entries:dock.hide()
+            effects.setFloating(False)
+            w.removeDockWidget(effects)
+            w.addDockWidget(area,effects)
+            effects.show()
+            rails.tabify(catalog,effects)
+            projects.setFloating(True)
+            projects.show()
+            rails.dock_at(projects,area)
+            QTest.qWait(30)
+            assert not projects.isFloating()
+            assert w.dockWidgetArea(projects)==area
+            assert {effects,catalog}<=set(w.tabifiedDockWidgets(projects))
+            assert all(not dock.isHidden() for dock in (projects,effects,catalog))
+            assert not projects.visibleRegion().isEmpty()
+            state=w.saveState()
+            projects.setFloating(True)
+            assert w.restoreState(state)
+            QTest.qWait(30)
+            assert not projects.isFloating() and w.dockWidgetArea(projects)==area
+            assert {effects,catalog}<=set(w.tabifiedDockWidgets(projects))
+    finally:w.project_dirty=False;w.close()
+
+
+def test_three_columns_keep_side_groups_outside_timeline_and_prompt_docks():
+    w=make_window()
+    w._restoring_layout=False
+    try:
+        rails=w.panel_rails
+        rails.dock_at(w.project_dock,Qt.DockWidgetArea.LeftDockWidgetArea)
+        rails.dock_at(w.project_preview_dock,Qt.DockWidgetArea.RightDockWidgetArea)
+        w.timeline_dock.show()
+        for dock in (w.global_prompt_dock,w.segment_prompt_dock):dock.show()
+        w.project_dock.raise_()
+        for width in (1600,1400):
+            w.resize(width,1000)
+            w.fit_internal_panels()
+            QTest.qWait(50)
+            left=w.project_dock.geometry()
+            right=w.project_preview_dock.geometry()
+            for dock in (w.timeline_dock,w.global_prompt_dock,w.segment_prompt_dock):
+                rect=dock.geometry()
+                assert left.right()<rect.left(), (dock.objectName(),left,rect)
+                assert rect.right()<right.left(), (dock.objectName(),rect,right)
+            # Side groups include their native tab bar above the dock widget.
+            assert left.top()<w.timeline_dock.geometry().bottom()
+            assert right.top()<w.timeline_dock.geometry().bottom()
+            assert w.timeline_dock.geometry().bottom()<w.segment_prompt_dock.y()
+            for corner,area in ((Qt.Corner.TopLeftCorner,Qt.DockWidgetArea.LeftDockWidgetArea),
+                                (Qt.Corner.BottomLeftCorner,Qt.DockWidgetArea.LeftDockWidgetArea),
+                                (Qt.Corner.TopRightCorner,Qt.DockWidgetArea.RightDockWidgetArea),
+                                (Qt.Corner.BottomRightCorner,Qt.DockWidgetArea.RightDockWidgetArea)):
+                assert w.corner(corner)==area
+        default=w.saveState()
+        w.timeline_dock.setFloating(True)
+        rails.dock_at(w.timeline_dock,Qt.DockWidgetArea.LeftDockWidgetArea)
+        QTest.qWait(30)
+        assert w.timeline_dock in w.tabifiedDockWidgets(w.project_dock)
+        assert w.restoreState(default)
+        QTest.qWait(30)
+        assert w.dockWidgetArea(w.timeline_dock)==Qt.DockWidgetArea.TopDockWidgetArea
+        assert w.timeline_dock.geometry().bottom()<w.segment_prompt_dock.y()
+    finally:w.project_dirty=False;w.close()
+
+
 def panel_group_tabs(window, *titles):
     from PySide6.QtWidgets import QTabBar
     return next(bar for bar in window.findChildren(QTabBar, 'panelDockTabs')

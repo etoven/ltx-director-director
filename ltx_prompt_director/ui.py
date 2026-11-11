@@ -3394,7 +3394,7 @@ class MiniMaxPromptPanel(QFrame):
         self.reference_dock = ReferenceImageDock("REFERENCE MEDIA", owner)
         self.reference_dock.setObjectName("minimaxReferenceDock")
         self.reference_dock.setMinimumWidth(200)
-        self.reference_dock.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea)
+        self.reference_dock.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
         self.reference_dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetClosable | QDockWidget.DockWidgetFeature.DockWidgetMovable)
         content = QWidget()
         refs_layout = QVBoxLayout(content)
@@ -4893,7 +4893,7 @@ class MainWindow(QMainWindow):
         self.project_preview_dock = QDockWidget("PROJECT VIDEO PREVIEW", self)
         self.project_preview_dock.setObjectName("projectPreviewDock")
         self.project_preview_dock.setAllowedAreas(
-            Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea | Qt.DockWidgetArea.BottomDockWidgetArea
+            Qt.DockWidgetArea.AllDockWidgetAreas
         )
         self.project_preview_dock.setFeatures(
             QDockWidget.DockWidgetFeature.DockWidgetClosable
@@ -4942,7 +4942,7 @@ class MainWindow(QMainWindow):
         self.project_properties_dock = QDockWidget("PROJECT PROPERTIES", self)
         self.project_properties_dock.setObjectName("projectPropertiesDock")
         self.project_properties_dock.setAllowedAreas(
-            Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea
+            Qt.DockWidgetArea.AllDockWidgetAreas
         )
         self.project_properties_dock.setFeatures(
             QDockWidget.DockWidgetFeature.DockWidgetClosable
@@ -4964,7 +4964,7 @@ class MainWindow(QMainWindow):
         self.project_dock = ProjectLibraryDock("PROJECT LIBRARY", self)
         self.project_dock.user_resized.connect(self.remember_project_panel_width)
         self.project_dock.setObjectName("projectDock")
-        self.project_dock.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea)
+        self.project_dock.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
         self.project_dock.setFeatures(
             QDockWidget.DockWidgetFeature.DockWidgetClosable
             | QDockWidget.DockWidgetFeature.DockWidgetMovable

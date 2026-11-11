@@ -38,6 +38,8 @@ Click an outer icon to open its panel. Click the active icon again, or use the d
 
 Drag a panel heading to reposition it. Use the heading's menu for docking locations, floating options, and **Close panel**. Closing a panel removes its tab; you can reopen it from its icon. Effects Library retains its sizing controls under **Panel sizing and options**. A workspace without Reference Media hides that panel and its icon; returning to a supported workspace restores it if it was open.
 
+The default layout has left, middle and right columns, with Timeline in the middle and Segment Prompt beneath it. These are starting positions: every panel, including Timeline, can move to any dock edge. Choosing a docking location from a panel's menu joins an open group at that edge; when no group is open there, it creates a separate dock. Drag headings to arrange panels above or below one another, or float a tab group together.
+
 The integrated header keeps file commands and window controls beside the centered project title, with workspace, preview, output-size and provider tools on the next row. Drag empty header space to move the window; double-click to maximize or restore. The timing overview stays beneath the timeline.
 
 **Continue:** [Local generation](local-generation-and-setup.md) · [Project browser](performance-and-properties.md) · [Complete feature guide](../usage.md)

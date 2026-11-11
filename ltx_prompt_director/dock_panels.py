@@ -194,12 +194,23 @@ class PanelRails(QObject):
         self.schedule()
 
     def dock_at(self,dock,area):
-        dock.setFloating(False);self.owner.addDockWidget(area,dock);dock.show();dock.raise_();self.schedule()
+        candidates=[other for _,_,other,_ in self.entries
+                    if other is not dock and not other.isFloating() and not other.isHidden()
+                    and self.owner.dockWidgetArea(other)==area]
+        target=next((other for other in candidates if not other.visibleRegion().isEmpty()),
+                    candidates[0] if candidates else None)
+        if target is not None:
+            self.tabify(dock,target)
+            return
+        dock.setFloating(False)
+        self.owner.removeDockWidget(dock)
+        self.owner.addDockWidget(area,dock)
+        dock.show();dock.raise_();self.save();self.schedule()
 
     def tabify(self,dock,target):
         area=self.owner.dockWidgetArea(target)
         if not dock.allowedAreas() & area:return
-        dock.setFloating(False);self.owner.addDockWidget(area,dock)
+        dock.setFloating(False);self.owner.removeDockWidget(dock);self.owner.addDockWidget(area,dock)
         self.owner.tabifyDockWidget(target,dock)
         self.show_dock(target);self.show_dock(dock);dock.raise_();self.save();self.schedule()
 
