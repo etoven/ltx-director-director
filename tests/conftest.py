@@ -25,7 +25,7 @@ def isolated_desktop_settings(tmp_path, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def install_legacy_workspace_for_existing_regressions(request, monkeypatch):
-    if request.module.__name__.split('.')[-1] in {'test_h3_official_settings', 'test_global_summary', 'test_reference_definitions', 'test_catalog_release', 'test_shared_segment_editor', 'test_prompt_only_refinement', 'test_comfy_minimax_export', 'test_prompt_timecodes', 'test_segment_prompt_review'}:
+    if request.module.__name__.split('.')[-1] in {'test_h3_official_settings', 'test_global_summary', 'test_continuous_prompt_editor', 'test_reference_definitions', 'test_catalog_release', 'test_shared_segment_editor', 'test_prompt_only_refinement', 'test_comfy_minimax_export', 'test_prompt_timecodes', 'test_segment_prompt_review'}:
         return
     original = WorkspaceStore.__init__
     def initialize(self, *args, **kwargs):

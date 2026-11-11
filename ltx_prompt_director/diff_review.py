@@ -117,11 +117,11 @@ class ParagraphDiffReview(QObject):
     def pending_count(self) -> int:
         return sum(part.decision == "pending" for part in self.parts)
 
-    def begin(self, editor: QTextEdit, before: str, after: str) -> bool:
+    def begin(self, editor: QTextEdit, before: str, after: str, *, changes=None) -> bool:
         self.finish()
         if before == after or editor.toPlainText() != after:
             return False
-        parts = paragraph_changes(before, after)
+        parts = paragraph_changes(before, after) if changes is None else changes
         if not any(part.decision == "pending" for part in parts):
             return False
         self.editor = editor

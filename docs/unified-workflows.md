@@ -24,9 +24,13 @@ Refinement uses only your current prompt and its inline annotations. It preserve
 
 Use the Segment panel for the selected timeline entry and Global for the entire sequence. Each panel has its own Generate and Refine controls. Unified follows the full document layout saved under **Settings → Workspaces → Workspace templates**.
 
-Typing in Segment updates its corresponding Unified section locally. Reordering a segment moves that section. Click any timeline entry to reveal its Unified section, including clicking the selected entry again after scrolling away. Section timecodes move or resize the timeline entry. **+** beside Unified adds a timeline section or subject definition.
+Unified uses one continuous text area and one scrollbar. Typing in Segment updates its corresponding Unified section locally. Reordering a segment moves that section. Click any timeline entry to highlight and reveal its Unified section, including clicking the selected entry again after scrolling away.
 
-The template defines the headings, spacing and section order. Edit its shaded fields in Unified. Generate and Refine fill explicitly named template variables; fixed document text remains intact. Complete authored action, appearance, dialogue and sound details take priority over word-count guidance. Prompt-only refinement retains its standalone editor and annotations.
+The template defines the headings, spacing and section order. Edit the prompt content in Unified; fixed headings, timestamps and separators remain protected, but can be selected and copied. The toolbar follows the section selected by your cursor or timeline: use its Start/End fields when the template includes timing, or **×** to remove the selected timeline section or definition. **+** adds a timeline section, subject definition or media reference. Spelling suggestions and inline refinement review stay in the same editor.
+
+![One Unified Prompt editor with a selected timeline passage and section controls above it](images/unified-continuous-editor.png)
+
+Generate and Refine fill explicitly named template variables. Complete authored action, appearance, dialogue and sound details take priority over word-count guidance. Prompt-only refinement retains its standalone editor and annotations.
 
 ## Apply a saved Quick Fix
 

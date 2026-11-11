@@ -6,14 +6,16 @@ import re
 import threading
 from uuid import uuid4
 
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTextEdit,
-    QLineEdit, QPushButton, QScrollArea, QFrame, QMenu)
+from PySide6.QtCore import QTimer, QSignalBlocker
+from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
+    QLineEdit, QPushButton, QMenu, QSizePolicy)
 
-from .diff_review import ParagraphDiffReview
+from .diff_review import ParagraphDiffReview, ParagraphChange, paragraph_changes
+from .continuous_prompt_editor import ContinuousPromptEditor, SectionText
+from .prompt_tags import install_prompt_tags
 from .spellcheck import install_spellcheck
 from .models import Segment
-from .output_templates import layout_for, render, split_legacy, parse_rendered, stamp, document_parts, root_fields
+from .output_templates import layout_for, render, split_legacy, parse_rendered, stamp, document_parts
 
 
 def seconds(text):
@@ -26,6 +28,12 @@ def seconds(text):
     if not math.isfinite(value):
         raise ValueError('Time must be finite.')
     return value
+
+
+class PromptSnapshot(dict):
+    def __init__(self, values, context):
+        super().__init__(values)
+        self.context = context
 
 
 class StructuredPromptPanel(QWidget):
@@ -41,21 +49,43 @@ class StructuredPromptPanel(QWidget):
         self.definition_timer = QTimer(self); self.definition_timer.setSingleShot(True); self.definition_timer.setInterval(700)
         self.definition_timer.timeout.connect(self.drain_definition_queue)
         self.definition_job = None; self.definition_result = None; self.reassess_after_definitions = None
-        outer = QHBoxLayout(self); outer.setContentsMargins(0, 0, 0, 0)
-        gutter = QVBoxLayout(); outer.addLayout(gutter)
+        outer = QVBoxLayout(self); outer.setContentsMargins(0, 0, 0, 0)
+        controls = QHBoxLayout(); outer.addLayout(controls)
         self.add = QPushButton('+'); self.add.setFixedWidth(32); self.add.setToolTip('Add a timeline section, subject, image, video or audio reference')
         menu = QMenu(self.add); menu.addAction('Timeline section', self.add_segment); menu.addAction('Subject definition', self.add_subject)
         for kind in ('image', 'video', 'audio'):
             menu.addAction(kind.title() + ' reference…', lambda checked=False, kind=kind: self.add_reference(kind))
-        self.add.setMenu(menu); gutter.addWidget(self.add); gutter.addStretch()
-        self.scroll = QScrollArea(); self.scroll.setWidgetResizable(True); outer.addWidget(self.scroll, 1)
-        self.content = QWidget(); self.parts = QVBoxLayout(self.content); self.parts.setContentsMargins(3, 3, 3, 3)
-        self.scroll.setWidget(self.content)
+        self.add.setMenu(menu); controls.addWidget(self.add)
+        self.section_label = QLabel('Unified prompt'); controls.addWidget(self.section_label, 1)
+        self.section_label.setMinimumWidth(0)
+        self.section_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.time_fields = []
+        for end, label in ((False, 'Start'), (True, 'End')):
+            field = QLineEdit(); field.setMaximumWidth(106); field.setAccessibleName(label + ' time')
+            field.setToolTip(label + ' time · edit the selected timeline section')
+            field.textEdited.connect(lambda _, is_end=end: self.edit_time(self.active_key, is_end))
+            controls.addWidget(field); self.time_fields.append(field)
+        self.remove = QPushButton('×'); self.remove.setFixedWidth(26)
+        self.remove.setAccessibleName('Remove selected section')
+        self.remove.clicked.connect(lambda: self.remove_part(self.active_key))
+        controls.addWidget(self.remove)
+        self.active_key = None
+        self.editor = ContinuousPromptEditor(self)
+        self.editor.writable = lambda: not owner.ai_busy
+        self.review = ParagraphDiffReview(self.editor)
+        self.editor.review_applying = lambda: self.review._applying
+        self.editor.textChanged.connect(self.document_edited)
+        self.editor.cursorPositionChanged.connect(self.cursor_section_changed)
+        install_spellcheck(self.editor); install_prompt_tags(self.editor)
+        outer.addWidget(self.editor, 1)
+        self.scroll = self.editor
+        self.status = QLabel(); self.status.setWordWrap(True); outer.addWidget(self.status)
+        self.specs = {}; self.document_spans = []
+        self.editor.viewport().installEventFilter(self)
         owner.unified_prompt.textChanged.connect(self.schedule)
         owner.global_prompt.textChanged.connect(self.schedule)
         owner.intent.textChanged.connect(self.schedule)
         owner.timeline.currentRowChanged.connect(self.schedule)
-        self.status = QLabel(); self.status.setWordWrap(True)
         self.source = owner.unified_prompt
 
     def schedule(self, *_):
@@ -81,7 +111,11 @@ class StructuredPromptPanel(QWidget):
 
     def refresh(self, *, refinement_baseline=None):
         owner = self.owner
-        if self.updating or owner._loading or not owner.unified_workspace or owner.prompt_only_workspace or owner.workspace_engine == 'shot_sequence':
+        if self.updating or owner._loading:
+            return
+        if not owner.unified_workspace or owner.prompt_only_workspace or owner.workspace_engine == 'shot_sequence':
+            self.finish_reviews()
+            self.reveal_timer.stop()
             return
         self.updating = True
         try:
@@ -178,32 +212,33 @@ class StructuredPromptPanel(QWidget):
                 else:
                     specs.append({**span, 'heading': prefix}); prefix = ''
             structure = (owner.current_project_id, owner.project_type, layout,
-                         tuple((part['key'], part.get('record', {}).get('name', '') if part.get('record') else '') for part in specs))
-            if structure != self.signature:
-                self.rebuild(specs, segments, prefix); self.signature = structure
-            for spec in specs:
-                self.set_text(spec['key'], spec['text'])
-                self.headings[spec['key']].setText(spec['heading'].strip('\n'))
-            start = 0.0
-            for segment in segments:
-                if segment.id in self.rows:
-                    row = self.rows[segment.id]
-                    for field, value in zip(row[1:], (stamp(start), stamp(start + segment.duration))):
-                        if not field.hasFocus():
-                            field.setText(value)
-                start += segment.duration
+                         tuple(part['key'] for part in specs))
+            if self.review.editor is not None:
+                if structure != self.signature or self.review.source_document.toPlainText() != text:
+                    self.finish_reviews()
+            self.specs = {spec['key']: spec for spec in specs}
+            self.document_spans = spans
+            if self.review.editor is None:
+                self.editor.set_parts(spans)
+            self.signature = structure
+            self.rows = {key: self.rows.get(key, [SectionText(self, key), *self.time_fields]) for key in self.specs}
+            self.reviews = {row[0]: self.review for row in self.rows.values()}
             self.add.setEnabled(not owner.ai_busy)
-            for row in self.rows.values():
-                for field in row:
-                    field.setReadOnly(owner.ai_busy or (field in self.reviews and self.reviews[field].editor is not None))
+            if self.review.editor is None:
+                self.editor.setReadOnly(owner.ai_busy)
             selected = owner.current_segment()
             selected_id = selected.id if selected else None
-            for key, row in self.rows.items():
-                row[0].parentWidget().setStyleSheet('QFrame { border-left: 2px solid #5d9bcb; }' if key == selected_id else '')
-            if (selected_id != self.selected_id or self.reveal_pending) and selected_id in self.rows:
-                self.reveal_timer.start()
+            if selected_id != self.selected_id or self.reveal_pending:
+                if selected_id in self.rows:
+                    self.active_key = selected_id
+                    self.reveal_timer.start()
             self.reveal_pending = False
             self.selected_id = selected_id
+            if self.active_key not in self.specs:
+                self.active_key = next(iter(self.specs), None)
+            self.update_section_controls()
+            if self.review.editor is None:
+                self.editor.select_section(self.active_key)
         finally:
             self.updating = False
         if state.get('pending_reference_definitions') and not state.get('reference_definition_error') and not self.definition_job and not self.definition_timer.isActive():
@@ -329,82 +364,115 @@ class StructuredPromptPanel(QWidget):
     def reveal_selected(self):
         segment = self.owner.current_segment()
         if segment is not None and segment.id in self.rows:
-            self.parts.activate()
-            section = self.rows[segment.id][0].parentWidget()
-            self.scroll.verticalScrollBar().setValue(max(0, section.y() - 4))
+            self.active_key = segment.id
+            self.editor.select_section(segment.id, reveal=True)
+            self.update_section_controls()
+
+    def cursor_section_changed(self):
+        if self.updating or self.review.editor is not None:
+            return
+        section = self.editor.section_for_cursor()
+        if section:
+            self.active_key = section['key']
+            self.update_section_controls()
+            self.editor.select_section(self.active_key)
+
+    def update_section_controls(self):
+        spec = self.specs.get(self.active_key, {})
+        title = ((spec.get('record') or {}).get('name') or spec.get('heading', '').strip()
+                 or spec.get('name', 'Unified prompt').replace('_', ' ').title())
+        self.section_label.setText(title)
+        self.section_label.setToolTip(title)
+        segment = next((s for s in self.segments() if s.id == self.active_key), None)
+        timed = segment is not None and spec.get('timed', False)
+        start = 0
+        if segment:
+            start = sum(s.duration for s in self.segments()[:self.segments().index(segment)])
+        busy = self.owner.ai_busy or self.review.editor is not None
+        for field, value in zip(self.time_fields, (stamp(start), stamp(start + (segment.duration if segment else 0)))):
+            field.setVisible(timed)
+            field.setReadOnly(busy)
+            if not field.hasFocus(): field.setText(value)
+        removable = bool(segment or str(self.active_key).startswith(('reference:', 'subject:')))
+        self.remove.setVisible(removable); self.remove.setEnabled(not busy)
 
     def review_snapshot(self):
-        return {
-            key: (self.reviews[row[0]].source_document or row[0].document()).toPlainText()
-            for key, row in self.rows.items()
-        }
+        return PromptSnapshot({key: self.editor.field_text(key) for key in self.specs}, self.review_context())
+
+    def review_context(self):
+        return (self.owner.workspace_revision, self.owner.current_project_id, self.owner.project_type,
+                getattr(self.owner, '_active_render_group', 0), tuple(self.specs))
 
     def review_refinement(self, before):
-        for key, row in self.rows.items():
-            if key in before:
-                editor = row[0]
-                self.reviews[editor].begin(editor, before[key], editor.toPlainText())
+        if isinstance(before, PromptSnapshot) and before.context != self.review_context():
+            return
+        self.finish_reviews()
+        parts = []
+        for span in self.document_spans:
+            if span['kind'] == 'literal':
+                parts.append(ParagraphChange(span['text'], span['text'], 'equal'))
+            else:
+                parts.extend(paragraph_changes(before.get(span['key'], span['text']), span['text']))
+        old = ''.join(p.old for p in parts)
+        self.review.begin(self.editor, old, self.editor.toPlainText(), changes=parts)
+        self.update_section_controls()
 
     def finish_reviews(self):
-        for review in self.reviews.values():
-            review.finish()
+        self.review.finish()
 
-    def set_text(self, key, value):
-        editor = self.rows[key][0]
-        review = self.reviews[editor]
-        if (review.source_document or editor.document()).toPlainText() != value:
-            review.finish()
-            editor.blockSignals(True); editor.setPlainText(value); editor.blockSignals(False)
+    def document_edited(self):
+        if self.updating:
+            return
+        if self.review._applying:
+            parsed = parse_rendered(self.editor.toPlainText(), layout_for(self.owner.workspace_definition), self.segments(), self.subjects())
+            if parsed is None:
+                return
+            values = parsed
+        elif self.review.editor is not None:
+            return
+        else:
+            values = {key: self.editor.field_text(key) for key in self.specs}
+        changed = False
+        for key, value in values.items():
+            if key not in self.specs:
+                continue
+            state = self.state()
+            previous = (state.get('global', '') if key == 'global' else
+                        state.get('fields', {}).get(key.removeprefix('field:'), '') if key.startswith('field:') else
+                        state.get('subjects', {}).get(key, '') if key.startswith(('reference:', 'subject:')) else
+                        state.get('prompts', {}).get(key, ''))
+            if value != previous:
+                self.edit(key, value)
+                changed = True
+        if changed and self.review._applying:
+            # Reindex the authoritative document before its diff projection returns.
+            state = self.state()
+            records = [{**s.to_dict(), 'prompt': state['prompts'].get(s.id, s.prompt)} for s in self.segments()]
+            spans = document_parts(layout_for(self.owner.workspace_definition), state.get('global', ''), records, self.subjects(), state.get('fields', {}))
+            self.editor.set_parts(spans)
+            self.document_spans = spans
+        if changed:
+            text = self.editor._text
+            self.state()['last_render'] = text
+            with QSignalBlocker(self.owner.unified_prompt):
+                self.owner.unified_prompt.setPlainText(text)
+            self.owner.minimax_prompt_text = text
 
-    def rebuild(self, specs, segments, trailing):
-        position = self.scroll.verticalScrollBar().value()
-        for row in self.rows.values():
-            self.owner._effect_drop_targets.pop(row[0].viewport(), None)
-            getattr(self.owner, '_effect_part_segments', {}).pop(row[0].viewport(), None)
-        self.finish_reviews()
-        self.reviews.clear()
-        self.rows = {}; self.headings = {}
-        while self.parts.count():
-            item = self.parts.takeAt(0)
-            if item.widget() and item.widget() is not self.status:
-                item.widget().deleteLater()
-        by_id = {segment.id: segment for segment in segments}
-        for spec in specs:
-            self.make_part(spec['key'], spec['heading'].strip('\n'), by_id.get(spec['key']) if spec['timed'] else None)
-        if trailing.strip():
-            label = QLabel(trailing); label.setTextFormat(Qt.TextFormat.PlainText); label.setWordWrap(True); self.parts.addWidget(label)
-        self.parts.addWidget(self.status); self.parts.addStretch()
-        self.scroll.verticalScrollBar().setValue(position)
-
-    def make_part(self, key, title, segment=None):
-        frame = QFrame(); layout = QVBoxLayout(frame); layout.setContentsMargins(6, 6, 6, 9)
-        header = QHBoxLayout(); heading = QLabel(title); heading.setTextFormat(Qt.TextFormat.PlainText); heading.setWordWrap(True); heading.setMinimumWidth(0); header.addWidget(heading, 1); self.headings[key] = heading
-        fields = []
-        if segment:
-            for end, label in [(False, 'Start'), (True, 'End')]:
-                field = QLineEdit(); field.setMaximumWidth(106); field.setAccessibleName(f'{title} {label}')
-                field.setToolTip(f'{label} time · edit to move or resize the timeline segment')
-                field.textEdited.connect(lambda _, sid=key, is_end=end: self.edit_time(sid, is_end))
-                header.addWidget(field); fields.append(field)
-        if segment or key.startswith(('reference:', 'subject:')):
-            remove = QPushButton('×'); remove.setFixedWidth(26)
-            remove.setAccessibleName('Remove ' + title)
-            remove.setToolTip('Remove timeline section' if segment else 'Remove reference or subject definition')
-            remove.clicked.connect(lambda checked=False: self.remove_part(key))
-            header.addWidget(remove)
-        layout.addLayout(header)
-        editor = QTextEdit(); editor.setAcceptRichText(False); editor.setMinimumHeight(70); editor.setMaximumHeight(180)
-        editor.setStyleSheet('QTextEdit { background: rgba(128, 148, 170, 0.09); border: 1px solid #485360; border-radius: 4px; }')
-        install_spellcheck(editor)
-        self.reviews[editor] = ParagraphDiffReview(editor)
-        editor.setAccessibleName(title + ' text'); editor.textChanged.connect(lambda: self.edit(key))
-        if hasattr(self.owner, '_effect_drop_targets'):
-            self.owner._effect_drop_targets[editor.viewport()] = 'segment' if segment else 'unified'
+    def eventFilter(self, watched, event):
+        from PySide6.QtCore import QEvent
+        from .effects_library import MIME as EFFECT_MIME
+        if watched is self.editor.viewport() and event.type() in (QEvent.Type.DragEnter, QEvent.Type.DragMove, QEvent.Type.Drop) and event.mimeData().hasFormat(EFFECT_MIME):
+            section = self.editor.section_at(self.editor.cursorForPosition(event.position().toPoint()).position())
+            if section is None or self.owner.ai_busy:
+                event.ignore(); return True
+            self.active_key = section['key']; self.update_section_controls()
+            target = 'segment' if any(s.id == self.active_key for s in self.segments()) else 'unified'
+            self.owner._effect_drop_targets[self.editor.viewport()] = target
             self.owner._effect_part_segments = getattr(self.owner, '_effect_part_segments', {})
-            if segment:
-                self.owner._effect_part_segments[editor.viewport()] = key
-            editor.viewport().installEventFilter(self.owner)
-        layout.addWidget(editor); self.rows[key] = [editor, *fields]; self.parts.addWidget(frame)
+            if target == 'segment':self.owner._effect_part_segments[self.editor.viewport()] = self.active_key
+            else:self.owner._effect_part_segments.pop(self.editor.viewport(), None)
+            return self.owner.eventFilter(watched, event)
+        return super().eventFilter(watched, event)
 
     def sync_segment_edit(self, segment):
         state = self.state()
@@ -413,13 +481,14 @@ class StructuredPromptPanel(QWidget):
         state.setdefault('prompts', {})[segment.id] = segment.prompt
         state.setdefault('sources', {})[segment.id] = segment.prompt
         if segment.id in self.rows:
-            self.set_text(segment.id, segment.prompt)
+            self.refresh()
         self.schedule()
 
-    def edit(self, key):
+    def edit(self, key, text=None):
         if self.updating or self.owner.ai_busy:
             return
-        state = self.state(); text = self.rows[key][0].toPlainText()
+        state = self.state()
+        if text is None: text = self.editor.field_text(key)
         if key == 'global':
             state['global'] = text
         elif key.startswith('field:'):

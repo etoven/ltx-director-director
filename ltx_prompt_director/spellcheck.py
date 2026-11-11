@@ -145,5 +145,8 @@ def spellcheck_menu(editor: QTextEdit, point, highlighter: SpellHighlighter):
 
 
 def _replace(editor: QTextEdit, cursor: QTextCursor, replacement: str) -> None:
+    if hasattr(editor, 'replace_cursor'):
+        editor.replace_cursor(cursor, replacement)
+        return
     cursor.insertText(replacement)
     editor.setTextCursor(cursor)
