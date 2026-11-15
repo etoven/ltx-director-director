@@ -54,3 +54,14 @@ def automatic_reference_transport_is_explicit(request, monkeypatch):
     if request.module.__name__.split('.')[-1] == 'test_reference_definitions':return
     from ltx_prompt_director.structured_prompt_panel import StructuredPromptPanel
     monkeypatch.setattr(StructuredPromptPanel, 'drain_definition_queue', lambda self: None)
+
+
+@pytest.fixture(autouse=True)
+def render_admission_is_explicit(request, monkeypatch):
+    """Synthetic queue/UI scenarios do not contend with a real desktop GPU.
+
+    test_gpu_queue exercises process admission and the actual OS lease separately.
+    """
+    if request.module.__name__.split('.')[-1]=='test_gpu_queue':return
+    from ltx_prompt_director.render_queue import RenderQueue
+    monkeypatch.setattr(RenderQueue,'_admit_local',lambda self,job:self._start_job(job))

@@ -485,7 +485,7 @@ def test_local_video_queue_captures_prompt_and_runs_after_prior_project(tmp_path
         w.set_project_type('minimax_frames');w.current_project_id='video-first';w.current_project_name='First'
         w.minimax_prompt_text='First authored unified output';w.segments=[Segment('first','','','text','text','First',15)]
         w.render_queue.executor=lambda *args,**kwargs:runs.append((args,kwargs))
-        profile={'video_duration':15,'video_width':1280,'video_height':704,'video_steps':20,'video_seed':42}
+        profile={'video_model':str(tmp_path/'minimax_fl2va_pruned.safetensors'),'video_variant':'fl2va','video_duration':15,'video_width':1280,'video_height':704,'video_steps':20,'video_seed':42}
         with patch.object(ui,'load_profile',return_value=profile),patch.object(ui,'validate_profile'):
             w.generate_local_video()
             w.current_project_id='video-second';w.current_project_name='Second';w.workspace_revision+=1

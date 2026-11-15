@@ -289,6 +289,8 @@ class RenderQueuePanel(QWidget):
             estimate=self.queue.estimated_video_seconds
             guide=progress_text(dict(message='Video queue guide',eta_seconds=estimate)) if estimate is not None else 'Video queue guide · estimating…'
             self.summary.setText(self.summary.text()+'\n'+guide+f' · {remaining} remaining'+(' (rendering time; queue paused)' if self.queue.paused else ''))
+        waiting_gpu=next((job for job in self.queue.jobs if job.state=='Waiting' and job.message.startswith('Waiting for GPU')),None)
+        if waiting_gpu:self.summary.setText(self.summary.text()+'\n'+waiting_gpu.message)
         self.pause.blockSignals(True);self.pause.setChecked(self.queue.paused);self.pause.blockSignals(False)
         self.pause.setText('Resume queue' if self.queue.paused else 'Pause queue');self.update_details()
         self.sweep.setEnabled(any(job.state not in ACTIVE_STATES for job in self.queue.jobs))

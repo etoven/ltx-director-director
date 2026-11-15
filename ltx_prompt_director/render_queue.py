@@ -60,6 +60,7 @@ class RenderJob:
 
 class RenderQueue(QObject):
     changed=Signal()
+    _gpu_checked=Signal(str,object)
 
     def __init__(self,executor,parent=None):
         super().__init__(parent);self.executor=executor;self.jobs=[];self.active=None
@@ -69,6 +70,11 @@ class RenderQueue(QObject):
         self._notify=QTimer(self);self._notify.setSingleShot(True);self._notify.setInterval(60)
         self._notify.timeout.connect(self.changed)
         self.changed.connect(self.update_estimates)
+        from .gpu_queue import GpuLease
+        self._gpu_lease=GpuLease();self._gpu_check_pending=False
+        self._gpu_checked.connect(self._gpu_ready)
+        self._gpu_retry=QTimer(self);self._gpu_retry.setSingleShot(True);self._gpu_retry.setInterval(1500)
+        self._gpu_retry.timeout.connect(self._advance)
 
     @property
     def remaining_video_jobs(self):
@@ -113,7 +119,7 @@ class RenderQueue(QObject):
 
     def set_paused(self,paused):
         self.paused=bool(paused);self.changed.emit()
-        if not self.paused:QTimer.singleShot(0,self._advance)
+        QTimer.singleShot(0,self._advance)
 
     def position(self,job):
         waiting=[j for j in self.jobs if j.state=='Waiting']
@@ -125,15 +131,67 @@ class RenderQueue(QObject):
         return next((j for j in jobs if j.state!='Waiting'),jobs[0] if jobs else None)
 
     def _advance(self):
-        if self.closing or self.paused or self.active is not None:return
+        if self.closing or self.paused or self.active is not None:
+            if self.active is None and not self._gpu_check_pending:self._release_gpu()
+            return
         job=next((j for j in self.jobs if j.state=='Waiting'),None)
-        if job is None:return
+        if job is None:
+            if not self._gpu_check_pending:self._release_gpu()
+            return
         states = {candidate.id: candidate.state for candidate in self.jobs}
         parents = [states.get(key, self._removed_states.get(key)) for key in job.dependencies]
         if any(state is None or state in {'Failed','Cancelled'} for state in parents):
             self.cancel_job(job.id);QTimer.singleShot(0,self._advance);return
         if any(state!='Complete' for state in parents):return
         if job.cancel.is_set():self.cancel_job(job.id);QTimer.singleShot(0,self._advance);return
+        if job.source=='local':self._admit_local(job)
+        else:self._start_job(job)
+
+    def _admit_local(self,job):
+        if self._gpu_check_pending or self._gpu_retry.isActive():return
+        if not self._gpu_lease.acquire():
+            self._wait_gpu(job);return
+        self._gpu_check_pending=True
+        def check():
+            from .gpu_queue import director_workers
+            try:result=director_workers()
+            except Exception:result=None
+            try:self._gpu_checked.emit(job.id,result)
+            except RuntimeError:pass  # Window was closed while scanning.
+        threading.Thread(target=check,daemon=True).start()
+
+    def _release_gpu(self):
+        if self._gpu_lease.stream is None:return
+        from .local_session import MANAGER
+        self._gpu_check_pending=True
+        def release():
+            try:
+                with MANAGER.lock:MANAGER.close()
+            finally:
+                self._gpu_lease.release()
+                try:self._gpu_checked.emit('',())
+                except RuntimeError:pass
+        threading.Thread(target=release,daemon=True).start()
+
+    def _wait_gpu(self,job):
+        self._release_gpu()
+        job.message='Waiting for GPU · another Prompt Director instance holds the local engine'
+        self.changed.emit();self._gpu_retry.start()
+
+    def _gpu_ready(self,job_id,workers):
+        self._gpu_check_pending=False
+        job=next((j for j in self.jobs if j.id==job_id),None)
+        first=next((j for j in self.jobs if j.state=='Waiting'),None)
+        if self.closing or self.paused or self.active is not None or job is None or job is not first or job.cancel.is_set():
+            self._release_gpu();QTimer.singleShot(0,self._advance);return
+        if workers is None:
+            self._gpu_lease.release();job.message='Waiting for GPU · checking local render processes'
+            self.changed.emit();self._gpu_retry.start();return
+        if workers:self._wait_gpu(job);return
+        job.message=''
+        self._start_job(job)
+
+    def _start_job(self,job):
         self.active=job;job.state='Rendering';job.started_at=time.monotonic();self.changed.emit()
         def progress(event):
             if job is not self.active:return
@@ -169,6 +227,11 @@ class RenderQueue(QObject):
                     else:callback(value)
             finally:
                 self.active=None
+                next_job=next((j for j in self.jobs if j.state=='Waiting'),None)
+                if job.source=='local' and (self.paused or next_job is None or next_job.source!='local' or self.closing):
+                    # Keep warm models between adjacent jobs, but relinquish VRAM
+                    # before allowing another instance to acquire the lease.
+                    self._release_gpu()
                 # Release request snapshots and credentials after the worker has ended.
                 job.operation=job.finished=job.failed=job.progress=job.started=job.cancelled=None;job.args=()
                 if job.id in self._remove_when_finished:
@@ -262,7 +325,8 @@ class RenderQueue(QObject):
         return True
 
     def shutdown(self):
-        self.closing=True
+        self.closing=True;self._gpu_retry.stop()
+        if self.active is None and not self._gpu_check_pending:self._release_gpu()
         for job in tuple(self.jobs):self.cancel_job(job.id)
         from .local_session import MANAGER
         MANAGER.release_async()

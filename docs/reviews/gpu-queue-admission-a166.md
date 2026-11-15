@@ -1,0 +1,9 @@
+# Director instance GPU admission · Aurora a166
+
+Local queue jobs remain Waiting/Pending until foreign Director local_worker processes exit. Detection matches the worker module invocation and packaged script entry, so legacy builds need no coordination protocol. Own direct-child workers are excluded; zombie and vanished processes do not block admission. Process enumeration runs in a background thread; the GUI retries every 1.5 seconds. The queue summary explains the GPU wait while individual pills stay Pending.
+
+A nonblocking, per-user OS lease spans admission and local rendering in updated instances, closing the simultaneous scan/start gap. It is independent of XDG profiles and engine locations. Warm workers remain reusable between adjacent queued local jobs. On queue drain/pause they are closed off-thread before the lease is released, since resident workers can retain VRAM even after sampling. An older resident worker conservatively remains a blocker while alive; this release does not terminate another instance's workers. Cloud jobs retain FIFO scheduling without GPU admission.
+
+Native coverage starts a real subprocess with the legacy worker command shape, checks Pending and waiting text, cancels waiting work, runs cloud work, exits the foreign worker and observes automatic local admission. It also covers owned workers, exclusive leases and pause/delete while a scan is in flight. Other synthetic queue tests stub admission explicitly so tests cannot contend with real desktop renders.
+
+The previous a165 broad CI timed out in the queued-local-video scenario: its profile fixture predated mandatory workspace checkpoint selection and opened a setup dialog. The fixture now supplies a matching FL2VA checkpoint name. Broader CI remains separate from this release's focused native and clean-installed artifact checks.
