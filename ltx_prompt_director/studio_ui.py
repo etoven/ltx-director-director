@@ -200,6 +200,7 @@ class DialoguePanel(QFrame):
         self.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Fixed)
         self.setObjectName('studioDialoguePanel')
         layout=QVBoxLayout(self);layout.setContentsMargins(0,1,0,1)
+        layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
         header=QHBoxLayout();title=QLabel('◉  DIALOGUE & SUBTITLES');title.setObjectName('studioDialogueTitle')
         header.addWidget(title);header.addStretch();self.count=QLabel('0 Lines Active');self.count.setObjectName('studioDialogueBadge');header.addWidget(self.count)
         add=QPushButton('+ Add Cue');add.setObjectName('studioSubtleButton');add.clicked.connect(self.add_cue);header.addWidget(add);layout.addLayout(header)
@@ -277,6 +278,9 @@ class StudioController(QObject):
         timeline_layout.insertWidget(0,header)
         self.dialogue=DialoguePanel(owner)
         stack=QWidget();stack.setObjectName('studioStack');stack_layout=QVBoxLayout(stack);stack_layout.setContentsMargins(0,0,0,0);stack_layout.setSpacing(0)
+        stack_layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
+        stack.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Minimum)
+        owner.timeline_shell.layout().setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
         for widget in (owner.timeline_shell,owner.audio_panel):outer.removeWidget(widget)
         stack_layout.addWidget(owner.timeline_shell);stack_layout.addWidget(self.dialogue);stack_layout.addWidget(owner.audio_panel)
         owner.audio_main_layout=stack_layout
@@ -314,6 +318,8 @@ class StudioController(QObject):
             panel.setStyleSheet(panel.styleSheet()+'\n'+ '#'+panel.objectName()+'{border-radius:0;padding:0;margin-top:1px;margin-bottom:1px;}')
 
         workspace=QWidget();workspace.setObjectName('studioWorkspace');row=QHBoxLayout(workspace);row.setContentsMargins(7,1,0,1);row.setSpacing(12);row.addWidget(stack,1)
+        row.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
+        workspace.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Minimum)
         track_row.removeWidget(owner.add_tile_wrap);owner.add_tile_wrap.setObjectName('studioActionRail');row.addWidget(owner.add_tile_wrap,0,Qt.AlignmentFlag.AlignTop)
         for button in (owner.add_tile,owner.add_text_tile,owner.sync_timeline_button,owner.retime_all_button,owner.add_extension_tile):button.setObjectName('studioActionButton')
         outer.insertWidget(2,workspace);outer.setContentsMargins(0,0,0,0);outer.setSpacing(0)

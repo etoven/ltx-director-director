@@ -3941,7 +3941,7 @@ class MainWindow(QMainWindow):
         timeline_layout.setContentsMargins(0, 0, 0, 0)
         timeline_layout.setSpacing(0)
         timeline_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        timeline_shell.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
+        timeline_shell.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         # Output size stays in the project toolbar; navigation sits by the ruler.
         self.output_size_control = QFrame()
         self.output_size_control.setToolTip("Output resolution (width × height, pixels)")
@@ -4562,9 +4562,9 @@ class MainWindow(QMainWindow):
         outer.addWidget(self.shot_sequence_panel, 1)
         self.shot_sequence_panel.hide()
         self.editor_root=root
-        root.setMinimumWidth(320)
-        root.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Ignored)
-        outer.setSizeConstraint(QLayout.SizeConstraint.SetNoConstraint)
+        root.setMinimumWidth(480)
+        root.setSizePolicy(QSizePolicy.Policy.Preferred,QSizePolicy.Policy.Minimum)
+        outer.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
         root.installEventFilter(self)
         self.timeline_dock = QDockWidget('Timeline', self)
         self.timeline_dock.setObjectName('timelineDock')
