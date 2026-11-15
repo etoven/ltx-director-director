@@ -27,6 +27,11 @@ def test_direct_frames_loop_update_pause_seek_and_release(tmp_path):
     QTest.qWait(850)  # More than three complete loops, without media end events.
     assert len(frames) >= 8 and panel.latent_player.playing
     assert frames[-1].width() == 5
+    assert not panel.latent_image.pixmap().isNull()
+    surface = panel.video_surface.grab().toImage()
+    color = surface.pixelColor(surface.width() // 2, surface.height() // 2)
+    assert color.red() + color.green() > 150, 'Preview surface must actually show the streamed RGB pixels'
+
     assert all(control.isHidden() for control in (panel.play, panel.seek, panel.fullscreen, panel.position))
     panel.set_rendering(False)
     panel.toggle_playback()
@@ -38,6 +43,13 @@ def test_direct_frames_loop_update_pause_seek_and_release(tmp_path):
     assert old.closed
     assert not panel.latent_player.playing and panel.latent_player.position == 150
     assert panel.current_frame.pixelColor(0, 0).blue() == 255
+    panel.resize(640, 480)
+    QTest.qWait(80)
+    surface = panel.video_surface.grab().toImage()
+    assert surface.pixelColor(surface.width() // 2, surface.height() // 2).blue() == 255
+    import os
+    if os.environ.get('DIRECTOR_PREVIEW_CAPTURE'):
+        panel.grab().save(os.environ['DIRECTOR_PREVIEW_CAPTURE'])
     count = len(frames)
     QTest.qWait(150)
     assert len(frames) == count

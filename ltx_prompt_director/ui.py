@@ -1225,7 +1225,7 @@ class ProjectPreviewPanel(QWidget):
         self.video.videoSink().setVideoFrame(QVideoFrame(image))
 
     def fit_latent_image(self):
-        if self._static_latent_active and self._latent_pixmap is not None:
+        if (self._static_latent_active or self.latent_player.active) and self._latent_pixmap is not None:
             self.latent_image.setPixmap(self._latent_pixmap.scaled(self.latent_image.size(),Qt.AspectRatioMode.KeepAspectRatio,Qt.TransformationMode.SmoothTransformation))
 
     def resizeEvent(self,event):
@@ -4848,7 +4848,7 @@ class MainWindow(QMainWindow):
             panel._memory_preview = False
             panel.pending_preview_path = value['path']
             panel.title.setText('Local video · live latent estimate · approximate colors')
-            panel.latent_image.show();panel.condition_text.hide();panel.empty.hide();panel.video.hide()
+            panel.latent_image.show();panel.latent_image.raise_();panel.condition_text.hide();panel.empty.hide();panel.video.hide()
             panel.play.setEnabled(True);panel.fullscreen.setEnabled(True);panel.export.setEnabled(False)
             panel.latent_player.load(value, panel._generation_autoplay)
             return
