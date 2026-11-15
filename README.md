@@ -6,11 +6,13 @@
 
 Build a visual plan for AI video, turn it into a detailed production prompt, and refine every beat while the timeline stays in view. Prompt Director gives you a hands-on way to direct **MiniMax H3** and **LTX Video 2.3**, with **Gemini or OpenAI** helping you develop the words behind the motion.
 
-![The Aurora workspace: a visual timeline, creative direction and one continuous MiniMax production brief](docs/images/panel-overhaul.png)
+![The Aurora workspace: a visual timeline, creative direction and one continuous MiniMax production brief](docs/images/studio-v3-experimental.png)
 
-*Current release: Aurora 1.13.0a132 on `experimental`. Screenshots show the native app with an authored demonstration project.*
+*Current release: Aurora 1.13.0a157 on `experimental`. Screenshots show the native app with an authored demonstration project.*
 
 ## See the story before you generate
+
+The studio track view places visual and text clips above timed dialogue and independent audio lanes. Use **Snap** beside transport to snap seeks and trim/move edits to nearby clip boundaries, the playhead, and whole seconds. The action rail retains the group-aware rewrite, re-time, and continuation actions. [See the studio controls and grouped sequences](docs/studio-timeline.md).
 
 Put images, MP4 and WebM clips, and text beats on a timeline that shows how long each moment lasts. Drag to reorder. Pull a segment’s edge to change its duration. Zoom in to shape a transition or fit the whole sequence into view. Start times, frame roles and resolution badges keep the important details close at hand.
 
@@ -127,7 +129,7 @@ Customize the workspace itself in **Settings → Workspaces**: choose the editor
 Install the current experimental wheel:
 
 ```bash
-python3 -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a132-py3-none-any.whl'
+python3 -m pip install --upgrade 'https://raw.githubusercontent.com/etoven/ltx-director-director/experimental/dist/ltx_prompt_director-1.13.0a157-py3-none-any.whl'
 ltx-director-director
 ```
 

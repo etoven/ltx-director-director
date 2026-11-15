@@ -33,6 +33,7 @@ class AudioTransport(QObject):
         self.playing = False
         self.position = 0
         self.duration = 0
+        self.volume = .8
         self.clock = QElapsedTimer()
         self.timer = QTimer(self)
         self.timer.setInterval(25)
@@ -57,7 +58,7 @@ class AudioTransport(QObject):
         for clip in clips:
             if clip.id not in self.players:
                 output = self.output_factory(self)
-                output.setVolume(.8)
+                output.setVolume(self.volume)
                 player = self.player_factory(self)
                 player.setAudioOutput(output)
                 self.players[clip.id] = player, output
@@ -83,7 +84,7 @@ class AudioTransport(QObject):
     def sync_clip(self, clip, audible, force=False):
         player = self.players[clip.id][0]
         frame = self.position * FPS / 1000
-        active = self.enabled and not clip.muted and clip.start_frame <= frame < clip.end_frame
+        active = self.enabled and not clip.muted and (not any(c.solo for c in self.clips) or clip.solo) and clip.start_frame <= frame < clip.end_frame
         if active:
             target = round((clip.trim_start + frame - clip.start_frame) * 1000 / FPS)
             ready=not hasattr(player,'mediaStatus') or player.mediaStatus() in (QMediaPlayer.MediaStatus.LoadedMedia,QMediaPlayer.MediaStatus.BufferedMedia,QMediaPlayer.MediaStatus.BufferingMedia)
@@ -104,6 +105,11 @@ class AudioTransport(QObject):
     def sync(self, audible=False, force=False):
         for clip in self.clips:
             self.sync_clip(clip, audible, force)
+
+    def set_volume(self, value):
+        self.volume = max(0., min(1., value))
+        for player, output in self.players.values():
+            output.setVolume(self.volume)
 
     def seek(self, position, audible=False):
         self.position = max(0, min(int(position), self.duration))
@@ -203,6 +209,12 @@ class AudioCanvas(QWidget):
     def frame_at(self, x):
         return max(0, round((x - self.panel.left) / self.panel.scale * FPS))
 
+    def snap_frame(self, frame, exclude=None):
+        if hasattr(self.panel.owner, 'studio'):
+            from .studio_ui import snap
+            return round(snap(self.panel.owner, frame / FPS, self.panel.scale, exclude) * FPS)
+        return frame
+
     def lane_at(self, y):
         return max(0, int((y - self.TOP) // self.ROW))
 
@@ -212,71 +224,27 @@ class AudioCanvas(QWidget):
                       max(2, clip.duration_frames / FPS * self.panel.scale), self.ROW - 8)
 
     def hit(self, point):
-        return next((c for c in reversed(self.panel.clips) if self.clip_rect(c).contains(point)), None)
+        selected_filter = getattr(self.panel, 'studio_filter', None)
+        return next((c for c in reversed(self.panel.clips) if (selected_filter is None or c.lane % 3 == selected_filter) and self.clip_rect(c).contains(point)), None)
 
     def paintEvent(self, event):
-        p = QPainter(self)
-        p.fillRect(event.rect(), QColor('#121b22'))
-        left, scale = self.panel.left, self.panel.scale
-        visible = self.panel.scroll.horizontalScrollBar().value()
-        right = visible + self.panel.scroll.viewport().width()
-        lanes = max(2, max((c.lane + 1 for c in self.panel.clips), default=0) + 1)
-        for lane in range(lanes):
-            y = self.TOP + lane * self.ROW
-            p.fillRect(QRectF(0, y, self.width(), self.ROW - 1), QColor('#18242c' if lane % 2 == 0 else '#152028'))
-            p.setPen(QColor('#90a8b7')); p.drawText(5, y + 30, f'A{lane + 1}')
-        interval = max(1, math.ceil(70 / scale))
-        first = max(0, int((visible - left) / scale // interval) * interval)
-        for second in range(first, math.ceil((right - left) / scale) + 1, interval):
-            x = round(left + second * scale)
-            p.setPen(QColor('#2b3944')); p.drawLine(x, self.TOP, x, self.height())
-            p.setPen(QColor('#96aab8')); p.drawText(x + 4, 17, f'{second}s')
-        if self.panel.sequence_duration:
-            x = round(left + self.panel.sequence_duration * scale)
-            p.setPen(QPen(QColor('#778696'), 1, Qt.PenStyle.DashLine))
-            p.drawLine(x, self.TOP, x, self.height())
-        colors = ('#65d9ca', '#a99af9', '#f0b77d', '#85b5f3')
-        for clip in self.panel.clips:
-            rect = self.clip_rect(clip)
-            if rect.right() < visible or rect.left() > right:
-                continue
-            selected = clip.id == self.panel.selected
-            color = QColor('#687984' if clip.muted or not self.panel.enabled.isChecked() else colors[clip.lane % len(colors)])
-            p.setPen(QPen(color, 2 if selected else 1))
-            fill = QColor(color); fill.setAlpha(46 if selected else 22)
-            p.setBrush(fill); p.drawRoundedRect(rect.adjusted(1, 1, -1, -1), 4, 4)
-            p.save(); p.setClipRect(rect.adjusted(4, 2, -4, -2))
-            p.setPen(color)
-            p.drawText(rect.adjusted(6, 1, -4, -25), Qt.AlignmentFlag.AlignVCenter,
-                       p.fontMetrics().elidedText(clip.name, Qt.TextElideMode.ElideRight, max(1, int(rect.width() - 12))))
-            center = rect.top() + 30
-            begin = max(int(rect.left()) + 5, visible)
-            end = min(int(rect.right()) - 4, right)
-            for x in range(begin, end, 3):
-                local = (x - rect.left()) / scale
-                index = int((clip.trim_start / FPS + local) / clip.source_duration * len(clip.peaks))
-                peak = clip.peaks[max(0, min(len(clip.peaks) - 1, index))] if clip.peaks else 0
-                height = max(.7, min(1., peak) * 10)
-                p.drawLine(QRectF(x, center - height, 0, height * 2).topLeft(),
-                           QRectF(x, center - height, 0, height * 2).bottomLeft())
-            p.restore()
-            p.setPen(QPen(color, 2))
-            for x in (rect.left() + 3, rect.right() - 3):
-                p.drawLine(round(x), round(rect.top() + 12), round(x), round(rect.bottom() - 6))
-        if not self.panel.clips:
-            p.setPen(QColor('#8299a8'))
-            p.drawText(QRectF(left + 12, self.TOP + 4, max(1, self.width() - left - 30), 76),
-                       Qt.AlignmentFlag.AlignVCenter, 'Drop audio here · independent strips, overlaps and gaps')
-        x = round(left + self.panel.transport.position / 1000 * scale)
-        p.setPen(QPen(QColor('#ffce75'), 2)); p.drawLine(x, 0, x, self.height())
-        p.setBrush(QColor('#ffce75')); p.drawEllipse(QRectF(x - 4, 1, 8, 8))
+        from .studio_ui import paint_audio
+        paint_audio(self, event)
 
     def scrub(self, event):
-        self.panel.seek(round(self.frame_at(event.position().x()) / FPS * 1000), audible=True)
+        self.panel.seek(round(self.snap_frame(self.frame_at(event.position().x())) / FPS * 1000), audible=True)
 
     def mousePressEvent(self, event):
         if event.button() != Qt.MouseButton.LeftButton:
             return
+        if event.position().y() >= self.TOP and 30 <= event.position().x() <= 68:
+            key = 'muted' if event.position().x() < 50 else 'solo'
+            clips = [clip for clip in self.panel.clips if clip.lane == self.lane_at(event.position().y())]
+            value = not any(getattr(clip, key) for clip in clips)
+            for clip in clips:
+                setattr(clip, key, value)
+            self.panel.transport.sync(self.panel.transport.playing, force=True)
+            self.panel.update_fields();self.panel.changed.emit();self.update();return
         self.setFocus()
         clip = self.hit(event.position()) if event.position().y() >= self.TOP else None
         if clip:
@@ -297,11 +265,11 @@ class AudioCanvas(QWidget):
             clip.start_frame, clip.trim_start, clip.duration_frames, clip.lane = before.start_frame, before.trim_start, before.duration_frames, before.lane
             delta = self.frame_at(event.position().x()) - anchor
             if edge == 'left':
-                clip.trim_left(before.start_frame + delta)
+                clip.trim_left(self.snap_frame(before.start_frame + delta, clip.id))
             elif edge == 'right':
-                clip.trim_right(before.end_frame + delta)
+                clip.trim_right(self.snap_frame(before.end_frame + delta, clip.id))
             else:
-                clip.move(before.start_frame + delta, self.lane_at(event.position().y()))
+                clip.move(self.snap_frame(before.start_frame + delta, clip.id), self.lane_at(event.position().y()))
             self.panel.update_fields(); self.panel.update_extent()
         else:
             clip = self.hit(event.position())
@@ -382,7 +350,8 @@ class AudioTimelinePanel(QFrame):
         row.addWidget(self.summary, 1)
         layout.addWidget(header)
         self.body = QWidget(); column = QVBoxLayout(self.body); column.setContentsMargins(0, 0, 0, 0); column.setSpacing(0)
-        controls = ControlRow(); controls.setContentsMargins(6, 0, 6, 2)
+        self.edit_controls = QWidget()
+        controls = ControlRow(self.edit_controls); controls.setContentsMargins(6, 0, 6, 2)
         self.start, self.end, self.source_in = [QDoubleSpinBox() for _ in range(3)]
         for label, widget in (('Start', self.start), ('End', self.end), ('Source in', self.source_in)):
             widget.setRange(0, 86400); widget.setDecimals(3); widget.setSingleStep(1 / FPS); widget.setSuffix(' s')
@@ -396,7 +365,7 @@ class AudioTimelinePanel(QFrame):
         self.mute = QCheckBox('Mute'); self.mute.toggled.connect(self.mute_selected); controls.addWidget(self.mute)
         self.remove = QPushButton('×'); self.remove.setFixedWidth(26); self.remove.setToolTip('Remove selected audio strip')
         self.remove.clicked.connect(self.remove_selected); controls.addWidget(self.remove); controls.addStretch()
-        column.addLayout(controls)
+        column.addWidget(self.edit_controls)
         self.scroll = QScrollArea(); self.scroll.setFrameShape(QFrame.Shape.NoFrame)
         self.scroll.setMinimumHeight(0); self.scroll.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         self.canvas = AudioCanvas(self); self.scroll.setWidget(self.canvas); column.addWidget(self.scroll, 1)
@@ -410,6 +379,8 @@ class AudioTimelinePanel(QFrame):
         self.transport.playing_changed.connect(lambda playing: self.play.setText('Ⅱ' if playing else '▶'))
         self.transport.error.connect(lambda message: self.owner.statusBar().showMessage('Audio preview: ' + message, 8000))
         self.update_fields()
+        from .studio_ui import style_audio
+        style_audio(self, header, row)
 
     def sizeHint(self):
         return QSize(400, super().sizeHint().height())
@@ -534,13 +505,18 @@ class AudioTimelinePanel(QFrame):
     def update_extent(self):
         total = max(self.sequence_duration, max((c.end_frame / FPS for c in self.clips), default=0), 1)
         self.transport.duration = round(total * 1000)
-        lanes = max(2, max((c.lane + 1 for c in self.clips), default=0) + 1)
-        self.canvas.resize(max(self.scroll.viewport().width(), round(self.left + total * self.scale + 48)),
+        lanes = max(3, max((c.lane + 1 for c in self.clips), default=0))
+        fitted = hasattr(self.owner, 'studio') and self.owner.timeline_fit_mode and self.owner.workspace_engine != 'shot_sequence'
+        width = self.scroll.viewport().width() if fitted else max(self.scroll.viewport().width(), round(self.left + total * self.scale + 48))
+        self.canvas.resize(width,
                            max(self.scroll.viewport().height(), self.canvas.TOP + lanes * self.canvas.ROW))
         self.canvas.update()
         self.summary.setText(f'{len(self.clips)} strips · {total:.2f}s' if self.clips else 'Drop audio · gaps and overlaps allowed')
 
     def set_timeline(self, duration, scale, left=38):
+        if hasattr(self.owner, 'studio') and self.owner.timeline_fit_mode and self.owner.workspace_engine != 'shot_sequence' and duration:
+            extent = max(duration, max((clip.end_frame / FPS for clip in self.clips), default=0))
+            scale = max(.1, (self.scroll.viewport().width() - left - 12) / extent)
         self.sequence_duration = duration; self.scale = max(.1, scale); self.left = left
         self.update_extent()
 

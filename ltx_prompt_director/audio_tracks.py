@@ -25,6 +25,7 @@ class AudioClip:
     id: str = ''
     peaks: list[float] = field(default_factory=list)
     muted: bool = False
+    solo: bool = False
 
     def __post_init__(self):
         if not math.isfinite(self.source_duration) or self.source_duration < 1 / FPS:

@@ -75,6 +75,7 @@ from .prompt_timecodes import retime_prompt
 from .prompt_sections import document_sections
 from .segment_prompt_review import SegmentPromptReview
 from .audio_timeline import AudioTimelinePanel
+from .studio_ui import StudioController, style_card, STUDIO_STYLE, snap as studio_snap_time
 from .audio_tracks import audio_export_records
 
 FPS = 24
@@ -1818,6 +1819,7 @@ class TimelineRuler(QWidget):
         self.playhead = None
         self.gaps=[]
         self._scrubbing=False
+        self.snapper = lambda value: value
         self.setCursor(Qt.CursorShape.CrossCursor)
         self.setToolTip('Drag to scrub rendered video and audio, or preview the conditioning segment.')
         self.setFixedHeight(28)
@@ -1825,17 +1827,17 @@ class TimelineRuler(QWidget):
     def mousePressEvent(self,event):
         if event.button()==Qt.MouseButton.LeftButton:
             self._scrubbing=True;self.scrub_started.emit();self.grabMouse()
-            self.scrub_requested.emit(max(0.,(event.position().x()+self.offset)/self.scale));event.accept()
+            self.scrub_requested.emit(self.snapper(max(0.,(event.position().x()+self.offset)/self.scale)));event.accept()
         else:super().mousePressEvent(event)
 
     def mouseMoveEvent(self,event):
         if self._scrubbing:
-            self.scrub_requested.emit(max(0.,(event.position().x()+self.offset)/self.scale));event.accept()
+            self.scrub_requested.emit(self.snapper(max(0.,(event.position().x()+self.offset)/self.scale)));event.accept()
         else:super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self,event):
         if self._scrubbing and event.button()==Qt.MouseButton.LeftButton:
-            self.scrub_requested.emit(max(0.,(event.position().x()+self.offset)/self.scale))
+            self.scrub_requested.emit(self.snapper(max(0.,(event.position().x()+self.offset)/self.scale)))
             self._scrubbing=False;self.releaseMouse();self.scrub_finished.emit();event.accept()
         else:super().mouseReleaseEvent(event)
 
@@ -1883,6 +1885,7 @@ class ResizeHandle(QFrame):
         self.start_x: float | None = None
         self.pixels_per_second = pixels_per_second
         self.start_scale = pixels_per_second
+        self.snapper = lambda value: value
         self.setObjectName("resizeHandle")
         # Keep a comfortable hit target while drawing only a slim dotted grip.
         self.setFixedWidth(12)
@@ -1924,7 +1927,7 @@ class ResizeHandle(QFrame):
 
     def mouseMoveEvent(self, event):
         if self.start_x is not None:
-            value = max(MIN_DURATION, self.start_duration + (event.globalPosition().x() - self.start_x) / self.start_scale)
+            value = max(MIN_DURATION, self.snapper(self.start_duration + (event.globalPosition().x() - self.start_x) / self.start_scale))
             if value != self.duration:
                 self.preview.emit(value)
             event.accept()
@@ -1991,7 +1994,7 @@ class TimelineHeightHandle(QFrame):
 
     def mouseMoveEvent(self, event):
         if self.start_y is not None:
-            value = max(184, min(430, int(self.start_height + event.globalPosition().y() - self.start_y)))
+            value = max(122, min(430, int(self.start_height + event.globalPosition().y() - self.start_y)))
             self.current_height = value
             self.height_changed.emit(value)
             event.accept()
@@ -2220,6 +2223,7 @@ class SegmentCard(QFrame):
         self.resize_handle.finished.connect(self.resize_finished)
         self.outer_layout.addWidget(self.resize_handle)
         self.update_layout(preview_height, pixels_per_second)
+        style_card(self)
 
     def _show_artwork_placeholder(self):
         if not self.segment.artwork_prompt:
@@ -2381,8 +2385,11 @@ class SegmentCard(QFrame):
             self.preview.setText(text or "Enter text prompt…")
 
     def update_layout(self, preview_height: int, pixels_per_second: int) -> None:
-        height = max(24, preview_height)
-        width = max(36, int(self.segment.duration * pixels_per_second) - 14)
+        studio = getattr(self, 'studio_ready', False)
+        height = (40 if self.segment.kind == 'text' else 94) if studio else max(24, preview_height)
+        width = 174 if studio else max(36, int(self.segment.duration * pixels_per_second) - 14)
+        if studio:
+            self.preview.setMaximumHeight(60 if self.segment.kind == 'text' else height)
         self.preview.setMinimumHeight(height)
         if not self.source_pixmap.isNull():
             scaled = self.source_pixmap.scaled(
@@ -2407,6 +2414,10 @@ class SegmentCard(QFrame):
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
+        if getattr(self, 'studio_ready', False) and self.segment.kind != 'text':
+            self.preview.setVisible(self.width() > 320)
+        if getattr(self, 'studio_ready', False):
+            self.start_time_label.setVisible(self.width() > 220)
         self.position_resolution_badge()
         self._position_rewrite_overlay()
         self._position_rewrite_marquee()
@@ -3573,7 +3584,7 @@ class MainWindow(QMainWindow):
         self._project_open_timer.setInterval(90)
         self._project_open_timer.timeout.connect(self.open_pending_library_project)
         self._pending_project_id: str | None = None
-        self.timeline_height = max(184, min(430, self.settings.value("timeline_panel_height", 184, int)))
+        self.timeline_height = max(122, min(430, self.settings.value("timeline_panel_height", 122, int)))
         self.thread_pool = QThreadPool.globalInstance()
         self.disk_pool = QThreadPool(self)
         self.disk_pool.setMaxThreadCount(1)
@@ -3987,7 +3998,7 @@ class MainWindow(QMainWindow):
         from .extension_timeline import ExtensionBrackets
         self.extension_brackets = ExtensionBrackets(self)
         brackets_row = QHBoxLayout()
-        brackets_row.setContentsMargins(38, 0, 44, 0)
+        brackets_row.setContentsMargins(12, 0, 12, 0)
         brackets_row.setSpacing(0)
         brackets_row.addWidget(self.extension_brackets)
         timeline_layout.addLayout(brackets_row)
@@ -4515,6 +4526,7 @@ class MainWindow(QMainWindow):
         self.timeline_dock.topLevelChanged.connect(self.save_window_panel_state)
         self.setStatusBar(QStatusBar())
         self.statusBar().addPermanentWidget(self.ai_timeline_status)
+        StudioController(self, root, outer, timeline_layout, ruler_row, track_row)
         self.apply_project_type_ui()
         self.update_summary()
 
@@ -5355,7 +5367,7 @@ class MainWindow(QMainWindow):
         from .window_chrome import chrome_style
         from .dock_panels import panel_style
         from .scope_style import scope_style
-        self.setStyleSheet(workspace_style(theme,scale)+chrome_style(scale)+panel_style(scale)+scope_style(scale))
+        self.setStyleSheet(workspace_style(theme,scale)+chrome_style(scale)+panel_style(scale)+scope_style(scale)+STUDIO_STYLE)
         self.findChild(QToolBar,'mainToolbar').setIconSize(QSize(metric(24),metric(24)))
         if hasattr(self,'chrome'):self.chrome.update_metrics(scale)
         if hasattr(self,'panel_rails'):self.panel_rails.update_metrics(scale)
@@ -6265,7 +6277,7 @@ class MainWindow(QMainWindow):
         self.reduce_music.setChecked(bool(state.get("reduceMusic")))
         self.output_width.setValue(int(state.get("outputWidth", 1280)))
         self.output_height.setValue(int(state.get("outputHeight", 704)))
-        self.timeline_height = max(184, min(430, int(state.get("timelineHeight", 184))))
+        self.timeline_height = max(122, min(430, int(state.get("timelineHeight", 122))))
         self.minimax_prompt_text = str(state.get("minimaxPrompt", ""))
         self.minimax_refinement_instructions = str(state.get("minimaxRefinementInstructions", ""))
         self.minimax_prompt_cache_key = str(state.get("minimaxPromptCacheKey", ""))
@@ -7022,7 +7034,7 @@ class MainWindow(QMainWindow):
         if hasattr(getattr(self, 'prompt_surface', None), 'structured'):
             header = self.menuWidget().height() if self.menuWidget() else 90
             available = self.height() - header - self.statusBar().height() - other_minimum - 160
-            return max(184, min(430, available))
+            return max(122, min(430, available))
         available_client_height = central.height()
         screen = self.screen() or QApplication.primaryScreen()
         if screen:
@@ -7030,10 +7042,10 @@ class MainWindow(QMainWindow):
             desktop_client_height = max(0, screen.availableGeometry().height() - window_overhead)
             available_client_height = min(available_client_height, desktop_client_height)
         reserve=min(100,max(40,round(available_client_height*.14)))
-        return max(184, min(430, available_client_height - other_minimum - reserve))
+        return max(122, min(430, available_client_height - other_minimum - reserve))
 
     def set_timeline_height(self, value: int) -> None:
-        value = max(184, min(int(value), 430))
+        value = max(122, min(int(value), 430))
         self.timeline_height = value
         self.timeline_height_handle.current_height = value
         effective=min(value,self.maximum_safe_timeline_height())
@@ -7375,7 +7387,7 @@ class MainWindow(QMainWindow):
             for box in self._extension_boxes.values():box.hide();box.deleteLater()
             self._extension_boxes={}
             self.timeline.clear()
-            card_height = max(80, self.timeline.height() - 32)
+            card_height = max(100, self.timeline.height() - 2)
             preview_height = max(24, card_height - 55)
             widths = self.timeline_item_widths()
             start_time = 0.0
@@ -7385,6 +7397,7 @@ class MainWindow(QMainWindow):
                 item.setSizeHint(QSize(widths[index], card_height))
                 self.timeline.addItem(item)
                 card = SegmentCard(segment, start_time, preview_height, self.pixels_per_second)
+                card.resize_handle.snapper = lambda duration, sid=segment.id: self.snap_visual_duration(sid, duration)
                 if segment.render_group and (index==0 or self.segments[index-1].render_group!=segment.render_group):
                     card.role_badge.setText('EXTENSION')
                     card.role_badge.setToolTip('Previous block trailing second conditions this block at time 0; frame blend included in marked duration.')
@@ -7417,7 +7430,7 @@ class MainWindow(QMainWindow):
         previous_loading = self._loading
         self._loading = True
         try:
-            card_height = max(152, self.timeline_height - 32)
+            card_height = max(100, self.timeline.height() - 2)
             preview_height = max(80, card_height - 55)
             by_id = {segment.id: segment for segment in self.segments}
             widths = self.timeline_item_widths()
@@ -7610,7 +7623,7 @@ class MainWindow(QMainWindow):
             if item.data(Qt.ItemDataRole.UserRole) == segment_id:
                 self.timeline.setUpdatesEnabled(False)
                 try:
-                    item.setSizeHint(QSize(max(48, int(segment.duration * self.pixels_per_second)), max(152, self.timeline_height - 32)))
+                    item.setSizeHint(QSize(max(48, int(segment.duration * self.pixels_per_second)), max(100, self.timeline.height() - 2)))
                     self.timeline.doItemsLayout()
                 finally:
                     self.timeline.setUpdatesEnabled(True)
@@ -7626,6 +7639,14 @@ class MainWindow(QMainWindow):
         self.update_segment_start_times()
         self.update_summary()
         self.sync_selected_duration_control()
+
+    def snap_visual_duration(self, segment_id, duration):
+        cursor = 0.
+        for segment in self.segments:
+            if segment.id == segment_id:
+                return max(MIN_DURATION, studio_snap_time(self, cursor + duration) - cursor)
+            cursor += segment.duration
+        return duration
 
     def finish_resize(self, segment_id: str) -> None:
         self._timeline_edge_drag = None
@@ -7692,6 +7713,8 @@ class MainWindow(QMainWindow):
 
     def update_summary(self) -> None:
         self.sync_audio_timeline()
+        if hasattr(self, 'studio'):
+            self.studio.refresh()
         if self.workspace_engine == "shot_sequence":
             self.workflow_label.setText("Completed shots · RAM playback · source audio")
             self.magic_button.hide()
@@ -9134,7 +9157,8 @@ class MainWindow(QMainWindow):
             if self.workspace_engine == 'shot_sequence':
                 self.shot_sequence_panel.audio_layout.addWidget(self.audio_panel)
             else:
-                self.audio_main_layout.insertWidget(self.audio_main_layout.indexOf(self.timeline_shell) + 1, self.audio_panel)
+                index = self.audio_main_layout.indexOf(self.studio.dialogue) if hasattr(self, 'studio') else self.audio_main_layout.indexOf(self.timeline_shell)
+                self.audio_main_layout.insertWidget(index + 1, self.audio_panel)
             self.audio_panel.show()
             self.sync_audio_timeline()
         if hasattr(self, 'editor_root'):
@@ -9148,7 +9172,7 @@ class MainWindow(QMainWindow):
             shots = self.shot_sequence_panel.shots
             self.audio_panel.set_timeline(shots.total, shots.scale, shots.LEFT)
         else:
-            self.audio_panel.set_timeline(self.total_duration(), self.pixels_per_second)
+            self.audio_panel.set_timeline(self.total_duration(), self.pixels_per_second, 80 if hasattr(self, 'studio') else 38)
 
     def audio_scroll_from_sequence(self, offset):
         if not getattr(self, '_syncing_audio_scroll', False):
@@ -11210,7 +11234,7 @@ class MainWindow(QMainWindow):
         def resize_tiles(progress: float) -> None:
             for row, (start, target) in enumerate(zip(start_widths, target_widths)):
                 item = self.timeline.item(row)
-                item.setSizeHint(QSize(round(start + (target - start) * progress), max(152, self.timeline_height - 32)))
+                item.setSizeHint(QSize(round(start + (target - start) * progress), max(100, self.timeline.height() - 2)))
                 card = self.timeline.itemWidget(item)
                 if card and hasattr(card, "duration_label"):
                     card.duration_label.setText(f"{target_durations[row]:.2f}s")
@@ -11520,7 +11544,7 @@ class MainWindow(QMainWindow):
         self.output_height.setValue(int(output.get("height", 704)))
         self.normalize_output_dimensions()
         view = payload.get("timelineView", {})
-        self.timeline_height = max(184, min(430, int(view.get("height", self.timeline_height))))
+        self.timeline_height = max(122, min(430, int(view.get("height", self.timeline_height))))
         self.timeline_height_handle.current_height = self.timeline_height
         self.set_timeline_height(self.timeline_height)
         auto_fit = bool(view.get("autoFit", False))
