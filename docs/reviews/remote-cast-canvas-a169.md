@@ -1,0 +1,9 @@
+# Remote rendering with canvas casting · Aurora a169
+
+The client-side crash report involved remote rendering and casting together. The original implementation encoded displayed previews to HLS using an FFmpeg subprocess. This release removes that preview encoding path entirely and sends owned RGBA frame snapshots over a WebSocket to an HTML canvas loaded on the Chromecast through DashCast. Attached finished videos retain direct HTTP range playback and audio.
+
+Cast server installation and connection completion now arrive through queued Qt signals, rather than mutating controller state from connection threads. Generation tokens reject stale connections after stop/restart. Snapshot bytes are copied on the UI thread; receiver threads never access Qt images or widgets. Each receiver acknowledges a painted frame before another is sent; only the newest pending snapshot is retained. Slow or disconnected receivers cannot grow a frame queue or fail a render.
+
+A focused combined native scenario runs real remote WebSocket sampling with fixture inference, repeatedly replaces latent banks while the cast receiver draws, stops/restarts casting, completes and attaches the result, then cancels a second remote render while casting. The client remains alive and the prior attachment and authored prompt survive. Direct attached-video range playback and Flux canvas frames remain covered. A slow-receiver scenario confirms intermediate snapshots are skipped.
+
+Physical-device verification used the idle Living Room TV, leaving the existing Living Room TV 2 session alone. The receiver acknowledged 13 canvas paints, including changing raw frames and percentage/ETA captions. Casting was stopped afterward. This confirms canvas presentation, not a live model-quality benchmark. The specific user's fatal exit was not captured in the available crash logs; the old encoding/shared-state path has been removed and the reported combined workflow is covered by the new regression.

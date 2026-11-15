@@ -1,0 +1,39 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Prompt Director · Live preview</title>
+<style>html,body{margin:0;width:100%;height:100%;background:#101923;overflow:hidden}canvas{display:block;width:100%;height:100%}</style></head>
+<body><canvas id="preview"></canvas><script>
+'use strict';
+const canvas=document.getElementById('preview'),context=canvas.getContext('2d');
+const sample=document.createElement('canvas'),pixels=sample.getContext('2d');
+let header=null,caption='Waiting for render preview…',hasFrame=false,socket=null,retry=null;
+window.__directorPreviewFrames=0;
+function paint(){
+  if(canvas.width!==innerWidth||canvas.height!==innerHeight){canvas.width=innerWidth;canvas.height=innerHeight;}
+  context.fillStyle='#101923';context.fillRect(0,0,canvas.width,canvas.height);
+  if(hasFrame){const scale=Math.min(canvas.width/sample.width,canvas.height/sample.height);
+    const width=sample.width*scale,height=sample.height*scale;
+    context.imageSmoothingEnabled=true;context.drawImage(sample,(canvas.width-width)/2,(canvas.height-height)/2,width,height);}
+  if(caption){const font=Math.max(18,Math.round(canvas.height/28));context.fillStyle='rgba(8,18,28,.9)';
+    context.fillRect(0,canvas.height-font*2,canvas.width,font*2);context.fillStyle='#d5f9f0';context.font=font+'px sans-serif';
+    context.fillText(caption,16,canvas.height-font*.65,canvas.width-32);}
+}
+function connect(){
+  clearTimeout(retry);
+  const token=location.pathname.split('/')[1];
+  const peer=new WebSocket('ws://'+location.hostname+':__WS_PORT__/'+token+'/frames');socket=peer;peer.binaryType='arraybuffer';
+  peer.onmessage=function(event){
+    if(typeof event.data==='string'){header=JSON.parse(event.data);return;}
+    const info=header;header=null;
+    if(!info||info.format!=='rgba'||event.data.byteLength!==info.width*info.height*4){peer.close();return;}
+    sample.width=info.width;sample.height=info.height;
+    pixels.putImageData(new ImageData(new Uint8ClampedArray(event.data),info.width,info.height),0,0);
+    hasFrame=true;caption=info.caption||'';
+    requestAnimationFrame(function(){paint();window.__directorPreviewFrames++;
+      if(peer.readyState===WebSocket.OPEN)peer.send(JSON.stringify({presented:info.sequence}));});
+  };
+  peer.onclose=function(){if(socket===peer)retry=setTimeout(connect,1000);};
+  peer.onerror=function(){peer.close();};
+}
+addEventListener('resize',paint);paint();connect();
+</script></body></html>
