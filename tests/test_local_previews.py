@@ -4,26 +4,25 @@ import pytest
 pytestmark=pytest.mark.skipif(os.environ.get('DIRECTOR_TEST_ML')!='1',reason='Private ML runtime CPU test')
 
 
-def test_noisy_preview_encodes_every_frame_without_loading_vae(tmp_path):
-    import av
+def test_noisy_preview_publishes_rgb_samples_without_a_video_codec(tmp_path):
+    import numpy as np
     import torch
     from types import SimpleNamespace
     from ltx_prompt_director.local_previews import H3VideoPreview
-    # Seven temporal latents represent 22 output frames. Channel nine makes
-    # temporal changes visible in all RGB channels, unlike a first-three view.
-    samples=torch.zeros(1,24,7,8,12)
-    samples[:,9]=torch.linspace(-1,1,7)[None,:,None,None]
-    before=samples.clone();events=[]
-    preview=H3VideoPreview(SimpleNamespace(),{},tmp_path,96,64,20,torch.bfloat16,
-        lambda kind,**data:events.append(dict(kind=kind,**data)))
-    preview.capture_clean(SimpleNamespace(sigmas=torch.ones(20)),samples,0,torch.zeros_like(samples))
-    preview.finish_step(samples,1)
-    assert len(events)==1 and events[0]['media']=='video' and events[0]['frames']==22
-    with av.open(events[0]['path']) as movie:
-        frames=list(movie.decode(video=0));assert len(frames)==22
-        assert movie.streams.video[0].average_rate==24
-        assert frames[-1].to_ndarray(format='rgb24').mean()>frames[0].to_ndarray(format='rgb24').mean()+30
-    assert torch.equal(samples,before) and not list(tmp_path.glob('*.partial.mp4'))
+    samples = torch.zeros(1, 24, 7, 8, 12)
+    samples[:, 9] = torch.linspace(-1, 1, 7)[None, :, None, None]
+    before = samples.clone(); events = []
+    preview = H3VideoPreview(SimpleNamespace(), {}, tmp_path, 96, 64, 20, torch.bfloat16,
+        lambda kind, **data: events.append(dict(kind=kind, **data)))
+    preview.capture_clean(SimpleNamespace(sigmas=torch.ones(20)), samples, 0, torch.zeros_like(samples))
+    preview.finish_step(samples, 1)
+    event = events[0]
+    assert event['media'] == 'latent_frames' and event['frames'] == 22
+    assert event['latent_frames'] == 7 and event['fps'] == 24
+    rgb = np.fromfile(event['path'], dtype=np.uint8).reshape(7, 8, 12, 3)
+    assert rgb[-1].mean() > rgb[0].mean() + 30
+    assert torch.equal(samples, before)
+    assert not list(tmp_path.glob('*.mp4')) and not list(tmp_path.glob('*.partial'))
 
 
 def test_fast_preview_cancels_high_sigma_noise_without_a_vae(tmp_path):

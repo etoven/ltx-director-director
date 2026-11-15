@@ -1083,6 +1083,9 @@ class FullscreenVideoDialog(QDialog):
             self.player.play()
 
     def seek_to(self, position: int) -> None:
+        if self.parent().latent_player.active:
+            self.parent().seek_to(position)
+            return
         self.player.setPosition(max(0, min(position, self.player.duration())))
 
     def update_position(self, position: int, duration: int) -> None:
@@ -1187,6 +1190,10 @@ class ProjectPreviewPanel(QWidget):
         self.player.playbackStateChanged.connect(self.playback_changed)
         self.player.mediaStatusChanged.connect(self.media_status_changed)
         self.player.errorOccurred.connect(self.media_error)
+        from .local_latent_player import LatentFramePlayer
+        self.latent_player = LatentFramePlayer(self)
+        self.fullscreen_window.play.clicked.disconnect()
+        self.fullscreen_window.play.clicked.connect(self.toggle_playback)
         self.clear_project()
 
     def show_conditioning_text(self,name,text):
@@ -1319,6 +1326,7 @@ class ProjectPreviewPanel(QWidget):
         return f"{total // 60:02d}:{total % 60:02d}"
 
     def release_memory_video(self):
+        self.latent_player.close()
         if getattr(self, "_memory_buffer", None) is not None:
             self.player.stop()
             self.player.setSource(QUrl())
@@ -1413,6 +1421,9 @@ class ProjectPreviewPanel(QWidget):
         self.player.setSource(QUrl.fromLocalFile(str(source)))
 
     def set_preview_visible(self, visible: bool) -> None:
+        if self.latent_player.active:
+            self.latent_player.set_playing(visible and self._generation_autoplay)
+            return
         if visible:
             pending = getattr(self, "pending_preview_path", "")
             if pending and Path(pending).is_file() and not self.player.source().isLocalFile():
@@ -1424,6 +1435,7 @@ class ProjectPreviewPanel(QWidget):
             self.current_frame = None
 
     def media_error(self, *_args) -> None:
+        if self.latent_player.active:return
         if self._static_latent_active:
             self.latent_image.show()
             self.latent_image.raise_()
@@ -1465,6 +1477,10 @@ class ProjectPreviewPanel(QWidget):
         # Only the first load may initialize playback; buffered/seek events must
         # never undo the user's pause or stop a replay at position zero.
         self._initial_media_pending = False
+        if self.latent_player.active:
+            self._generation_autoplay = not self.latent_player.playing
+            self.latent_player.set_playing(self._generation_autoplay)
+            return
         if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
             if getattr(self,'_generation_preview_active',False):self._generation_autoplay=False
             self.player.pause()
@@ -1475,6 +1491,9 @@ class ProjectPreviewPanel(QWidget):
             self.player.play()
 
     def seek_to(self, position: int) -> None:
+        if self.latent_player.active:
+            self.latent_player.seek(position)
+            return
         if self.duration > 0:
             self.player.setPosition(max(0, min(position, self.duration)))
 
@@ -1485,6 +1504,7 @@ class ProjectPreviewPanel(QWidget):
         self.position_changed(self.player.position())
 
     def media_status_changed(self, status) -> None:
+        if self.latent_player.active:return
         if status in {QMediaPlayer.MediaStatus.LoadedMedia, QMediaPlayer.MediaStatus.BufferedMedia}:
             self.empty.hide()
             self.video.show()
@@ -1509,6 +1529,7 @@ class ProjectPreviewPanel(QWidget):
         self.fullscreen_window.update_position(position, self.duration)
 
     def playback_changed(self, state) -> None:
+        if hasattr(self, 'latent_player') and self.latent_player.active:return
         playing = state == QMediaPlayer.PlaybackState.PlayingState
         self.play.setText("❚❚ Pause" if playing else "▶ Play")
         self.fullscreen_window.play.setText("❚❚ Pause" if playing else "▶ Play")
@@ -1530,6 +1551,7 @@ class ProjectPreviewPanel(QWidget):
         self.player.setVideoOutput(self.video)
         self.player.setPosition(position)
         self.fullscreen_changed(False)
+        if self.latent_player.active:self.latent_player.present()
 
 class CatalogMediaViewer(QDialog):
     """Lightbox for originals with the same player as the project preview."""
@@ -4813,6 +4835,23 @@ class MainWindow(QMainWindow):
         if getattr(panel, '_render_workspace_key', None) != key:
             panel.clear_project()
             panel._render_workspace_key = key
+        if value.get('media') == 'latent_frames':
+            if not panel.latent_player.active:
+                panel.release_memory_video()
+                panel._initial_media_pending = False
+                panel.player.stop()
+                panel.player.setSource(QUrl())
+            panel._awaiting_render_frame = False
+            panel._source_generation += 1
+            panel._generation_preview_active = True
+            panel._static_latent_active = False
+            panel._memory_preview = False
+            panel.pending_preview_path = value['path']
+            panel.title.setText('Local video · live latent estimate · approximate colors')
+            panel.latent_image.show();panel.condition_text.hide();panel.empty.hide();panel.video.hide()
+            panel.play.setEnabled(True);panel.fullscreen.setEnabled(True);panel.export.setEnabled(False)
+            panel.latent_player.load(value, panel._generation_autoplay)
+            return
         if value.get("media") == "image":
             image = QImageReader(value["path"]).read()
             if image.isNull():return

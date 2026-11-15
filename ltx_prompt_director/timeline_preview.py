@@ -121,6 +121,9 @@ class TimelinePreviewController(QObject):
         if not self.panel._rendering and self.panel.duration>0 and self.panel.player.source().isLocalFile():self.scrubber.begin()
 
     def seek_player(self,position):
+        if self.panel.latent_player.active:
+            self.panel.seek_to(position)
+            return
         if self.panel._rendering or self.panel.duration<=0 or not self.panel.player.source().isLocalFile():return
         self.panel._initial_media_pending=False
         self.scrubber.seek(position)

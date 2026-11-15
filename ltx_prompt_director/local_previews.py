@@ -60,45 +60,24 @@ H3_RGB = (
     (-.014015,-.017438,-.019134),(-.033787,-.009984,-.019725),(.004224,.017284,.027196))
 
 
-def noisy_latent_video(latents, path, width, height, fps=24):
-    """Stream all current temporal samples into a lightweight, silent movie.
-
-    H3 represents 17 video frames in each five-token temporal chunk, plus an
-    opening five frames. Interpolate the cheap RGB projection across that grid;
-    the full VAE decode remains separate. No model is loaded for this preview.
-    """
-    import av
-    import numpy as np
+def write_latent_frames(latents, path):
+    """Publish RGB temporal samples directly, without a codec or VAE."""
     import torch
-    from PIL import Image
-    samples = latents.detach()[0].to(device='cpu',dtype=torch.float32)
-    if samples.shape[0]!=len(H3_RGB):raise ValueError('Expected 24 H3 latent channels.')
-    rgb = torch.einsum('cthw,cr->thwr',samples,torch.tensor(H3_RGB))
-    rgb = torch.nan_to_num(rgb+torch.tensor((.057426,-.022078,-.071449)))
-    rgb = ((rgb.clamp(-1,1)+1)*127.5).numpy()
-    count = max(1,((samples.shape[1]-2)//5)*17+5)
-    spans=np.array([1 if index%5==0 else 4 for index in range(len(rgb))])
-    times=np.concatenate(([0],np.cumsum(spans[:-1])))
-    scale = min(1,640/max(width,height))
-    size = tuple(max(2,round(v*scale/2)*2) for v in (width,height))
-    target=Path(path);partial=target.with_suffix('.partial.mp4')
+    samples = latents.detach()[0].to(device='cpu', dtype=torch.float32)
+    if samples.shape[0] != len(H3_RGB):
+        raise ValueError('Expected 24 H3 latent channels.')
+    rgb = torch.einsum('cthw,cr->thwr', samples, torch.tensor(H3_RGB))
+    rgb = torch.nan_to_num(rgb + torch.tensor((.057426, -.022078, -.071449)))
+    rgb = ((rgb.clamp(-1, 1) + 1) * 127.5).to(torch.uint8).contiguous().numpy()
+    target = Path(path)
+    partial = target.with_suffix('.partial')
     try:
-        with av.open(str(partial),'w') as container:
-            stream=container.add_stream('libx264',rate=fps)
-            stream.width,stream.height=size;stream.pix_fmt='yuv420p'
-            stream.options={'preset':'ultrafast','crf':'26'}
-            for index in range(count):
-                low=max(0,int(np.searchsorted(times,index,side='right'))-1)
-                high=min(low+1,len(rgb)-1)
-                blend=0 if high==low else (index-times[low])/(times[high]-times[low])
-                pixels=(rgb[low]*(1-blend)+rgb[high]*blend).clip(0,255).astype(np.uint8)
-                image=Image.fromarray(pixels).resize(size,Image.Resampling.BILINEAR)
-                frame=av.VideoFrame.from_image(image);frame.pts=index
-                for packet in stream.encode(frame):container.mux(packet)
-            for packet in stream.encode():container.mux(packet)
+        rgb.tofile(partial)
         partial.replace(target)
-    finally:partial.unlink(missing_ok=True)
-    return count
+    finally:
+        partial.unlink(missing_ok=True)
+    return dict(latent_frames=rgb.shape[0], width=rgb.shape[2], height=rgb.shape[1],
+                frames=max(1, ((samples.shape[1] - 2) // 5) * 17 + 5), fps=24)
 
 
 def denoised_preview_due(profile, done, total):
@@ -116,9 +95,9 @@ class H3VideoPreview:
 
     def noisy(self, latents, done):
         if self.profile.get('video_preview_mode', 'noisy') != 'noisy': return
-        path = self.root / f'latent-{done}.mp4'
-        count=noisy_latent_video(latents,path,self.width,self.height)
-        self.emit('preview', path=str(path), media='video', draft=True, frames=count,
+        path = self.root / f'latent-{done}.rgb'
+        dimensions = write_latent_frames(latents, path)
+        self.emit('preview', path=str(path), media='latent_frames', draft=True, **dimensions,
                   preview_mode='noisy', latent_source='predicted_clean' if done else 'initial_noise',
                   step=done, sampling_steps=self.total)
 
