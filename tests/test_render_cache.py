@@ -46,3 +46,18 @@ def test_display_settings_do_not_re_render_and_output_changes_do(tmp_path):
     path.write_bytes(b'replaced output')
     assert not cached_render(cache,0,request,[],render,cancel)['reused']
     assert len(calls)==2
+
+
+def test_blend_length_and_upstream_render_invalidate_video_conditioning(tmp_path):
+    from ltx_prompt_director.render_cache import block_signature
+    source = tmp_path/'previous.mp4'
+    source.write_bytes(b'previous video')
+    request = dict(kind='video',profile={'video_variant':'fl2va'},duration=5,
+                   conditioning=[dict(kind='video',path=str(source),start=4,duration=1,timeline_time=0)],
+                   references=[])
+    original = copy.deepcopy(request)
+    signature = block_signature(request, [], 'render-one')
+    assert block_signature(request, [], 'render-two') != signature
+    request['conditioning'][0].update(start=3,duration=2)
+    assert block_signature(request, [], 'render-one') != signature
+    assert original['conditioning'][0]['path'] == str(source)

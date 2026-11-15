@@ -214,7 +214,7 @@ class BlendDiagram(QWidget):
     def __init__(self,owner,group):
         super().__init__();self.owner=owner;self.group=group
         self.setObjectName("extensionBlendDiagram")
-        self.setMinimumHeight(0)
+        self.setMinimumHeight(36)
         self.setToolTip('Outgoing (gold) and incoming (mint) blend. Image segments show edge frames when available; text sequences show the curve. Curves illustrate the selected blend type.')
 
     def edge_paths(self):

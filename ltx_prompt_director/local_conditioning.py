@@ -33,6 +33,63 @@ def video_references(segments, references, duration):
     return result
 
 
+def install_fl2va_video_conditioning(pipe, clips, emit):
+    """Encode timed video segments into FL2VA's existing visual condition lane."""
+    if not clips:
+        return
+    import torch
+    from diffsynth.pipelines.minimax_h3_audio_video import patchify_video
+
+    encoder = next(unit for unit in pipe.units if type(unit).__name__ == 'MiniMaxH3Unit_KeyframeEncoder')
+    builder = next(unit for unit in pipe.units if type(unit).__name__ == 'MiniMaxH3Unit_PackedSequenceBuilder')
+    encode_images = encoder.process
+    build_sequence = builder.process
+    condition_times = []
+
+    def encode(pipe, keyframes, keyframe_indices, video_latents, rand_device, seed, height, width):
+        result = encode_images(pipe, keyframes, keyframe_indices, video_latents, rand_device, seed, height, width)
+        condition_times.clear()
+        indices = list(keyframe_indices or [])
+        condition_times.extend(None for _ in indices)
+        anchors = [result['keyframe_cond_anchor']] if 'keyframe_cond_anchor' in result else []
+        pipe.load_models_to_device(encoder.onload_model_names)
+        for segment, frames in clips:
+            padded = pad_video_conditioning_frames(frames)
+            tensor = pipe.preprocess_video(padded, torch_dtype=torch.float32, min_value=0, device=pipe.device)
+            latents = pipe.video_vae.encode_video(tensor, dtype=pipe.torch_dtype,
+                                                  tiled=True, tile_size=128, tile_overlap=64)
+            latents = latents.to(device=pipe.device, dtype=pipe.torch_dtype)
+            rows = patchify_video(latents)
+            if pipe.imgvid_cond_noise_aug != 1.0:
+                noise = pipe.generate_noise(latents.shape, seed, rand_device, pipe.torch_dtype)
+                amount = pipe.imgvid_cond_noise_aug
+                rows = amount * rows + (1.0 - amount) * patchify_video(noise)
+            anchors.append(rows)
+            times = builder._video_t_grid(int(latents.shape[2]), 0)
+            times.clamp_(max=(len(frames)-1)*builder._FRAME_RESCALE)
+            times += float(segment.get('timeline_time', 0)) * 24 * builder._FRAME_RESCALE
+            condition_times.extend(times.tolist())
+            indices.extend([0] * len(times))
+            emit('log', message=f"FL2VA video conditioning: {segment.get('name', 'video')} · "
+                 f"{len(frames)} frames at {segment.get('timeline_time', 0):g}s")
+        result['keyframe_cond_anchor'] = torch.cat(anchors, dim=0).contiguous()
+        result['keyframe_indices'] = indices
+        return result
+
+    def pack(pipe, prompt_embeds, video_latents, audio_latents, **kwargs):
+        result = build_sequence(pipe, prompt_embeds, video_latents, audio_latents, **kwargs)
+        packed = result['packed']
+        rows_per_frame = (video_latents.shape[3]//2) * (video_latents.shape[4]//2)
+        for index, time in enumerate(condition_times):
+            if time is not None:
+                positions = packed['img_pos'][index*rows_per_frame:(index+1)*rows_per_frame]
+                packed['img_position_ids'][0, positions, 0] = prompt_embeds.shape[0] + time
+        return result
+
+    encoder.process = encode
+    builder.process = pack
+
+
 def configure_video_conditioning_encoder(pipe, references):
     if not any(ref.get('kind')=='video' for ref in references):return
     original=pipe.video_vae.encode_video

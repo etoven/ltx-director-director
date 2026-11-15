@@ -41,16 +41,24 @@ def paint_render_overlay(painter,image,job,position,phase,font,scale):
 
 class JobFileList(QListWidget):
     file_action = Signal(object, str)
+    delete_requested = Signal(str)
+    reorder_requested = Signal(str, object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setDragEnabled(True);self.setMouseTracking(True)
+        self.setAcceptDrops(True)
+        self.setDropIndicatorShown(True)
+        self.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self.setVerticalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
 
     def mouseMoveEvent(self,event):
         item=self.itemAt(event.position().toPoint())
         if item:
             job=item.data(Qt.ItemDataRole.UserRole)
             tooltip=job.title+'\n'+job.state
+            if QueueJobDelegate.delete_button(self.visualItemRect(item)).contains(event.position().toPoint()):
+                tooltip = 'Delete job and cancel dependent work'
             for area,label in QueueJobDelegate.file_buttons(self.visualItemRect(item)):
                 if job.output_path and area.contains(event.position().toPoint()):tooltip='Open containing folder' if label=='Folder' else 'Export file…'
             item.setToolTip(tooltip)
@@ -59,12 +67,53 @@ class JobFileList(QListWidget):
     def startDrag(self, actions):
         item = self.currentItem()
         job = item.data(Qt.ItemDataRole.UserRole) if item else None
-        if not job or not job.output_path or not Path(job.output_path).is_file(): return
+        if not job:
+            return
         mime = QMimeData()
+        if job.state == 'Waiting':
+            mime.setData('application/x-director-render-job', job.id.encode())
+            drag = QDrag(self)
+            drag.setMimeData(mime)
+            drag.exec(Qt.DropAction.MoveAction)
+            return
+        if not job.output_path or not Path(job.output_path).is_file():
+            return
         mime.setUrls([QUrl.fromLocalFile(job.output_path)])
         drag = QDrag(self)
         drag.setMimeData(mime)
         drag.exec(Qt.DropAction.CopyAction)
+
+    def dragEnterEvent(self, event):
+        if event.source() is self and event.mimeData().hasFormat('application/x-director-render-job'):
+            event.setDropAction(Qt.DropAction.MoveAction)
+            event.accept()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event):
+        self.dragEnterEvent(event)
+        if event.isAccepted():
+            super().dragMoveEvent(event)
+            event.setDropAction(Qt.DropAction.MoveAction)
+            event.accept()
+
+    def dropEvent(self, event):
+        if event.source() is not self or not event.mimeData().hasFormat('application/x-director-render-job'):
+            event.ignore()
+            return
+        target = self.itemAt(event.position().toPoint())
+        before_id = target.data(Qt.ItemDataRole.UserRole).id if target else None
+        if target and event.position().y() > self.visualItemRect(target).center().y():
+            row = self.row(target) + 1
+            job = target.data(Qt.ItemDataRole.UserRole)
+            if job.kind == 'Group':
+                while row < self.count() and self.item(row).data(Qt.ItemDataRole.UserRole).group_id == job.group_id:
+                    row += 1
+            target = self.item(row)
+            before_id = target.data(Qt.ItemDataRole.UserRole).id if target else None
+        self.reorder_requested.emit(bytes(event.mimeData().data('application/x-director-render-job')).decode(), before_id)
+        event.setDropAction(Qt.DropAction.MoveAction)
+        event.accept()
 
 
 class QueueJobDelegate(QStyledItemDelegate):
@@ -80,14 +129,15 @@ class QueueJobDelegate(QStyledItemDelegate):
         card=option.rect.adjusted(15 if job.group_id and job.kind!='Group' else 1,2,-1,-2)
         if job.kind=='Group':
             painter.setPen(QColor('#abd8dc'))
-            painter.drawText(card.adjusted(5,0,-5,0), Qt.AlignmentFlag.AlignVCenter,
-                             option.fontMetrics.elidedText(job.title, Qt.TextElideMode.ElideRight, max(0,card.width()-10)))
+            painter.drawText(card.adjusted(5,0,-34,0), Qt.AlignmentFlag.AlignVCenter,
+                             option.fontMetrics.elidedText(job.title, Qt.TextElideMode.ElideRight, max(0,card.width()-39)))
+            self.paint_delete(painter, option.rect)
             painter.restore();return
         selected=bool(option.state & QStyle.StateFlag.State_Selected)
         painter.setPen(QColor('#67b5c7' if selected else '#354858'));painter.setBrush(QColor('#213f4b' if selected else '#1d2b36'))
         painter.drawRoundedRect(card,4,4)
         font=QFont(option.font);painter.setFont(font);fm=painter.fontMetrics();line=fm.height()+4
-        text=card.adjusted(10,7,-42 if job.output_path else -10,-7)
+        text=card.adjusted(10,7,-42,-7)
         # Both source text and icon are laid out against viewport-bounded card,
         # with a separate gutter after them before the scrollbar.
         source='Cloud' if job.source=='cloud' else 'Local';source_width=fm.horizontalAdvance(source)+23
@@ -106,16 +156,30 @@ class QueueJobDelegate(QStyledItemDelegate):
             for area, label in self.file_buttons(option.rect):
                 standard=QStyle.StandardPixmap.SP_DirOpenIcon if label=='Folder' else QStyle.StandardPixmap.SP_DialogSaveButton
                 QApplication.style().standardIcon(standard).paint(painter,area.adjusted(2,2,-2,-2))
+        self.paint_delete(painter, option.rect)
         painter.restore()
 
     @staticmethod
+    def delete_button(rect):
+        return QRect(rect.right()-28, rect.top()+3, 23, 20)
+
+    @classmethod
+    def paint_delete(cls, painter, rect):
+        area = cls.delete_button(rect)
+        painter.setPen(QColor('#e6a4a4'))
+        painter.drawText(area, Qt.AlignmentFlag.AlignCenter, '×')
+
+    @staticmethod
     def file_buttons(rect):
-        x=rect.right()-28;y=rect.top()+8
-        return [(QRect(x,y,23,23),'Folder'),(QRect(x,y+27,23,23),'Export…')]
+        x=rect.right()-28;y=rect.top()+27
+        return [(QRect(x,y,23,20),'Folder'),(QRect(x,y+23,23,20),'Export…')]
 
     def editorEvent(self,event,model,option,index):
         if event.type()==event.Type.MouseButtonRelease and event.button()==Qt.MouseButton.LeftButton:
             job=index.data(Qt.ItemDataRole.UserRole)
+            if job and self.delete_button(option.rect).contains(event.position().toPoint()):
+                self.parent().delete_requested.emit(job.id)
+                return True
             if job and job.output_path and Path(job.output_path).is_file():
                 for area,label in self.file_buttons(option.rect):
                     if area.contains(event.position().toPoint()):
@@ -129,6 +193,9 @@ class RenderQueuePanel(QWidget):
         self.setMinimumWidth(0);self.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Preferred)
         layout=QVBoxLayout(self);layout.setContentsMargins(10,10,10,10);layout.setSpacing(8)
         row=QHBoxLayout();row.addWidget(QLabel('RENDER QUEUE'));row.addStretch()
+        self.sweep=QPushButton('Sweep')
+        self.sweep.setToolTip('Clear completed, cancelled and failed jobs')
+        self.sweep.clicked.connect(queue.sweep);row.addWidget(self.sweep)
         self.pause=QPushButton('Pause queue');self.pause.setCheckable(True);self.pause.toggled.connect(queue.set_paused);row.addWidget(self.pause);layout.addLayout(row)
         self.summary=QLabel();layout.addWidget(self.summary)
         self.collapsed_groups=set()
@@ -138,6 +205,8 @@ class RenderQueuePanel(QWidget):
         self.list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
         self.list.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Expanding)
         self.list.file_action.connect(self.file_action)
+        self.list.delete_requested.connect(queue.delete_job)
+        self.list.reorder_requested.connect(self.reorder_jobs)
         self.list.itemClicked.connect(self.toggle_group)
         self.list.currentItemChanged.connect(lambda *_:self.update_details());layout.addWidget(self.list,1)
         details=QFrame();details.setObjectName('renderJobDetails');body=QVBoxLayout(details);body.setContentsMargins(9,8,9,8);body.setSpacing(5)
@@ -161,7 +230,11 @@ class RenderQueuePanel(QWidget):
         selected=self.selected_job();key=selected.id if selected else None
         self.list.blockSignals(True)
         scroll=self.list.verticalScrollBar().value()
-        self.list.clear()
+        top = next((self.list.item(row) for row in range(self.list.count())
+                    if not self.list.item(row).isHidden() and self.list.visualItemRect(self.list.item(row)).bottom() >= 0), None)
+        top_key = top.data(Qt.ItemDataRole.UserRole).id if top else None
+        top_offset = self.list.visualItemRect(top).top() if top else 0
+        entries = []
         seen=set()
         for job in self.queue.jobs:
             if job.group_id and job.group_id not in seen:
@@ -170,20 +243,42 @@ class RenderQueuePanel(QWidget):
                 state=next((candidate.state for candidate in group_jobs if candidate.state in ACTIVE_STATES), 'Complete' if all(candidate.state=='Complete' for candidate in group_jobs) else 'Failed' if any(candidate.state=='Failed' for candidate in group_jobs) else 'Cancelled')
                 header=RenderJob(('▸ ' if job.group_id in self.collapsed_groups else '▾ ')+job.group_title,
                                  job.project_id,job.source,'','Group',id=job.group_id,group_id=job.group_id,state=state)
-                item=QListWidgetItem();item.setData(Qt.ItemDataRole.UserRole,header);self.list.addItem(item)
-                if header.id==key:self.list.setCurrentItem(item)
-            item=QListWidgetItem();item.setData(Qt.ItemDataRole.UserRole,job);self.list.addItem(item)
-            item.setHidden(job.group_id in self.collapsed_groups)
+                entries.append(header)
+            entries.append(job)
+        existing_ids = [self.list.item(row).data(Qt.ItemDataRole.UserRole).id for row in range(self.list.count())]
+        rebuild = existing_ids != [job.id for job in entries]
+        if rebuild:
+            self.list.clear()
+        for row, job in enumerate(entries):
+            item = QListWidgetItem() if rebuild else self.list.item(row)
+            item.setData(Qt.ItemDataRole.UserRole,job)
+            if rebuild:
+                self.list.addItem(item)
+            item.setHidden(job.kind != 'Group' and job.group_id in self.collapsed_groups)
             item.setData(Qt.ItemDataRole.UserRole+1,self.queue.position(job))
             item.setToolTip(job.title+'\n'+job.state+' · '+job.source.title()+'\n'+job.model+'\n'+job.error+
                             ('\nDrag this tile to copy the output file.' if job.output_path else ''))
-            if job.id==key:self.list.setCurrentItem(item)
-        if key is None and self.list.count():self.list.setCurrentRow(0)
-        self.list.verticalScrollBar().setValue(scroll)
+            if rebuild and job.id==key:self.list.setCurrentItem(item)
+        if rebuild and key is None and self.list.count():self.list.setCurrentRow(0)
+        self.list.doItemsLayout()
+        anchor = next((self.list.item(row) for row in range(self.list.count())
+                       if self.list.item(row).data(Qt.ItemDataRole.UserRole).id == top_key), None)
+        if anchor is not None:
+            self.list.verticalScrollBar().setValue(
+                self.list.verticalScrollBar().value() + self.list.visualItemRect(anchor).top() - top_offset)
+        else:
+            self.list.verticalScrollBar().setValue(scroll)
         self.list.blockSignals(False);self.list.viewport().update()
         self.summary.setText(f"{sum(j.state in ('Rendering','Cancelling') for j in self.queue.jobs)} rendering · {sum(j.state=='Waiting' for j in self.queue.jobs)} waiting")
         self.pause.blockSignals(True);self.pause.setChecked(self.queue.paused);self.pause.blockSignals(False)
         self.pause.setText('Resume queue' if self.queue.paused else 'Pause queue');self.update_details()
+        self.sweep.setEnabled(any(job.state not in ACTIVE_STATES for job in self.queue.jobs))
+
+    def reorder_jobs(self, job_id, before_id):
+        if self.queue.move_job(job_id, before_id):
+            self.file_status.setText('')
+        else:
+            self.file_status.setText('Keep waiting jobs after their dependencies and each generation together.')
 
     def update_details(self):
         job=self.selected_job();self.cancel.setEnabled(bool(job and (job.state in ACTIVE_STATES if job.kind!='Group' else any(j.group_id==job.group_id and j.state in ACTIVE_STATES for j in self.queue.jobs))))

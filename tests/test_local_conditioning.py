@@ -69,6 +69,56 @@ def test_memory_allowance_counts_video_temporal_rows():
 
 
 @pytest.mark.skipif(os.environ.get('DIRECTOR_TEST_ML')!='1',reason='Private ML runtime CPU test')
+def test_fl2va_native_condition_lane_consumes_all_video_frames_and_keeps_keyframes():
+    import torch
+    from PIL import Image
+    from diffsynth.pipelines.minimax_h3_audio_video import (
+        MiniMaxH3Pipeline, MiniMaxH3Unit_KeyframeEncoder, MiniMaxH3Unit_PackedSequenceBuilder)
+    from diffsynth.diffusion.base_pipeline import PipelineUnitRunner
+    from ltx_prompt_director.local_conditioning import install_fl2va_video_conditioning
+    from ltx_prompt_director.local_model_cache import job_scope
+
+    encoder = MiniMaxH3Unit_KeyframeEncoder()
+    builder = MiniMaxH3Unit_PackedSequenceBuilder()
+    encoded = []
+
+    def encode(tensor, **options):
+        encoded.append((tensor.clone(), options))
+        count = 1 if options.get('process_image') else (tensor.shape[2]-5)//17*5+2
+        return torch.ones(1,24,count,4,4)
+
+    pipe = MiniMaxH3Pipeline(device='cpu', torch_dtype=torch.float32)
+    pipe.units = [encoder, builder]
+    pipe.video_vae = SimpleNamespace(encode_video=encode)
+    pipe.dit = SimpleNamespace(vdn_enabled=False)
+    pipe.load_models_to_device = lambda names: None
+    frames = [Image.new('RGB', (64,64), (index*9,0,0)) for index in range(24)]
+    segment = dict(name='Previous block',timeline_time=0,duration=1)
+    inputs = dict(keyframes=[Image.new('RGB',(64,64),'blue')],keyframe_indices=[-1],
+                  video_latents=torch.zeros(1,24,27,4,4),audio_latents=torch.zeros(2,32,100),
+                  height=64,width=64,rand_device='cpu',seed=5,cfg_scale=1)
+    prompt = dict(prompt_embeds=torch.zeros(11,8),text_token_tags=torch.ones(11,dtype=torch.long))
+    runner = PipelineUnitRunner()
+    with job_scope(pipe):
+        install_fl2va_video_conditioning(pipe, [(segment,frames)], lambda *args,**kwargs:None)
+        inputs, positive, negative = runner(encoder, pipe, inputs, prompt.copy(), {})
+        inputs, positive, negative = runner(builder, pipe, inputs, positive, negative)
+        assert len(encoded) == 2
+        video, options = encoded[1]
+        assert video.shape[2] == 39 and options['tiled']
+        assert video[0,0,23,0,0] != video[0,0,0,0,0]
+        assert torch.equal(video[:,:,24:], video[:,:,23:24].expand(-1,-1,15,-1,-1))
+        assert inputs['keyframe_cond_anchor'].shape == (13*4,96)
+        packed = positive['packed']
+        positions = packed['img_position_ids'][0,packed['img_pos'][:13*4],0]
+        assert torch.all(positions[:4] > 11)
+        assert torch.all(positions[4:8] == 11)
+        assert positions[-1] == 11 + 23*builder._FRAME_RESCALE
+        assert 'ref_blocks' not in inputs and 'retake_video' not in inputs
+    assert 'process' not in vars(encoder) and 'process' not in vars(builder)
+
+
+@pytest.mark.skipif(os.environ.get('DIRECTOR_TEST_ML')!='1',reason='Private ML runtime CPU test')
 def test_packaged_vae_converters_accept_lazy_disk_mappings():
     from ltx_prompt_director.local_h3_quant import video_vae_keys, audio_vae_keys
     class LazyWeights:

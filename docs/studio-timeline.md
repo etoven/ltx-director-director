@@ -10,4 +10,12 @@ The right rail adds media or text, rewrites from the combined prompt, re-times t
 
 ![Three native 15-second groups with one-second blends](images/studio-v3-groups.png)
 
-Groups retain their own settings, source prompts and render caches. The brackets show each block's duration; transition controls retain blend mode, side and overlap. Existing archive formats, media associations and the text-only FL2VA extension workflow remain supported.
+Groups retain their own settings, source prompts and render caches. The brackets show each block's duration. The blend panel shows the crossing curves, duration, blend mode and overlap side.
+
+![Blend controls between adjacent groups](images/group-blend-controls.png)
+
+Each continuation receives the preceding video's trailing clip as a video conditioning segment at time zero, with its length set by the blend duration. This render input is prepared automatically. FL2VA uses its video conditioning lane. Hard cuts start without the inherited clip.
+
+In Render Queue, drag waiting jobs or waiting generation groups to change their order. Dependent blocks stay after their source. Use the × on a job to cancel and remove it with dependent work. Sweep clears completed, cancelled and failed entries. Output files remain available on disk. Queue updates retain your scroll position and selection.
+
+The local video preview keeps the last valid frame visible while the next preview loads and between render stages.

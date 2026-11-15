@@ -37,8 +37,9 @@ def block_signature(request,segments,previous_token=''):
     profile=request.get('profile',{})
     selected={key:value for key,value in profile.items() if key.startswith('video_') and not key.startswith('video_preview') and key!='video_duration'}
     references=copy.deepcopy(request.get('references',[]))
+    conditioning = copy.deepcopy(request.get('conditioning', []))
     media=[]
-    for index,reference in enumerate(references):
+    for index,reference in enumerate(conditioning + references):
         for field in tuple(reference):
             if field.startswith('archive'):reference.pop(field,None)
         previous=index==0 and previous_token and reference.get('kind')=='video'
@@ -56,8 +57,8 @@ def block_signature(request,segments,previous_token=''):
         if segment.media_path:media.append([segment.media_path,file_identity(segment.media_path)])
     for key in ('video_model',):
         if selected.get(key):media.append([selected[key],file_identity(selected[key])])
-    value=dict(request={key:value for key,value in request.items() if key not in {'profile','references'}},
-               profile=selected,references=references,segments=records,media=media,previous=previous_token)
+    value=dict(request={key:value for key,value in request.items() if key not in {'profile','references','conditioning'}},
+               profile=selected,references=references,conditioning=conditioning,segments=records,media=media,previous=previous_token)
     def canonical(item):
         if isinstance(item,float) and item.is_integer():return int(item)
         if isinstance(item,dict):return {key:canonical(value) for key,value in item.items()}

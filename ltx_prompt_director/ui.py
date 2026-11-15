@@ -25,7 +25,7 @@ from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
     QColorDialog, QDateTimeEdit, QDockWidget, QGraphicsOpacityEffect, QFileDialog, QFormLayout, QFrame, QHBoxLayout, QLabel, QLayout, QLineEdit,
-    QListWidget, QListWidgetItem, QSplitter, QStackedWidget, QTabBar, QTabWidget, QMainWindow, QMenu, QMessageBox, QPushButton, QScrollArea,
+    QListWidget, QListWidgetItem, QSplitter, QStackedLayout, QStackedWidget, QTabBar, QTabWidget, QMainWindow, QMenu, QMessageBox, QPushButton, QScrollArea,
     QSizePolicy, QSlider, QSpinBox, QProgressBar, QPlainTextEdit, QStatusBar, QStyle, QStyledItemDelegate, QStyleOptionSlider, QStyleOptionViewItem, QTextEdit, QToolBar, QToolButton, QToolTip, QVBoxLayout, QWidget, QWidgetAction,
 )
 
@@ -1140,7 +1140,8 @@ class ProjectPreviewPanel(QWidget):
         self.video_surface.setObjectName('projectVideoSurface')
         self.video_surface.setStyleSheet('#projectVideoSurface{background:#000000;border:0;}')
         self.video_surface.setMinimumSize(160,90)
-        video_stack = QVBoxLayout(self.video_surface)
+        video_stack = QStackedLayout(self.video_surface)
+        video_stack.setStackingMode(QStackedLayout.StackingMode.StackAll)
         video_stack.setContentsMargins(0, 0, 0, 0)
         self.latent_image=QLabel()
         self.latent_image.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -1148,15 +1149,15 @@ class ProjectPreviewPanel(QWidget):
         self.latent_image.setMinimumSize(0,0)
         self.latent_image.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Ignored)
         self.latent_image.hide();self._static_latent_active=False;self._latent_pixmap=None
-        video_stack.addWidget(self.video,1)
-        video_stack.addWidget(self.latent_image,1)
+        video_stack.addWidget(self.video)
+        video_stack.addWidget(self.latent_image)
         video_stack.addWidget(self.empty)
         self.condition_text=QPlainTextEdit();self.condition_text.setReadOnly(True)
         self.condition_text.setFrameShape(QFrame.Shape.NoFrame)
         self.condition_text.setStyleSheet('background:#000000;color:#dce6ec;border:0;padding:8px;')
         self.condition_text.setMinimumSize(0,0)
         self.condition_text.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Ignored)
-        self.condition_text.hide();video_stack.addWidget(self.condition_text,1)
+        self.condition_text.hide();video_stack.addWidget(self.condition_text)
         layout.addWidget(self.title)
         layout.addWidget(self.video_surface,1)
         seek_row = QHBoxLayout()
@@ -1209,9 +1210,10 @@ class ProjectPreviewPanel(QWidget):
     def show_static_image(self,name,image):
         self.release_memory_video();self._source_generation+=1
         self._memory_preview=False;self._initial_media_pending=False;self._static_latent_active=True
+        self._awaiting_render_frame = False
         self.player.stop();self.player.setSource(QUrl());self.pending_preview_path=''
         self.title.setText(name);self._latent_pixmap=QPixmap.fromImage(image)
-        self.empty.hide();self.video.hide();self.condition_text.hide();self.latent_image.show();self.fit_latent_image()
+        self.empty.hide();self.video.hide();self.condition_text.hide();self.latent_image.show();self.latent_image.raise_();self.fit_latent_image()
         self.export.setEnabled(False);self.fullscreen.setEnabled(False);self.play.setEnabled(False)
         self.video.videoSink().setVideoFrame(QVideoFrame(image))
 
@@ -1233,6 +1235,22 @@ class ProjectPreviewPanel(QWidget):
         image = frame.toImage()
         if not image.isNull():
             self.current_frame = image.copy()
+            if getattr(self, '_awaiting_render_frame', False):
+                self._awaiting_render_frame = False
+                self._static_latent_active = False
+                self.latent_image.hide()
+                self.empty.hide()
+                self.video.show()
+
+    def hold_render_frame(self):
+        if self.current_frame is not None and not self.current_frame.isNull():
+            self._latent_pixmap = QPixmap.fromImage(self.current_frame)
+        if self._latent_pixmap is not None and not self._latent_pixmap.isNull():
+            self._static_latent_active = True
+            self._awaiting_render_frame = True
+            self.latent_image.show()
+            self.latent_image.raise_()
+            self.fit_latent_image()
 
     def frame_available(self) -> bool:
         if self.current_frame is not None and not self.current_frame.isNull():
@@ -1324,8 +1342,14 @@ class ProjectPreviewPanel(QWidget):
         self.choose.setEnabled(True);self.export.setEnabled(True)
         self.empty.setText("Loading continuous RAM preview…")
 
-    def set_project(self, name: str, video_path: str = "") -> None:
-        self._static_latent_active=False;self.latent_image.hide();self.condition_text.hide();self.play.setEnabled(True)
+    def set_project(self, name: str, video_path: str = "", *, preserve_frame: bool = False) -> None:
+        if preserve_frame:
+            self.hold_render_frame()
+        else:
+            self._awaiting_render_frame = False
+            self._static_latent_active=False;self.latent_image.hide()
+            self._latent_pixmap = None
+        self.condition_text.hide();self.play.setEnabled(True)
         self.release_memory_video()
         self._generation_preview_active = False
         self._memory_preview = False
@@ -1360,9 +1384,9 @@ class ProjectPreviewPanel(QWidget):
         self.current_frame = None
         self.player.setSource(QUrl())
         if valid_preview:
-            self.video.hide()
+            self.video.setVisible(preserve_frame)
             self.empty.setText("Loading saved video preview…")
-            self.empty.show()
+            self.empty.setVisible(not self._static_latent_active)
             self.export.setEnabled(True)
             self.fullscreen.setEnabled(False)
             if self.isVisible():
@@ -1400,7 +1424,10 @@ class ProjectPreviewPanel(QWidget):
             self.current_frame = None
 
     def media_error(self, *_args) -> None:
-        if self._static_latent_active:return
+        if self._static_latent_active:
+            self.latent_image.show()
+            self.latent_image.raise_()
+            return
         self.player.stop()
         self.current_frame = None
         self.player.setSource(QUrl())
@@ -1412,6 +1439,8 @@ class ProjectPreviewPanel(QWidget):
 
     def clear_project(self) -> None:
         self.pending_preview_path=''
+        self._awaiting_render_frame = False
+        self._latent_pixmap = None
         self._static_latent_active=False;self.latent_image.hide();self.condition_text.hide();self.play.setEnabled(True)
         self.release_memory_video()
         self._generation_preview_active = False
@@ -1459,6 +1488,9 @@ class ProjectPreviewPanel(QWidget):
         if status in {QMediaPlayer.MediaStatus.LoadedMedia, QMediaPlayer.MediaStatus.BufferedMedia}:
             self.empty.hide()
             self.video.show()
+            if getattr(self, '_awaiting_render_frame', False):
+                self.latent_image.show()
+                self.latent_image.raise_()
             self.fullscreen.setEnabled(True)
             if not getattr(self, "_initial_media_pending", False):return
             self._initial_media_pending = False
@@ -4584,7 +4616,6 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("Write or generate the unified production prompt first.", 10000)
             return
         extensions = self.video_extensions
-        video_variant = profile.get('video_variant', 'ref2va' if 'ref2va' in Path(profile['video_model']).name.lower() else 'fl2va')
         extra_references = copy.deepcopy([r for r in self.active_reference_images() if r])
         grouped_segments = copy.deepcopy(list(self.render_groups().items()))
         from .render_groups import input_stamp,production_prompt
@@ -4636,16 +4667,16 @@ class MainWindow(QMainWindow):
             if value.get("kind") == "progress": self.local_video_pill.update_event(value)
             elif value.get("kind") == "preview":
                 self.show_video_render_preview(value)
-        def operation():
+        def operation(cancel=video_cancel):
             from .local_conditioning import video_references
             from .project_archive import materialize_source
             for segment in conditioning_segments:
                 if segment.kind in ('image','video'):materialize_source(segment)
-            references = video_references(conditioning_segments, extra_references, request['duration'])
+            conditioning = video_references(conditioning_segments, [], request['duration'])
             from .render_cache import cached_render
-            prepared={**request,'references':references}
+            prepared={**request,'conditioning':conditioning,'references':extra_references}
             return cached_render(cache,grouped_segments[0][0],prepared,conditioning_segments,
-                                 lambda:run_request(prepared,cancel=video_cancel),video_cancel)
+                                 lambda:run_request(prepared,cancel=cancel),cancel)
         def finish():
             self.update_render_controls()
             if current():self.local_video_pill.hide()
@@ -4673,7 +4704,7 @@ class MainWindow(QMainWindow):
 
             if not current():
                 self.statusBar().showMessage("Queued video saved for its original project.", 8000); return
-            self.project_preview_panel.set_project(self.current_project_name or "Generated video", result["path"])
+            self.project_preview_panel.set_project(self.current_project_name or "Generated video", result["path"], preserve_frame=True)
             self._local_result_video = {"scope": result_scope, "path": result["path"]}
             self.statusBar().showMessage("Local video ready · " + result["path"], 12000)
         def failed(message):
@@ -4706,25 +4737,28 @@ class MainWindow(QMainWindow):
             for index in range(extensions + 1):
                 previous = blocks[-1] if blocks else None
                 block_duration = block_durations[index]
-                def render_block(previous=previous, block_duration=block_duration, previous_duration=block_durations[index-1], block_segments=grouped_segments[index][1], group=grouped_segments[index][0], previous_group=grouped_segments[index-1][0],block_prompt=prompts[index],block_refs=group_references[index]):
+                block_cancel = threading.Event()
+                transition = blend_settings[index-1] if index else None
+                def render_block(previous=previous, block_duration=block_duration, previous_duration=block_durations[index-1], block_segments=grouped_segments[index][1], group=grouped_segments[index][0], previous_group=grouped_segments[index-1][0],block_prompt=prompts[index],block_refs=group_references[index],block_cancel=block_cancel,transition=transition):
                     if previous is None:
-                        result=operation()
-                        return add_block_thumbnails(result,block_duration,video_cancel)
-                    if video_cancel.is_set(): raise RuntimeError('Extension cancelled.')
+                        result=operation(block_cancel)
+                        return add_block_thumbnails(result,block_duration,block_cancel)
+                    if block_cancel.is_set(): raise RuntimeError('Extension cancelled.')
                     from .local_conditioning import video_references
                     from .project_archive import materialize_source
                     for segment in block_segments:
                         if segment.kind in ('image','video'):materialize_source(segment)
-                    references = video_references(block_segments,block_refs,block_duration)
-                    if video_variant == 'ref2va':
-                        references.insert(0,continuation_reference(previous.output_path,previous_duration))
+                    conditioning = video_references(block_segments,[],block_duration)
+                    if transition['blend'] != 'cut' and transition['overlap'] > 0:
+                        conditioning.insert(0,continuation_reference(previous.output_path,previous_duration,transition['overlap']))
                     from .render_cache import cached_render
-                    prepared={**request,'prompt':block_prompt,'duration':block_duration,'references':references}
+                    prepared={**request,'prompt':block_prompt,'duration':block_duration,
+                              'conditioning':conditioning,'references':block_refs,'transition':transition}
                     previous_result=cache.get(str(previous_group),{}).get('result',{})
                     previous_token=previous_result.get('render_token') or previous.output_path
                     result=cached_render(cache,group,prepared,block_segments,
-                        lambda:run_request(prepared,cancel=video_cancel),video_cancel,previous_token)
-                    return add_block_thumbnails(result,block_duration,video_cancel)
+                        lambda:run_request(prepared,cancel=block_cancel),block_cancel,previous_token)
+                    return add_block_thumbnails(result,block_duration,block_cancel)
                 def block_ready(result,group=grouped_segments[index][0]):
                     save_cache(group,result)
                     self._video_block_frames.setdefault(self.resolve_video_key(preview_key),{})[str(group)]={key:result.get(key,'') for key in ('first_frame','last_frame')}
@@ -4732,8 +4766,9 @@ class MainWindow(QMainWindow):
                         for diagram in self.timeline.findChildren(QWidget,'extensionBlendDiagram'):diagram.update()
                 job = self.start_render_job(render_block, (), block_ready, failed,
                     title=f'Block {index + 1} · {block_duration:g} s', source='local', model='MiniMax H3', kind='Video',
-                    details=('Trailing second of preceding block conditions time 0' if video_variant=='ref2va' else 'Text prompt with optional opening and ending keyframes') if index else 'Original timeline conditioning',
-                    progress=event, cancel=video_cancel, started=started, cancelled=finish,
+                    details=(f"Previous block · trailing {transition['overlap']:g} s conditions time 0"
+                             if index and transition['blend'] != 'cut' else 'Original timeline conditioning'),
+                    progress=event, cancel=block_cancel, started=started, cancelled=finish,
                     group_id=group_id, group_title=group_title,
                     dependencies=(previous.id,) if previous else (), intermediate=True,
                     workspace_key=preview_key,generation_number=generation)
@@ -4742,7 +4777,7 @@ class MainWindow(QMainWindow):
                 return blend_blocks([block.output_path for block in blocks], video_cancel, LOCAL_PROGRESS.get(), block_durations, blend_settings)
             self.start_render_job(assemble, (), ready, failed, title='Final · frame blended',
                 source='local', model='Frame blend', kind='Video',
-                details=f'{sum(block_durations):g} s · duration-preserving one-second joins',
+                details=f'{sum(block_durations):g} s · duration-preserving configured blends',
                 progress=event, cancel=video_cancel, cancelled=finish,
                 group_id=group_id, group_title=group_title, dependencies=tuple(block.id for block in blocks),
                 workspace_key=preview_key,generation_number=generation)
@@ -4774,13 +4809,20 @@ class MainWindow(QMainWindow):
 
     def show_video_render_preview(self,value):
         panel = self.project_preview_panel
+        key = self.video_preview_key()
+        if getattr(panel, '_render_workspace_key', None) != key:
+            panel.clear_project()
+            panel._render_workspace_key = key
         if value.get("media") == "image":
             image = QImageReader(value["path"]).read()
             if image.isNull():return
             panel.show_static_image(f"Local video · live noisy latent · step {value.get('step',0)} · approximate colors",image)
             self.local_video_pill.reposition();self.local_video_pill.raise_()
             return
-        panel._static_latent_active=False;panel.latent_image.hide();panel.condition_text.hide();panel.play.setEnabled(True)
+        if panel.pending_preview_path == value["path"] and panel.player.source().toLocalFile() == value["path"]:
+            return
+        panel.hold_render_frame()
+        panel.condition_text.hide();panel.play.setEnabled(True)
         panel.release_memory_video()
         panel._memory_preview = False
         panel._source_generation += 1
@@ -4792,6 +4834,9 @@ class MainWindow(QMainWindow):
         panel.title.setText("Local video · live latent estimate · approximate colors" if value.get('preview_mode')=='noisy'
             else "Local video · denoised draft estimate")
         panel.empty.hide(); panel.video.show()
+        if panel._static_latent_active:
+            panel.latent_image.show()
+            panel.latent_image.raise_()
         panel.export.setEnabled(False)
         panel.player.setSource(QUrl.fromLocalFile(value["path"]))
         panel.player.setLoops(QMediaPlayer.Loops.Infinite)
@@ -4800,7 +4845,9 @@ class MainWindow(QMainWindow):
         value = self._video_preview_cache.get(self.video_preview_key())
         if not value or not Path(value.get('path','')).is_file():return False
         if value['kind']=='final':
-            self.project_preview_panel.set_project(self.current_project_name or 'Generated video',value['path'])
+            panel = self.project_preview_panel
+            panel.set_project(self.current_project_name or 'Generated video',value['path'],
+                              preserve_frame=getattr(panel, '_render_workspace_key', None)==self.video_preview_key())
             self._local_result_video = {'scope':(self.workspace_revision,self.current_project_id,self.project_type),'path':value['path']}
         else:self.show_video_render_preview(value)
         return True
@@ -5782,6 +5829,10 @@ class MainWindow(QMainWindow):
 
     def update_project_preview(self) -> None:
         if hasattr(self,'timeline_preview'):self.timeline_preview.cancel()
+        key = self.video_preview_key()
+        if getattr(self.project_preview_panel, '_render_workspace_key', None) != key:
+            self.project_preview_panel.clear_project()
+            self.project_preview_panel._render_workspace_key = key
         self.update_render_controls()
         restored=self.restore_video_render_preview()
         meta = self.current_library_metadata()
@@ -7155,7 +7206,9 @@ class MainWindow(QMainWindow):
             bounds=[preview_bounds(card,self.timeline.viewport()) for card in (before,after) if isinstance(card,SegmentCard)]
             top=max(value[0] for value in bounds) if bounds else rect.top()+24
             bottom=min(value[1] for value in bounds) if bounds else rect.bottom()-20
-            box.setGeometry(x,top+10,width,max(1,bottom-top-20))
+            height = max(88, bottom - top - 20)
+            top = min(top + 10, max(rect.top() + 24, rect.bottom() - height - 4))
+            box.setGeometry(x,top,width,height)
             box.setVisible(rect.left()+width//2>0 and rect.left()-width//2<self.timeline.viewport().width())
             box.raise_()
 

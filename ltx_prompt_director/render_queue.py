@@ -43,6 +43,8 @@ class RenderQueue(QObject):
     def __init__(self,executor,parent=None):
         super().__init__(parent);self.executor=executor;self.jobs=[];self.active=None
         self.paused=False;self.closing=False
+        self._removed_states = {}
+        self._remove_when_finished = set()
         self._notify=QTimer(self);self._notify.setSingleShot(True);self._notify.setInterval(60)
         self._notify.timeout.connect(self.changed)
 
@@ -74,10 +76,11 @@ class RenderQueue(QObject):
         if self.closing or self.paused or self.active is not None:return
         job=next((j for j in self.jobs if j.state=='Waiting'),None)
         if job is None:return
-        parents=[next((candidate for candidate in self.jobs if candidate.id==key),None) for key in job.dependencies]
-        if any(parent is None or parent.state in {'Failed','Cancelled'} for parent in parents):
+        states = {candidate.id: candidate.state for candidate in self.jobs}
+        parents = [states.get(key, self._removed_states.get(key)) for key in job.dependencies]
+        if any(state is None or state in {'Failed','Cancelled'} for state in parents):
             self.cancel_job(job.id);QTimer.singleShot(0,self._advance);return
-        if any(parent.state!='Complete' for parent in parents):return
+        if any(state!='Complete' for state in parents):return
         if job.cancel.is_set():self.cancel_job(job.id);QTimer.singleShot(0,self._advance);return
         self.active=job;job.state='Rendering';self.changed.emit()
         def progress(event):
@@ -111,10 +114,13 @@ class RenderQueue(QObject):
                 self.active=None
                 # Release request snapshots and credentials after the worker has ended.
                 job.operation=job.finished=job.failed=job.progress=job.started=job.cancelled=None;job.args=()
+                if job.id in self._remove_when_finished:
+                    self._remove_entries({job.id})
                 terminal=[j for j in self.jobs if j.state not in ACTIVE_STATES]
                 if len(terminal)>100:
                     protected={j.group_id for j in self.jobs if j.state in ACTIVE_STATES and j.group_id}
-                    stale={j.id for j in terminal[:-100] if not j.group_id or j.group_id not in protected};self.jobs[:]=[j for j in self.jobs if j.id not in stale]
+                    stale={j.id for j in terminal[:-100] if not j.group_id or j.group_id not in protected}
+                    self._remove_entries(stale)
                 self.changed.emit();QTimer.singleShot(0,self._advance)
         try:
             if job.started:job.started()
@@ -138,6 +144,65 @@ class RenderQueue(QObject):
             finally:
                 job.operation=job.finished=job.failed=job.progress=job.started=job.cancelled=None;job.args=()
         self.changed.emit()
+
+    def _remove_entries(self, ids):
+        for job in self.jobs:
+            if job.id in ids:
+                self._removed_states[job.id] = job.state
+        self.jobs[:] = [job for job in self.jobs if job.id not in ids]
+        self._remove_when_finished.difference_update(ids)
+        needed = {key for job in self.jobs if job.state in ACTIVE_STATES for key in job.dependencies}
+        self._removed_states = {key: state for key, state in self._removed_states.items() if key in needed}
+
+    def sweep(self):
+        self._remove_entries({job.id for job in self.jobs if job.state not in ACTIVE_STATES})
+        self.changed.emit()
+        QTimer.singleShot(0, self._advance)
+
+    def delete_job(self, job_id):
+        ids = {job.id for job in self.jobs if job.id == job_id or job.group_id == job_id}
+        while True:
+            dependents = {job.id for job in self.jobs if ids.intersection(job.dependencies)}
+            if dependents <= ids:
+                break
+            ids.update(dependents)
+        self._remove_when_finished.update(ids)
+        for job in tuple(self.jobs):
+            if job.id in ids:
+                self.cancel_job(job.id)
+        self._remove_entries({job.id for job in self.jobs if job.id in ids and job is not self.active})
+        self.changed.emit()
+        QTimer.singleShot(0, self._advance)
+
+    def move_job(self, job_id, before_id=None):
+        moving = [job for job in self.jobs if job.id == job_id or job.group_id == job_id]
+        if not moving or any(job.state != 'Waiting' for job in moving):
+            return False
+        ids = {job.id for job in moving}
+        if before_id in ids:
+            return False
+        remaining = [job for job in self.jobs if job.id not in ids]
+        position = next((index for index, job in enumerate(remaining)
+                         if job.id == before_id or job.group_id == before_id), len(remaining))
+        candidate = remaining[:position] + moving + remaining[position:]
+        positions = {job.id: index for index, job in enumerate(candidate)}
+        if self.active and positions[self.active.id] != self.jobs.index(self.active):
+            return False
+        for job in candidate:
+            if job.state == 'Waiting' and any(positions.get(key, -1) >= positions[job.id]
+                                               for key in job.dependencies):
+                return False
+        # Generation cards stay contiguous when moving their individual blocks.
+        groups = {}
+        for index, job in enumerate(candidate):
+            if job.group_id:
+                groups.setdefault(job.group_id, []).append(index)
+        if any(indices != list(range(indices[0], indices[-1] + 1)) for indices in groups.values()):
+            return False
+        self.jobs[:] = candidate
+        self.changed.emit()
+        QTimer.singleShot(0, self._advance)
+        return True
 
     def shutdown(self):
         self.closing=True

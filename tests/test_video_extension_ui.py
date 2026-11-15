@@ -122,8 +122,10 @@ def test_grouped_generation_uses_marked_durations_and_previous_tail(tmp_path,var
             return {'path':str(tmp_path/f'block{len(requests)}.mp4')}
         from ltx_prompt_director.local_generation import load_profile
         profile=load_profile(w.settings);profile['video_variant']=variant
-        def reference(path,marked):
-            return dict(kind='video',path=path,start=marked-1,duration=1,timeline_time=0)
+        w.set_extension_transition(1, 2, 'linear_blend')
+        w.set_extension_transition(2, .5, 'linear_blend')
+        def reference(path,marked,overlap):
+            return dict(kind='video',path=path,start=marked-overlap,duration=overlap,timeline_time=0)
         with patch('ltx_prompt_director.ui.validate_profile'),patch('ltx_prompt_director.ui.run_request',side_effect=request),\
              patch('ltx_prompt_director.video_extensions.continuation_reference',side_effect=reference),\
              patch('ltx_prompt_director.ui.load_profile',return_value=profile),\
@@ -135,12 +137,12 @@ def test_grouped_generation_uses_marked_durations_and_previous_tail(tmp_path,var
                 op,args,ready,failed,options=runs[index]
                 ready(op(*args))
             assert [r['duration'] for r in requests]==[10,5,5]
-            if variant=='ref2va':
-                assert requests[1]['references'][0]['start']==9
-                assert requests[2]['references'][0]['start']==4
-            else:
-                assert all(r['references']==[] for r in requests)
-            if variant=='ref2va':assert requests[1]['references'][0]['timeline_time']==0
+            assert requests[1]['conditioning'][0]['start']==8
+            assert requests[2]['conditioning'][0]['start']==4.5
+            assert requests[1]['conditioning'][0]['duration']==2
+            assert requests[2]['conditioning'][0]['duration']==.5
+            assert requests[1]['conditioning'][0]['timeline_time']==0
+            assert all(r['references']==[] for r in requests)
             assert [r['prompt'] for r in requests]==['Original production wording.']*3
             assert blend.call_args.args[3]==[10,5,5]
         assert len({j.group_id for j in w.render_queue.jobs})==1
@@ -184,7 +186,7 @@ def test_edit_next_group_reuses_completed_prefix_and_blend_only_reuses_both(tmp_
             requests.append(value)
             path=tmp_path/f'block-{len(requests)}.mp4';path.write_bytes(f'render{len(requests)}'.encode())
             return {'path':str(path)}
-        def reference(path,marked):return dict(kind='video',path=path,start=marked-1,duration=1,timeline_time=0)
+        def reference(path,marked,overlap):return dict(kind='video',path=path,start=marked-overlap,duration=overlap,timeline_time=0)
         def build():
             first=len(runs)
             w.generate_local_video()
@@ -203,19 +205,19 @@ def test_edit_next_group_reuses_completed_prefix_and_blend_only_reuses_both(tmp_
             build();assert len(requests)==3
             assert w.video_render_cache['0']['result']['path']==first_output
             assert requests[-1]['prompt']=='Original production wording.'
-            assert requests[-1]['references'][0]['path']==first_output
+            assert requests[-1]['conditioning'][0]['path']==first_output
             w.set_extension_transition(1,2,'filmic_crossfade')
-            build();assert len(requests)==3
-            assert 'Reused completed block' in w.render_queue.jobs[-2].message
-            w.unified_prompt.setPlainText('Only the later group Unified Prompt changes.')
             build();assert len(requests)==4
+            assert requests[-1]['conditioning'][0]['duration']==2
+            w.unified_prompt.setPlainText('Only the later group Unified Prompt changes.')
+            build();assert len(requests)==5
             assert w.video_render_cache['0']['result']['path']==first_output
             assert requests[-1]['prompt']=='Only the later group Unified Prompt changes.'
             from PIL import Image
             from ltx_prompt_director.media import data_url
             image=tmp_path/'later-reference.png';Image.new('RGB',(16,16),'green').save(image)
             w.minimax_reference_images=[dict(role='identity',name='Later reference',image=data_url(str(image))),None,None,None]
-            build();assert len(requests)==5
+            build();assert len(requests)==6
             assert w.video_render_cache['0']['result']['path']==first_output
 
 
@@ -246,8 +248,8 @@ def test_single_mix_box_has_only_edge_length_controls_and_stays_centered(tmp_pat
         card=w.timeline.itemWidget(w.timeline.item(0))
         preview=card.preview
         top=preview.mapTo(w.timeline.viewport(),QPoint(0,0)).y()
-        assert box.geometry().top()==top+10
-        assert box.geometry().bottom()==top+preview.height()-11
+        assert box.diagram.height()>=36
+        assert box.geometry().height()>=88
         from PySide6.QtCore import QRect
         for control in (box.mode,box.side,box.diagram,box.left_handle,box.right_handle):
             region=QRect(control.mapTo(box,QPoint(0,0)),control.size())
@@ -262,7 +264,7 @@ def test_original_single_video_is_reused_when_extension_is_added(tmp_path):
         def request(value,**options):
             requests.append(value);path=tmp_path/f'output-{len(requests)}.mp4';path.write_bytes(f'video{len(requests)}'.encode())
             return {'path':str(path)}
-        def reference(path,marked):return dict(kind='video',path=path,start=marked-1,duration=1,timeline_time=0)
+        def reference(path,marked,overlap):return dict(kind='video',path=path,start=marked-overlap,duration=overlap,timeline_time=0)
         with patch('ltx_prompt_director.ui.validate_profile'),patch('ltx_prompt_director.ui.run_request',side_effect=request),\
              patch('ltx_prompt_director.video_extensions.continuation_reference',side_effect=reference),\
              patch('ltx_prompt_director.video_extensions.add_block_thumbnails',side_effect=lambda result,*args:result),\
@@ -276,6 +278,6 @@ def test_original_single_video_is_reused_when_extension_is_added(tmp_path):
                 for _ in range(4):APP.processEvents()
                 op,args,ready,failed,options=runs[index];ready(op(*args))
             assert len(requests)==2
-            assert requests[-1]['references'][0]['path']==original
+            assert requests[-1]['conditioning'][0]['path']==original
             assert w.video_render_cache['0']['result']['path']==original
             assert w.render_queue.jobs[1].message=='Reused completed block'
