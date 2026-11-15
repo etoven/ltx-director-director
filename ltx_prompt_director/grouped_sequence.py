@@ -168,7 +168,10 @@ class GroupedSequence(QObject):
     def selected_clip(self):
         return self.owner.render_group_options.get(str(self.owner._active_render_group),{}).get('clip',{})
     def show_group(self):
-        o=self.owner;clip=self.selected_clip()
+        o=self.owner
+        # Editor selection must not replace a running sampler's live preview.
+        if o.project_preview_panel._rendering:return
+        clip=self.selected_clip()
         if self.timeline_active:o.audio_panel.transport.pause()
         self.timeline_active=False
         if clip.get('path'):

@@ -4717,6 +4717,9 @@ class MainWindow(QMainWindow):
             self.update_render_controls()
             if current():self.local_video_pill.hide()
             if current(): self.project_preview_panel.player.setLoops(QMediaPlayer.Loops.Once)
+        def cancelled():
+            finish()
+            if current():self.grouped_sequence.show_group()
         def save_cache(group,result):
             record=result.get('_cache_record')
             if record:
@@ -4762,7 +4765,7 @@ class MainWindow(QMainWindow):
             self.start_render_job(operation,(),ready,failed,title=(self.current_project_name or 'Untitled video')+f' · Generation {generation}',
                 source='local',model='MiniMax H3',kind='Video',
                 details=f"{request['width']} × {request['height']} · {request['duration']} s · {request['steps']} steps",
-                progress=event,cancel=video_cancel,started=started,cancelled=finish,
+                progress=event,cancel=video_cancel,started=started,cancelled=cancelled,
                 workspace_key=preview_key,generation_number=generation)
             return
         from .video_extensions import continuation_reference, blend_blocks, add_block_thumbnails
@@ -4811,7 +4814,7 @@ class MainWindow(QMainWindow):
                     title=f'Block {index + 1} · {block_duration:g} s', source='local', model='MiniMax H3', kind='Video',
                     details=(f"Previous block · trailing {transition['overlap']:g} s conditions time 0"
                              if index and transition['blend'] != 'cut' else 'Original timeline conditioning'),
-                    progress=event, cancel=block_cancel, started=started, cancelled=finish,
+                    progress=event, cancel=block_cancel, started=started, cancelled=cancelled,
                     group_id=group_id, group_title=group_title,
                     dependencies=(previous.id,) if previous else (), intermediate=True,
                     workspace_key=preview_key,generation_number=generation)
@@ -4894,6 +4897,10 @@ class MainWindow(QMainWindow):
         panel.player.setLoops(QMediaPlayer.Loops.Infinite)
 
     def restore_video_render_preview(self):
+        panel=self.project_preview_panel
+        # A library/selection refresh must not reload the last sampling event.
+        if panel._rendering and getattr(panel,'_render_workspace_key',None)==self.video_preview_key():
+            return True
         value = self._video_preview_cache.get(self.video_preview_key())
         if not value or not Path(value.get('path','')).is_file():return False
         if value['kind']=='final':
