@@ -326,6 +326,8 @@ class StudioController(QObject):
         owner.audio_panel.transport.playing_changed.connect(lambda playing:self.play.setIcon(icon('pause' if playing else 'play')))
         owner.audio_panel.transport.position_changed.connect(self.position_changed)
         owner.timeline.horizontalScrollBar().valueChanged.connect(lambda _:self.dialogue.refresh())
+        from .timeline_sections import TimelineSections
+        owner.timeline_sections=TimelineSections(owner,outer,workspace,stack,stack_layout)
         self.refresh()
 
     def _sync_scrollbar(self):

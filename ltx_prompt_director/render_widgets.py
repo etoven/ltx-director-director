@@ -7,6 +7,7 @@ from PySide6.QtGui import QColor, QFont, QIcon, QPen, QDrag, QDesktopServices
 from PySide6.QtWidgets import (QApplication, QFrame, QHBoxLayout, QLabel, QListWidget, QListWidgetItem,
     QPushButton, QSizePolicy, QStyledItemDelegate, QStyle, QVBoxLayout, QWidget, QMessageBox)
 from .render_queue import ACTIVE_STATES, RenderJob
+from .local_widgets import ProgressPill, progress_text
 from .file_dialogs import choose_document_save
 
 
@@ -56,7 +57,7 @@ class JobFileList(QListWidget):
         item=self.itemAt(event.position().toPoint())
         if item:
             job=item.data(Qt.ItemDataRole.UserRole)
-            tooltip=job.title+'\n'+job.state
+            tooltip=job.title+'\n'+job.state+'\n'+job.model_label
             if QueueJobDelegate.delete_button(self.visualItemRect(item)).contains(event.position().toPoint()):
                 tooltip = 'Delete job and cancel dependent work'
             for area,label in QueueJobDelegate.file_buttons(self.visualItemRect(item)):
@@ -118,9 +119,14 @@ class JobFileList(QListWidget):
 
 class QueueJobDelegate(QStyledItemDelegate):
     """Paint only inside the list viewport; no oversized row widgets by the scrollbar."""
+    def __init__(self,parent=None):
+        super().__init__(parent)
+        self.pill=ProgressPill(parent.viewport() if hasattr(parent,'viewport') else parent)
+
     def sizeHint(self,option,index):
         job=index.data(Qt.ItemDataRole.UserRole)
-        return QSize(160, option.fontMetrics.height()+20 if job and job.kind=='Group' else option.fontMetrics.height()*3+26)
+        extra=30 if job and job.state in ACTIVE_STATES and job.kind!='Group' else 0
+        return QSize(160, option.fontMetrics.height()+20 if job and job.kind=='Group' else option.fontMetrics.height()*3+26+extra)
 
     def paint(self,painter,option,index):
         job=index.data(Qt.ItemDataRole.UserRole)
@@ -144,14 +150,22 @@ class QueueJobDelegate(QStyledItemDelegate):
         source_rect=QRect(text.right()-source_width+1,text.y(),source_width,line)
         render_icon(job.source).paint(painter,QRect(source_rect.x(),source_rect.y()+2,16,16))
         painter.setPen(QColor('#b7cbd9'));painter.drawText(source_rect.adjusted(21,0,0,0),Qt.AlignmentFlag.AlignVCenter,source)
-        status=job.state+(' · #'+str(index.data(Qt.ItemDataRole.UserRole+1)) if job.state=='Waiting' else '')
+        status=('Pending' if job.state=='Waiting' else job.state)+(' · #'+str(index.data(Qt.ItemDataRole.UserRole+1)) if job.state=='Waiting' else '')
         state_rect=QRect(text.x(),text.y(),max(0,source_rect.x()-text.x()-12),line)
         render_icon('waiting' if job.state=='Waiting' else 'rendering').paint(painter,QRect(state_rect.x(),state_rect.y()+2,16,16))
         painter.setPen(QColor('#e5b866' if job.state=='Waiting' else '#77d4e5'))
         label=state_rect.adjusted(23,0,0,0);painter.drawText(label,Qt.AlignmentFlag.AlignVCenter,fm.elidedText(status,Qt.TextElideMode.ElideRight,max(0,label.width())))
-        for offset,value,color in ((1,job.title,'#e2ebf1'),(2,job.model+' · '+job.kind,'#aabac7')):
+        for offset,value,color in ((1,job.title,'#e2ebf1'),(2,job.model_label+' · '+job.kind,'#aabac7')):
             painter.setPen(QColor(color));area=QRect(text.x(),text.y()+offset*line,text.width(),line)
             painter.drawText(area,Qt.AlignmentFlag.AlignVCenter,fm.elidedText(value,Qt.TextElideMode.ElideRight,max(0,area.width())))
+        if job.state in ACTIVE_STATES:
+            # Render the exact QLabel pill used over Video Preview, kept hidden
+            # as a delegate helper so it never floats over neighboring cards.
+            self.pill.setMaximumWidth(max(20,text.width()))
+            label=self.pill.fontMetrics().elidedText(progress_text(job.progress_event),Qt.TextElideMode.ElideRight,max(1,text.width()-20))
+            self.pill.setText(label);self.pill.adjustSize()
+            image=self.pill.grab();self.pill.hide()
+            painter.drawPixmap(text.right()-image.width()+1,text.y()+3*line+2,image)
         if job.output_path and Path(job.output_path).is_file():
             for area, label in self.file_buttons(option.rect):
                 standard=QStyle.StandardPixmap.SP_DirOpenIcon if label=='Folder' else QStyle.StandardPixmap.SP_DialogSaveButton
@@ -197,7 +211,7 @@ class RenderQueuePanel(QWidget):
         self.sweep.setToolTip('Clear completed, cancelled and failed jobs')
         self.sweep.clicked.connect(queue.sweep);row.addWidget(self.sweep)
         self.pause=QPushButton('Pause queue');self.pause.setCheckable(True);self.pause.toggled.connect(queue.set_paused);row.addWidget(self.pause);layout.addLayout(row)
-        self.summary=QLabel();layout.addWidget(self.summary)
+        self.summary=QLabel();self.summary.setWordWrap(True);layout.addWidget(self.summary)
         self.collapsed_groups=set()
         self.list=JobFileList();self.list.setObjectName('renderQueueJobs');self.list.setSpacing(4)
         self.list.setItemDelegate(QueueJobDelegate(self.list));self.list.setMinimumWidth(0)
@@ -256,7 +270,7 @@ class RenderQueuePanel(QWidget):
                 self.list.addItem(item)
             item.setHidden(job.kind != 'Group' and job.group_id in self.collapsed_groups)
             item.setData(Qt.ItemDataRole.UserRole+1,self.queue.position(job))
-            item.setToolTip(job.title+'\n'+job.state+' · '+job.source.title()+'\n'+job.model+'\n'+job.error+
+            item.setToolTip(job.title+'\n'+job.state+' · '+job.source.title()+'\n'+job.model_label+'\n'+job.error+
                             ('\nDrag this tile to copy the output file.' if job.output_path else ''))
             if rebuild and job.id==key:self.list.setCurrentItem(item)
         if rebuild and key is None and self.list.count():self.list.setCurrentRow(0)
@@ -270,6 +284,11 @@ class RenderQueuePanel(QWidget):
             self.list.verticalScrollBar().setValue(scroll)
         self.list.blockSignals(False);self.list.viewport().update()
         self.summary.setText(f"{sum(j.state in ('Rendering','Cancelling') for j in self.queue.jobs)} rendering · {sum(j.state=='Waiting' for j in self.queue.jobs)} waiting")
+        remaining=len(self.queue.remaining_video_jobs)
+        if remaining:
+            estimate=self.queue.estimated_video_seconds
+            guide=progress_text(dict(message='Video queue guide',eta_seconds=estimate)) if estimate is not None else 'Video queue guide · estimating…'
+            self.summary.setText(self.summary.text()+'\n'+guide+f' · {remaining} remaining'+(' (rendering time; queue paused)' if self.queue.paused else ''))
         self.pause.blockSignals(True);self.pause.setChecked(self.queue.paused);self.pause.blockSignals(False)
         self.pause.setText('Resume queue' if self.queue.paused else 'Pause queue');self.update_details()
         self.sweep.setEnabled(any(job.state not in ACTIVE_STATES for job in self.queue.jobs))
@@ -284,7 +303,7 @@ class RenderQueuePanel(QWidget):
         job=self.selected_job();self.cancel.setEnabled(bool(job and (job.state in ACTIVE_STATES if job.kind!='Group' else any(j.group_id==job.group_id and j.state in ACTIVE_STATES for j in self.queue.jobs))))
         self.cleanup.setEnabled(self.can_cleanup(job))
         if job is None:self.details.setText('No queued renders');self.progress.clear();return
-        self.details.setText(job.title+'\n'+job.model+' · '+job.kind+('\n'+job.details if job.details else ''))
+        self.details.setText(job.title+'\n'+job.model_label+' · '+job.kind+('\n'+job.details if job.details else ''))
         text=job.state+(' · '+f'{job.percent:.0f}%' if job.percent is not None else '')
         self.progress.setText(text+(' · '+job.message if job.message else '')+('\n'+job.error if job.error else ''))
 

@@ -46,12 +46,14 @@ def test_group_clicks_and_deselection_preserve_live_stream_and_terminal_restore(
                 APP.processEvents()
                 job=w.render_queue.active
                 assert job is not None and job.state=='Rendering'
+                assert job.mode=='fl2va' and job.model_label.startswith('FL2VA')
+                assert all(queued.mode=='fl2va' for queued in w.render_queue.jobs)
                 ready,failed,progress=runs[-1]
                 bank=tmp_path/(outcome+'.rgb')
                 bank.write_bytes(bytes((220,30,40))*6*4+bytes((30,220,40))*6*4)
                 progress(dict(kind='preview',media='latent_frames',path=str(bank),width=6,height=4,latent_frames=2,frames=22,fps=24,step=1))
                 mapping=panel.latent_player.data;generation=panel._source_generation
-                panel.latent_player.seek(100);before=len(frames)
+                panel.latent_player.seek(100);before=len(frames);origin=panel.latent_player.origin
                 for row in (1,0,1):
                     rect=w.timeline.visualItemRect(w.timeline.item(row))
                     QTest.mouseClick(w.timeline.viewport(),Qt.MouseButton.LeftButton,pos=rect.center())
@@ -64,7 +66,7 @@ def test_group_clicks_and_deselection_preserve_live_stream_and_terminal_restore(
                     assert panel._source_generation==generation
                     assert panel.latent_player.playing and panel.latent_player.timer.isActive()
                     assert job is w.render_queue.active and not job.cancel.is_set()
-                assert len(frames)>before+2 and panel.latent_player.position>100
+                assert len(frames)>before+2 and panel.latent_player.origin==origin
                 assert all(control.isHidden() for control in (panel.play,panel.seek,panel.fullscreen))
                 assert [segment.prompt for segment in w.segments]==original
                 # Terminal callbacks must release the guard; passive group display works again.

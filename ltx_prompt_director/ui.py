@@ -4763,7 +4763,7 @@ class MainWindow(QMainWindow):
                 self.project_preview_panel._generation_autoplay=True
         if not extensions:
             self.start_render_job(operation,(),ready,failed,title=(self.current_project_name or 'Untitled video')+f' · Generation {generation}',
-                source='local',model='MiniMax H3',kind='Video',
+                source='local',model='MiniMax H3',kind='Video',mode=profile['video_variant'],
                 details=f"{request['width']} × {request['height']} · {request['duration']} s · {request['steps']} steps",
                 progress=event,cancel=video_cancel,started=started,cancelled=cancelled,
                 workspace_key=preview_key,generation_number=generation)
@@ -4811,7 +4811,7 @@ class MainWindow(QMainWindow):
                     if current():
                         for diagram in self.timeline.findChildren(QWidget,'extensionBlendDiagram'):diagram.update()
                 job = self.start_render_job(render_block, (), block_ready, failed,
-                    title=f'Block {index + 1} · {block_duration:g} s', source='local', model='MiniMax H3', kind='Video',
+                    title=f'Block {index + 1} · {block_duration:g} s', source='local', model='MiniMax H3', kind='Video',mode=group_profiles[index]['video_variant'],
                     details=(f"Previous block · trailing {transition['overlap']:g} s conditions time 0"
                              if index and transition['blend'] != 'cut' else 'Original timeline conditioning'),
                     progress=event, cancel=block_cancel, started=started, cancelled=cancelled,
@@ -6991,7 +6991,7 @@ class MainWindow(QMainWindow):
             self.fit_sequence_options()
             self.editor_root.layout().activate()
             timeline_resized=False
-            if not self.timeline_shell.isHidden():
+            if not self.timeline_shell.isHidden() and not hasattr(self,'timeline_sections'):
                 limit=self.maximum_safe_timeline_height()
                 height=min(self.timeline_height,limit)
                 if self.timeline.height()!=height:
@@ -7225,6 +7225,10 @@ class MainWindow(QMainWindow):
         return max(122, min(430, available_client_height - other_minimum - reserve))
 
     def set_timeline_height(self, value: int) -> None:
+        if hasattr(self,'timeline_sections'):
+            chrome=max(0,self.timeline_shell.height()-self.timeline.height())
+            self.timeline_sections.resize_section('visual',max(122,int(value))+chrome)
+            return
         value = max(122, min(int(value), 430))
         self.timeline_height = value
         self.timeline_height_handle.current_height = value
@@ -9352,16 +9356,20 @@ class MainWindow(QMainWindow):
             self._timeline_dock_available = available
             self.timeline_dock.toggleViewAction().setVisible(available)
             self.timeline_dock.toggleViewAction().setEnabled(available)
-        if hasattr(self, 'audio_panel'):
-            self.audio_main_layout.removeWidget(self.audio_panel)
-            self.shot_sequence_panel.audio_layout.removeWidget(self.audio_panel)
-            if self.workspace_engine == 'shot_sequence':
-                self.shot_sequence_panel.audio_layout.addWidget(self.audio_panel)
-            else:
-                index = self.audio_main_layout.indexOf(self.studio.dialogue) if hasattr(self, 'studio') else self.audio_main_layout.indexOf(self.timeline_shell)
-                self.audio_main_layout.insertWidget(index + 1, self.audio_panel)
-            self.audio_panel.setVisible(self.workspace_engine!='minimax_frames')
+        if hasattr(self,'timeline_sections'):
+            self.timeline_sections.sync_workspace()
             self.sync_audio_timeline()
+        else:
+            if hasattr(self, 'audio_panel'):
+                self.audio_main_layout.removeWidget(self.audio_panel)
+                self.shot_sequence_panel.audio_layout.removeWidget(self.audio_panel)
+                if self.workspace_engine == 'shot_sequence':
+                    self.shot_sequence_panel.audio_layout.addWidget(self.audio_panel)
+                else:
+                    index = self.audio_main_layout.indexOf(self.studio.dialogue) if hasattr(self, 'studio') else self.audio_main_layout.indexOf(self.timeline_shell)
+                    self.audio_main_layout.insertWidget(index + 1, self.audio_panel)
+                self.audio_panel.setVisible(self.workspace_engine!='minimax_frames')
+                self.sync_audio_timeline()
         if hasattr(self,'grouped_sequence'):self.grouped_sequence.warning()
         if hasattr(self, 'editor_root'):
             self.editor_root.layout().invalidate()
@@ -9527,6 +9535,12 @@ class MainWindow(QMainWindow):
         self.conditioning_row.addStretch()
 
     def set_conditioning_height(self, height: int):
+        if hasattr(self,'timeline_sections'):
+            self.conditioning_height=0 if height<48 else max(96,min(260,height))
+            self.conditioning_guide.setVisible(self.conditioning_height>0 and self.unified_workspace and not self.prompt_only_workspace)
+            self.timeline_sections.sync_workspace()
+            if self.conditioning_height:self.timeline_sections.resize_section('conditioning',self.conditioning_height)
+            return
         self.conditioning_height = 0 if height < 48 else max(96, min(260, height))
         self.conditioning_height_handle.current_height = self.conditioning_height
         if self.conditioning_height:
