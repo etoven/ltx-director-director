@@ -1,5 +1,5 @@
 """Adjacent section resizing inside one top-aligned Timeline frame."""
-from PySide6.QtCore import QObject, QEvent, QSize, Qt, QTimer
+from PySide6.QtCore import QObject, QEvent, QSize, QPoint, Qt, QTimer
 from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import QWidget, QSplitter, QSplitterHandle, QSizePolicy, QLayout
 
@@ -11,7 +11,7 @@ class SectionHandle(QSplitterHandle):
         self.setCursor(Qt.CursorShape.SizeVerCursor)
         self.setToolTip('Drag to trade height between adjacent sections')
     def paintEvent(self,event):
-        painter=QPainter(self);painter.fillRect(self.rect(),QColor('#292c33'))
+        painter=QPainter(self);painter.fillRect(self.rect(),QColor('#292929'))
         painter.setPen(Qt.PenStyle.NoPen);painter.setBrush(QColor('#849ca8'))
         center=self.width()//2
         for x in range(center-15,center+16,6):painter.drawEllipse(x-1,self.height()//2-1,3,3)
@@ -44,6 +44,7 @@ class TimelineSections(QObject):
         self.heights=dict(stored) if isinstance(stored,dict) else {}
         chrome=max(50,owner.timeline_shell.minimumSizeHint().height()-owner.timeline_height)
         self.defaults={'visual':owner.timeline_height+chrome,'dialogue':104,'audio':max(124,owner.audio_panel.handle.last_height+32),'conditioning':owner.conditioning_height or 144}
+        self.brackets_layout=next((item.layout() for index in range(owner.timeline_shell.layout().count()) if (item:=owner.timeline_shell.layout().itemAt(index)).layout() is not None and item.layout().indexOf(owner.extension_brackets)>=0),None)
         self.syncing=False;self.signature=None
         self.parking=QWidget(owner);self.parking.hide()
         # Keep old settings callbacks compatible without leaving orphan grips.
@@ -62,7 +63,7 @@ class TimelineSections(QObject):
             outer.removeWidget(widget);layout.addWidget(widget)
         layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         workspace.setObjectName('timelineSharedPanel')
-        workspace.setStyleSheet('#timelineSharedPanel{background:#141d21;border:1px solid #42525b;border-radius:0;padding:0;}')
+        workspace.setStyleSheet('#timelineSharedPanel{background:#292929;border:0 solid #42525b;border-radius:0;padding:0;}')
         workspace.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Expanding)
         outer.setAlignment(Qt.AlignmentFlag.AlignTop)
         workspace.layout().setAlignment(Qt.AlignmentFlag.AlignTop)
@@ -130,6 +131,10 @@ class TimelineSections(QObject):
     def adapt(self):
         o=self.owner
         if self.frame.isHidden():return
+        origin=o.timeline.viewport().mapTo(o.editor_root,QPoint(0,0)).x()
+        ruler_origin=o.ruler_spacer.mapTo(o.editor_root,QPoint(0,0)).x()
+        o.ruler_spacer.setFixedWidth(max(0,origin-ruler_origin))
+        if self.brackets_layout is not None:self.brackets_layout.setContentsMargins(o.main_track_label.width(),0,0,0)
         o.timeline_height=o.timeline.height()
         o.conditioning_height=0 if o.conditioning_guide.isHidden() else o.conditioning_guide.height()
         dialogue=o.studio.dialogue

@@ -148,50 +148,13 @@ QMainWindow,#directorWorkspace{background:#131517;color:#d7dce8}
 
 
 def style_card(card):
-    """Rearrange existing controls; retain artwork, diff, review and resize objects."""
-    card.setProperty('kind', card.segment.kind)
+    """Keep the original stacked card controls and all their editing signals."""
+    card.setProperty('kind',card.segment.kind)
     card.outer_layout.setSizeConstraint(QLayout.SizeConstraint.SetNoConstraint)
-    layout = card.content.layout()
-    layout.setSizeConstraint(QLayout.SizeConstraint.SetNoConstraint)
-    parts = [layout.takeAt(0) for _ in range(layout.count())]
-    badges, old_title, timing = parts[0].layout(), parts[2].widget(), parts[3].layout()
-    old_title.setVisible(card.segment.kind == 'text')
-    kind = badges.itemAt(0).widget()
-    kind.setObjectName('studioClipName')
-    kind.setMinimumWidth(0)
-    kind.setMinimumWidth(70)
-    kind.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-    quote = ElidedLabel(dialogue(card.segment.prompt))
-    quote.setObjectName('studioClipQuote')
-    quote.setVisible(card.segment.kind != 'text')
-    timing.insertWidget(0, quote, 1)
-    card.studio_quote = quote
-    details = QVBoxLayout(); details.setContentsMargins(0,0,0,0); details.setSpacing(5)
-    details.addLayout(badges)
-    if card.segment.kind == 'text':
-        card.preview.setWordWrap(True)
-        card.preview.setMargin(7)
-        card.preview.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
-        details.addWidget(card.preview, 1)
-    else:
-        card.studio_prompt = ElidedLabel(card.segment.prompt or 'Enter a prompt…')
-        card.studio_prompt.setObjectName('studioClipPrompt')
-        card.studio_prompt.setMaximumHeight(44)
-        details.addWidget(card.studio_prompt, 1)
-    if card.segment.kind == 'text':
-        details.addWidget(old_title)
-    details.addLayout(timing)
-    row = QHBoxLayout(); row.setContentsMargins(3,3,3,3); row.setSpacing(12)
-    if card.segment.kind != 'text':
-        card.preview.setFixedWidth(174)
-        row.addWidget(card.preview)
-    row.addLayout(details,1)
-    layout.setContentsMargins(5,5,5,5)
-    layout.addLayout(row)
-    card.studio_ready = True
-    card.setMinimumWidth(0)
-    card.content.setMinimumWidth(0)
-    card.update_layout(80, card.resize_handle.pixels_per_second)
+    card.content.layout().setSizeConstraint(QLayout.SizeConstraint.SetNoConstraint)
+    card.content.layout().setContentsMargins(2,2,2,2)
+    card.content.layout().setSpacing(1)
+    card.setMinimumWidth(0);card.content.setMinimumWidth(0)
 
 
 class DialoguePanel(QFrame):
@@ -272,10 +235,10 @@ class StudioController(QObject):
         owner.timeline_navigation.setFixedWidth(220)
         timeline_layout.removeItem(ruler_row);outer.insertWidget(0,self.transport);outer.insertLayout(1,ruler_row)
         owner.ruler_spacer.setFixedWidth(20);ruler_row.setSpacing(0);ruler_row.addSpacing(56)
-        track_row.removeWidget(owner.main_track_label);owner.main_track_label.hide();track_row.setContentsMargins(12,10,12,0)
+        owner.main_track_label.show();track_row.setContentsMargins(0,1,0,1)
         header=QFrame();header.setObjectName('studioTrackHeader');header_row=QHBoxLayout(header);header_row.setContentsMargins(12,7,12,7)
         title=QLabel('▦  TRACK V1: VISUAL & PROMPTS');title.setObjectName('studioTrackTitle');header_row.addWidget(title);header_row.addStretch();self.range=QLabel('0.00s – 0.00s');self.range.setObjectName('studioTrackRange');header_row.addWidget(self.range)
-        timeline_layout.insertWidget(0,header)
+        timeline_layout.insertWidget(0,header);header.hide()
         self.dialogue=DialoguePanel(owner)
         stack=QWidget();stack.setObjectName('studioStack');stack_layout=QVBoxLayout(stack);stack_layout.setContentsMargins(0,0,0,0);stack_layout.setSpacing(0)
         stack_layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
@@ -378,9 +341,19 @@ STUDIO_STYLE += '''
 
 def paint_audio(canvas, event):
     panel=canvas.panel;p=QPainter(canvas);p.setRenderHint(QPainter.RenderHint.Antialiasing)
-    p.fillRect(event.rect(),QColor('#191d22'))
+    p.fillRect(event.rect(),QColor('#141e23'))
     left,scale=panel.left,panel.scale;visible=panel.scroll.horizontalScrollBar().value();right=visible+panel.scroll.viewport().width()
     colors=('#2dd4bf','#c084fc','#fbbf24');lanes=max(3,max((clip.lane+1 for clip in panel.clips),default=0))
+    # Reference-style ruler and alternating audio lanes; existing hit targets stay.
+    p.fillRect(QRectF(visible,0,right-visible,canvas.TOP),QColor('#111b20'))
+    for lane in range(lanes):
+        p.fillRect(QRectF(visible,canvas.TOP+lane*canvas.ROW,right-visible,canvas.ROW),QColor('#19262d' if lane%2==0 else '#142027'))
+    step=1
+    while step*scale<48:step+=1
+    for second in range(max(0,math.floor((visible-left)/scale/step)*step),max(1,math.ceil((right-left)/scale))+1,step):
+        x=left+second*scale
+        p.setPen(QColor('#2c3d46'));p.drawLine(QRectF(x,canvas.TOP,0,canvas.height()-canvas.TOP).topLeft(),QRectF(x,canvas.TOP,0,canvas.height()-canvas.TOP).bottomLeft())
+        p.setPen(QColor('#85a6b6'));p.drawText(QRectF(x+3,0,45,canvas.TOP),Qt.AlignmentFlag.AlignVCenter,f'{second}s')
     solo=any(getattr(c,'solo',False) for c in panel.clips)
     for lane in range(lanes):
         y=canvas.TOP+lane*canvas.ROW;color=QColor(colors[lane%3]);p.setPen(color);p.drawText(5,y+28,f'A{lane+1}')
@@ -406,24 +379,27 @@ def paint_audio(canvas, event):
         p.restore();p.setPen(Qt.PenStyle.NoPen);p.setBrush(color)
         p.drawRoundedRect(QRectF(rect.left(),rect.top(),6,rect.height()),3,3);p.drawRoundedRect(QRectF(rect.right()-6,rect.top(),6,rect.height()),3,3)
         p.setPen(color);p.drawText(rect.adjusted(12,0,-12,0),Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignVCenter,f'{clip.duration_frames/24:.2f}s')
+    position=left+panel.transport.position/1000*scale
+    p.setPen(QPen(QColor('#f2c96b'),1));p.drawLine(QRectF(position,0,0,canvas.height()).topLeft(),QRectF(position,0,0,canvas.height()).bottomLeft())
+    p.setBrush(QColor('#f2c96b'));p.drawEllipse(QRectF(position-4,2,8,8))
     if not panel.clips:
         p.setPen(QColor('#78859d'));p.drawText(QRectF(left+12,canvas.TOP,canvas.width()-left-25,80),Qt.AlignmentFlag.AlignVCenter,'Add dialogue, ambience / SFX, or music to display decoded waveforms.')
 
 
 def style_audio(panel, header, row):
     """Keep AudioTimelinePanel, AudioTransport, AudioClip and archive/export routes."""
-    panel.canvas.TOP=2
+    panel.canvas.TOP=26
     panel.studio_filter=None
-    panel.play.hide();panel.time.hide();panel.summary.hide()
+    panel.play.show();panel.time.show();panel.summary.show()
     title=next((w for w in header.findChildren(QLabel) if w.text()=='AUDIO'),None)
-    if title:title.setText('☷  AUDIO TRACKS');title.setObjectName('studioAudioTitle')
-    panel.enabled.setText('')
+    if title:title.setText('AUDIO');title.setObjectName('studioAudioTitle')
+    panel.enabled.setText('Conditioning')
     row.insertStretch(3,1)
-    panel.add.setText('+ Track');panel.add.setObjectName('studioAudioButton')
+    panel.add.setText('+ Audio');panel.add.setObjectName('studioAudioButton')
     # Existing source-range fields remain available on demand.
     properties=QPushButton('Properties');properties.setObjectName('studioSubtleButton');properties.setCheckable(True)
     properties.toggled.connect(panel.edit_controls.setVisible);row.addWidget(properties)
-    panel.edit_controls.hide()
+    properties.setChecked(True)
     for label,lane in (('All',None),('SFX',1),('Dialog',0),('Music',2)):
         button=QPushButton(label);button.setObjectName('studioFilter');button.setCheckable(True);button.setChecked(lane is None)
         def changed(checked,key=lane):
@@ -435,7 +411,36 @@ def style_audio(panel, header, row):
     from PySide6.QtWidgets import QSlider
     volume=QSlider(Qt.Orientation.Horizontal);volume.setRange(0,100);volume.setValue(80);volume.setFixedWidth(80);volume.setToolTip('Audio monitoring volume')
     volume.valueChanged.connect(lambda value:panel.transport.set_volume(value/100));row.addWidget(volume)
-    row.removeWidget(panel.add);row.addWidget(panel.add)
-    row.setContentsMargins(12,7,12,7)
+    row.setContentsMargins(4,2,4,2);row.setSpacing(4)
     # Three native 52px lanes; preserve saved heights when the user changes them.
     if not panel.owner.settings.contains('audio_panel_height'):panel.set_body_height(166)
+
+
+# Timeline-only reference presentation. Transport/snap, caches and controllers
+# retain their current styling and behavior.
+STUDIO_STYLE += """
+#timelineShell{background:#11191d;border:1px solid #354047;border-radius:0;padding:0}
+#timeline{background:#11191d;border:0;padding:0}
+#studioStack{background:#292929}
+#studioActionRail{background:#192329;border-left:1px solid #354047}
+#studioActionButton{background:#1b2e38;border:1px solid #385667;color:#b7dcef;border-radius:3px}
+#segmentCard,#segmentCard[kind="text"]{background:#252728;border:1px solid #47545c;border-radius:0}
+#segmentCard[selected="true"],#segmentCard[kind="text"][selected="true"]{background:#192a33;border:1px solid #82bacf}
+#segmentCardBody{background:#252728;border:0}
+#segmentPreview{background:#17191a;color:#e1e8ec;border:0;border-radius:0}
+#mediaBadge{background:#e5e5e5;color:#262626;font-weight:bold;padding:1px 3px}
+#roleBadge{background:#36393a;color:#eee;border:0;border-radius:0;padding:1px 4px;font-size:11px}
+#tileDelete{background:#36393a;color:#eee;border:0;border-radius:0;padding:0}
+#tileTitle{background:transparent;color:#b7d5e3;font-size:10px}
+#tileDuration,#tileStartTime{background:transparent;color:#85acbd;font-size:9px}
+#studioDialoguePanel{background:#192126;border:1px solid #354047;border-radius:0}
+#studioDialogueTitle{color:#a6c9d9;background:transparent}
+#studioDialogueCue{background:#1b242a;border:1px solid #3d4b54;border-radius:0}
+#studioDialogueBadge,#studioDialoguePanel #studioSpeaker{background:#2b353c;color:#bfd4df;border:1px solid #47545d;border-radius:2px}
+#studioDialogueText{color:#d3e0e7}
+#audioTimelinePanel{background:#292929;border:0;border-radius:0}
+#studioAudioTitle{background:transparent;color:#8edbce}
+#studioFilter{background:#28333a;color:#b9ced9;border:1px solid #42515b;border-radius:2px;padding:1px 4px}
+#studioFilter:checked{background:#24463f;color:#b6e5d6;border-color:#527d70}
+#conditioningGuide{background:#141d21;border:1px solid #42525b;border-radius:0}
+"""
