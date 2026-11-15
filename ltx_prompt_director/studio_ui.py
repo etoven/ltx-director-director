@@ -7,7 +7,7 @@ from PySide6.QtCore import Qt, QRectF, QSize, QObject, QTimer
 from PySide6.QtGui import QColor, QPainter, QPen, QIcon
 from PySide6.QtWidgets import (QWidget, QFrame, QLabel, QPushButton, QSizePolicy,
     QHBoxLayout, QVBoxLayout, QScrollArea, QDialog, QFormLayout, QLineEdit,
-    QDialogButtonBox, QPlainTextEdit, QLayout)
+    QDialogButtonBox, QPlainTextEdit, QLayout, QScrollBar)
 
 def icon(name):
     return QIcon(str(files('ltx_prompt_director').joinpath(f'assets/studio-{name}.svg')))
@@ -31,8 +31,9 @@ def snap(owner, value, scale=None, exclude_audio=None):
         return value
     cursor = 0.
     targets = [0., owner.audio_panel.transport.position / 1000]
-    for segment in owner.segments:
-        cursor += segment.duration
+    durations=owner.grouped_sequence.display_durations() if hasattr(owner,'grouped_sequence') else [s.duration for s in owner.segments]
+    for duration in durations:
+        cursor += duration
         targets.append(cursor)
     for clip in owner.audio_panel.clips:
         if clip.id != exclude_audio:
@@ -198,7 +199,7 @@ class DialoguePanel(QFrame):
         super().__init__(); self.owner=owner; self.signature=None
         self.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Fixed)
         self.setObjectName('studioDialoguePanel')
-        layout=QVBoxLayout(self);layout.setContentsMargins(12,7,12,10)
+        layout=QVBoxLayout(self);layout.setContentsMargins(0,1,0,1)
         header=QHBoxLayout();title=QLabel('◉  DIALOGUE & SUBTITLES');title.setObjectName('studioDialogueTitle')
         header.addWidget(title);header.addStretch();self.count=QLabel('0 Lines Active');self.count.setObjectName('studioDialogueBadge');header.addWidget(self.count)
         add=QPushButton('+ Add Cue');add.setObjectName('studioSubtleButton');add.clicked.connect(self.add_cue);header.addWidget(add);layout.addLayout(header)
@@ -275,11 +276,44 @@ class StudioController(QObject):
         title=QLabel('▦  TRACK V1: VISUAL & PROMPTS');title.setObjectName('studioTrackTitle');header_row.addWidget(title);header_row.addStretch();self.range=QLabel('0.00s – 0.00s');self.range.setObjectName('studioTrackRange');header_row.addWidget(self.range)
         timeline_layout.insertWidget(0,header)
         self.dialogue=DialoguePanel(owner)
-        stack=QWidget();stack.setObjectName('studioStack');stack_layout=QVBoxLayout(stack);stack_layout.setContentsMargins(0,0,0,0);stack_layout.setSpacing(12)
+        stack=QWidget();stack.setObjectName('studioStack');stack_layout=QVBoxLayout(stack);stack_layout.setContentsMargins(0,0,0,0);stack_layout.setSpacing(0)
         for widget in (owner.timeline_shell,owner.audio_panel):outer.removeWidget(widget)
         stack_layout.addWidget(owner.timeline_shell);stack_layout.addWidget(self.dialogue);stack_layout.addWidget(owner.audio_panel)
         owner.audio_main_layout=stack_layout
-        workspace=QWidget();workspace.setObjectName('studioWorkspace');row=QHBoxLayout(workspace);row.setContentsMargins(7,10,0,0);row.setSpacing(12);row.addWidget(stack,1)
+        from .grouped_sequence import CacheCoverage
+        warning=QFrame();warning.setObjectName('keyframesAudioWarning')
+        warning.setStyleSheet('#keyframesAudioWarning{background:#4b401c;color:#ffe6a1;border:0;border-radius:0;}')
+        warning_row=QHBoxLayout(warning);warning_row.setContentsMargins(7,1,7,1)
+        warning_row.addWidget(QLabel('Audio will not extend properly between groups in keyframes mode.'))
+        dismiss=QPushButton('×');dismiss.setFixedWidth(24)
+        def dismiss_warning():
+            owner.grouped_sequence.data['audioWarningDismissed']=True
+            warning.hide();owner.mark_dirty()
+        dismiss.clicked.connect(dismiss_warning);warning_row.addWidget(dismiss)
+        owner.keyframes_audio_warning=warning;warning.hide();stack_layout.insertWidget(0,warning)
+        # One bottom scrollbar owns horizontal navigation for all lanes.
+        owner.timeline_cache_coverage=CacheCoverage(root);outer.addWidget(owner.timeline_cache_coverage)
+        owner.timeline_bottom_scroll=QScrollBar(Qt.Orientation.Horizontal,root);outer.addWidget(owner.timeline_bottom_scroll)
+        self.sync_scrollbar=lambda: self._sync_scrollbar()
+        for bar in (owner.timeline.horizontalScrollBar(),owner.shot_sequence_panel.shots.horizontalScrollBar()):
+            bar.rangeChanged.connect(lambda *args:self._sync_scrollbar())
+            bar.valueChanged.connect(lambda value:self._sync_scrollbar())
+        def scroll(value):
+            bar=owner.shot_sequence_panel.shots.horizontalScrollBar() if owner.workspace_engine=='shot_sequence' else owner.timeline.horizontalScrollBar()
+            bar.setValue(value)
+            owner.audio_panel.scroll.horizontalScrollBar().setValue(value)
+            owner.conditioning_guide.horizontalScrollBar().setValue(value)
+            self.dialogue.scroll.horizontalScrollBar().setValue(value)
+        owner.timeline_bottom_scroll.valueChanged.connect(scroll)
+        owner.shot_sequence_panel.shots.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        owner.timeline.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        owner.timeline.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        owner.conditioning_guide.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        owner.audio_panel.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        for panel in (owner.timeline_shell,self.dialogue,owner.audio_panel,owner.conditioning_guide):
+            panel.setStyleSheet(panel.styleSheet()+'\n'+ '#'+panel.objectName()+'{border-radius:0;padding:0;margin-top:1px;margin-bottom:1px;}')
+
+        workspace=QWidget();workspace.setObjectName('studioWorkspace');row=QHBoxLayout(workspace);row.setContentsMargins(7,1,0,1);row.setSpacing(12);row.addWidget(stack,1)
         track_row.removeWidget(owner.add_tile_wrap);owner.add_tile_wrap.setObjectName('studioActionRail');row.addWidget(owner.add_tile_wrap,0,Qt.AlignmentFlag.AlignTop)
         for button in (owner.add_tile,owner.add_text_tile,owner.sync_timeline_button,owner.retime_all_button,owner.add_extension_tile):button.setObjectName('studioActionButton')
         outer.insertWidget(2,workspace);outer.setContentsMargins(0,0,0,0);outer.setSpacing(0)
@@ -287,6 +321,14 @@ class StudioController(QObject):
         owner.audio_panel.transport.position_changed.connect(self.position_changed)
         owner.timeline.horizontalScrollBar().valueChanged.connect(lambda _:self.dialogue.refresh())
         self.refresh()
+
+    def _sync_scrollbar(self):
+        owner=self.owner
+        bar=owner.shot_sequence_panel.shots.horizontalScrollBar() if owner.workspace_engine=='shot_sequence' else owner.timeline.horizontalScrollBar()
+        bottom=owner.timeline_bottom_scroll
+        bottom.blockSignals(True)
+        bottom.setRange(bar.minimum(),bar.maximum());bottom.setPageStep(bar.pageStep());bottom.setValue(bar.value())
+        bottom.blockSignals(False)
 
     def set_snap(self, enabled):
         self.owner.studio_snap.setText('Snap: On' if enabled else 'Snap: Off');self.owner.settings.setValue('timeline_snap',enabled)
@@ -299,13 +341,16 @@ class StudioController(QObject):
         owner.audio_panel.seek(round(value*1000))
 
     def position_changed(self, position):
-        total=max(self.owner.total_duration(),self.owner.audio_panel.transport.duration/1000)
+        total=sum(self.owner.grouped_sequence.display_durations()) if hasattr(self.owner,'grouped_sequence') and self.owner.grouped_sequence.enabled else max(self.owner.total_duration(),self.owner.audio_panel.transport.duration/1000)
+        if self.owner.workspace_engine=='shot_sequence':total=self.owner.shot_sequence_panel.shots.total
         self.time.setText(f'{int(position/60000):02d}:{position/1000%60:05.2f} / {int(total/60):02d}:{total%60:05.2f}')
 
     def refresh(self):
         self.dialogue.setVisible(self.owner.workspace_engine!='shot_sequence' and not self.owner.prompt_only_workspace)
-        self.range.setText(f'0.00s – {self.owner.total_duration():.2f}s')
+        length=sum(self.owner.grouped_sequence.display_durations()) if hasattr(self.owner,'grouped_sequence') and self.owner.grouped_sequence.enabled else self.owner.total_duration()
+        self.range.setText(f'0.00s – {length:.2f}s')
         self.dialogue.refresh();self.position_changed(self.owner.audio_panel.transport.position)
+        if hasattr(self.owner,'timeline_bottom_scroll'):self._sync_scrollbar()
         for index in range(self.owner.timeline.count()):
             card=self.owner.timeline.itemWidget(self.owner.timeline.item(index))
             if hasattr(card,'studio_prompt'):card.studio_prompt.setText(card.segment.prompt)

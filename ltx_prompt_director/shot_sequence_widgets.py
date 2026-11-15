@@ -99,7 +99,7 @@ class ShotSequencePanel(QWidget):
         self.blend=QComboBox();self.blend.addItems(MODES)
         self.side=QComboBox();self.side.addItem('Source side','source');self.side.addItem('Destination side','destination')
         self.side.setToolTip('Source: fade source tail toward destination head. Destination: reverse overlap weighting. For cut, trim the selected side.')
-        self.overlap=QDoubleSpinBox();self.overlap.setRange(0,60);self.overlap.setDecimals(2);self.overlap.setSuffix(' s');self.overlap.setValue(1)
+        self.overlap=QDoubleSpinBox();self.overlap.setRange(0,60);self.overlap.setDecimals(4);self.overlap.setSuffix(' s');self.overlap.setValue(22/24)
         self.crf=QSpinBox();self.crf.setRange(0,63);self.crf.setValue(15);self.crf.setToolTip('WebM CRF: lower values retain more detail.')
         self.width=QSpinBox();self.height=QSpinBox()
         for field,value in [(self.width,1280),(self.height,704)]:field.setRange(32,8192);field.setSingleStep(2);field.setValue(value)
@@ -190,6 +190,34 @@ class ShotSequencePanel(QWidget):
             widget.installEventFilter(self)
         self.refresh()
 
+    @property
+    def sequence_shots(self):
+        grouped=getattr(self.owner,'grouped_sequence',None)
+        return grouped.shots if grouped and grouped.enabled and self.owner.workspace_engine!='shot_sequence' else self.owner.segments
+
+    @sequence_shots.setter
+    def sequence_shots(self,value):
+        if self.owner.workspace_engine=='shot_sequence':self.owner.segments=value
+        else:self.owner.grouped_sequence.shots=value
+
+    @property
+    def playback_panel(self):
+        grouped=getattr(self.owner,'grouped_sequence',None)
+        return self.owner.project_preview_panel if grouped and grouped.enabled and grouped.timeline_active and self.owner.workspace_engine!='shot_sequence' else self.preview
+
+    def set_coverage(self,ranges):
+        self.shots.set_coverage(ranges)
+        if hasattr(self.owner,'timeline_cache_coverage'):
+            shots=self.sequence_shots
+            missing=[];cursor=0
+            from .shot_sequence import shot_layout
+            joins,_=shot_layout(shots,self.options())
+            for index,shot in enumerate(shots):
+                cursor-=joins[index-1]/24 if index else 0
+                if not shot.media_path:missing.append((cursor,cursor+shot.duration))
+                cursor+=shot.duration
+            self.owner.timeline_cache_coverage.set_coverage([(a,b,ready and not any(x<b and y>a for x,y in missing)) for a,b,ready in ranges])
+
     def eventFilter(self,watched,event):
         if (event.type()==QEvent.Type.KeyPress and self._active
                 and event.modifiers()==Qt.KeyboardModifier.NoModifier
@@ -208,29 +236,31 @@ class ShotSequencePanel(QWidget):
         self._build_timer.stop()
         if self._cancel:self._cancel.set()
         self._cancel=None
-        self._installing=True;self.preview.clear_project();self._installing=False
+        grouped=getattr(self.owner,'grouped_sequence',None)
+        if self.owner.workspace_engine=='shot_sequence' or grouped and grouped.timeline_active:
+            self._installing=True;self.playback_panel.clear_project();self._installing=False
         self._available_frames=0
-        self.preview.choose.setEnabled(True)
-        self.preview.export.setEnabled(bool(self.owner.segments) and not self._baking)
-        self.cache_percent=0;self.preview.play.setToolTip('Play the assembled sequence; the timeline line shows cache coverage')
+        self.playback_panel.choose.setEnabled(True)
+        self.playback_panel.export.setEnabled(bool(self.sequence_shots) and not self._baking)
+        self.cache_percent=0;self.playback_panel.play.setToolTip('Play the assembled sequence; the timeline line shows cache coverage')
         if self._active:
             self._pending_position=self.owner.audio_panel.transport.position
         self.shots.set_playhead(self._pending_position)
-        self.preview.play.setEnabled(bool(self.owner.segments))
-        self.preview.title.setText('Shot Sequence · RAM preview')
-        self.preview.empty.setText('Caching the sequence in the background…' if self.owner.segments else 'Drop completed shots to begin')
+        self.playback_panel.play.setEnabled(bool(self.sequence_shots))
+        self.playback_panel.title.setText('Shot Sequence · RAM preview')
+        self.playback_panel.empty.setText('Caching the sequence in the background…' if self.sequence_shots else 'Drop completed shots to begin')
 
     def deactivate(self):
         self._active=False;self._pending=False;self._desired_playing=False;self._pending_position=0
-        self.invalidate();self._signature=None;self._plan=None;self.shots.set_coverage([])
+        self.invalidate();self._signature=None;self._plan=None;self.set_coverage([])
 
     def refresh(self):
-        opts=independent_transitions([shot.id for shot in self.owner.segments],getattr(self.owner,'shot_sequence_settings',None))
+        opts=independent_transitions([shot.id for shot in self.sequence_shots],getattr(self.owner,'shot_sequence_settings',None))
         self.owner.shot_sequence_settings=opts
         tags=self.owner.project_status_tags()
-        signature=(self.owner.workspace_revision,tuple((s.id,s.media_path,s.duration,s.name,s.preview_path,source_identity(s)) for s in self.owner.segments),tuple(opts.items()),tuple((t["name"],t["color"]) for t in tags))
+        signature=(self.owner.workspace_revision,tuple((s.id,s.media_path,s.duration,s.name,s.preview_path,source_identity(s)) for s in self.sequence_shots),tuple(opts.items()),tuple((t["name"],t["color"]) for t in tags))
         if signature==self._signature:return
-        self._active=self.owner.workspace_engine=="shot_sequence"
+        self._active=self.owner.workspace_engine=='shot_sequence' or bool(getattr(self.owner,'grouped_sequence',None) and self.owner.grouped_sequence.enabled)
         self._signature=signature;self._populating=True
         selected={item.data(Qt.ItemDataRole.UserRole) for item in self.shots.selectedItems()}
         current_row=self.shots.currentRow()
@@ -239,7 +269,7 @@ class ShotSequencePanel(QWidget):
         self.blend.setCurrentText(opts['blend']);self.side.setCurrentIndex(self.side.findData(opts['side']))
         self.overlap.setValue(opts['overlap']);self.crf.setValue(opts['crf']);self.width.setValue(opts['width']);self.height.setValue(opts['height'])
         self.shots.clear()
-        for index,shot in enumerate(self.owner.segments):
+        for index,shot in enumerate(self.sequence_shots):
             item=QListWidgetItem(f'{index+1:02d} · {shot.name}\n{shot.duration:.2f}s')
             item.setData(Qt.ItemDataRole.UserRole,shot.id)
             start=int(shot.trim_start or 0)/24
@@ -247,18 +277,18 @@ class ShotSequencePanel(QWidget):
             from PySide6.QtGui import QIcon
             item.setIcon(QIcon(shot.preview_path))
             self.shots.addItem(item)
-        self.shots.set_shots(self.owner.segments,opts)
+        self.shots.set_shots(self.sequence_shots,opts)
         self.shots.set_statuses(opts.get('shot_statuses',{}),tags)
-        for index,shot in enumerate(self.owner.segments):
+        for index,shot in enumerate(self.sequence_shots):
             if shot.id==current_id:self.shots.setCurrentRow(index)
-        for index,shot in enumerate(self.owner.segments):self.shots.item(index).setSelected(shot.id in selected)
-        if self.owner.segments and not any(shot.id==current_id for shot in self.owner.segments):
-            self.shots.setCurrentRow(min(max(0,current_row),len(self.owner.segments)-1))
+        for index,shot in enumerate(self.sequence_shots):self.shots.item(index).setSelected(shot.id in selected)
+        if self.sequence_shots and not any(shot.id==current_id for shot in self.sequence_shots):
+            self.shots.setCurrentRow(min(max(0,current_row),len(self.sequence_shots)-1))
         self._populating=False
         self.sync_transition_controls()
-        joins,total=shot_layout(self.owner.segments,opts)
-        self.summary.setText(f'{len(self.owner.segments)} shots · {total/24:.2f}s · per-shot transitions · audio included')
-        plan=make_plan(copy.deepcopy(self.owner.segments),opts)
+        joins,total=shot_layout(self.sequence_shots,opts)
+        self.summary.setText(f'{len(self.sequence_shots)} shots · {total/24:.2f}s · per-shot transitions · audio included')
+        plan=make_plan(copy.deepcopy(self.sequence_shots),opts)
         changed=self._plan is None or plan.signature!=self._plan.signature
         self._plan=plan
         # A split can leave the assembled frames identical while introducing a
@@ -267,7 +297,7 @@ class ShotSequencePanel(QWidget):
         if changed:
             self._pending_position=min(self._pending_position,round(plan.count/24*1000))
             self.invalidate()
-            self.shots.set_coverage(self.cache.coverage(plan))
+            self.set_coverage(self.cache.coverage(plan))
             self._pending=bool(plan.parts)
             if self._active and self._pending:self._build_timer.start()
 
@@ -279,28 +309,31 @@ class ShotSequencePanel(QWidget):
     def sync_transition_controls(self,*_):
         if self._populating:return
         row=self.shots.currentRow()
-        selected=0<=row<len(self.owner.segments) and self.shots.item(row).isSelected()
+        selected=0<=row<len(self.sequence_shots) and self.shots.item(row).isSelected()
         self._populating=True
         opts=self.options()
         join={key:opts[key] for key in ('blend','overlap','side')}
         if selected:
-            shot=self.owner.segments[row]
-            hint=f'{row+1:02d} · {shot.name}'+(f' → {self.owner.segments[row+1].name}' if row<len(self.owner.segments)-1 else ' · used when the next shot is added')
+            shot=self.sequence_shots[row]
+            hint=f'{row+1:02d} · {shot.name}'+(f' → {self.sequence_shots[row+1].name}' if row<len(self.sequence_shots)-1 else ' · used when the next shot is added')
             join.update(opts.get('shot_transitions',{}).get(shot.id,{}))
-        else:hint='Settings for the first shot' if not self.owner.segments else 'Select a shot to edit its transition'
+        else:hint='Settings for the first shot' if not self.sequence_shots else 'Select a shot to edit its transition'
         self.blend.setCurrentText(join['blend']);self.overlap.setValue(join['overlap'])
         self.side.setCurrentIndex(self.side.findData(join['side']))
         for control in (self.blend,self.overlap,self.side):
-            control.setEnabled(selected or not self.owner.segments);control.setToolTip(hint)
+            control.setEnabled(selected or not self.sequence_shots);control.setToolTip(hint)
         self._populating=False
 
     def transition_changed(self,*_):
         if self._populating:return
         row=self.shots.currentRow()
         opts=self.options();join=dict(blend=self.blend.currentText(),overlap=self.overlap.value(),side=self.side.currentData())
-        if not self.owner.segments:opts.update(join)
-        elif 0<=row<len(self.owner.segments) and self.shots.item(row).isSelected():
-            opts['shot_transitions']={**opts.get('shot_transitions',{}),self.owner.segments[row].id:join}
+        from .blend_timing import blend_seconds
+        maximum=min((shot.duration for shot in self.sequence_shots[row:row+2]),default=60) if row>=0 else 60
+        join['overlap']=blend_seconds(join['overlap'],maximum,cut=join['blend']=='cut')
+        if not self.sequence_shots:opts.update(join)
+        elif 0<=row<len(self.sequence_shots) and self.shots.item(row).isSelected():
+            opts['shot_transitions']={**opts.get('shot_transitions',{}),self.sequence_shots[row].id:join}
         else:return
         self.owner.shot_sequence_settings=settings(opts)
         self.refresh();self.owner.mark_dirty()
@@ -325,7 +358,7 @@ class ShotSequencePanel(QWidget):
         def ready(result):
             if project!=(self.owner.current_project_id,self.owner.workspace_revision):return
             shots,sources=result
-            self.owner.segments.extend(shots)
+            self.sequence_shots.extend(shots)
             self.owner.combined_sources.extend(sources)
             self.owner.shot_sequence_settings=inherit_transitions([shot.id for shot in shots],self.owner.shot_sequence_settings)
             self.owner.refresh_timeline();self.refresh();self.owner.mark_dirty()
@@ -335,17 +368,17 @@ class ShotSequencePanel(QWidget):
     def add_paths(self,paths,index=None):
         if not paths:return
         project=(self.owner.current_project_id,self.owner.workspace_revision)
-        index=len(self.owner.segments) if index is None or index<0 else min(index,len(self.owner.segments))
-        anchor=self.owner.segments[index].id if index<len(self.owner.segments) else None
+        index=len(self.sequence_shots) if index is None or index<0 else min(index,len(self.sequence_shots))
+        anchor=self.sequence_shots[index].id if index<len(self.sequence_shots) else None
         from .ui import project_library_path
         def imported(shots):
             if project!=(self.owner.current_project_id,self.owner.workspace_revision):
                 for shot in shots:Path(shot.media_path).unlink(missing_ok=True)
                 return
-            position=next((i for i,shot in enumerate(self.owner.segments) if shot.id==anchor),min(index,len(self.owner.segments))) if anchor else len(self.owner.segments)
-            neighbor=self.owner.segments[position-1] if position>0 else self.owner.segments[0] if self.owner.segments else None
+            position=next((i for i,shot in enumerate(self.sequence_shots) if shot.id==anchor),min(index,len(self.sequence_shots))) if anchor else len(self.sequence_shots)
+            neighbor=self.sequence_shots[position-1] if position>0 else self.sequence_shots[0] if self.sequence_shots else None
             self.owner.shot_sequence_settings=inherit_transitions([shot.id for shot in shots],self.owner.shot_sequence_settings,neighbor.id if neighbor else None)
-            self.owner.segments[position:position]=shots
+            self.sequence_shots[position:position]=shots
             self.owner.refresh_timeline();self.refresh();self.owner.mark_dirty()
             if shots:self.shots.setCurrentRow(position)
         self.owner.start_disk_job(import_shots,(list(paths),project_library_path()/'shot_sources'),imported,
@@ -356,7 +389,7 @@ class ShotSequencePanel(QWidget):
         project=(self.owner.current_project_id,self.owner.workspace_revision)
         from .ui import project_library_path
         def imported(shots):
-            location=next((i for i,s in enumerate(self.owner.segments) if s.id==target_id),-1)
+            location=next((i for i,s in enumerate(self.sequence_shots) if s.id==target_id),-1)
             if project!=(self.owner.current_project_id,self.owner.workspace_revision) or location<0:
                 for shot in shots:Path(shot.media_path).unlink(missing_ok=True)
                 return
@@ -365,7 +398,7 @@ class ShotSequencePanel(QWidget):
             # of the replacement. Additional dropped movies follow this slot.
             shots[0].id=target_id
             self.owner.shot_sequence_settings=inherit_transitions([shot.id for shot in shots[1:]],self.owner.shot_sequence_settings,target_id)
-            self.owner.segments[location:location+1]=shots
+            self.sequence_shots[location:location+1]=shots
             self.owner.refresh_timeline();self.shots.setCurrentRow(location);self.owner.mark_dirty()
         self.owner.start_disk_job(import_shots,(list(paths),project_library_path()/'shot_sources'),imported,
                                  lambda message:QMessageBox.warning(self,'Shot replacement failed',message))
@@ -375,7 +408,7 @@ class ShotSequencePanel(QWidget):
         if status and status not in available:return
         current=getattr(self.owner,'shot_sequence_settings',{})
         statuses=dict(current.get('shot_statuses',{}))
-        existing={shot.id for shot in self.owner.segments}
+        existing={shot.id for shot in self.sequence_shots}
         for ident in ids:
             if ident not in existing:continue
             if status:statuses[ident]=status
@@ -388,7 +421,7 @@ class ShotSequencePanel(QWidget):
         if blend not in MODES:return
         current=settings(getattr(self.owner,'shot_sequence_settings',None))
         overrides=dict(current.get('shot_transitions',{}))
-        existing={shot.id for shot in self.owner.segments}
+        existing={shot.id for shot in self.sequence_shots}
         for ident in ids:
             if ident not in existing:continue
             join=dict(overrides.get(ident,{}))
@@ -401,7 +434,7 @@ class ShotSequencePanel(QWidget):
         if side not in ('source','destination'):return
         current=settings(getattr(self.owner,'shot_sequence_settings',None))
         overrides=dict(current.get('shot_transitions',{}))
-        existing={shot.id for shot in self.owner.segments}
+        existing={shot.id for shot in self.sequence_shots}
         for ident in ids:
             if ident not in existing:continue
             join=dict(overrides.get(ident,{}))
@@ -412,15 +445,15 @@ class ShotSequencePanel(QWidget):
 
     def order_changed(self,*_):
         if self._populating:return
-        mapping={s.id:s for s in self.owner.segments}
+        mapping={s.id:s for s in self.sequence_shots}
         ids=[self.shots.item(i).data(Qt.ItemDataRole.UserRole) for i in range(self.shots.count())]
-        self.owner.segments=[mapping[key] for key in ids]
+        self.sequence_shots=[mapping[key] for key in ids]
         self.owner.refresh_timeline();self.refresh();self.owner.mark_dirty()
 
     def remove(self):
         ids={item.data(Qt.ItemDataRole.UserRole) for item in self.shots.selectedItems()}
         if not ids:return
-        self.owner.segments=[s for s in self.owner.segments if s.id not in ids]
+        self.sequence_shots=[s for s in self.sequence_shots if s.id not in ids]
         opts=dict(self.owner.shot_sequence_settings)
         for field in ('shot_statuses','shot_transitions'):
             if field in opts:opts[field]={key:value for key,value in opts[field].items() if key not in ids}
@@ -436,7 +469,7 @@ class ShotSequencePanel(QWidget):
         self.shots.setCurrentRow(target)
 
     def export_segment(self,ident):
-        for index,shot in enumerate(self.owner.segments):
+        for index,shot in enumerate(self.sequence_shots):
             if shot.id==ident:
                 self.owner.export_segment(shot,index+1)
                 return
@@ -444,10 +477,10 @@ class ShotSequencePanel(QWidget):
     def pause_for_edit(self):
         self._desired_playing=False
         self._audio_scrub.cancel()
-        self.preview.player.pause()
+        self.playback_panel.player.pause()
 
     def trim_shot(self,ident,start,end):
-        shot=next((shot for shot in self.owner.segments if shot.id==ident),None)
+        shot=next((shot for shot in self.sequence_shots if shot.id==ident),None)
         if shot is None:return
         total=shot.media_duration_frames or (int(shot.trim_start or 0)+round(shot.duration*24))
         start=max(0,min(int(start),total-1));end=max(start+1,min(int(end),total))
@@ -456,21 +489,21 @@ class ShotSequencePanel(QWidget):
         self.owner.refresh_timeline();self.owner.mark_dirty()
 
     def split_shot(self,ident,frame):
-        index=next((i for i,shot in enumerate(self.owner.segments) if shot.id==ident),-1)
+        index=next((i for i,shot in enumerate(self.sequence_shots) if shot.id==ident),-1)
         if index<0:return
-        shot=self.owner.segments[index];count=round(shot.duration*24);frame=int(frame)
+        shot=self.sequence_shots[index];count=round(shot.duration*24);frame=int(frame)
         if not 0<frame<count:return
         self.pause_for_edit()
         right=copy.deepcopy(shot);right.id=str(uuid4())
         right.trim_start=int(shot.trim_start or 0)+frame;right.duration=(count-frame)/24;right.shot_trimmed=True
         shot.duration=frame/24;shot.shot_trimmed=True
-        opts=independent_transitions([s.id for s in self.owner.segments],self.owner.shot_sequence_settings)
+        opts=independent_transitions([s.id for s in self.sequence_shots],self.owner.shot_sequence_settings)
         joins=dict(opts['shot_transitions']);joins[right.id]=dict(joins[shot.id])
         joins[shot.id]=dict(blend='cut',overlap=0.0,side='source')
         statuses=dict(opts.get('shot_statuses',{}))
         if shot.id in statuses:statuses[right.id]=statuses[shot.id]
         self.owner.shot_sequence_settings={**opts,'shot_transitions':joins,'shot_statuses':statuses}
-        self.owner.segments.insert(index+1,right)
+        self.sequence_shots.insert(index+1,right)
         self.owner.refresh_timeline();self.shots.setCurrentRow(index+1);self.owner.mark_dirty()
 
     def scrub_sequence(self,milliseconds):
@@ -487,21 +520,21 @@ class ShotSequencePanel(QWidget):
         if getattr(self.preview,'_memory_preview',False):
             if milliseconds < self._available_frames/24*1000:
                 if audible and not self._installing:
-                    self._audio_scrub.seek(max(0,min(milliseconds,self.preview.duration)))
-                else:self.preview.seek_to(milliseconds)
+                    self._audio_scrub.seek(max(0,min(milliseconds,self.playback_panel.duration)))
+                else:self.playback_panel.seek_to(milliseconds)
             else:
                 self._audio_scrub.cancel()
-                self._installing=True;self.preview.player.pause();self._installing=False
+                self._installing=True;self.playback_panel.player.pause();self._installing=False
         self.shots.set_playhead(milliseconds)
 
     def sequence_position_changed(self,milliseconds):
         if self._audio_scrub.active:return
         if getattr(self.preview,'_memory_preview',False) and not self._installing and not self._waiting_position:
             self._pending_position=milliseconds
-            self.shots.set_playhead(milliseconds,follow=self.preview.player.playbackState()==QMediaPlayer.PlaybackState.PlayingState)
+            self.shots.set_playhead(milliseconds,follow=self.playback_panel.player.playbackState()==QMediaPlayer.PlaybackState.PlayingState)
             audio=self.owner.audio_panel.transport
             audio.position=milliseconds
-            audio.sync(self.preview.player.playbackState()==QMediaPlayer.PlaybackState.PlayingState)
+            audio.sync(self.playback_panel.player.playbackState()==QMediaPlayer.PlaybackState.PlayingState)
             audio.position_changed.emit(milliseconds)
 
     def sequence_playback_changed(self,state):
@@ -519,7 +552,7 @@ class ShotSequencePanel(QWidget):
 
     def sequence_media_status(self,status):
         if status in {QMediaPlayer.MediaStatus.LoadedMedia,QMediaPlayer.MediaStatus.BufferedMedia}:
-            self.preview.play.setEnabled(True)
+            self.playback_panel.play.setEnabled(True)
             if self._installing:
                 self._installing=False
                 self.shots.set_playhead(self._pending_position)
@@ -532,7 +565,7 @@ class ShotSequencePanel(QWidget):
     def install_thumbnails(self,plan,key,images,peaks):
         identity=plan.sources.get(key)
         if identity is None:return
-        for shot in self.owner.segments:
+        for shot in self.sequence_shots:
             if source_identity(shot)==source_identity(identity):
                 total=max(1,round(identity.duration*24))
                 start=int(shot.trim_start or 0);end=start+max(1,round(shot.duration*24))
@@ -546,25 +579,30 @@ class ShotSequencePanel(QWidget):
 
     def install_preview(self,data,frames):
         if not data:return
+        grouped=getattr(self.owner,'grouped_sequence',None)
+        if self.owner.workspace_engine!='shot_sequence' and (not grouped or not grouped.timeline_active or self.owner.project_preview_panel._rendering):
+            self._available_frames=frames
+            return
         self._audio_scrub.cancel()
         self._available_frames=frames
         playable=self._pending_position<frames/24*1000
         self._waiting_position=not playable
         self._installing=True
-        self.preview.set_memory_video('Shot Sequence · continuous preview',data,
+        self.playback_panel.player.setVideoOutput(self.playback_panel.video)
+        self.playback_panel.set_memory_video('Shot Sequence · continuous preview',data,
                                       min(self._pending_position,max(0,round(frames/24*1000)-1)),
                                       autoplay=self._desired_playing and playable)
-        self.preview.export.setEnabled(not self._baking)
+        self.playback_panel.export.setEnabled(not self._baking)
 
     def restore_full_clips(self):
-        if not self.owner.segments:return
+        if not self.sequence_shots:return
         project=(self.owner.current_project_id,self.owner.workspace_revision)
-        shots=copy.deepcopy(self.owner.segments)
+        shots=copy.deepcopy(self.sequence_shots)
         def scan():return [(shot.id,probe(materialize_source(shot))['frames']) for shot in shots]
         def ready(lengths):
             if project!=(self.owner.current_project_id,self.owner.workspace_revision):return
             by_id=dict(lengths)
-            for shot in self.owner.segments:
+            for shot in self.sequence_shots:
                 if shot.id in by_id:
                     shot.media_duration_frames=by_id[shot.id];shot.duration=by_id[shot.id]/24;shot.trim_start=0;shot.shot_trimmed=False
             self.owner.refresh_timeline();self.owner.mark_dirty()
@@ -580,29 +618,29 @@ class ShotSequencePanel(QWidget):
         return channel
 
     def snapshot(self):
-        if not self.owner.segments:raise ValueError('Add at least one completed shot.')
-        if any(s.kind!='video' for s in self.owner.segments):raise ValueError('Shot sequences accept completed movies only.')
-        return copy.deepcopy(self.owner.segments),self.options()
+        if not self.sequence_shots:raise ValueError('Add at least one completed shot.')
+        if any(s.kind!='video' for s in self.sequence_shots):raise ValueError('Shot sequences accept completed movies only.')
+        return copy.deepcopy(self.sequence_shots),self.options()
 
     def build_preview(self):
         if not self._plan or not self._plan.parts:return
         self._desired_playing=True
         if self._worker_running:
-            if self._available_frames and not self._installing:self.preview.player.play()
+            if self._available_frames and not self._installing:self.playback_panel.player.play()
             return
         if self._available_frames==self._plan.count and getattr(self.preview,"_memory_preview",False) and not self._installing:
-            self.preview.player.play();return
+            self.playback_panel.player.play();return
         self._pending=True
         self._build_timer.stop();self._start_cached_preview()
 
     def toggle_sequence_playback(self):
         self._audio_scrub.cancel()
         if self._available_frames and not self._installing:
-            self.preview.toggle_playback()
+            self.playback_panel.toggle_playback()
         elif self._desired_playing:
             self._desired_playing=False
         else:self.build_preview()
-        self.preview.play.setText('❚❚ Pause' if self._desired_playing else '▶ Play')
+        self.playback_panel.play.setText('❚❚ Pause' if self._desired_playing else '▶ Play')
 
     def _start_cached_preview(self):
         if not self._active or not self._pending or not self._plan or not self._plan.parts:return
@@ -610,35 +648,35 @@ class ShotSequencePanel(QWidget):
         plan=self._plan;revision=self._revision
         self._pending=False;self._worker_running=True
         cancel=threading.Event();self._cancel=cancel
-        self.preview.play.setEnabled(True)
+        self.playback_panel.play.setEnabled(True)
         progress=RenderProgress(self)
         def cache_progress(value,stage):
             if revision!=self._revision:return
             self.cache_percent=value
-            self.preview.play.setToolTip(f'Background preview: {stage} · {value}%')
+            self.playback_panel.play.setToolTip(f'Background preview: {stage} · {value}%')
         progress.updated.connect(cache_progress,Qt.ConnectionType.QueuedConnection)
         coverage=self.cache.coverage(plan)
-        self.shots.set_coverage(coverage)
+        self.set_coverage(coverage)
         def region(index):
             if revision!=self._revision:return
             start,end,_=coverage[index];coverage[index]=(start,end,True)
-            self.shots.set_coverage(coverage)
+            self.set_coverage(coverage)
         progress.region.connect(region,Qt.ConnectionType.QueuedConnection)
         progress.thumbnail.connect(lambda key,images,peaks:self.install_thumbnails(plan,key,images,peaks) if revision==self._revision else None,Qt.ConnectionType.QueuedConnection)
         progress.partial.connect(lambda data,frames:self.install_preview(data,frames) if revision==self._revision else None,Qt.ConnectionType.QueuedConnection)
         def finish():
             progress.deleteLater();self._worker_running=False
-            if revision==self._revision:self._cancel=None;self.preview.play.setEnabled(True)
+            if revision==self._revision:self._cancel=None;self.playback_panel.play.setEnabled(True)
             elif self._active and self._pending:self._build_timer.start()
         def ready(data):
             finish()
             if revision!=self._revision or data is None:return
-            self.cache_percent=100;self.preview.play.setToolTip('Play the assembled sequence')
+            self.cache_percent=100;self.playback_panel.play.setToolTip('Play the assembled sequence')
             self.install_preview(data,plan.count)
         def failed(message):
             finish()
             if revision!=self._revision:return
-            self.preview.empty.setText(message);self.preview.play.setToolTip(message)
+            self.playback_panel.empty.setText(message);self.playback_panel.play.setToolTip(message)
         self.owner.start_disk_job(self.cache.build,(plan,cancel,progress.updated.emit,progress.region.emit,progress.thumbnail.emit,progress.partial.emit),ready,failed)
 
     def bake(self):
@@ -647,12 +685,12 @@ class ShotSequencePanel(QWidget):
         except ValueError as error:QMessageBox.information(self,'Shot Sequence',str(error));return
         path=self.owner.next_export_path((self.owner.current_project_name or 'Shot Sequence')+'.webm')
         self.owner.statusBar().showMessage('Baking shot sequence with source audio…')
-        self._baking=True;self.preview.export.setEnabled(False)
+        self._baking=True;self.playback_panel.export.setEnabled(False)
         progress=self.progress_channel(self.bake_progress,'Final bake',lambda:self._baking)
         def finish():
             self._baking=False;progress.deleteLater()
-            enabled=bool(self.owner.segments)
-            self.preview.export.setEnabled(enabled)
+            enabled=bool(self.sequence_shots)
+            self.playback_panel.export.setEnabled(enabled)
         def ready(_):
             self.bake_progress.setValue(100);self.bake_progress.setFormat('Final bake · saved · %p%')
             finish();self.bake_progress.hide();self.owner.record_export(path)

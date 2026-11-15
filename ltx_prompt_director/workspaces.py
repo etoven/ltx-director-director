@@ -12,7 +12,7 @@ from PySide6.QtCore import QStandardPaths
 from .timing_limits import sequence_limit, shot_limit
 
 SCHEMA_VERSION = 1
-FACTORY_IDS = frozenset({'ltx', 'minimax_official_skill_base', 'minimax_official_skill_reference', 'minimax_prompt_refinement'})
+FACTORY_IDS = frozenset({'ltx', 'minimax_official_skill_base', 'minimax_official_skill_reference', 'minimax_prompt_refinement', 'shot_sequence'})
 PREVIOUS_REFINEMENT_DIGEST = 'b2c4c7c9c53dd41c5cf3440742c9effcb7de352b63d945b8d73171807fe09977'
 KINDS = {"image", "video", "start", "end", "identity", "style", "scene", "object", "composition", "wardrobe", "voice", "sound", "motion"}
 
@@ -206,6 +206,11 @@ class WorkspaceStore:
                 except (OSError, ValueError):
                     pass
             compact_marker.touch()
+        shared_marker=self.root/'.shared-shot-sequence-v1'
+        if not shared_marker.exists():
+            if not (self.root/'shot_sequence.json').exists():
+                self.save(json.loads(files('ltx_prompt_director').joinpath('workspace_templates/shot_sequence.json').read_text()))
+            shared_marker.touch()
         self.errors: list[str] = []
 
     def load(self) -> dict[str, dict]:

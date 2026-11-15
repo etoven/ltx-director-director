@@ -76,7 +76,7 @@ class ExtensionBrackets(QWidget):
             if group:
                 painter.setPen(QColor('#a8bfc7'))
                 setting=self.owner.extension_transition(group)
-                label='Hard cut' if setting['blend']=='cut' else f'↔ {setting["overlap"]:g} s blend included'
+                label='Hard cut' if setting['blend']=='cut' else f'↔ {setting["overlap"]:.3f} s blend included'
                 painter.drawText(QRectF(visible_left+5,22,max(0,visible_right-visible_left-10),18),Qt.AlignmentFlag.AlignLeft,label)
 
 
@@ -140,6 +140,10 @@ class BlendControl(QWidget):
             index=list(owner.render_groups()).index(group)
             self.title.setText(f'{index} → {index+1} · {self.length.value():g} s')
         def update():
+            from .blend_timing import blend_seconds
+            snapped=blend_seconds(self.length.value(),maximum,cut=self.mode.currentData()=='cut')
+            if abs(self.length.value()-snapped)>1e-5:
+                self.length.blockSignals(True);self.length.setValue(snapped);self.length.blockSignals(False)
             cut=self.mode.currentData()=='cut'
             self.mode.setToolTip(self.mode.currentText())
             if cut:
@@ -240,7 +244,7 @@ class BlendDiagram(QWidget):
         mode=self.owner.extension_transition(self.group)['blend']
         draw_blend_curves(painter,QRectF(5,5,max(1,self.width()-10),max(1,self.height()-10)),mode)
         length=0 if mode=='cut' else self.owner.extension_transition(self.group)['overlap']
-        text=f'{length:g} s'
+        text=f'{length:.3f} s'
         width=painter.fontMetrics().horizontalAdvance(text)+8
         label=QRectF(self.width()-width-2,1,width,painter.fontMetrics().height()+2)
         painter.fillRect(label,QColor(0,0,0,175));painter.setPen(QColor('#d3e6e8'));painter.drawText(label,Qt.AlignmentFlag.AlignCenter,text)

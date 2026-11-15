@@ -393,12 +393,12 @@ def video_generation(request):
                 reference = {'type': 'video', 'video': frames}
                 if ref.get('audio_path'):
                     audio, rate = read_reference_audio(ref['audio_path'], start=ref.get('start', 0), duration=ref.get('duration', 15))
-                    if audio.shape[-1] / rate < 2: raise ValueError('H3 audio references need at least two seconds of source audio.')
+                    if audio.shape[-1] / rate < 2 and not ref.get('continuation'): raise ValueError('H3 audio references need at least two seconds of source audio.')
                     reference.update(type='video_audio', audio=torch.from_numpy(audio), sample_rate=rate)
                 references.append(reference)
             elif ref.get('kind') == 'audio':
                 audio, rate = read_reference_audio(ref['path'], start=ref.get('start', 0), duration=ref.get('duration', 15))
-                if audio.shape[-1] / rate < 2: raise ValueError('H3 audio references need at least two seconds of source audio.')
+                if audio.shape[-1] / rate < 2 and not ref.get('continuation'): raise ValueError('H3 audio references need at least two seconds of source audio.')
                 references.append({'type': 'audio', 'audio': torch.from_numpy(audio), 'sample_rate': rate})
             else:
                 image = _pil_reference(ref)

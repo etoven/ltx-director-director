@@ -80,6 +80,17 @@ def _reference_records(payload):
                 seen.add(id(ref));yield ref
 
 
+def _grouped_media(payload):
+    for options in payload.get('renderGroupOptions',{}).values():
+        clip=options.get('clip',{})
+        for key in ('path','preview_path'):
+            if clip.get(key):yield clip,key
+    originals=[raw for options in payload.get('renderGroupOptions',{}).values() for raw in options.get('authoringOriginal',[])]
+    for raw in [*payload.get('groupedSequence',{}).get('authoring',[]),*originals]:
+        for key in ('media_path','preview_path'):
+            if raw.get(key):yield raw,key
+
+
 def save_project_archive(path: str | Path, payload: dict, segments: list) -> None:
     """Save atomically; no source file or base64 copy is held in memory."""
     target = Path(path)
@@ -171,6 +182,20 @@ def save_project_archive(path: str | Path, payload: dict, segments: list) -> Non
                     _copy_to_archive(archive,member,stream)
                 source['archiveProject']=member
                 source.pop('projectPath',None)
+            packed={}
+            for index,(record,key) in enumerate(_grouped_media(payload)):
+                source=Path(record[key]);identity=str(source)
+                if identity not in packed:
+                    member=f'grouped-assets/{index:04d}{source.suffix.lower()}'
+                    if source.is_file():
+                        with source.open('rb') as incoming:_copy_to_archive(archive,member,incoming)
+                    elif record.get('archiveOriginal') and key=='media_path':
+                        with zipfile.ZipFile(record['archiveOriginal'][0]) as original:
+                            with original.open(record['archiveOriginal'][1]) as incoming:_copy_to_archive(archive,member,incoming)
+                    else:continue
+                    packed[identity]=member
+                record['groupArchive_'+key]=packed[identity]
+            # Legacy whole-project previews remain independent of group clips.
             payload["projectVersion"] = 11
             archive.writestr(MANIFEST, json.dumps(payload, separators=(",", ":"), ensure_ascii=False), compress_type=zipfile.ZIP_DEFLATED, compresslevel=6)
         os.replace(temporary.name, target)
@@ -225,6 +250,10 @@ def load_project_archive(path: str | Path) -> dict:
             frame["name"] = safe_media_filename(frame.get("name", ""), "Segment", suffix=suffix)
             frame["_archiveMediaPath"] = str(_member_cache_path(frame["archiveSource"], source, suffix))
             frame["_archiveSourceSize"] = info.file_size
+        for record,key in _grouped_media(payload):
+            if record.get('groupArchive_'+key):
+                record[key]=str(_cached_member(archive,record['groupArchive_'+key],source))
+                record.pop('archiveOriginal',None)
         for entry in payload.get('combinedSources', []):
             if entry.get('archiveProject'):
                 member=entry['archiveProject']

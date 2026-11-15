@@ -36,6 +36,7 @@ def _check(cancel):
 
 
 def source_identity(shot):
+    if not shot.media_path:return ('placeholder',shot.id,shot.name)
     digest=getattr(shot,'_media_digest','')
     archive=getattr(shot,'_archive_source',None)
     if digest:return ('digest',digest)
@@ -194,11 +195,15 @@ class PreviewCache:
             if notify:notify(key,cached['thumbs'],cached['peaks'])
             return cached
         _check(cancel)
-        shot=plan.sources[key];path=materialize_source(shot)
-        with av.open(path) as container:
-            first=next(container.decode(video=0),None)
-            if first is None:raise ValueError(f'{shot.name} has no decodable video frames.')
-            info=dict(path=path,frames=max(1,round(shot.duration*FPS)),audio=bool(container.streams.audio),start_time=first.time or 0)
+        shot=plan.sources[key]
+        if not shot.media_path:
+            info=dict(path='',frames=max(1,round(shot.duration*FPS)),audio=False,start_time=0,placeholder=True,name='Waiting for video · '+shot.name)
+        else:
+            path=materialize_source(shot)
+            with av.open(path) as container:
+                first=next(container.decode(video=0),None)
+                if first is None:raise ValueError(f'{shot.name} has no decodable video frames.')
+                info=dict(path=path,frames=max(1,round(shot.duration*FPS)),audio=bool(container.streams.audio),start_time=first.time or 0)
         blocks=[];batch=[];thumbs=[]
         for image in _frames(info,plan.width,plan.height,cancel):
             batch.append(image)

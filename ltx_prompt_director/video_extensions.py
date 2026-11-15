@@ -19,17 +19,21 @@ def duration(path):
         return float(media.duration / av.time_base)
 
 
-def continuation_reference(path, marked_duration=None, overlap=OVERLAP_SECONDS):
-    length = duration(path)
+def continuation_reference(path, marked_duration=None, overlap=OVERLAP_SECONDS, trim_start=0):
+    from .blend_timing import blend_seconds
+    length = duration(path) - trim_start/24
     if marked_duration is not None:length=min(length,float(marked_duration))
-    overlap = round(float(overlap) * 24) / 24
+    overlap = blend_seconds(overlap, length)
     if overlap <= 0:
         raise ValueError('Continuation conditioning needs a positive blend duration.')
     if length + 1/24 < overlap:
         raise ValueError('The previous block is shorter than the continuation overlap.')
-    return dict(kind='video', name=f'Previous block · trailing {overlap:g} s', path=str(path),
-                start=max(0,length-overlap), duration=overlap,
-                timeline_time=0, timeline_start=0, timeline_end=overlap)
+    with av.open(str(path)) as media:has_audio=bool(media.streams.audio)
+    reference = dict(kind='video', name=f'Previous block · trailing {overlap:g} s', path=str(path),
+                start=trim_start/24+max(0,length-overlap), duration=overlap,
+                timeline_time=0, timeline_start=0, timeline_end=overlap, continuation=True)
+    if has_audio:reference['audio_path']=str(path)
+    return reference
 
 
 def render_join(source, destination, source_length, left_frames, right_frames, mode, output, cancel, side='center'):

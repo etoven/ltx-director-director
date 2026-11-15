@@ -129,6 +129,11 @@ class TimelinePreviewController(QObject):
         self.scrubber.seek(position)
 
     def audio_play_state(self,playing):
+        grouped=getattr(self.owner,'grouped_sequence',None)
+        if grouped and grouped.enabled and self.owner.workspace_engine!='shot_sequence':
+            if playing:grouped.activate_timeline(self.owner.audio_panel.transport.position/1000,True)
+            elif grouped.timeline_active:self.panel.player.pause()
+            return
         if self.owner.workspace_engine=='shot_sequence':return
         if playing:
             if self.audio_muted_before is None:self.audio_muted_before=self.panel.audio.isMuted()
@@ -140,6 +145,8 @@ class TimelinePreviewController(QObject):
                 self.panel.audio.setMuted(self.audio_muted_before);self.audio_muted_before=None
 
     def audio_position(self,position):
+        grouped=getattr(self.owner,'grouped_sequence',None)
+        if grouped and grouped.timeline_active:return
         if self.owner.audio_panel.transport.playing and not self.syncing_audio:self.seek(position/1000,from_audio=True)
 
     def seek_audio(self,position,audible):
@@ -149,6 +156,11 @@ class TimelinePreviewController(QObject):
     def seek(self,seconds,from_audio=False):
         if self.panel._rendering or self.owner.workspace_engine=='shot_sequence':return
         self.from_audio=from_audio
+        grouped=getattr(self.owner,'grouped_sequence',None)
+        if grouped and grouped.enabled:
+            grouped.activate_timeline(seconds,self.owner.audio_panel.transport.playing)
+            self.owner.ruler.playhead=seconds;self.owner.ruler.update()
+            return
         self.latest=max(0.,min(float(seconds),self.owner.total_duration()))
         if not from_audio:
             self.audio_seek_audible=True

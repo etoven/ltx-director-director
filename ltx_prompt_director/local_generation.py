@@ -350,3 +350,21 @@ def generate_text(images, rules, profile, schema, timeout):
     result = run_request({'kind': 'text', 'profile': profile, 'prompt': rules,
                           'images': contexts, 'schema': schema}, on_event=progress, timeout=max(timeout, 120))
     return result['text']
+
+
+def workspace_video_profile(profile, definition):
+    """Workspace engine, not the last selected checkpoint, owns the H3 mode."""
+    result = dict(profile)
+    engine = definition.get('engine', '')
+    mode = {'minimax_frames': 'fl2va', 'minimax_references': 'ref2va'}.get(engine)
+    if mode is None:return result
+    path = Path(result.get('video_model', ''))
+    name = path.name.lower()
+    if mode not in name:
+        other = 'ref2va' if mode == 'fl2va' else 'fl2va'
+        candidate = path.with_name(re.sub(other, mode, path.name, flags=re.I))
+        if candidate == path or not candidate.is_file():
+            raise ValueError(f'This workspace requires a pruned {mode.upper()} checkpoint. Configure the matching local video model.')
+        path = candidate
+    result.update(video_variant=mode, video_model=str(path))
+    return result

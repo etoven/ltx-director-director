@@ -1,5 +1,6 @@
 """CPU shot compositor: streamed video, source audio and seekable RAM WebM previews."""
 from __future__ import annotations
+from .blend_timing import DEFAULT_SECONDS, blend_seconds, blend_frames
 from collections import deque
 from fractions import Fraction
 from itertools import islice
@@ -16,7 +17,7 @@ import numpy as np
 MODES = ('cut', 'linear_blend', 'filmic_crossfade', 'perceptual_crossfade')
 FPS = 24
 RATE = 48000
-DEFAULTS = dict(blend='perceptual_crossfade', overlap=1.0, side='source', crf=15,
+DEFAULTS = dict(blend='perceptual_crossfade', overlap=DEFAULT_SECONDS, side='source', crf=15,
                 width=1280, height=704)
 
 
@@ -30,6 +31,7 @@ def settings(value=None):
     result['overlap'] = float(result['overlap'])
     if not np.isfinite(result['overlap']) or not 0 <= result['overlap'] <= 60:
         raise ValueError('Overlap must be between 0 and 60 seconds.')
+    result['overlap'] = blend_seconds(result['overlap'], cut=result['blend']=='cut')
     raw=result.get('shot_transitions',{})
     if isinstance(raw,dict):
         overrides={}
@@ -56,6 +58,7 @@ def _transition(value,defaults):
     result['overlap']=float(result['overlap'])
     if not np.isfinite(result['overlap']) or not 0<=result['overlap']<=60:
         raise ValueError('Overlap must be between 0 and 60 seconds.')
+    result['overlap']=blend_seconds(result['overlap'],cut=result['blend']=='cut')
     return result
 
 
@@ -119,7 +122,7 @@ def overlaps(clips, seconds):
     intervals=[seconds]*(len(counts)-1) if isinstance(seconds,(int,float)) else list(seconds)
     if len(intervals)!=max(0,len(counts)-1):raise ValueError('Each shot join needs an overlap duration.')
     for count,seconds in zip(counts[1:],intervals):
-        amount = min(round(seconds * FPS), total, count)
+        amount = blend_frames(seconds, min(total,count)/FPS) if seconds else 0
         result.append(amount)
         total += count - amount
     return result, total
@@ -160,6 +163,15 @@ def blend_frame(source, destination, alpha, mode, side):
 
 
 def _frames(clip, width, height, cancel):
+    if clip.get('placeholder'):
+        from PIL import Image, ImageDraw
+        image=Image.new('RGB',(width,height),(25,29,36));draw=ImageDraw.Draw(image)
+        draw.text((12,height//2),clip.get('name','Waiting for video'),fill=(185,200,214))
+        pixels=np.asarray(image)
+        for _ in range(clip['frames']):
+            if cancel is not None and cancel.is_set():raise RuntimeError('Preview cancelled.')
+            yield pixels
+        return
     with av.open(clip['path']) as container:
         stream = container.streams.video[0]
         decoded = iter(container.decode(stream))

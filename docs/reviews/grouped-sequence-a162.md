@@ -1,0 +1,13 @@
+# Shared grouped sequence · Aurora a162
+
+The grouped authoring timeline retains its segment cards, group brackets and in-place blend curves, mode/side menus and edge handles. Blend edits use integer 17k+5 frame counts; a new source-side join defaults to 22 frames (0.9167 s at 24 fps). No additional blend toolbar is introduced.
+
+Group options now persist a stable sequence ID and a clip attachment with source path, preview, source duration, trim and playback duration. The project-level groupedSequence record preserves authoring rows across Shot Sequence projection. Sequence trims, splits, order and media changes update group records without deleting source files. Existing per-group render results become attachments when the project is opened. Portable archives include group videos and backing authoring media.
+
+Grouped timeline transport uses the existing Shot Sequence PreviewCache, workfiles and RAM movie playback. Missing clips generate labeled, silent placeholders. The selected group's Video Preview Play action remains separate. Media replacement invalidates its content-dependent source/joins and marks later generation dependencies stale. Manual attachment revisions prevent earlier generation callbacks from overwriting newer imports. Completed groups attach independently; automatic final assembly jobs are removed.
+
+MiniMax workspace engines select their checkpoint family. References use Ref2VA with aligned video/audio continuation at local time zero; keyframes use FL2VA and omit continuation audio. The timed window matches the snapped blend contribution rather than a two-second constant. Keyframes hide audio tracks and show a persistent, dismissible audio-continuity warning.
+
+Timeline subpanels are square, with 1 px vertical margins and retained side gutters. A shared scrollbar at the bottom routes to the active timeline and synchronizes the lanes. Time/conditioning height is resized through its existing handle. Normal RAM preview installation restores the embedded player output, and workspace switches close fullscreen surfaces and cancel stale cache work.
+
+Validation uses one bounded native fixture workflow and one audiovisual/request/archive contract scenario. Native coverage includes actual Add Video, stale generation protection, grouped RAM playback, a missing clip, no assembly jobs, hidden keyframe audio, embedded output, sequence trim/split synchronization, save/reopen, hidden sampling controls and a captured rendered frame. It does not establish live model quality or seamless model-generated audio. CI retains the broader existing regression suite.
