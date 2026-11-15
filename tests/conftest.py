@@ -65,3 +65,12 @@ def render_admission_is_explicit(request, monkeypatch):
     if request.module.__name__.split('.')[-1]=='test_gpu_queue':return
     from ltx_prompt_director.render_queue import RenderQueue
     monkeypatch.setattr(RenderQueue,'_admit_local',lambda self,job:self._start_job(job))
+
+
+@pytest.fixture(autouse=True)
+def lan_discovery_is_explicit(request, monkeypatch):
+    from ltx_prompt_director.network_render import NetworkRenderController
+    from ltx_prompt_director.cast_preview import CastPreviewController
+    monkeypatch.setattr(CastPreviewController,'discover',lambda self:None)
+    if request.module.__name__.split('.')[-1]=='test_network_render':return
+    monkeypatch.setattr(NetworkRenderController,'start',lambda self:None)

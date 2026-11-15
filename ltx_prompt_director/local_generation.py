@@ -163,7 +163,10 @@ def resolve_video_seed(value):
 
 def run_request(request, on_event=None, cancel=None, timeout=None):
     from .local_session import MANAGER, WorkerError
+    from .network_render import REMOTE_TARGET,run_remote_request
     if cancel is None:cancel=LOCAL_CANCEL.get()
+    if REMOTE_TARGET.get() and request.get('kind') in {'image','video'}:
+        return run_remote_request(request,REMOTE_TARGET.get(),on_event or LOCAL_PROGRESS.get(),cancel,timeout or 86400)
     timeout=timeout if timeout is not None else 86400 if request.get('kind')=='video' else 7200
     inference=request.get('kind') in ('image','video','text','audio')
     if not inference:return _run_request(request,on_event,cancel,timeout)
@@ -332,7 +335,8 @@ def flux_image_size(width, height):
 
 
 def generate_image(prompt, profile, source='', references=None):
-    validate_profile(profile, 'image')
+    from .network_render import REMOTE_TARGET
+    if not REMOTE_TARGET.get():validate_profile(profile, 'image')
     width, height = flux_image_size(profile.get('image_width', 1024), profile.get('image_height', 1024))
     event = run_request({'kind': 'image', 'profile': profile, 'prompt': prompt, 'source': source,
                          'references': references or [], 'width': width, 'height': height,

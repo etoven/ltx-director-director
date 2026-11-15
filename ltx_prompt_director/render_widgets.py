@@ -28,7 +28,7 @@ def paint_render_overlay(painter,image,job,position,phase,font,scale):
         painter.drawLine(center.x()+int(cos(angle)*radius*.6),center.y()+int(sin(angle)*radius*.6),center.x()+int(cos(angle)*radius),center.y()+int(sin(angle)*radius))
     source=QRect(image.right()-s(25),image.y()+s(4),s(21),s(21))
     painter.setBrush(QColor('#152532'));painter.setPen(QColor('#405768'));painter.drawRoundedRect(source,s(4),s(4))
-    render_icon(job.source).paint(painter,source.adjusted(s(2),s(2),-s(2),-s(2)))
+    render_icon('local' if job.source=='network' else job.source).paint(painter,source.adjusted(s(2),s(2),-s(2),-s(2)))
     label=job.state+(' · '+str(position) if job.state=='Waiting' else '')
     font=QFont(font);font.setPixelSize(s(12));painter.setFont(font)
     width=min(image.width()-s(6),painter.fontMetrics().horizontalAdvance(label)+s(28))
@@ -146,9 +146,10 @@ class QueueJobDelegate(QStyledItemDelegate):
         text=card.adjusted(10,7,-42,-7)
         # Both source text and icon are laid out against viewport-bounded card,
         # with a separate gutter after them before the scrollbar.
-        source='Cloud' if job.source=='cloud' else 'Local';source_width=fm.horizontalAdvance(source)+23
+        source=job.remote_target.get('name','Network') if job.source=='network' else 'Cloud' if job.source=='cloud' else 'Local'
+        source=fm.elidedText(source,Qt.TextElideMode.ElideRight,max(35,text.width()//2));source_width=fm.horizontalAdvance(source)+23
         source_rect=QRect(text.right()-source_width+1,text.y(),source_width,line)
-        render_icon(job.source).paint(painter,QRect(source_rect.x(),source_rect.y()+2,16,16))
+        render_icon('local' if job.source=='network' else job.source).paint(painter,QRect(source_rect.x(),source_rect.y()+2,16,16))
         painter.setPen(QColor('#b7cbd9'));painter.drawText(source_rect.adjusted(21,0,0,0),Qt.AlignmentFlag.AlignVCenter,source)
         status=('Pending' if job.state=='Waiting' else job.state)+(' · #'+str(index.data(Qt.ItemDataRole.UserRole+1)) if job.state=='Waiting' else '')
         state_rect=QRect(text.x(),text.y(),max(0,source_rect.x()-text.x()-12),line)

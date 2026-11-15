@@ -3666,6 +3666,8 @@ class MainWindow(QMainWindow):
         from .render_queue import RenderQueue
         self.render_queue=RenderQueue(lambda *args,**kwargs:self.start_disk_job(*args,**kwargs,allow_close_on_error=True),self)
         self._build_ui()
+        self.timeline.currentRowChanged.connect(lambda _:self.refresh_render_scope())
+        self.refresh_render_scope()
         from .grouped_sequence import GroupedSequence
         self.grouped_sequence=GroupedSequence(self)
         from .timeline_preview import TimelinePreviewController
@@ -4624,27 +4626,45 @@ class MainWindow(QMainWindow):
         self.local_video_cancel_button = QPushButton("Cancel generation")
         self.local_video_cancel_button.clicked.connect(self.cancel_queued_video)
         self.local_video_cancel_button.hide()
-        row.addWidget(self.local_video_generate); row.addWidget(self.local_video_cancel_button)
+        self.render_scope=QComboBox();self.render_scope.setObjectName('videoRenderScope');self.render_scope.addItem('All groups',None)
+        self.render_scope.setToolTip('Render all groups or only the chosen group')
+        row.addWidget(self.local_video_generate);row.addWidget(self.render_scope); row.addWidget(self.local_video_cancel_button)
         panel.layout().insertLayout(1, row)
         self.local_video_pill = ProgressPill(panel, anchor=lambda: panel.empty if panel.video.isHidden() else panel.video)
         self.local_video_log = GenerationLog()
         panel.layout().addWidget(self.local_video_log)
+        from .network_render import NetworkRenderController
+        self.network_render=NetworkRenderController(self)
+        from .cast_preview import CastPreviewController
+        self.cast_preview=CastPreviewController(self)
+
+    def refresh_render_scope(self):
+        if not hasattr(self,'render_scope'):return
+        selected=self.render_scope.currentData()
+        groups=list(self.render_groups())
+        self.render_scope.blockSignals(True);self.render_scope.clear();self.render_scope.addItem('All groups',None)
+        for index,group in enumerate(groups):self.render_scope.addItem(f'Group {index+1} only',group)
+        found=self.render_scope.findData(selected)
+        self.render_scope.setCurrentIndex(max(0,found));self.render_scope.setVisible(len(groups)>1)
+        self.render_scope.blockSignals(False)
 
     def generate_local_video(self):
-        profile = load_profile(self.settings)
-        try: validate_profile(profile, "video")
+        profile = self.network_render.client_profile('video') if self.network_render.target else load_profile(self.settings)
+        try:
+            if self.network_render.target:self.network_render.validate(profile, "video")
+            else:validate_profile(profile,"video")
         except ValueError as error:
-            QMessageBox.information(self, "Local video setup", str(error))
-            self.open_settings(); return
-        self.store_render_group()
-        production = self.minimax_prompt_text if self.unified_workspace else self.global_prompt.toPlainText()
-        prompt = prompt_content(production, preserve_spacing=True)
-        if not prompt:
-            self.statusBar().showMessage("Write or generate the unified production prompt first.", 10000)
+            QMessageBox.information(self, "Video render setup", str(error))
+            if not self.network_render.target:self.open_settings()
             return
-        extensions = self.video_extensions
+        self.store_render_group()
+        all_groups=copy.deepcopy(list(self.render_groups().items()))
+        selected_group=self.render_scope.currentData()
+        grouped_segments=[entry for entry in all_groups if selected_group is None or entry[0]==selected_group]
+        if not grouped_segments:
+            self.statusBar().showMessage('Add timeline segments before rendering.',8000);return
+        extensions=max(0,len(grouped_segments)-1)
         extra_references = copy.deepcopy([r for r in self.active_reference_images() if r])
-        grouped_segments = copy.deepcopy(list(self.render_groups().items()))
         from .render_groups import input_stamp,production_prompt
         contexts=[copy.deepcopy(self.render_group_options.get(str(group),{}).get('context') or self.capture_render_group()) for group,items in grouped_segments]
         prompts=[prompt_content(production_prompt(context),preserve_spacing=True) for context in contexts]
@@ -4659,8 +4679,10 @@ class MainWindow(QMainWindow):
                 if enabled and value and index<refs.get('untimed_slots',0) and value.get('role','identity') in refs.get('kinds',[])])
         from .local_generation import workspace_video_profile
         try:
-            group_profiles=[workspace_video_profile(profile,self.render_group_definition(group)) for group,_ in grouped_segments]
-            for item in group_profiles:validate_profile(item,'video')
+            group_profiles=[self.network_render.group_profile(profile,self.render_group_definition(group)) for group,_ in grouped_segments]
+            for item in group_profiles:
+                if self.network_render.target:self.network_render.validate(item,'video')
+                else:validate_profile(item,'video')
         except ValueError as error:
             QMessageBox.information(self,'Local video setup',str(error));return
         profile=group_profiles[0]
@@ -4668,13 +4690,25 @@ class MainWindow(QMainWindow):
         attachment_revisions={str(group):self.render_group_options.get(str(group),{}).get('attachmentRevision',0) for group,_ in grouped_segments}
         stamps={str(group):input_stamp(items,context) for (group,items),context in zip(grouped_segments,contexts)}
         prompt=prompts[0];extra_references=group_references[0]
-        conditioning_segments = grouped_segments[0][1] if extensions else copy.deepcopy(self.segments)
+        conditioning_segments = copy.deepcopy(grouped_segments[0][1])
         cache=self.video_render_cache
         request = dict(kind="video", profile=profile, prompt=prompt,
             duration=profile["video_duration"], width=profile["video_width"], height=profile["video_height"], steps=profile["video_steps"],
             seed=profile["video_seed"])
-        if not extensions and self.workspace_engine.startswith('minimax') and self.requested_length.value()>0:
+        if selected_group is not None:request['duration']=self.render_group_duration(selected_group)
+        elif not extensions and self.workspace_engine.startswith('minimax') and self.requested_length.value()>0:
             request['duration']=self.requested_length.value()
+        selected_continuation=None
+        if selected_group is not None:
+            position=next(index for index,(group,items) in enumerate(all_groups) if group==selected_group)
+            transition=self.extension_transition(selected_group)
+            if position and transition['blend']!='cut' and transition['overlap']>0:
+                previous=all_groups[position-1][0]
+                clip=self.render_group_options.get(str(previous),{}).get('clip',{})
+                if not clip.get('path') or not Path(clip['path']).is_file():
+                    self.statusBar().showMessage('Attach or render the preceding group first, or set this join to Cut.',10000);return
+                previous_duration=float(clip.get('duration') or self.render_group_duration(previous))+float(clip.get('trim_start') or 0)/24
+                selected_continuation=(clip['path'],previous_duration,transition['overlap'],profile['video_variant'])
         block_durations = [self.render_group_duration(group) for group,items in grouped_segments] if extensions else [float(request['duration'])]
         if extensions and any(not 4<=length<=15 for length in block_durations):
             QMessageBox.information(self,'Video extensions','Set each bracketed block length between 4 and 15 seconds using the timeline length control.')
@@ -4709,6 +4743,12 @@ class MainWindow(QMainWindow):
             for segment in conditioning_segments:
                 if segment.kind in ('image','video'):materialize_source(segment)
             conditioning = video_references(conditioning_segments, [], request['duration'])
+            if selected_continuation:
+                from .video_extensions import continuation_reference
+                path,duration,overlap,mode=selected_continuation
+                reference=continuation_reference(path,duration,overlap)
+                if mode!='ref2va':reference.pop('audio_path',None)
+                conditioning.insert(0,reference)
             from .render_cache import cached_render
             prepared={**request,'conditioning':conditioning,'references':extra_references}
             return cached_render(cache,grouped_segments[0][0],prepared,conditioning_segments,
@@ -4762,7 +4802,7 @@ class MainWindow(QMainWindow):
                 self.local_video_log.clear();self.project_preview_dock.show()
                 self.project_preview_panel._generation_autoplay=True
         if not extensions:
-            self.start_render_job(operation,(),ready,failed,title=(self.current_project_name or 'Untitled video')+f' · Generation {generation}',
+            self.start_render_job(operation,(),ready,failed,title=(self.current_project_name or 'Untitled video')+f' · Generation {generation}'+(f' · Group {next(i for i,(g,_) in enumerate(all_groups) if g==selected_group)+1}' if selected_group is not None else ''),
                 source='local',model='MiniMax H3',kind='Video',mode=profile['video_variant'],
                 details=f"{request['width']} × {request['height']} · {request['duration']} s · {request['steps']} steps",
                 progress=event,cancel=video_cancel,started=started,cancelled=cancelled,
@@ -4925,6 +4965,9 @@ class MainWindow(QMainWindow):
         return state.get('segments',[]) if state.get('projectType')==workspace[2] else []
 
     def start_render_job(self,operation,args,finished,failed,*,title,source,model,kind='Image',details='',progress=None,cancel=None,started=None,cancelled=None,project_id=None,**queue_options):
+        destination=self.network_render.target if hasattr(self,'network_render') and source=='local' and kind in {'Video','Image'} else None
+        if destination:
+            source='network';queue_options['remote_target']=copy.deepcopy(destination)
         job=self.render_queue.enqueue(operation,args,finished,failed,title=title,
             project_id=self.current_project_id if project_id is None else project_id,
             source=source,model=model,kind=kind,details=details,progress=progress,cancel=cancel,
@@ -4933,6 +4976,7 @@ class MainWindow(QMainWindow):
         return job
 
     def update_render_controls(self):
+        self.refresh_render_scope()
         active=[j for j in self.render_queue.jobs if j.kind=='Video' and j.state in {'Waiting','Rendering','Cancelling'}]
         self._local_video_busy=bool(active)
         key=self.video_preview_key()
@@ -4941,7 +4985,8 @@ class MainWindow(QMainWindow):
         if hasattr(self,'local_video_generate'):
             self.local_video_generate.setEnabled(True);self.local_video_cancel_button.setVisible(current)
             number=self._video_generation_counts.get(key,0)+1
-            self.local_video_generate.setText('✦ Generate locally'+(f' ({number})' if number>1 else ''))
+            destination=self.network_render.target if hasattr(self,'network_render') else None
+            self.local_video_generate.setText(('✦ Generate on '+destination['name'] if destination else '✦ Generate locally')+(f' ({number})' if number>1 else ''))
             self.project_preview_panel.set_rendering(rendering)
         if hasattr(self,'project_list'):self.project_list.viewport().update()
 
@@ -4951,7 +4996,7 @@ class MainWindow(QMainWindow):
 
     def cancel_local_artwork(self):
         for job in tuple(self.render_queue.jobs):
-            if job.kind=='Image' and job.source=='local':self.render_queue.cancel_job(job.id)
+            if job.kind=='Image' and job.source in {'local','network'}:self.render_queue.cancel_job(job.id)
         for event in tuple(self._local_artwork_cancel.values()):event.set()
 
     def local_image_progress(self, event, workspace):
@@ -6847,6 +6892,8 @@ class MainWindow(QMainWindow):
         for panel in getattr(self, 'audio_generation_panels', {}).values():
             panel.dispose()
         if hasattr(self,'timeline_preview'):self.timeline_preview.cancel()
+        if hasattr(self,'network_render'):self.network_render.close()
+        if hasattr(self,'cast_preview'):self.cast_preview.close()
         if hasattr(self,'render_queue'):self.render_queue.shutdown()
         self.reject_segment_prompt_review()
         if hasattr(self, "shot_sequence_panel"):
@@ -10535,7 +10582,7 @@ class MainWindow(QMainWindow):
             )
             for provider in ("gemini", "openai")
         }
-        keys["local"] = {**load_profile(self.settings),
+        keys["local"] = {**(self.network_render.client_profile('image') if hasattr(self,'network_render') and self.network_render.target else load_profile(self.settings)),
                          "image_width": self.output_width.value(), "image_height": self.output_height.value()}
         return available_artwork_tools(
             keys,
@@ -11038,7 +11085,11 @@ class MainWindow(QMainWindow):
         request['referenceImages']=copy.deepcopy(self._artwork_reference_inputs(segment_id))
         if item.kind=='image':request['sourceImage']=materialize_source(item)
         tool=copy.deepcopy(tool)
-        if tool.provider=='local':self._local_artwork_cancel[segment_id]=cancel
+        if tool.provider=='local':
+            self._local_artwork_cancel[segment_id]=cancel
+            if hasattr(self,'network_render') and self.network_render.target:
+                from dataclasses import replace
+                tool=replace(tool,config={**self.network_render.client_profile('image'),**{k:v for k,v in (tool.config or {}).items() if k in {'image_width','image_height','steps','preview_every'}}})
         self._artwork_jobs=getattr(self,'_artwork_jobs',0)+1
         item.artwork_status='generating'
         def current():return self.render_workspace_is_current(workspace)

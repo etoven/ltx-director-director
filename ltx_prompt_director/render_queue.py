@@ -43,6 +43,7 @@ class RenderJob:
     started_at: float | None = None
     elapsed_seconds: float | None = None
     reused: bool = False
+    remote_target: dict = field(default_factory=dict,repr=False)
 
     @property
     def progress_event(self):
@@ -106,13 +107,13 @@ class RenderQueue(QObject):
             else:estimate=fallback
             job.expected_seconds=estimate
 
-    def enqueue(self,operation,args,finished,failed,*,title,project_id='',source='local',model='',kind='Image',details='',progress=None,cancel=None,started=None,cancelled=None,group_id='',group_title='',dependencies=(),intermediate=False,workspace_key=(),generation_number=0,mode=''):
+    def enqueue(self,operation,args,finished,failed,*,title,project_id='',source='local',model='',kind='Image',details='',progress=None,cancel=None,started=None,cancelled=None,group_id='',group_title='',dependencies=(),intermediate=False,workspace_key=(),generation_number=0,mode='',remote_target=None):
         if self.closing:raise RuntimeError('Render queue is closing')
         job=RenderJob(title,str(project_id or ''),source,model,kind,details,
                       operation=operation,args=args,finished=finished,failed=failed,
                       progress=progress,started=started,cancelled=cancelled,
                       group_id=group_id,group_title=group_title,dependencies=tuple(dependencies),intermediate=intermediate,
-                      workspace_key=workspace_key,generation_number=generation_number,mode=mode)
+                      workspace_key=workspace_key,generation_number=generation_number,mode=mode,remote_target=dict(remote_target or {}))
         if cancel is not None:job.cancel=cancel
         self.jobs.append(job);self.changed.emit();self._advance()
         return job
@@ -246,9 +247,10 @@ class RenderQueue(QObject):
             if job.started:job.started()
             def operation(*args):
                 from .local_generation import LOCAL_KEEP_LOADED
-                token=LOCAL_KEEP_LOADED.set(job.source=='local')
+                from .network_render import REMOTE_TARGET
+                token=LOCAL_KEEP_LOADED.set(job.source=='local');destination=REMOTE_TARGET.set(job.remote_target or None)
                 try:return job.operation(*args)
-                finally:LOCAL_KEEP_LOADED.reset(token)
+                finally:LOCAL_KEEP_LOADED.reset(token);REMOTE_TARGET.reset(destination)
             self.executor(operation,job.args,lambda result:finish(result),lambda error:finish(error=error),progress=progress,cancel=job.cancel)
         except Exception as error:finish(error=str(error))
 

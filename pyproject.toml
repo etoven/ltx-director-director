@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ltx-prompt-director"
-version = "1.13.0a166"
+version = "1.13.0a167"
 description = "Prompt Director: native AI video prompt editor and completed-shot sequence workspace"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -12,6 +12,8 @@ license = {text = "MIT"}
 authors = [{name = "Prompt Director contributors"}]
 dependencies = [
   "psutil>=5.9,<8",
+  "websockets>=15,<18",
+  "pychromecast>=13.1,<15",
   "PySide6-Essentials>=6.8,<7",
   "PySide6-Addons>=6.8,<7",
   "Pillow>=10.4,<12",
