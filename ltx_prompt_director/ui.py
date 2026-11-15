@@ -4572,9 +4572,7 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("Write or generate the unified production prompt first.", 10000)
             return
         extensions = self.video_extensions
-        if extensions and profile.get('video_variant', 'ref2va') != 'ref2va':
-            QMessageBox.information(self, 'Video extensions', 'Select the Ref2VA video checkpoint in Local models to condition extensions on the preceding video.')
-            return
+        video_variant = profile.get('video_variant', 'ref2va' if 'ref2va' in Path(profile['video_model']).name.lower() else 'fl2va')
         extra_references = copy.deepcopy([r for r in self.active_reference_images() if r])
         grouped_segments = copy.deepcopy(list(self.render_groups().items()))
         from .render_groups import input_stamp,production_prompt
@@ -4705,7 +4703,9 @@ class MainWindow(QMainWindow):
                     from .project_archive import materialize_source
                     for segment in block_segments:
                         if segment.kind in ('image','video'):materialize_source(segment)
-                    references = [continuation_reference(previous.output_path,previous_duration)] + video_references(block_segments,block_refs,block_duration)
+                    references = video_references(block_segments,block_refs,block_duration)
+                    if video_variant == 'ref2va':
+                        references.insert(0,continuation_reference(previous.output_path,previous_duration))
                     from .render_cache import cached_render
                     prepared={**request,'prompt':block_prompt,'duration':block_duration,'references':references}
                     previous_result=cache.get(str(previous_group),{}).get('result',{})
@@ -4720,7 +4720,7 @@ class MainWindow(QMainWindow):
                         for diagram in self.timeline.findChildren(QWidget,'extensionBlendDiagram'):diagram.update()
                 job = self.start_render_job(render_block, (), block_ready, failed,
                     title=f'Block {index + 1} · {block_duration:g} s', source='local', model='MiniMax H3', kind='Video',
-                    details='Trailing second of preceding block conditions time 0' if index else 'Original timeline conditioning',
+                    details=('Trailing second of preceding block conditions time 0' if video_variant=='ref2va' else 'Text prompt with optional opening and ending keyframes') if index else 'Original timeline conditioning',
                     progress=event, cancel=video_cancel, started=started, cancelled=finish,
                     group_id=group_id, group_title=group_title,
                     dependencies=(previous.id,) if previous else (), intermediate=True,

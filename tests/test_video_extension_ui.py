@@ -109,7 +109,8 @@ def test_failed_block_prevents_continuations_and_blend(tmp_path):
     queue.shutdown()
 
 
-def test_grouped_generation_uses_marked_durations_and_previous_tail(tmp_path):
+@pytest.mark.parametrize('variant', ['ref2va', 'fl2va'])
+def test_grouped_generation_uses_marked_durations_and_previous_tail(tmp_path,variant):
     with window(tmp_path) as w:
         prepare(w);w.current_project_id='one'
         w.add_video_extension();w.requested_length.setValue(5)
@@ -119,10 +120,13 @@ def test_grouped_generation_uses_marked_durations_and_previous_tail(tmp_path):
         def request(value,**options):
             requests.append(value)
             return {'path':str(tmp_path/f'block{len(requests)}.mp4')}
+        from ltx_prompt_director.local_generation import load_profile
+        profile=load_profile(w.settings);profile['video_variant']=variant
         def reference(path,marked):
             return dict(kind='video',path=path,start=marked-1,duration=1,timeline_time=0)
         with patch('ltx_prompt_director.ui.validate_profile'),patch('ltx_prompt_director.ui.run_request',side_effect=request),\
              patch('ltx_prompt_director.video_extensions.continuation_reference',side_effect=reference),\
+             patch('ltx_prompt_director.ui.load_profile',return_value=profile),\
              patch('ltx_prompt_director.video_extensions.blend_blocks',return_value={'path':str(tmp_path/'final.mp4')}) as blend,\
              patch.object(w,'attach_local_generated_video'),patch.object(w.project_preview_panel,'set_project'):
             w.generate_local_video()
@@ -131,9 +135,12 @@ def test_grouped_generation_uses_marked_durations_and_previous_tail(tmp_path):
                 op,args,ready,failed,options=runs[index]
                 ready(op(*args))
             assert [r['duration'] for r in requests]==[10,5,5]
-            assert requests[1]['references'][0]['start']==9
-            assert requests[2]['references'][0]['start']==4
-            assert requests[1]['references'][0]['timeline_time']==0
+            if variant=='ref2va':
+                assert requests[1]['references'][0]['start']==9
+                assert requests[2]['references'][0]['start']==4
+            else:
+                assert all(r['references']==[] for r in requests)
+            if variant=='ref2va':assert requests[1]['references'][0]['timeline_time']==0
             assert [r['prompt'] for r in requests]==['Original production wording.']*3
             assert blend.call_args.args[3]==[10,5,5]
         assert len({j.group_id for j in w.render_queue.jobs})==1
