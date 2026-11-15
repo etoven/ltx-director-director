@@ -49,6 +49,7 @@ w.audio_panel.transport.seek(2500)
 app.processEvents()
 target=ROOT/'docs/images/studio-v3-experimental.png';target.parent.mkdir(exist_ok=True)
 assert w.grab().save(str(target))
+assert w.chrome.header.grab().save(str(ROOT/'docs/images/studio-header-padding.png'))
 print('Experimental proof:',target,'version',ui.__version__,flush=True)
 # Exercise the native group controllers and capture their bracket/blend UI.
 w.segments=[Segment(f'Prompt {index+1}','','','text','text',f'[Shot {index+1}] Preserve authored motion and camera direction.',5,render_group=index//3) for index in range(9)]

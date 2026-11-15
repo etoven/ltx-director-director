@@ -63,7 +63,7 @@ class WindowChrome(QObject):
         self.header=QFrame(owner);self.header.setObjectName('customChromeHeader')
         column=QVBoxLayout(self.header);column.setContentsMargins(0,0,0,0);column.setSpacing(0)
         self.command_row=QFrame(self.header);self.command_row.setObjectName('chromeCommandRow')
-        self.command_row.setFixedHeight(44)
+        self.command_row.setFixedHeight(36)
         row=QHBoxLayout(self.command_row);row.setContentsMargins(0,0,0,0);row.setSpacing(0)
         self.title_balance=QWidget(self.command_row);self.title_balance.setObjectName('chromeCommandGroup')
         left_layout=QHBoxLayout(self.title_balance);left_layout.setContentsMargins(0,0,0,0);left_layout.setSpacing(0)
@@ -122,7 +122,7 @@ class WindowChrome(QObject):
         row.addWidget(self.trailing)
         owner.setMenuWidget(self.header)
         toolbar.show()
-        self.header.setMinimumHeight(44+max(42,toolbar.sizeHint().height()))
+        self.header.setMinimumHeight(36+max(34,toolbar.sizeHint().height()))
         owner.installEventFilter(self)
         QApplication.instance().installEventFilter(self)
         for widget in [owner,*owner.findChildren(QWidget)]:widget.setMouseTracking(True)
@@ -133,12 +133,12 @@ class WindowChrome(QObject):
     def update_metrics(self,scale=None):
         if scale is not None:self.scale=scale
         size=lambda n:max(1,round(n*self.scale))
-        self.command_row.setFixedHeight(size(44))
+        self.command_row.setFixedHeight(size(36))
         for button in (self.minimize,self.maximize,self.close):
-            button.setFixedSize(size(36),size(38));button.setIconSize(QSize(size(16),size(16)))
+            button.setFixedSize(size(36),size(32));button.setIconSize(QSize(size(16),size(16)))
         self.controls.setFixedWidth(size(111))
         for bar in (self.project_commands,self.utility_commands):bar.setIconSize(self.toolbar.iconSize())
-        self.header.setMinimumHeight(size(44)+max(size(42),self.toolbar.sizeHint().height()))
+        self.header.setMinimumHeight(size(36)+max(size(34),self.toolbar.sizeHint().height()))
         desired=max(size(240),self.project_commands.sizeHint().width(),self.utility_commands.sizeHint().width()+size(111))
         gutter=min(desired,max(size(150),(self.owner.width()-size(80))//2))
         for group in (self.title_balance,self.trailing):
@@ -148,7 +148,7 @@ class WindowChrome(QObject):
     def make_button(self,label,icon,callback):
         button=QToolButton(self.controls);button.setObjectName('chromeWindowButton')
         button.setAccessibleName(label);button.setToolTip(label);button.setIcon(icon)
-        button.setIconSize(QSize(16,16));button.setFixedSize(36,38)
+        button.setIconSize(QSize(16,16));button.setFixedSize(36,32)
         button.clicked.connect(callback)
         return button
 
@@ -213,5 +213,5 @@ class WindowChrome(QObject):
 
 
 def chrome_style(scale):
-    style='QFrame#customChromeHeader{background:#17222c;border:0;border-bottom:1px solid #293b48}\nQFrame#chromeCommandRow,QWidget#chromeCommandGroup{background:transparent;border:0}\n#customChromeHeader QToolBar{border:0;background:transparent;spacing:2px}\n#customChromeHeader QToolBar QToolButton{background:transparent;border:1px solid transparent;border-radius:4px;padding:5px 9px;color:#c5cdd1}\n#customChromeHeader QToolBar QToolButton:hover{background:#2b3b49;border-color:#3a4f60}\n#customChromeHeader #workspaceBrand{background:transparent;border:0}\nQLabel#chromeDocumentTitle{background:transparent;border:0;color:#d6e7f2;padding:0 12px;font:600 16px "Roboto Condensed"}\nQWidget#chromeTitleDragArea{background:transparent;border:0}\nQWidget#chromeWindowControls{background:transparent;border:0}\nQToolButton#chromeWindowButton,QToolButton#chromeCloseButton{background:transparent;border:0;border-radius:0;padding:0;min-height:0}\nQToolButton#chromeWindowButton:hover{background:#324352}\nQToolButton#chromeWindowButton:pressed{background:#22313f}\nQToolButton#chromeCloseButton:hover{background:#ad3641}\nQToolButton#chromeCloseButton:pressed{background:#842a33}\n'
+    style='QFrame#customChromeHeader{background:#17222c;border:0;border-bottom:1px solid #293b48}\nQFrame#chromeCommandRow,QWidget#chromeCommandGroup{background:transparent;border:0}\n#customChromeHeader QToolBar{border:0;background:transparent;spacing:2px;padding:2px 4px}\n#customChromeHeader QToolBar QToolButton{background:transparent;border:1px solid transparent;border-radius:4px;padding:3px 6px;color:#c5cdd1}\n#customChromeHeader QToolBar QToolButton:hover{background:#2b3b49;border-color:#3a4f60}\n#customChromeHeader #workspaceBrand{background:transparent;border:0}\nQLabel#chromeDocumentTitle{background:transparent;border:0;color:#d6e7f2;padding:0 12px;font:600 16px "Roboto Condensed"}\nQWidget#chromeTitleDragArea{background:transparent;border:0}\nQWidget#chromeWindowControls{background:transparent;border:0}\nQToolButton#chromeWindowButton,QToolButton#chromeCloseButton{background:transparent;border:0;border-radius:0;padding:0;min-height:0}\nQToolButton#chromeWindowButton:hover{background:#324352}\nQToolButton#chromeWindowButton:pressed{background:#22313f}\nQToolButton#chromeCloseButton:hover{background:#ad3641}\nQToolButton#chromeCloseButton:pressed{background:#842a33}\n'
     return re.sub(r"(\d+)px",lambda match:str(max(1,round(int(match[1])*scale)))+"px",style)
