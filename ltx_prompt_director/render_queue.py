@@ -20,6 +20,7 @@ class RenderJob:
     id: str = field(default_factory=lambda:uuid4().hex)
     workspace_key: tuple = ()
     generation_number: int = 0
+    portable: dict = field(default_factory=dict,repr=False)
     recipe: dict = field(default_factory=dict,repr=False)
     force_render: bool = False
     render_group: str | None = None
@@ -70,6 +71,7 @@ class RenderQueue(QObject):
         super().__init__(parent);self.executor=executor;self.jobs=[];self.active=None
         self.paused=False;self.closing=False
         self._removed_states = {}
+        self._removed_outputs = {}
         self._remove_when_finished = set()
         self._notify=QTimer(self);self._notify.setSingleShot(True);self._notify.setInterval(60)
         self._notify.timeout.connect(self.changed)
@@ -110,7 +112,7 @@ class RenderQueue(QObject):
             else:estimate=fallback
             job.expected_seconds=estimate
 
-    def enqueue(self,operation,args,finished,failed,*,title,project_id='',source='local',model='',kind='Image',details='',progress=None,cancel=None,started=None,cancelled=None,group_id='',group_title='',dependencies=(),intermediate=False,workspace_key=(),generation_number=0,mode='',remote_target=None,render_group=None,replay_factory=None,force_render=False):
+    def enqueue(self,operation,args,finished,failed,*,title,project_id='',source='local',model='',kind='Image',details='',progress=None,cancel=None,started=None,cancelled=None,group_id='',group_title='',dependencies=(),intermediate=False,workspace_key=(),generation_number=0,mode='',remote_target=None,render_group=None,replay_factory=None,force_render=False,portable=None):
         if self.closing:raise RuntimeError('Render queue is closing')
         job=RenderJob(title,str(project_id or ''),source,model,kind,details,
                       operation=operation,args=args,finished=finished,failed=failed,
@@ -118,6 +120,7 @@ class RenderQueue(QObject):
                       group_id=group_id,group_title=group_title,dependencies=tuple(dependencies),intermediate=intermediate,
                       workspace_key=workspace_key,generation_number=generation_number,mode=mode,remote_target=dict(remote_target or {}),
                       render_group=str(render_group) if render_group is not None else None)
+        job.portable=dict(portable or {})
         job.force_render=force_render
         job.recipe=dict(operation=operation,args=args,finished=finished,failed=failed,progress=progress,
             started=started,cancelled=cancelled,factory=replay_factory)
@@ -280,10 +283,12 @@ class RenderQueue(QObject):
         for job in self.jobs:
             if job.id in ids:
                 self._removed_states[job.id] = job.state
+                if job.output_path:self._removed_outputs[job.id]=job.output_path
         self.jobs[:] = [job for job in self.jobs if job.id not in ids]
         self._remove_when_finished.difference_update(ids)
         needed = {key for job in self.jobs if job.state in ACTIVE_STATES for key in job.dependencies}
         self._removed_states = {key: state for key, state in self._removed_states.items() if key in needed}
+        self._removed_outputs = {key: path for key,path in self._removed_outputs.items() if key in needed}
 
     def sweep(self):
         self._remove_entries({job.id for job in self.jobs if job.state not in ACTIVE_STATES})
@@ -305,7 +310,7 @@ class RenderQueue(QObject):
         self.changed.emit()
         QTimer.singleShot(0, self._advance)
 
-    def move_job(self, job_id, before_id=None):
+    def move_job(self, job_id, before_id=None, *, dry_run=False):
         moving = [job for job in self.jobs if job.id == job_id or job.group_id == job_id]
         if not moving or any(job.state != 'Waiting' for job in moving):
             return False
@@ -330,6 +335,7 @@ class RenderQueue(QObject):
                 groups.setdefault(job.group_id, []).append(index)
         if any(indices != list(range(indices[0], indices[-1] + 1)) for indices in groups.values()):
             return False
+        if dry_run:return True
         self.jobs[:] = candidate
         self.changed.emit()
         QTimer.singleShot(0, self._advance)
@@ -354,7 +360,7 @@ class RenderQueue(QObject):
                     dependencies=tuple(mapping[key].id if key in mapping else key for key in original.dependencies),
                     intermediate=original.intermediate,workspace_key=original.workspace_key,generation_number=original.generation_number,
                     mode=original.mode,remote_target=original.remote_target,render_group=original.render_group,
-                    replay_factory=recipe.get('factory'),force_render=True)
+                    replay_factory=recipe.get('factory'),force_render=True,portable=original.portable)
                 root=recipe.get("origin_id",original.id)
                 job.recipe["origin_id"]=root
                 mapping[original.id]=job;mapping[root]=job;created.append(job)

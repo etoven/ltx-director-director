@@ -3742,6 +3742,8 @@ class MainWindow(QMainWindow):
             ('Render Queue',render_icon('queue'),self.render_queue_dock,'right'),
             ('AI Activity',prompt_action_icon('action-generate'),self.reasoning_dock,'right'),
         ])
+        from .queue_persistence import QueueStore
+        self.queue_store=QueueStore(self,project_library_path()/"render-queue.json")
         self.tabifiedDockWidgetActivated.connect(lambda *_: self.queue_project_panel_width_restore())
         QTimer.singleShot(0, self.restore_startup_workspace)
         self.update_window_title()
@@ -3833,7 +3835,11 @@ class MainWindow(QMainWindow):
             for label, icon_name, callback in group:
                 action = QAction(toolbar_icon(icon_name), label, self)
                 action.triggered.connect(callback)
+                if label == "Save to Library":
+                    action.setShortcut("Shift+S");action.setShortcutContext(Qt.ShortcutContext.WindowShortcut)
+                    self.save_project_action=action
                 if label == "Save All":
+                    action.setShortcut("Shift+A");action.setShortcutContext(Qt.ShortcutContext.WindowShortcut)
                     self.save_all_action=action
                     action.setToolTip("Save All")
                 if label == "Export":
@@ -4623,6 +4629,8 @@ class MainWindow(QMainWindow):
         self.render_queue_dock.setObjectName('renderQueueDock')
         self.render_queue_dock.setMinimumWidth(260)
         self.render_queue_panel=RenderQueuePanel(self.render_queue)
+        self.render_queue_panel.project_requested.connect(self.open_render_project)
+        self.render_queue_panel.export_requested.connect(self.export_render_result)
         self.render_queue_dock.setWidget(self.render_queue_panel)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea,self.render_queue_dock)
         self.render_queue_dock.hide()
@@ -4647,6 +4655,20 @@ class MainWindow(QMainWindow):
         from .cast_preview import CastPreviewController
         self.cast_preview=CastPreviewController(self)
 
+    def open_render_project(self,project_id):
+        if project_id and project_id!=self.current_project_id:self.open_library_project(project_id=project_id,reveal=True)
+
+    def export_render_result(self,job):
+        source=Path(job.output_path)
+        if not source.is_file():return
+        meta=next((record for record in self.library_records() if str(record.get('id',''))==job.project_id),{})
+        state=self.project_sessions.get(job.project_id,{}).get('state',{})
+        directory=(self.export_directory() if job.project_id==self.current_project_id else
+                   self.export_directory(str(state.get('downloadDirectory',meta.get('downloadDirectory')) or '')))
+        target=self.next_export_path(source.name,directory=directory)
+        self.start_disk_job(shutil.copy2,(source,target),lambda result:self.record_export(target),
+                            lambda error:self.export_failed(target,error),serialized=True)
+
     def refresh_render_scope(self):
         if not hasattr(self,'render_scope'):return
         selected=self.render_scope.currentData()
@@ -4658,6 +4680,10 @@ class MainWindow(QMainWindow):
         self.render_scope.blockSignals(False)
 
     def generate_local_video(self):
+        if not self.current_project_id:
+            self.initialize_empty_library_project(None)
+            if not self.current_project_id:return
+            self.save_library_project(automatic=True)
         profile = self.network_render.client_profile('video') if self.network_render.target else load_profile(self.settings)
         try:
             if self.network_render.target:self.network_render.validate(profile, "video")
@@ -4822,13 +4848,21 @@ class MainWindow(QMainWindow):
                 self.local_video_log.clear();self.project_preview_dock.show()
                 self.project_preview_panel._generation_autoplay=True
         if not extensions:
+            from .queue_persistence import video_spec
+            continuation=None
+            if selected_continuation:
+                path,length,overlap,mode,trim=selected_continuation
+                continuation=dict(path=path or '',duration=length,overlap=overlap,trim_start=trim)
+            portable=video_spec(request,conditioning_segments,extra_references,continuation=continuation,
+                previous_job=continuation_job.id if continuation_job is not None else '',workspace_type=self.project_type,
+                attachment_revision=attachment_revisions[str(grouped_segments[0][0])])
             self.start_render_job(operation,(),ready,failed,title=(self.current_project_name or 'Untitled video')+f' · Generation {generation}'+(f' · Group {next(i for i,(g,_) in enumerate(all_groups) if g==selected_group)+1}' if selected_group is not None else ''),
                 source='local',model='MiniMax H3',kind='Video',mode=profile['video_variant'],
                 details=f"{request['width']} × {request['height']} · {request['duration']} s · {request['steps']} steps",
                 progress=event,cancel=video_cancel,started=started,cancelled=cancelled,
                 workspace_key=preview_key,generation_number=generation,render_group=grouped_segments[0][0],
                 dependencies=(continuation_job.id,) if continuation_job is not None else (),
-                replay_factory=lambda cancel,mapping:lambda:operation(cancel))
+                replay_factory=lambda cancel,mapping:lambda:operation(cancel),portable=portable)
             return
         from .video_extensions import continuation_reference, blend_blocks, add_block_thumbnails
         from .local_generation import LOCAL_PROGRESS
@@ -4872,6 +4906,13 @@ class MainWindow(QMainWindow):
                     self._video_block_frames.setdefault(self.resolve_video_key(preview_key),{})[str(group)]={key:result.get(key,'') for key in ('first_frame','last_frame')}
                     if current():
                         for diagram in self.timeline.findChildren(QWidget,'extensionBlendDiagram'):diagram.update()
+                from .queue_persistence import video_spec
+                continuation=(dict(path='',duration=block_durations[index-1],overlap=transition['overlap'],trim_start=0)
+                    if previous is not None and transition['blend']!='cut' and transition['overlap']>0 else None)
+                portable=video_spec({**request,'profile':group_profiles[index],'prompt':prompts[index],'duration':block_duration},
+                    grouped_segments[index][1],group_references[index],continuation=continuation,
+                    previous_job=previous.id if previous is not None else '',workspace_type=self.project_type,
+                    attachment_revision=attachment_revisions[str(grouped_segments[index][0])])
                 job = self.start_render_job(render_block, (), block_ready, failed,
                     title=f'Block {index + 1} · {block_duration:g} s', source='local', model='MiniMax H3', kind='Video',mode=group_profiles[index]['video_variant'],
                     details=(f"Previous block · trailing {transition['overlap']:g} s conditions time 0"
@@ -4881,7 +4922,7 @@ class MainWindow(QMainWindow):
                     dependencies=(previous.id,) if previous else (), intermediate=True,
                     workspace_key=preview_key,generation_number=generation,render_group=grouped_segments[index][0],
                     replay_factory=lambda cancel,mapping,render=render_block,parent=previous:lambda:render(
-                        block_cancel=cancel,previous=mapping.get(parent.id,parent) if parent is not None else None))
+                        block_cancel=cancel,previous=mapping.get(parent.id,parent) if parent is not None else None),portable=portable)
                 blocks.append(job)
         finally:
             self.render_queue.set_paused(was_paused)
@@ -6942,6 +6983,7 @@ class MainWindow(QMainWindow):
         QApplication.processEvents(QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents)
 
     def closeEvent(self, event) -> None:
+        if hasattr(self,"queue_store"):self.queue_store.freeze()
         self.audio_panel.transport.pause()
         if hasattr(self, 'prompt_surface'):self.prompt_surface.structured.cancel_definition_generation()
         for panel in getattr(self, 'audio_generation_panels', {}).values():
@@ -11191,6 +11233,10 @@ class MainWindow(QMainWindow):
 
     def _start_segment_artwork(self, segment_id, record, tool):
         import threading
+        if not self.current_project_id:
+            self.initialize_empty_library_project(None)
+            if not self.current_project_id:return
+            self.save_library_project(automatic=True)
         item=next((item for item in self.segments if item.id==segment_id),None)
         if not item or tool is None or not item.artwork_prompt:return
         workspace=(self.workspace_revision,self.current_project_id,self.project_type)
@@ -11268,7 +11314,8 @@ class MainWindow(QMainWindow):
             source='local' if tool.provider=='local' else 'cloud',model=tool.model,kind='Image',
             details=f"{self.output_width.value()} × {self.output_height.value()}",cancel=cancel,
             progress=(lambda event:self.local_image_progress(event,workspace)) if tool.provider=='local' else None,
-            started=started,cancelled=cancelled)
+            started=started,cancelled=cancelled,
+            portable=dict(type="artwork",record=request,provider=tool.provider,model=tool.model,config=tool.config or {},source_path=item.media_path,prompt_signature=item.prompt))
         jobs[key]=job
         row=next((i for i,s in enumerate(self.segments) if s.id==segment_id),-1)
         if 0<=row<self.timeline.count():
@@ -11898,7 +11945,7 @@ class MainWindow(QMainWindow):
             loaded.append(segment)
         prompt_only = self.workspace_definitions.get(payload.get("projectType"), {}).get("prompt_mode") == "prompt_only"
         sequence = self.workspace_definitions.get(payload.get("projectType"), {}).get("engine") == "shot_sequence"
-        if not loaded and not prompt_only and not sequence and not payload.get('conditioningAudio', {}).get('clips'):
+        if not loaded and not prompt_only and not sequence and not payload.get('conditioningAudio', {}).get('clips') and not payload.get('library',{}).get('id'):
             raise ValueError("Project contains no supported main-track segments.")
         self.segments = loaded
         audio = payload.get('conditioningAudio', {})

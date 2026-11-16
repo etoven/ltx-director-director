@@ -3,7 +3,7 @@ from math import cos, sin, pi
 from pathlib import Path
 import sys
 from PySide6.QtCore import Qt, QRect, QRectF, QSize, QTimer, QProcess, QMimeData, QUrl, Signal
-from PySide6.QtGui import QColor, QFont, QIcon, QPen, QDrag, QDesktopServices
+from PySide6.QtGui import QColor, QFont, QIcon, QPen, QPainter, QDrag, QDesktopServices
 from PySide6.QtWidgets import (QApplication, QFrame, QHBoxLayout, QLabel, QListWidget, QListWidgetItem,
     QPushButton, QSizePolicy, QStyledItemDelegate, QStyle, QVBoxLayout, QWidget, QMessageBox, QMenu)
 from .render_queue import ACTIVE_STATES, RenderJob
@@ -47,9 +47,10 @@ class JobFileList(QListWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.drop_y=None;self.drop_before=None;self.drop_valid=False;self.validate_drop=None
         self.setDragEnabled(True);self.setMouseTracking(True)
         self.setAcceptDrops(True)
-        self.setDropIndicatorShown(True)
+        self.setDropIndicatorShown(False)
         self.setDefaultDropAction(Qt.DropAction.MoveAction)
         self.setVerticalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
 
@@ -91,30 +92,49 @@ class JobFileList(QListWidget):
         else:
             event.ignore()
 
-    def dragMoveEvent(self, event):
-        self.dragEnterEvent(event)
-        if event.isAccepted():
-            super().dragMoveEvent(event)
-            event.setDropAction(Qt.DropAction.MoveAction)
-            event.accept()
+    def drop_target(self,position):
+        target=self.itemAt(position)
+        if target and position.y()>self.visualItemRect(target).center().y():
+            row=self.row(target)+1;job=target.data(Qt.ItemDataRole.UserRole)
+            if job.kind=='Group':
+                while row<self.count() and self.item(row).data(Qt.ItemDataRole.UserRole).group_id==job.group_id:row+=1
+            target=self.item(row)
+        before=target.data(Qt.ItemDataRole.UserRole).id if target else None
+        y=self.visualItemRect(target).top() if target else self.visualItemRect(self.item(self.count()-1)).bottom()+2 if self.count() else 2
+        return before,y
 
-    def dropEvent(self, event):
+    def clear_drop(self):
+        self.drop_y=None;self.drop_before=None;self.drop_valid=False;self.viewport().update()
+
+    def dragMoveEvent(self,event):
+        self.dragEnterEvent(event)
+        if not event.isAccepted():self.clear_drop();return
+        super().dragMoveEvent(event)
+        ident=bytes(event.mimeData().data('application/x-director-render-job')).decode()
+        self.drop_before,self.drop_y=self.drop_target(event.position().toPoint())
+        self.drop_valid=self.validate_drop(ident,self.drop_before) if self.validate_drop else True
+        self.viewport().update()
+        if self.drop_valid:event.setDropAction(Qt.DropAction.MoveAction);event.accept()
+        else:event.ignore()
+
+    def dragLeaveEvent(self,event):
+        self.clear_drop();super().dragLeaveEvent(event)
+
+    def paintEvent(self,event):
+        super().paintEvent(event)
+        if self.drop_y is None:return
+        painter=QPainter(self.viewport())
+        painter.setPen(QPen(QColor('#67d9ec' if self.drop_valid else '#d47b69'),3))
+        painter.drawLine(4,self.drop_y,max(4,self.viewport().width()-4),self.drop_y)
+        painter.end()
+
+    def dropEvent(self,event):
         if event.source() is not self or not event.mimeData().hasFormat('application/x-director-render-job'):
-            event.ignore()
-            return
-        target = self.itemAt(event.position().toPoint())
-        before_id = target.data(Qt.ItemDataRole.UserRole).id if target else None
-        if target and event.position().y() > self.visualItemRect(target).center().y():
-            row = self.row(target) + 1
-            job = target.data(Qt.ItemDataRole.UserRole)
-            if job.kind == 'Group':
-                while row < self.count() and self.item(row).data(Qt.ItemDataRole.UserRole).group_id == job.group_id:
-                    row += 1
-            target = self.item(row)
-            before_id = target.data(Qt.ItemDataRole.UserRole).id if target else None
-        self.reorder_requested.emit(bytes(event.mimeData().data('application/x-director-render-job')).decode(), before_id)
-        event.setDropAction(Qt.DropAction.MoveAction)
-        event.accept()
+            self.clear_drop();event.ignore();return
+        before,_=self.drop_target(event.position().toPoint())
+        ident=bytes(event.mimeData().data('application/x-director-render-job')).decode()
+        self.reorder_requested.emit(ident,before)
+        self.clear_drop();event.setDropAction(Qt.DropAction.MoveAction);event.accept()
 
 
 class QueueJobDelegate(QStyledItemDelegate):
@@ -204,6 +224,8 @@ class QueueJobDelegate(QStyledItemDelegate):
 
 
 class RenderQueuePanel(QWidget):
+    project_requested=Signal(str)
+    export_requested=Signal(object)
     def __init__(self,queue,parent=None):
         super().__init__(parent);self.queue=queue;self.setObjectName('renderQueuePanel')
         self.setMinimumWidth(0);self.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Preferred)
@@ -223,6 +245,7 @@ class RenderQueuePanel(QWidget):
         self.list.file_action.connect(self.file_action)
         self.list.delete_requested.connect(queue.delete_job)
         self.list.reorder_requested.connect(self.reorder_jobs)
+        self.list.validate_drop=lambda ident,before:queue.move_job(ident,before,dry_run=True)
         self.list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.list.customContextMenuRequested.connect(self.context_menu)
         self.list.itemClicked.connect(self.toggle_group)
@@ -247,6 +270,7 @@ class RenderQueuePanel(QWidget):
         job=item.data(Qt.ItemDataRole.UserRole)
         menu=QMenu(self.list)
         action=menu.addAction('Render Again')
+        action.setEnabled(any(candidate.recipe for candidate in self.queue.jobs if candidate.id==job.id or candidate.group_id==job.id))
         action.triggered.connect(lambda:self.queue.render_again(job.id))
         menu.exec(self.list.viewport().mapToGlobal(point))
 
@@ -332,6 +356,7 @@ class RenderQueuePanel(QWidget):
 
     def toggle_group(self,item):
         job=item.data(Qt.ItemDataRole.UserRole)
+        if job.project_id:self.project_requested.emit(job.project_id)
         if job.kind!='Group':return
         if job.group_id in self.collapsed_groups:self.collapsed_groups.remove(job.group_id)
         else:self.collapsed_groups.add(job.group_id)
@@ -392,14 +417,4 @@ class RenderQueuePanel(QWidget):
             except ImportError:pass
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(path.parent)))
             return
-        target=choose_document_save(self,'Export rendered video',path.name,'Video files (*'+path.suffix+');;All files (*)')
-        if not target or Path(target).resolve()==path.resolve():return
-        def export():
-            import os,shutil,tempfile
-            destination=Path(target)
-            handle,temporary=tempfile.mkstemp(prefix='.director-export-',suffix=destination.suffix,dir=destination.parent)
-            os.close(handle)
-            try:shutil.copy2(path,temporary);os.replace(temporary,destination)
-            finally:Path(temporary).unlink(missing_ok=True)
-            return str(destination)
-        self.queue.executor(export,(),lambda result:self.file_status.setText('Exported · '+result),lambda error:self.file_status.setText(str(error)))
+        self.export_requested.emit(job)
