@@ -1,4 +1,7 @@
 """Content-dependent reuse of completed native video blocks."""
+from contextvars import ContextVar
+FORCE_RENDER=ContextVar("force_render",default=False)
+
 import copy
 import hashlib
 import json
@@ -74,7 +77,7 @@ def cached_render(cache,group,request,segments,render,cancel,previous_token=''):
     result=entry.get('result',{})
     if not isinstance(result,dict):result={}
     path=result.get('path','')
-    if (path and Path(path).is_file() and entry.get('signature')==signature and entry.get('identity')==file_identity(path)
+    if (not FORCE_RENDER.get() and path and Path(path).is_file() and entry.get('signature')==signature and entry.get('identity')==file_identity(path)
             and file_identity(path) is not None):
         return {**result,'reused':True,'_cache_record':entry}
     if cancel.is_set():raise RuntimeError('Video render cancelled.')

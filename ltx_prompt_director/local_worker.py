@@ -154,7 +154,7 @@ def image_generation(request):
     from .local_lora import generation_prompt
     from .local_model_cache import model, job_scope
     profile=request['profile'];validate_profile(profile,'image')
-    with job_scope(model(request,lambda:_load_image_pipeline(profile))) as pipe:
+    with job_scope(model(request,lambda:_load_image_pipeline(profile)),request) as pipe:
         transformer=pipe.transformer
         width = int(request.get('width', 1024)); height = int(request.get('height', 1024))
         steps = int(request.get('steps', 30)); every = max(1, int(profile.get('preview_every', 5)))
@@ -272,18 +272,9 @@ def _load_video_pipeline(request):
     if register_encoder(profile['video_encoder']):
         progress('Using native NVFP4/AWQ encoder with per-layer BF16 computation…')
     progress('Loading pruned H3 and its encoders…')
-    count = align_h3_frames(request.get('duration', 5))
-    # VAE downsamples by 16, then DiT packs 2×2 spatial latent patches.
-    tokens = (((count - 5) // 17) * 5 + 2) * (request['height'] // 32) * (request['width'] // 32)
-    # Packed attention/QKV activations must fit alongside the cached weights.
-    from .local_conditioning import reference_token_budget
-    reference_tokens=reference_token_budget(refs,request['width'],request['height'],count)
-    reserve = max(3, (tokens + reference_tokens + 2048) * 21504 * 2 * 2.5 / 2**30)
-    limit = max(1, torch.cuda.mem_get_info()[0] / 2**30 - reserve) if device == 'cuda' else None
-    if device == 'cuda':
-        free, total = torch.cuda.mem_get_info()
-        progress(f'GPU memory: {free / 2**30:.2f} GiB free / {total / 2**30:.2f} GiB total; '
-                 f'activation allowance {reserve:.2f} GiB; weight cache threshold {limit:.2f} GiB')
+    from .local_memory import allowance
+    reserve=allowance(request)
+    limit=max(0,torch.cuda.mem_get_info()[1]/2**30-reserve) if device=='cuda' else None
     pipe = MiniMaxH3Pipeline.from_pretrained(torch_dtype=dtype, device=device,
         model_configs=[ModelConfig(path=profile[k], **config)
                        for k in ('video_model', 'video_encoder', 'video_vae', 'audio_vae')],
@@ -320,7 +311,7 @@ def video_generation(request):
     from .local_lora import generation_prompt
     from .local_model_cache import model,job_scope
     profile=request['profile'];validate_profile(profile,'video');dtype=torch.bfloat16
-    with job_scope(model(request,lambda:_load_video_pipeline(request))) as pipe:
+    with job_scope(model(request,lambda:_load_video_pipeline(request)),request) as pipe:
         pipe.scheduler=copy.deepcopy(pipe.scheduler)
         pipe.scheduler_audio=copy.deepcopy(pipe.scheduler_audio)
         if profile.get('video_sampler', 'res_multistep') == 'res_multistep':
@@ -342,7 +333,11 @@ def video_generation(request):
         sampling_finished = [False]
         def trace_decode(method, label, percent):
             def decode(*args, **kwargs):
-                if sampling_finished[0]: progress(label, percent)
+                if sampling_finished[0]:
+                    last_video[0]=None;preview.clean=None;preview.fast=None
+                    from .local_memory import snapshot
+                    snapshot(label)
+                    progress(label, percent)
                 else: emit('log', message=label)
                 return method(*args, **kwargs)
             return decode
@@ -350,6 +345,8 @@ def video_generation(request):
         pipe.audio_vae.decode_audio = trace_decode(pipe.audio_vae.decode_audio, 'Decoding audio latents…', 96)
         run_unit = pipe.unit_runner
         def unit_runner(unit, *args, **kwargs):
+            from .local_memory import snapshot
+            snapshot('H3 stage: '+type(unit).__name__)
             progress('H3 stage: ' + type(unit).__name__.replace('MiniMaxH3Unit_', ''))
             return run_unit(unit, *args, **kwargs)
         pipe.unit_runner = unit_runner
@@ -410,6 +407,8 @@ def video_generation(request):
         def iterate(values):
             total = len(values); started[0] = time.monotonic()
             for index, value in enumerate(values):
+                from .local_memory import sampling_boundary
+                sampling_boundary(pipe)
                 current_step[0] = index
                 progress(f'Rendering video and audio · step {index + 1}/{total}', index / total * 94)
                 yield value
@@ -436,7 +435,10 @@ def video_generation(request):
         else:
             from .local_conditioning import install_fl2va_video_conditioning
             install_fl2va_video_conditioning(pipe, video_conditions, emit, image_conditions=image_conditions)
+        from .local_memory import snapshot,observe
+        initial=snapshot('conditioning and sampling')
         video, audio = pipe(**args)
+        observe(request,'video/audio decoded',initial['allocated'] if initial else 0)
         progress('Encoding finished video…', 97)
         path = root / 'video.mp4'
         write_video_audio(video=video, audio=audio, output_path=str(path), fps=24, audio_sample_rate=32000)
@@ -533,7 +535,7 @@ def single_request():
             traceback.print_exc(file=sys.stderr)
             message = str(error)[:1400]
             if request.get('hf_token'): message = message.replace(request['hf_token'], '[redacted]')
-            emit('error', message=f'{type(error).__name__}: {message}')
+            emit('error', message=f'{type(error).__name__}: {message}',memory_pressure=isinstance(error,RuntimeError) and ('out of memory' in message.lower() or 'cuda_error_out_of_memory' in message.lower()))
             raise SystemExit(1)
 
 
@@ -570,6 +572,9 @@ def serve_requests(first_path):
                     emit('error',message=type(error).__name__+': '+message,memory_pressure=pressure,
                          recoverable=isinstance(error,ValueError) and request['kind']!='text')
         request=None
+        try:cache.finish_job()
+        except Exception as cleanup_error:
+            terminal.append(dict(kind='error',message='GPU cleanup failed: '+str(cleanup_error)[:500],memory_pressure=True))
         gc.collect()
         for event in terminal:emit(event.pop('kind'),**event)
         emit('ready')

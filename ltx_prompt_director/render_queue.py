@@ -20,6 +20,8 @@ class RenderJob:
     id: str = field(default_factory=lambda:uuid4().hex)
     workspace_key: tuple = ()
     generation_number: int = 0
+    recipe: dict = field(default_factory=dict,repr=False)
+    force_render: bool = False
     render_group: str | None = None
     group_id: str = ''
     group_title: str = ''
@@ -108,7 +110,7 @@ class RenderQueue(QObject):
             else:estimate=fallback
             job.expected_seconds=estimate
 
-    def enqueue(self,operation,args,finished,failed,*,title,project_id='',source='local',model='',kind='Image',details='',progress=None,cancel=None,started=None,cancelled=None,group_id='',group_title='',dependencies=(),intermediate=False,workspace_key=(),generation_number=0,mode='',remote_target=None,render_group=None):
+    def enqueue(self,operation,args,finished,failed,*,title,project_id='',source='local',model='',kind='Image',details='',progress=None,cancel=None,started=None,cancelled=None,group_id='',group_title='',dependencies=(),intermediate=False,workspace_key=(),generation_number=0,mode='',remote_target=None,render_group=None,replay_factory=None,force_render=False):
         if self.closing:raise RuntimeError('Render queue is closing')
         job=RenderJob(title,str(project_id or ''),source,model,kind,details,
                       operation=operation,args=args,finished=finished,failed=failed,
@@ -116,6 +118,9 @@ class RenderQueue(QObject):
                       group_id=group_id,group_title=group_title,dependencies=tuple(dependencies),intermediate=intermediate,
                       workspace_key=workspace_key,generation_number=generation_number,mode=mode,remote_target=dict(remote_target or {}),
                       render_group=str(render_group) if render_group is not None else None)
+        job.force_render=force_render
+        job.recipe=dict(operation=operation,args=args,finished=finished,failed=failed,progress=progress,
+            started=started,cancelled=cancelled,factory=replay_factory)
         if cancel is not None:job.cancel=cancel
         self.jobs.append(job);self.changed.emit();self._advance()
         return job
@@ -250,9 +255,11 @@ class RenderQueue(QObject):
             def operation(*args):
                 from .local_generation import LOCAL_KEEP_LOADED
                 from .network_render import REMOTE_TARGET
+                from .render_cache import FORCE_RENDER
+                forced=FORCE_RENDER.set(job.force_render)
                 token=LOCAL_KEEP_LOADED.set(job.source=='local');destination=REMOTE_TARGET.set(job.remote_target or None)
                 try:return job.operation(*args)
-                finally:LOCAL_KEEP_LOADED.reset(token);REMOTE_TARGET.reset(destination)
+                finally:LOCAL_KEEP_LOADED.reset(token);REMOTE_TARGET.reset(destination);FORCE_RENDER.reset(forced)
             self.executor(operation,job.args,lambda result:finish(result),lambda error:finish(error=error),progress=progress,cancel=job.cancel)
         except Exception as error:finish(error=str(error))
 
@@ -327,6 +334,32 @@ class RenderQueue(QObject):
         self.changed.emit()
         QTimer.singleShot(0, self._advance)
         return True
+
+    def render_again(self,ident):
+        selected=[job for job in self.jobs if job.id==ident or job.group_id==ident]
+        if not selected:return []
+        mapping={};groups={};created=[];paused=self.paused
+        self.set_paused(True)
+        try:
+            for original in selected:
+                recipe=original.recipe
+                if not recipe:continue
+                cancel=threading.Event()
+                operation=(recipe['factory'](cancel,mapping) if recipe.get('factory') else recipe['operation'])
+                group=groups.setdefault(original.group_id,uuid4().hex) if original.group_id else ''
+                job=self.enqueue(operation,recipe['args'],recipe['finished'],recipe['failed'],
+                    title=original.title,project_id=original.project_id,source=original.source,model=original.model,
+                    kind=original.kind,details=original.details,progress=recipe['progress'],cancel=cancel,
+                    started=recipe['started'],cancelled=recipe['cancelled'],group_id=group,group_title=original.group_title,
+                    dependencies=tuple(mapping[key].id if key in mapping else key for key in original.dependencies),
+                    intermediate=original.intermediate,workspace_key=original.workspace_key,generation_number=original.generation_number,
+                    mode=original.mode,remote_target=original.remote_target,render_group=original.render_group,
+                    replay_factory=recipe.get('factory'),force_render=True)
+                root=recipe.get("origin_id",original.id)
+                job.recipe["origin_id"]=root
+                mapping[original.id]=job;mapping[root]=job;created.append(job)
+        finally:self.set_paused(paused)
+        return created
 
     def shutdown(self):
         self.closing=True;self._gpu_retry.stop()

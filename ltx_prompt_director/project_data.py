@@ -115,3 +115,11 @@ def normalize_notes(value: object) -> list[dict]:
 def new_note(text: str, date: str | None = None) -> dict:
     created = datetime.now(timezone.utc).isoformat()
     return {"id": uuid4().hex, "text": text.strip(), "createdAt": created, "date": date or created, "checked": False}
+
+
+# A non-dict Python mapping stays an opaque PyObject in QVariant. Converting
+# nested project dictionaries to QVariantMap overflows unsigned 64-bit seeds.
+from collections import UserDict
+
+class ProjectMetadata(UserDict):
+    pass

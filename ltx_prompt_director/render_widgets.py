@@ -5,7 +5,7 @@ import sys
 from PySide6.QtCore import Qt, QRect, QRectF, QSize, QTimer, QProcess, QMimeData, QUrl, Signal
 from PySide6.QtGui import QColor, QFont, QIcon, QPen, QDrag, QDesktopServices
 from PySide6.QtWidgets import (QApplication, QFrame, QHBoxLayout, QLabel, QListWidget, QListWidgetItem,
-    QPushButton, QSizePolicy, QStyledItemDelegate, QStyle, QVBoxLayout, QWidget, QMessageBox)
+    QPushButton, QSizePolicy, QStyledItemDelegate, QStyle, QVBoxLayout, QWidget, QMessageBox, QMenu)
 from .render_queue import ACTIVE_STATES, RenderJob
 from .local_widgets import progress_text
 from .file_dialogs import choose_document_save
@@ -223,6 +223,8 @@ class RenderQueuePanel(QWidget):
         self.list.file_action.connect(self.file_action)
         self.list.delete_requested.connect(queue.delete_job)
         self.list.reorder_requested.connect(self.reorder_jobs)
+        self.list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.list.customContextMenuRequested.connect(self.context_menu)
         self.list.itemClicked.connect(self.toggle_group)
         self.list.currentItemChanged.connect(lambda *_:self.update_details());layout.addWidget(self.list,1)
         details=QFrame();details.setObjectName('renderJobDetails');body=QVBoxLayout(details);body.setContentsMargins(9,8,9,8);body.setSpacing(5)
@@ -238,6 +240,15 @@ class RenderQueuePanel(QWidget):
         note=QLabel('Jobs render in order. Pausing holds waiting jobs; the active render continues.');note.setWordWrap(True);note.setMinimumWidth(0);layout.addWidget(note)
         self.setStyleSheet('''#renderQueuePanel{background:#292929} #renderQueueJobs{background:#202020;border:1px solid #444;border-radius:4px;padding:5px} #renderJobDetails{background:#303030;border:1px solid #484848;border-radius:4px} #renderJobDetails QLabel{background:transparent;border:0}''')
         queue.changed.connect(self.refresh);self.refresh()
+
+    def context_menu(self,point):
+        item=self.list.itemAt(point)
+        if item is None:return
+        job=item.data(Qt.ItemDataRole.UserRole)
+        menu=QMenu(self.list)
+        action=menu.addAction('Render Again')
+        action.triggered.connect(lambda:self.queue.render_again(job.id))
+        menu.exec(self.list.viewport().mapToGlobal(point))
 
     def selected_job(self):
         item=self.list.currentItem();return item.data(Qt.ItemDataRole.UserRole) if item else None

@@ -163,6 +163,8 @@ def resolve_video_seed(value):
 
 def run_request(request, on_event=None, cancel=None, timeout=None):
     from .local_session import MANAGER, WorkerError
+    request={**request,'profile':dict(request.get('profile',{}))}
+    if request.get('kind')=='video':request['seed']=resolve_video_seed(request.get('seed',request['profile'].get('video_seed',-1)))
     from .network_render import REMOTE_TARGET,run_remote_request
     if cancel is None:cancel=LOCAL_CANCEL.get()
     if REMOTE_TARGET.get() and request.get('kind') in {'image','video'}:
@@ -176,7 +178,9 @@ def run_request(request, on_event=None, cancel=None, timeout=None):
         for attempt in range(2):
             try:return _run_request(request,on_event,cancel,timeout,MANAGER if keep else None)
             except WorkerError as error:
-                if not(error.memory_pressure and MANAGER.reused and attempt==0):raise
+                if not(error.memory_pressure and attempt==0):raise
+                MANAGER.close()
+                request['profile']['offload']=True
                 callback=on_event or LOCAL_PROGRESS.get()
                 if callback:callback(dict(kind='progress',message='Freeing cached model memory and retrying this render…'))
 
@@ -299,7 +303,9 @@ def _run_request(request, on_event=None, cancel=None, timeout=None, manager=None
                         raise WorkerError(error_event.get('message','Local engine failed.'),memory_pressure=error_event.get('memory_pressure',False))
                     if result_event is not None:return result_event
             else:
-                if event.get('kind') == 'error':raise RuntimeError(event.get('message','Local engine failed.'))
+                if event.get('kind') == 'error':
+                    from .local_session import WorkerError
+                    raise WorkerError(event.get('message','Local engine failed.'),memory_pressure=event.get('memory_pressure',False))
                 if event.get('kind') == 'result':return event
         process.wait(timeout=15)
         details = '\n'.join(tail)[-2500:]

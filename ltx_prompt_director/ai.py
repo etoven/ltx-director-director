@@ -951,6 +951,17 @@ def _gemini(images: list[dict], key: str, model: str, rules: str, timeout: int, 
 
 
 def _provider_raw(images: list[dict], provider: str, model: str, key: str, rules: str, timeout: int) -> str:
+    from .project_naming import ACTIVE_NAME,schema_with_name,extract
+    naming=ACTIVE_NAME.get()
+    if naming is None:return _provider_raw_impl(images,provider,model,key,rules,timeout)
+    contract=schema_with_name(response_schemas.current())
+    rules += '\nAlso return projectName metadata for the WHOLE project below. Keep the requested prompt editing scope unchanged.\n'+naming['context']
+    with response_schemas.using(contract):
+        raw=_provider_raw_impl(images,provider,model,key,rules,timeout)
+    return extract(raw)
+
+
+def _provider_raw_impl(images: list[dict], provider: str, model: str, key: str, rules: str, timeout: int) -> str:
     if provider == "local":
         from .group_prompt_context import augment
         images,rules=augment(images,rules,provider,_mixed_reference_input)

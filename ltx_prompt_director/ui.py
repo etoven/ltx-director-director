@@ -285,6 +285,11 @@ class BackgroundCallbacks(QObject):
 
 
 def _write_library_archive(path: str, payload: dict, segments: list[Segment], metadata_path: Path, meta: dict) -> None:
+    try:latest=json.loads(metadata_path.read_text(encoding='utf-8'))
+    except (OSError,ValueError):latest={}
+    if int(latest.get('nameRevision') or 0)>int(meta.get('nameRevision') or 0):
+        meta.update({key:latest[key] for key in ('name','nameOrigin','nameRevision') if key in latest})
+        payload['library']=copy.deepcopy(meta)
     save_project_archive(path, payload, segments)
     metadata_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
@@ -3818,6 +3823,7 @@ class MainWindow(QMainWindow):
             (("New Project", "new", self.new_project),
              ("Open", "open", self.open_project),
              ("Save to Library", "save", self.save_library_project),
+             ("Save All", "save-all", self.save_all_projects),
              ("Export Project", "export-project", self.export_project)),
             (("Import", "import", self.import_ltx),
              ("Export", "export-ltx", self.export_workflow)),
@@ -3827,6 +3833,9 @@ class MainWindow(QMainWindow):
             for label, icon_name, callback in group:
                 action = QAction(toolbar_icon(icon_name), label, self)
                 action.triggered.connect(callback)
+                if label == "Save All":
+                    self.save_all_action=action
+                    action.setToolTip("Save All")
                 if label == "Export":
                     self.workflow_export_action = action
                 elif label == "Import":
@@ -4818,7 +4827,8 @@ class MainWindow(QMainWindow):
                 details=f"{request['width']} × {request['height']} · {request['duration']} s · {request['steps']} steps",
                 progress=event,cancel=video_cancel,started=started,cancelled=cancelled,
                 workspace_key=preview_key,generation_number=generation,render_group=grouped_segments[0][0],
-                dependencies=(continuation_job.id,) if continuation_job is not None else ())
+                dependencies=(continuation_job.id,) if continuation_job is not None else (),
+                replay_factory=lambda cancel,mapping:lambda:operation(cancel))
             return
         from .video_extensions import continuation_reference, blend_blocks, add_block_thumbnails
         from .local_generation import LOCAL_PROGRESS
@@ -4869,7 +4879,9 @@ class MainWindow(QMainWindow):
                     progress=event, cancel=block_cancel, started=started, cancelled=cancelled,
                     group_id=group_id, group_title=group_title,
                     dependencies=(previous.id,) if previous else (), intermediate=True,
-                    workspace_key=preview_key,generation_number=generation,render_group=grouped_segments[index][0])
+                    workspace_key=preview_key,generation_number=generation,render_group=grouped_segments[index][0],
+                    replay_factory=lambda cancel,mapping,render=render_block,parent=previous:lambda:render(
+                        block_cancel=cancel,previous=mapping.get(parent.id,parent) if parent is not None else None))
                 blocks.append(job)
         finally:
             self.render_queue.set_paused(was_paused)
@@ -5679,7 +5691,8 @@ class MainWindow(QMainWindow):
                 members = meta["members"]
                 item = QListWidgetItem(f"{name}\n{len(members)} project{'s' if len(members) != 1 else ''}")
                 item.setBackground(QColor("#22282b"))
-                item.setData(Qt.ItemDataRole.UserRole, meta)
+                from .project_data import ProjectMetadata
+                item.setData(Qt.ItemDataRole.UserRole, ProjectMetadata(meta))
                 item.setToolTip(f"Collection: {name}")
                 item.setSizeHint(QSize(self.project_icon_size + 28, self.project_icon_size + 76))
                 collection_cover = self.collection_pixmap(members[:4], self.project_icon_size)
@@ -5692,7 +5705,8 @@ class MainWindow(QMainWindow):
                 description = description[:102] + "…"
             item = QListWidgetItem(f"{name}\n{description}")
             item.setBackground(QColor("#22282b"))
-            item.setData(Qt.ItemDataRole.UserRole, {**meta, "kind": "project"})
+            from .project_data import ProjectMetadata
+            item.setData(Qt.ItemDataRole.UserRole, ProjectMetadata({**meta, "kind": "project"}))
             item.setToolTip(f"{name}\n\n{meta.get('description', '')}")
             labels_text=', '.join(str(tag) for tag in meta.get('tags', []))
             item.setToolTip(item.toolTip()+f"\n\nStatus: {meta.get('status') or 'No status'}"+(f"\nTags: {labels_text}" if labels_text else ''))
@@ -5930,7 +5944,7 @@ class MainWindow(QMainWindow):
 
     def selected_library_project(self) -> dict | None:
         item = self.project_list.currentItem()
-        return item.data(Qt.ItemDataRole.UserRole) if item else None
+        return dict(item.data(Qt.ItemDataRole.UserRole)) if item else None
 
     def current_library_metadata(self) -> dict | None:
         if not self.current_project_id:
@@ -6379,6 +6393,12 @@ class MainWindow(QMainWindow):
 
     def persist_library_metadata(self, meta: dict) -> None:
         clean = {key: value for key, value in meta.items() if key not in {"kind", "members"}}
+        path=project_library_path()/f"{clean['id']}.meta.json"
+        try:previous=json.loads(path.read_text(encoding='utf-8'))
+        except (OSError,ValueError):previous={}
+        if previous and previous.get('name')!=clean.get('name') and int(clean.get('nameRevision') or 0)<=int(previous.get('nameRevision') or 0):
+            clean.update(nameOrigin='manual',nameRevision=int(previous.get('nameRevision') or 0)+1)
+            meta.update(nameOrigin=clean['nameOrigin'],nameRevision=clean['nameRevision'])
         normalize_project_labels(clean)
         root = project_library_path()
         (root / f"{clean['id']}.meta.json").write_text(json.dumps(clean, indent=2), encoding="utf-8")
@@ -6612,19 +6632,26 @@ class MainWindow(QMainWindow):
             meta["thumbnailData"] = data_url(visual.preview_path, max_edge=360, quality=84) if visual else ""
         payload = self.project_payload(include_media=False)
         normalize_project_labels(meta)
-        payload["library"] = {key: meta.get(key, "") for key in ("id", "name", "description", "collection", "savedAt", "status", "color", "tags", "tag", "archived", "notes", "previewVideoPath", "previewVideoName", "projectFiles", "workflowFiles", "downloadDirectory")}
+        payload["library"] = {key: meta.get(key, "") for key in ("id", "name", "description", "collection", "savedAt", "status", "color", "tags", "tag", "archived", "notes", "previewVideoPath", "previewVideoName", "projectFiles", "workflowFiles", "downloadDirectory", "nameOrigin", "nameRevision")}
+        self.queue_project_snapshot(meta,payload,self.capture_workspace_state())
+
+    def queue_project_snapshot(self,meta,payload,workspace,*,done=None,quiet=False):
+        root=project_library_path()
+        payload=copy.deepcopy(payload);meta=copy.deepcopy(meta)
+        payload['library']=copy.deepcopy(meta)
         project_id = str(meta["id"])
         save_id = uuid4().hex
         self._latest_save_id[project_id] = save_id
         edit_serial = self._edit_serial
-        snapshot = copy.deepcopy(self.segments)
-        workspace = self.capture_workspace_state()
+        snapshot = copy.deepcopy(workspace.get("segments",[]))
+        workspace = copy.deepcopy(workspace)
         self.statusBar().showMessage(f"Saving project in background: {meta['name']}…")
 
         def saved(_result):
             if self._latest_save_id.get(project_id) != save_id:
+                if done:done(True,meta["name"])
                 return
-            if self.current_project_id == project_id and self._edit_serial == edit_serial:
+            if self.current_project_id == project_id and self._edit_serial == edit_serial and self.current_project_name == meta["name"] and self.capture_workspace_state() == workspace:
                 self.project_dirty = False
                 self.project_sessions[project_id] = {"name": meta["name"], "dirty": False, "state": workspace}
             elif self.current_project_id != project_id:
@@ -6637,6 +6664,7 @@ class MainWindow(QMainWindow):
                 self.settings.setValue("last_project_id", project_id)
                 self.queue_settings_sync()
             self.statusBar().showMessage(f"Project saved to library: {meta['name']}")
+            if done:done(True,meta["name"])
 
         def failed(message):
             self._close_after_jobs = False
@@ -6645,12 +6673,43 @@ class MainWindow(QMainWindow):
                 self._closing_progress.close()
                 self._closing_progress = None
                 self.show()
-            self.project_dirty = True
-            QMessageBox.critical(self, "Save failed", message)
+            if self.current_project_id==project_id:self.project_dirty=True
+            elif project_id in self.project_sessions:self.project_sessions[project_id]["dirty"]=True
+            if not quiet:QMessageBox.critical(self, "Save failed", message)
+            if done:done(False,str(message))
 
         self.start_disk_job(_write_library_archive,
                             (str(meta["projectPath"]), payload, snapshot, root / f"{project_id}.meta.json", copy.deepcopy(meta)),
                             saved, failed, serialized=True)
+
+    def save_all_projects(self):
+        if getattr(self,'_save_all_pending',False):return
+        if not self.current_project_id:
+            if not self.has_project_content:return
+            self.initialize_empty_library_project(None)
+        self.cache_current_workspace()
+        from .project_saves import payload_from_state
+        snapshots=[(ident,copy.deepcopy(session)) for ident,session in self.project_sessions.items()
+                   if session.get('dirty') and session.get('state')]
+        if not snapshots:
+            self.statusBar().showMessage('All projects are saved.',5000);return
+        self._save_all_pending=len(snapshots);self._save_all_errors=[]
+        def done(success,message):
+            if not success:self._save_all_errors.append(message)
+            self._save_all_pending-=1
+            if not self._save_all_pending:
+                self.statusBar().showMessage('Save All finished'+(': '+ '; '.join(self._save_all_errors) if self._save_all_errors else ''),12000)
+        for ident,session in snapshots:
+            try:
+                path=project_library_path()/f'{ident}.meta.json'
+                meta=(json.loads(path.read_text(encoding='utf-8')) if path.is_file() else
+                      dict(id=ident,name=session['name'],nameOrigin='placeholder' if session['name'].startswith('Untitled') else 'manual',
+                           projectPath=str(project_library_path()/f'{ident}.LTXD'),description='',collection=self.current_collection or ''))
+                state=session['state'];meta.update(name=session['name'],savedAt=datetime.now(timezone.utc).isoformat(),
+                    projectType=state.get('projectType'),segmentCount=len(state.get('segments',[])),
+                    duration=sum(item.duration for item in state.get('segments',[])))
+                self.queue_project_snapshot(meta,payload_from_state(state),state,done=done,quiet=True)
+            except (OSError,ValueError) as error:done(False,str(error))
 
     def open_library_project(self, checked: bool = False, project_id: str | None = None, *,
                              reveal: bool = False) -> None:
@@ -6801,6 +6860,7 @@ class MainWindow(QMainWindow):
             return
         thumbnail_source, thumbnail_data = dialog.selected_thumbnail()
         meta.update({
+            "nameOrigin":"manual", "nameRevision":int(meta.get("nameRevision") or 0)+1,
             "name": dialog.name.text().strip(),
             "description": dialog.description.toPlainText().strip(),
             "collection": dialog.collection_name(),
@@ -6830,24 +6890,7 @@ class MainWindow(QMainWindow):
 
     def queue_closing_projects(self) -> None:
         """Save every dirty workspace only after the user requests app close."""
-        self.stage_current_workspace()
-        self.cache_current_workspace()
-        active_id, active_name = self.current_project_id, self.current_project_name
-        active_state = self.capture_workspace_state()
-        active_dirty = self.project_dirty
-        dirty = [(project_id, dict(session)) for project_id, session in self.project_sessions.items()
-                 if session.get("dirty") and session.get("state")]
-        for project_id, session in dirty:
-            self.current_project_id = project_id
-            self.current_project_name = session.get("name", "Untitled")
-            self.restore_workspace_state(session["state"])
-            self.project_dirty = True
-            self.save_library_project(automatic=True)
-        self.current_project_id, self.current_project_name = active_id, active_name
-        if dirty:
-            self.restore_workspace_state(active_state)
-            self.project_dirty = active_dirty
-            self.update_window_title()
+        self.save_all_projects()
         self._close_saves_queued = True
 
     def update_closing_progress(self) -> None:
@@ -6912,8 +6955,6 @@ class MainWindow(QMainWindow):
             self.shot_sequence_panel.deactivate()
         if not self._close_saves_queued:
             needs_save = self.project_dirty or any(session.get("dirty") for session in self.project_sessions.values())
-            if needs_save or self._pending_disk_jobs:
-                self.show_closing_progress()
             self.queue_closing_projects()
             self._closing_total = self._pending_disk_jobs
             self.update_closing_progress()
@@ -6924,8 +6965,11 @@ class MainWindow(QMainWindow):
             self._close_after_jobs = True
             self.statusBar().showMessage("Finishing background project saves before closing…")
             self.show_closing_progress()
-            event.ignore()
-            return
+            # Showing the dialog processes events; the final save may have
+            # finished there. Do not wait for a callback that already ran.
+            if self._pending_disk_jobs:
+                event.ignore()
+                return
         if self._closing_progress:
             self._closing_progress.close()
             self._closing_progress = None
@@ -7163,12 +7207,14 @@ class MainWindow(QMainWindow):
             name = f"Untitled project ({index})"
             index += 1
         collection = (anchor.get("collection") if anchor else self.current_collection) or None
-        meta = {"id": project_id, "name": name, "description": "",
+        meta = {"id": project_id, "name": name, "nameOrigin":"placeholder", "nameRevision":0, "description": "",
                 "collection": collection or "", "projectType": self.project_type,
                 "projectPath": str(root / f"{project_id}.LTXD"),
                 "savedAt": datetime.now(timezone.utc).isoformat(),
                 "segmentCount": 0, "duration": 0, "thumbnailData": "",
                 "status": "", "tags": [], "archived": False, "notes": []}
+        self.current_project_id=project_id
+        self.current_project_name=name
         payload = self.project_payload(include_media=False)
         payload["library"] = dict(meta)
         # This writes only an empty manifest and metadata, never media. Later
@@ -7176,10 +7222,13 @@ class MainWindow(QMainWindow):
         try:
             _write_library_archive(meta["projectPath"], payload, [], root / f"{project_id}.meta.json", meta)
         except OSError as error:
+            self.current_project_id=None
+            self.current_project_name="Untitled"
             QMessageBox.critical(self, "New project failed", str(error))
             return
         self.current_project_id = project_id
         self.current_project_name = name
+        self.project_dirty=False
         self.cache_current_workspace()
         if self.current_collection != collection:
             self.library_surface.navigate(collection)
@@ -7190,6 +7239,8 @@ class MainWindow(QMainWindow):
         self.refresh_project_library(project_id, reveal=True)
         self.settings.setValue("last_project_id", project_id)
         self.queue_settings_sync()
+        self.project_dirty=False
+        self.cache_current_workspace()
 
     def set_timeline_scale(self, value: int) -> None:
         if value == 0:
@@ -8646,6 +8697,10 @@ class MainWindow(QMainWindow):
                         *, review_text: bool = True, refinement_scope=None, refinement_intent="") -> None:
         if self.ai_busy:
             return
+        if not self.current_project_id:
+            self.initialize_empty_library_project(None)
+            if not self.current_project_id:return
+            self.save_library_project(automatic=True)
         if refinement_scope is None:
             if operation in {refine_segment_prompt, refine_generic_segment}:
                 refinement_scope = 'segment'
@@ -8716,7 +8771,17 @@ class MainWindow(QMainWindow):
                                 refine_minimax_h3_prompt, refine_minimax_h3_reference_prompt,
                                 build_generic_prompt, refine_generic_prompt, generate_combined,
                                 sync_combined_from_timeline} else None)
+        from .project_saves import name_origin
+        naming=None
+        meta=self.current_library_metadata()
+        if meta and name_origin(meta)=='placeholder' and not any(word in operation.__name__ for word in ('timing','definition','reassess')):
+            baseline=copy.deepcopy(self.capture_workspace_state())
+            naming=dict(project_id=self.current_project_id,revision=int(meta.get('nameRevision') or 0),baseline=baseline,
+                context=json.dumps(dict(globalPrompt=baseline.get('globalPrompt'),directorIntent=baseline.get('directorIntent'),
+                    unified=baseline.get('minimaxPrompt'),segments=[dict(name=item.name,prompt=item.prompt) for item in baseline.get('segments',[])]),ensure_ascii=False))
         def workspace_operation(*values):
+            from .project_naming import ACTIVE_NAME,NamedResult
+            naming_token=ACTIVE_NAME.set(naming)
             continuity_token=GROUP_PROMPT_CONTEXT.set(continuity_context)
             output_token = ACTIVE_OUTPUT.set(template_context)
             from .prompt_templates import WORKSPACE_ENGINE, WORKSPACE_OPERATION
@@ -8726,8 +8791,10 @@ class MainWindow(QMainWindow):
             shot_token = SHOT_COUNT_LIMIT.set(maximum_shots)
             stream_token = STREAM_SINK.set(worker.signals.stream.emit)
             try:
-                return operation(*values)
+                result=operation(*values)
+                return NamedResult(result,naming) if naming is not None else result
             finally:
+                ACTIVE_NAME.reset(naming_token)
                 STREAM_SINK.reset(stream_token)
                 SHOT_COUNT_LIMIT.reset(shot_token)
                 WORKSPACE_INSTRUCTIONS.reset(token)
@@ -8815,6 +8882,9 @@ class MainWindow(QMainWindow):
                 self._ai_plan_timer.start()
 
     def ai_result_received(self, result) -> None:
+        from .project_naming import NamedResult
+        naming=result.naming if isinstance(result,NamedResult) else None
+        if isinstance(result,NamedResult):result=result.value
         # Keep the exact pre-generation draft for paragraph-level review.
         review_editor = getattr(self, "ai_request_editor", None)
         review_baseline = getattr(self, "ai_review_baseline", "")
@@ -8853,6 +8923,25 @@ class MainWindow(QMainWindow):
             self.paragraph_review.begin(
                 review_editor, review_baseline, review_editor.toPlainText()
             )
+
+        if naming:self.finish_project_naming(naming)
+
+    def finish_project_naming(self,naming):
+        from .project_saves import name_origin,payload_from_state
+        if self.current_project_id!=naming['project_id']:return
+        meta=self.current_library_metadata()
+        if not meta or name_origin(meta)!='placeholder' or int(meta.get('nameRevision') or 0)!=naming['revision']:return
+        title=naming.get('title')
+        if title:
+            existing={record.get('name','').casefold() for record in self.library_records() if record.get('id')!=meta['id']}
+            name=title;number=2
+            while name.casefold() in existing:name=f'{title} ({number})';number+=1
+            meta.update(name=name,nameOrigin='ai',nameRevision=naming['revision']+1)
+            self.current_project_name=name;self.update_window_title();self.persist_library_metadata(meta)
+        # Persist accepted content. Refine proposals remain in their existing review flow.
+        reviewing=bool(getattr(self,'timeline_review_pending',None) or self.paragraph_review.pending_count)
+        state=copy.deepcopy(naming['baseline'] if reviewing else self.capture_workspace_state())
+        self.queue_project_snapshot(meta,payload_from_state(state),state,quiet=True)
 
     def show_refinement_feedback(self, message="Refinement complete", *, retry=False):
         scope = getattr(self, 'ai_refinement_scope', None)

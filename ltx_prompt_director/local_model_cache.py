@@ -56,7 +56,12 @@ def has_model():return _MODEL is not None
 
 def clear():
     global _MODEL,_KEY
-    _MODEL=None;_KEY=None;gc.collect()
+    old,_MODEL=_MODEL,None;_KEY=None
+    if old is not None:
+        from .local_memory import offload
+        offload(old,all_models=True)
+    del old
+    gc.collect()
     torch=sys.modules.get('torch')
     if torch is not None and torch.cuda.is_available():torch.cuda.empty_cache()
 
@@ -75,8 +80,11 @@ def model(request,loader):
 
 
 @contextlib.contextmanager
-def job_scope(pipe):
+def job_scope(pipe, request=None):
     """Undo job-specific monkey patches and hooks before another render starts."""
+    if request is not None:
+        from .local_memory import prepare
+        prepare(pipe,request)
     targets=[pipe]
     for name in ('scheduler','scheduler_audio','video_vae','audio_vae'):
         target=getattr(pipe,name,None)
@@ -99,3 +107,8 @@ def job_scope(pipe):
         for target,name,owned,value in reversed(attributes):
             if owned:setattr(target,name,value)
             elif name in vars(target):delattr(target,name)
+
+
+def finish_job():
+    from .local_memory import finish
+    finish(_MODEL)

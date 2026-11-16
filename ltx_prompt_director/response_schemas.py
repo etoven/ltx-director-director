@@ -191,4 +191,13 @@ def validate(raw: str) -> None:
         value = json.loads(raw, object_pairs_hook=pairs)
     except (ValueError, TypeError) as error:
         raise ValueError("malformed or incomplete JSON") from error
-    check(value, current(), "response")
+    contract=current()
+    from .project_naming import ACTIVE_NAME
+    if ACTIVE_NAME.get() is not None and 'projectName' in contract.get('properties',{}):
+        # A missing/invalid optional name must never invalidate valid prompt edits.
+        value=dict(value) if isinstance(value,dict) else value
+        contract=copy.deepcopy(contract)
+        contract['properties'].pop('projectName',None)
+        contract['required']=[key for key in contract.get('required',[]) if key!='projectName']
+        if isinstance(value,dict):value.pop('projectName',None)
+    check(value, contract, "response")

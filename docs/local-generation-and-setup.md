@@ -95,3 +95,9 @@ Enter the adapter's **trigger words** and set its **Weight** from **0.00 to 1.00
 Each local render adds the enabled adapter's trigger words to its generation prompt. Image adapters also apply to locally generated tile artwork. Your authored prompt remains unchanged, and image and video triggers stay separate. Duplicate trigger phrases already present in the prompt are not appended again.
 
 Adapter files remain in their selected locations, and Director applies their contributions without changing the base checkpoint. Standard LoRA matrices are supported; DoRA adapters are not supported. Incompatible targets or dimensions appear in verbose output. The setup wizard keeps these advanced settings intact but does not show LoRA controls.
+
+### Queued renders and saving
+
+Queued MiniMax and Flux jobs reuse compatible loaded checkpoints. Director releases completed-job buffers and inactive components, adjusts video memory headroom for each job, and retries a CUDA out-of-memory failure once in a fresh worker without lowering your output settings. Verbose output shows memory use and recovery. Right-click a render tile or batch and choose **Render Again** to repeat that selection.
+
+New projects are saved immediately with an Untitled placeholder. The first successful prompt Generate or Refine supplies a descriptive project name when you have not named it yourself. **Save All**, the double-disk button beside Save, saves edits in all open projects while keeping your current workspace visible.
