@@ -2,12 +2,12 @@
 from math import cos, sin, pi
 from pathlib import Path
 import sys
-from PySide6.QtCore import Qt, QRect, QSize, QTimer, QProcess, QMimeData, QUrl, Signal
+from PySide6.QtCore import Qt, QRect, QRectF, QSize, QTimer, QProcess, QMimeData, QUrl, Signal
 from PySide6.QtGui import QColor, QFont, QIcon, QPen, QDrag, QDesktopServices
 from PySide6.QtWidgets import (QApplication, QFrame, QHBoxLayout, QLabel, QListWidget, QListWidgetItem,
     QPushButton, QSizePolicy, QStyledItemDelegate, QStyle, QVBoxLayout, QWidget, QMessageBox)
 from .render_queue import ACTIVE_STATES, RenderJob
-from .local_widgets import ProgressPill, progress_text
+from .local_widgets import progress_text
 from .file_dialogs import choose_document_save
 
 
@@ -119,10 +119,6 @@ class JobFileList(QListWidget):
 
 class QueueJobDelegate(QStyledItemDelegate):
     """Paint only inside the list viewport; no oversized row widgets by the scrollbar."""
-    def __init__(self,parent=None):
-        super().__init__(parent)
-        self.pill=ProgressPill(parent.viewport() if hasattr(parent,'viewport') else parent)
-
     def sizeHint(self,option,index):
         job=index.data(Qt.ItemDataRole.UserRole)
         extra=30 if job and job.state in ACTIVE_STATES and job.kind!='Group' else 0
@@ -160,13 +156,18 @@ class QueueJobDelegate(QStyledItemDelegate):
             painter.setPen(QColor(color));area=QRect(text.x(),text.y()+offset*line,text.width(),line)
             painter.drawText(area,Qt.AlignmentFlag.AlignVCenter,fm.elidedText(value,Qt.TextElideMode.ElideRight,max(0,area.width())))
         if job.state in ACTIVE_STATES:
-            # Render the exact QLabel pill used over Video Preview, kept hidden
-            # as a delegate helper so it never floats over neighboring cards.
-            self.pill.setMaximumWidth(max(20,text.width()))
-            label=self.pill.fontMetrics().elidedText(progress_text(job.progress_event),Qt.TextElideMode.ElideRight,max(1,text.width()-20))
-            self.pill.setText(label);self.pill.adjustSize()
-            image=self.pill.grab();self.pill.hide()
-            painter.drawPixmap(text.right()-image.width()+1,text.y()+3*line+2,image)
+            # Match Video Preview's pill using this paint device. Grabbing a
+            # child widget here reenters QWidget painting and can crash Qt's
+            # backing store before the first remote preview arrives.
+            pill_font=QFont(option.font);pill_font.setPixelSize(11)
+            painter.setFont(pill_font);pill_metrics=painter.fontMetrics()
+            label=pill_metrics.elidedText(progress_text(job.progress_event),Qt.TextElideMode.ElideRight,max(1,text.width()-20))
+            width=min(max(1,text.width()),pill_metrics.horizontalAdvance(label)+20)
+            pill=QRect(text.right()-width+1,text.y()+3*line+2,width,pill_metrics.height()+10)
+            painter.setPen(QPen(QColor('#497f8a'),1));painter.setBrush(QColor(12,28,40,230))
+            painter.drawRoundedRect(QRectF(pill).adjusted(.5,.5,-.5,-.5),10,10)
+            painter.setPen(QColor('#d5f9f0'))
+            painter.drawText(pill.adjusted(10,5,-10,-5),Qt.AlignmentFlag.AlignVCenter,label)
         if job.output_path and Path(job.output_path).is_file():
             for area, label in self.file_buttons(option.rect):
                 standard=QStyle.StandardPixmap.SP_DirOpenIcon if label=='Folder' else QStyle.StandardPixmap.SP_DialogSaveButton

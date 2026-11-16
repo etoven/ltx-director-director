@@ -49,3 +49,34 @@ def test_modes_pills_and_queue_estimates(tmp_path):
             queue.cancel_job(third.id)
             assert not queue.remaining_video_jobs and queue.estimated_video_seconds==0
         finally:queue.shutdown();panel.close()
+
+
+def test_queue_pills_never_render_a_widget_inside_delegate_paint(monkeypatch):
+    from PySide6.QtCore import QRect, Qt
+    from PySide6.QtGui import QImage, QPainter, QStandardItem, QStandardItemModel
+    from PySide6.QtWidgets import QListWidget, QStyleOptionViewItem
+    from ltx_prompt_director.local_widgets import ProgressPill
+    from ltx_prompt_director.render_queue import RenderJob
+    from ltx_prompt_director.render_widgets import QueueJobDelegate
+
+    def nested_widget_render(*args, **kwargs):
+        raise AssertionError('A queue paint must not grab/render another widget')
+    monkeypatch.setattr(ProgressPill, 'grab', nested_widget_render)
+    monkeypatch.setattr(ProgressPill, 'render', nested_widget_render)
+    view=QListWidget();delegate=QueueJobDelegate(view)
+    model=QStandardItemModel();item=QStandardItem();model.appendRow(item)
+    option=QStyleOptionViewItem();option.rect=QRect(0,0,350,125);option.font=view.font()
+    image=QImage(350,125,QImage.Format.Format_ARGB32_Premultiplied)
+    painter=QPainter(image)
+    try:
+        for kind in ('Video','Image'):
+            for state in ('Waiting','Rendering','Cancelling'):
+                for percent in (None,37):
+                    job=RenderJob('Remote render','','network','MiniMax H3' if kind=='Video' else 'Flux',kind,
+                        state=state,percent=percent,eta_seconds=120,remote_target={'name':'Render PC'})
+                    item.setData(job,Qt.ItemDataRole.UserRole)
+                    image.fill(0)
+                    delegate.paint(painter,option,item.index())
+                    assert painter.isActive() and not image.isNull()
+    finally:
+        painter.end();view.close()
