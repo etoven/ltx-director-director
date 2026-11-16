@@ -8683,6 +8683,15 @@ class MainWindow(QMainWindow):
         # Never cover the real prompt editor with a duplicate streaming window.
         # All text edits animate inline; reasoning is in a dockable side panel.
         self.magic_overlay.hide_overlay()
+        from .group_prompt_context import snapshot as prompt_context_snapshot, fingerprint as prompt_context_fingerprint, GROUP_PROMPT_CONTEXT
+        group_targets=None
+        if args and isinstance(args[0],list) and args[0] and all(isinstance(item,Segment) for item in args[0]):
+            group_targets=list(dict.fromkeys(item.render_group for item in args[0]))
+            if kind=='segment' and self.current_segment() is not None:group_targets=[self.current_segment().render_group]
+        use_context=group_targets is not None and not any(word in operation.__name__ for word in ('timing','definition'))
+        continuity_context=prompt_context_snapshot(self,group_targets) if use_context else None
+        self.ai_request_group_targets=group_targets if continuity_context else None
+        self.ai_request_group_fingerprint=prompt_context_fingerprint(continuity_context)
         instructions = copy.deepcopy(self.workspace_definition.get("generation_prompts", {}))
         instruction_engine = self.workspace_engine if self.workspace_engine in {"minimax_frames", "minimax_references"} else None
         instruction_kind = "refine" if "refine" in operation.__name__ or "reassess" in operation.__name__ else "generate"
@@ -8696,6 +8705,7 @@ class MainWindow(QMainWindow):
                                 build_generic_prompt, refine_generic_prompt, generate_combined,
                                 sync_combined_from_timeline} else None)
         def workspace_operation(*values):
+            continuity_token=GROUP_PROMPT_CONTEXT.set(continuity_context)
             output_token = ACTIVE_OUTPUT.set(template_context)
             from .prompt_templates import WORKSPACE_ENGINE, WORKSPACE_OPERATION
             engine_token = WORKSPACE_ENGINE.set(instruction_engine)
@@ -8712,6 +8722,7 @@ class MainWindow(QMainWindow):
                 WORKSPACE_ENGINE.reset(engine_token)
                 WORKSPACE_OPERATION.reset(kind_token)
                 ACTIVE_OUTPUT.reset(output_token)
+                GROUP_PROMPT_CONTEXT.reset(continuity_token)
         worker = MagicWorker(workspace_operation, args, retries, retry_cooldown, activity)
         # Internal/custom worker calls may legitimately have no model args.
         model = (
@@ -8809,6 +8820,13 @@ class MainWindow(QMainWindow):
         if not self.ai_request_is_current():
             self.discard_obsolete_ai_result()
             return
+        targets=getattr(self,'ai_request_group_targets',None)
+        if targets is not None:
+            from .group_prompt_context import snapshot as prompt_context_snapshot, fingerprint as prompt_context_fingerprint
+            if prompt_context_fingerprint(prompt_context_snapshot(self,targets))!=self.ai_request_group_fingerprint:
+                self.discard_obsolete_ai_result()
+                self.statusBar().showMessage('AI result discarded because its group anchor or earlier source context changed.',9000)
+                return
         if getattr(self, "active_live_panel", None) is not None:
             self.active_live_panel.finish(True)
         previous_effect_choice = getattr(self, '_effect_ai_choice', None)

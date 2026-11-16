@@ -952,6 +952,8 @@ def _gemini(images: list[dict], key: str, model: str, rules: str, timeout: int, 
 
 def _provider_raw(images: list[dict], provider: str, model: str, key: str, rules: str, timeout: int) -> str:
     if provider == "local":
+        from .group_prompt_context import augment
+        images,rules=augment(images,rules,provider,_mixed_reference_input)
         from .local_generation import generate_text
         return _checked_response(generate_text(images, rules, key, response_schemas.current(), timeout))
     if provider == "openai":
@@ -1032,6 +1034,8 @@ def _checked_response(raw: str) -> str:
 
 
 def _gemini_raw(images: list[dict], key: str, model: str, rules: str, timeout: int) -> str:
+    from .group_prompt_context import augment
+    images,rules=augment(images,rules,'gemini',_mixed_reference_input)
     parts: list[dict] = [{"text": rules}]
     for index, item in enumerate(images, 1):
         label = (
@@ -1194,6 +1198,8 @@ def _openai(images: list[dict], key: str, rules: str, timeout: int, sfx: bool, s
 
 def _openai_raw(images: list[dict], key: str, rules: str, timeout: int, *,
                 model: str = "gpt-5.4-mini", chatgpt: bool = False) -> str:
+    from .group_prompt_context import augment
+    images,rules=augment(images,rules,'chatgpt' if chatgpt else 'openai',_mixed_reference_input)
     content: list[dict] = [{"type": "input_text", "text": rules}]
     for index, item in enumerate(images, 1):
         label = (

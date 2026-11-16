@@ -1,0 +1,9 @@
+# Group starting context for Generate and Refine · Aurora a170
+
+Prompt authoring captures a read-only snapshot of the relevant groups before starting its AI worker. Image decoding and blend compositing run in that worker. When the preceding and current attachments exist, the anchor uses Shot Sequence's blend_frame with the first overlap sample's alpha, stored blend mode and side. Explicit authored start images and existing group starts are available as appropriate; missing or unreadable sources continue backward through earlier groups.
+
+Without a usable visual, the request carries Group 1 / Segment 1's exact prompt and Group 1's saved Reference-panel data, independently of the current group's Reference panel. Existing identical media payloads are reused. Unavailable media remains labeled as unavailable; the local text-only writer receives authoring/notes rather than invented image observations.
+
+Both Generate and Refine receive a provider-level image input and instructions requiring the first text segment to describe its initial state. Older fallback images are identified as earlier evidence, with intervening authored actions; an exact blend start is distinguished from a backward reference. Context records are explicitly not new output segments or model asset IDs. Existing operation scope, schema, actions, timings, media and settings remain authoritative. No semantic output-matching gate is added.
+
+Source fingerprints discard results when a contributing attachment, source prompt or fallback reference changes while the request is in flight. Native Generate/Refine button coverage verifies actual worker context and provider payloads, untouched source groups, and stale-anchor rejection. Focused fixtures cover Gemini/OpenAI/ChatGPT Generate and Refine, backward image selection, root prompt/reference fallback, source immutability and reuse of the sequence compositor. These are application transport tests, not live model-quality claims.
