@@ -35,7 +35,7 @@ def test_blends_preserve_duration_and_mix_boundary_pixels(tmp_path,lengths,audio
                 assert pixel[0]>30 and pixel[2]>30, pixel
                 break
     ref=continuation_reference(paths[0],lengths[0])
-    assert ref['timeline_time']==0 and ref['duration']==1 and ref['start']==lengths[0]-1
+    assert ref['timeline_time']==0 and ref['duration']==22/24 and ref['start']==pytest.approx(lengths[0]-22/24)
     assert all(Path(path).is_file() for path in paths)
 
 

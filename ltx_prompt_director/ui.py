@@ -4707,8 +4707,8 @@ class MainWindow(QMainWindow):
                 clip=self.render_group_options.get(str(previous),{}).get('clip',{})
                 if not clip.get('path') or not Path(clip['path']).is_file():
                     self.statusBar().showMessage('Attach or render the preceding group first, or set this join to Cut.',10000);return
-                previous_duration=float(clip.get('duration') or self.render_group_duration(previous))+float(clip.get('trim_start') or 0)/24
-                selected_continuation=(clip['path'],previous_duration,transition['overlap'],profile['video_variant'])
+                previous_duration=float(clip.get('duration') or self.render_group_duration(previous))
+                selected_continuation=(clip['path'],previous_duration,transition['overlap'],profile['video_variant'],float(clip.get('trim_start') or 0))
         block_durations = [self.render_group_duration(group) for group,items in grouped_segments] if extensions else [float(request['duration'])]
         if extensions and any(not 4<=length<=15 for length in block_durations):
             QMessageBox.information(self,'Video extensions','Set each bracketed block length between 4 and 15 seconds using the timeline length control.')
@@ -4745,8 +4745,8 @@ class MainWindow(QMainWindow):
             conditioning = video_references(conditioning_segments, [], request['duration'])
             if selected_continuation:
                 from .video_extensions import continuation_reference
-                path,duration,overlap,mode=selected_continuation
-                reference=continuation_reference(path,duration,overlap)
+                path,duration,overlap,mode,trim_start=selected_continuation
+                reference=continuation_reference(path,duration,overlap,trim_start=trim_start)
                 if mode!='ref2va':reference.pop('audio_path',None)
                 conditioning.insert(0,reference)
             from .render_cache import cached_render

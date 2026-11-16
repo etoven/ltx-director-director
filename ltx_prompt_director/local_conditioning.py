@@ -33,9 +33,17 @@ def video_references(segments, references, duration):
     return result
 
 
-def install_fl2va_video_conditioning(pipe, clips, emit):
+def render_conditioning_inputs(conditioning, references, variant):
+    """Keep Standard's visual conditioning separate from Ref2VA references."""
+    if variant == 'ref2va':
+        return copy.deepcopy([*conditioning, *references])
+    return [{k: copy.deepcopy(v) for k, v in ref.items() if k != 'audio_path'}
+            for ref in conditioning if ref.get('kind', 'image') in ('image', 'video')]
+
+
+def install_fl2va_video_conditioning(pipe, clips, emit, *, image_conditions=()):
     """Encode timed video segments into FL2VA's existing visual condition lane."""
-    if not clips:
+    if not clips and not image_conditions:
         return
     import torch
     from diffsynth.pipelines.minimax_h3_audio_video import patchify_video
@@ -52,6 +60,16 @@ def install_fl2va_video_conditioning(pipe, clips, emit):
         indices = list(keyframe_indices or [])
         condition_times.extend(None for _ in indices)
         anchors = [result['keyframe_cond_anchor']] if 'keyframe_cond_anchor' in result else []
+        for segment, image in image_conditions:
+            encoded = encode_images(pipe, [image], [0], video_latents, rand_device, seed, height, width)
+            anchors.append(encoded['keyframe_cond_anchor'])
+            # Untimed End keeps the model's native last-frame placement. Timed
+            # checkpoints use their authored local timestamp, irrespective of role.
+            time = segment.get('timeline_time')
+            indices.append(-1 if time is None and segment.get('role') == 'end' else 0)
+            condition_times.append(None if time is None else float(time) * 24 * builder._FRAME_RESCALE)
+            emit('log', message=f"FL2VA image conditioning: {segment.get('name', 'image')} · "
+                 f"{time if time is not None else segment.get('role', 'start')}s")
         pipe.load_models_to_device(encoder.onload_model_names)
         for segment, frames in clips:
             padded = pad_video_conditioning_frames(frames)

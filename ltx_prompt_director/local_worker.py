@@ -302,27 +302,10 @@ def _load_video_pipeline(request):
 
 def video_generation(request):
     conditioning = list(request.get('conditioning', []))
-    refs = [*conditioning, *request.get('references', [])]
     profile = request['profile']
     variant = profile.get('video_variant', 'ref2va' if 'ref2va' in Path(profile['video_model']).name.lower() else 'fl2va')
-    image_count = sum(r.get('kind', 'image') == 'image' for r in refs)
-    video_count = sum(r.get('kind') == 'video' for r in refs)
-    audio_count = sum(r.get('kind') == 'audio' or r.get('kind') == 'video' and bool(r.get('audio_path')) for r in refs)
-    if variant == 'ref2va' and (image_count > 9 or video_count > 3 or audio_count > 3 or image_count + video_count + audio_count > 12):
-        raise ValueError('H3 accepts up to 9 images, 3 video and 3 audio references, 12 files in total.')
-    if variant != 'ref2va':
-        if audio_count or image_count > 2 or any('timeline_time' not in ref for ref in refs if ref.get('kind') == 'video'):
-            raise ValueError('FL2VA accepts timed video conditioning and up to two image keyframes.')
-        images = [ref for ref in refs if ref.get('kind', 'image') == 'image']
-        roles = [-1 if r.get('role') == 'end' else 0 for r in images]
-        if len(roles) != len(set(roles)):
-            raise ValueError('FL2VA keyframes need one Start and one End role.')
-        for ref in images:
-            expected=float(request.get('duration',15)) if ref.get('role')=='end' else 0
-            if 'timeline_time' in ref and abs(float(ref['timeline_time'])-expected)>1/24:
-                raise ValueError('FL2VA supports only the opening and final frame. Use Ref2VA for intermediate timeline checkpoints.')
-    elif not refs:
-        raise ValueError('Ref2VA requires timeline conditioning media or Reference panel media. Add media or use a pruned FL2VA checkpoint.')
+    from .local_conditioning import render_conditioning_inputs
+    refs = render_conditioning_inputs(conditioning, request.get('references', []), variant)
     for number,ref in enumerate(refs,1):
         embedded=ref.get('kind','image')=='image' and str(ref.get('image','')).startswith('data:image/')
         if ref.get('path') and not Path(ref['path']).is_file() and not embedded:
@@ -376,6 +359,7 @@ def video_generation(request):
             install_timeline_positions(pipe,refs,emit)
         references = []
         video_conditions = []
+        image_conditions = []
         for ref in refs:
             if ref.get('kind') == 'video':
                 frames = read_reference_video(ref['path'], height=request['height'], width=request['width'],
@@ -385,9 +369,6 @@ def video_generation(request):
                     raise ValueError('Video conditioning has no frames in the selected trim.' if minimum==1 else 'H3 video references need at least two seconds of source footage.')
                 progress(f'Video conditioning: {ref.get("name","video")} · {len(frames)} frames · source trim {ref.get("start",0):g}s')
                 if variant == 'fl2va':
-                    end = float(ref.get('timeline_time', 0)) + len(frames)/24
-                    if end > float(request['duration']) + 1/24:
-                        raise ValueError('Video conditioning extends beyond the group duration.')
                     video_conditions.append((ref, frames))
                     continue
                 reference = {'type': 'video', 'video': frames}
@@ -404,7 +385,10 @@ def video_generation(request):
                 image = _pil_reference(ref)
                 if image is None:raise ValueError(f'Cannot load conditioning image: {ref.get("name","image")}')
                 if 'timeline_time' in ref:image=image.resize((int(request['width']),int(request['height'])),Image.Resampling.LANCZOS)
-                references.append({'type': 'image', 'image': image})
+                if variant != 'ref2va':
+                    image_conditions.append((ref, image))
+                else:
+                    references.append({'type': 'image', 'image': image})
         steps = int(request.get('steps', profile.get('video_steps', 20)))
         diagnostic_steps = max(0, int(request.get('diagnostic_steps', 0)))
         completed_steps = [0]
@@ -448,14 +432,10 @@ def video_generation(request):
             ref_video_short_edge=min(480, int(request['height']), int(request['width'])),
             ref_video_max_pixels=int(request['height']) * int(request['width']))
         if variant == 'ref2va':
-            if not references: raise ValueError('The selected Ref2VA checkpoint requires reference media. Add references or select a pruned FL2VA checkpoint.')
             args['references'] = references
         else:
-            keyframes = [r['image'] for r in references if r['type'] == 'image']
-            indices = [-1 if r.get('role') == 'end' else 0 for r in refs if r.get('kind', 'image') == 'image']
-            if keyframes: args.update(keyframes=keyframes, keyframe_indices=indices)
             from .local_conditioning import install_fl2va_video_conditioning
-            install_fl2va_video_conditioning(pipe, video_conditions, emit)
+            install_fl2va_video_conditioning(pipe, video_conditions, emit, image_conditions=image_conditions)
         video, audio = pipe(**args)
         progress('Encoding finished video…', 97)
         path = root / 'video.mp4'

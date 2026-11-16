@@ -100,19 +100,21 @@ def test_fl2va_native_condition_lane_consumes_all_video_frames_and_keeps_keyfram
     prompt = dict(prompt_embeds=torch.zeros(11,8),text_token_tags=torch.ones(11,dtype=torch.long))
     runner = PipelineUnitRunner()
     with job_scope(pipe):
-        install_fl2va_video_conditioning(pipe, [(segment,frames)], lambda *args,**kwargs:None)
+        install_fl2va_video_conditioning(pipe, [(segment,frames)], lambda *args,**kwargs:None,
+            image_conditions=[(dict(name='Group 2 checkpoint', timeline_time=3.67, role='start'), Image.new('RGB',(64,64),'green'))])
         inputs, positive, negative = runner(encoder, pipe, inputs, prompt.copy(), {})
         inputs, positive, negative = runner(builder, pipe, inputs, positive, negative)
-        assert len(encoded) == 2
-        video, options = encoded[1]
+        assert len(encoded) == 3
+        video, options = encoded[2]
         assert video.shape[2] == 39 and options['tiled']
         assert video[0,0,23,0,0] != video[0,0,0,0,0]
         assert torch.equal(video[:,:,24:], video[:,:,23:24].expand(-1,-1,15,-1,-1))
-        assert inputs['keyframe_cond_anchor'].shape == (13*4,96)
+        assert inputs['keyframe_cond_anchor'].shape == (14*4,96)
         packed = positive['packed']
-        positions = packed['img_position_ids'][0,packed['img_pos'][:13*4],0]
+        positions = packed['img_position_ids'][0,packed['img_pos'][:14*4],0]
         assert torch.all(positions[:4] > 11)
-        assert torch.all(positions[4:8] == 11)
+        assert torch.all(positions[4:8] == 11 + 3.67*24*builder._FRAME_RESCALE)
+        assert torch.all(positions[8:12] == 11)
         assert positions[-1] == 11 + 23*builder._FRAME_RESCALE
         assert 'ref_blocks' not in inputs and 'retake_video' not in inputs
     assert 'process' not in vars(encoder) and 'process' not in vars(builder)
@@ -200,3 +202,19 @@ def test_native_first_last_toggle_positions_do_not_depend_on_image_order(indices
         frame=0 if role==0 else count-1
         condition=packed['img_pos'][index*6:(index+1)*6]
         torch.testing.assert_close(packed['img_position_ids'][0,condition,0],(origin+frame*builder._FRAME_RESCALE).expand(6))
+
+
+def test_standard_uses_timed_visual_conditions_without_reference_audio():
+    from ltx_prompt_director.local_conditioning import render_conditioning_inputs
+    inputs=[dict(kind='video', path='/attached-group-1.mp4', audio_path='/attached-group-1.mp4',
+                 continuation=True, timeline_time=0, start=14, duration=22/24),
+            dict(kind='image', path='/condition.png', timeline_time=3.67, role='start'),
+            dict(kind='audio', path='/reference.wav')]
+    panel=[dict(kind='image', path='/identity.png')]
+    before=copy.deepcopy(inputs)
+    result=render_conditioning_inputs(inputs,panel,'fl2va')
+    assert len(result)==2 and 'audio_path' not in result[0]
+    assert result[0]['path']=='/attached-group-1.mp4' and result[0]['timeline_time']==0
+    assert result[0]['duration']==22/24 and result[1]['timeline_time']==3.67
+    assert inputs==before
+    assert render_conditioning_inputs(inputs,panel,'ref2va')==inputs+panel
