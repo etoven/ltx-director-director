@@ -1,0 +1,7 @@
+# Aurora a173: queued group continuation
+
+Submitting one group no longer rejects a missing preceding attachment when that preceding group is already rendering or waiting in the same project's queue. Video jobs carry an explicit authoring-group identifier, independent of the queue's batch identifier. The new group depends on the latest pending render for its predecessor and resolves that job's completed output when execution starts, without waiting for asynchronous preview attachment. Batch-generated group jobs expose the same identifier.
+
+A sequence-head group has no predecessor and needs no starting condition image. Standard/FL2VA text-only rendering remains available. Later groups retain the existing blend-length tail at local zero and Standard excludes continuation audio. Existing attachments remain usable when no predecessor render is pending. Failed or cancelled dependencies use the queue's existing downstream cancellation behavior; other projects cannot supply a predecessor.
+
+Focused native coverage queues three groups separately before any attachment exists, verifies the text-only head and waiting chain, completes each output before conditioning the next, and exercises failure/cancellation. It uses fixture rendering through the real queue and controls, without an extended model render. The tested wheel is reused for clean installation, desktop installation and publication.

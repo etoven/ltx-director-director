@@ -20,6 +20,7 @@ class RenderJob:
     id: str = field(default_factory=lambda:uuid4().hex)
     workspace_key: tuple = ()
     generation_number: int = 0
+    render_group: str | None = None
     group_id: str = ''
     group_title: str = ''
     dependencies: tuple = ()
@@ -107,13 +108,14 @@ class RenderQueue(QObject):
             else:estimate=fallback
             job.expected_seconds=estimate
 
-    def enqueue(self,operation,args,finished,failed,*,title,project_id='',source='local',model='',kind='Image',details='',progress=None,cancel=None,started=None,cancelled=None,group_id='',group_title='',dependencies=(),intermediate=False,workspace_key=(),generation_number=0,mode='',remote_target=None):
+    def enqueue(self,operation,args,finished,failed,*,title,project_id='',source='local',model='',kind='Image',details='',progress=None,cancel=None,started=None,cancelled=None,group_id='',group_title='',dependencies=(),intermediate=False,workspace_key=(),generation_number=0,mode='',remote_target=None,render_group=None):
         if self.closing:raise RuntimeError('Render queue is closing')
         job=RenderJob(title,str(project_id or ''),source,model,kind,details,
                       operation=operation,args=args,finished=finished,failed=failed,
                       progress=progress,started=started,cancelled=cancelled,
                       group_id=group_id,group_title=group_title,dependencies=tuple(dependencies),intermediate=intermediate,
-                      workspace_key=workspace_key,generation_number=generation_number,mode=mode,remote_target=dict(remote_target or {}))
+                      workspace_key=workspace_key,generation_number=generation_number,mode=mode,remote_target=dict(remote_target or {}),
+                      render_group=str(render_group) if render_group is not None else None)
         if cancel is not None:job.cancel=cancel
         self.jobs.append(job);self.changed.emit();self._advance()
         return job

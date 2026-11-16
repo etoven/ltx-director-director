@@ -4699,16 +4699,26 @@ class MainWindow(QMainWindow):
         elif not extensions and self.workspace_engine.startswith('minimax') and self.requested_length.value()>0:
             request['duration']=self.requested_length.value()
         selected_continuation=None
+        continuation_job=None
         if selected_group is not None:
             position=next(index for index,(group,items) in enumerate(all_groups) if group==selected_group)
             transition=self.extension_transition(selected_group)
             if position and transition['blend']!='cut' and transition['overlap']>0:
                 previous=all_groups[position-1][0]
                 clip=self.render_group_options.get(str(previous),{}).get('clip',{})
-                if not clip.get('path') or not Path(clip['path']).is_file():
-                    self.statusBar().showMessage('Attach or render the preceding group first, or set this join to Cut.',10000);return
-                previous_duration=float(clip.get('duration') or self.render_group_duration(previous))
-                selected_continuation=(clip['path'],previous_duration,transition['overlap'],profile['video_variant'],float(clip.get('trim_start') or 0))
+                continuation_job=next((job for job in reversed(self.render_queue.jobs)
+                    if job.kind=='Video' and job.render_group==str(previous)
+                    and job.state in {'Waiting','Rendering'} and not job.cancel.is_set()
+                    and self.resolve_video_key(job.workspace_key)==self.video_preview_key()),None)
+                if continuation_job is not None:
+                    # Resolve the output only when the queue has completed this
+                    # dependency; attaching it to the preview is asynchronous.
+                    selected_continuation=(None,self.render_group_duration(previous),transition['overlap'],profile['video_variant'],0)
+                elif clip.get('path') and Path(clip['path']).is_file():
+                    previous_duration=float(clip.get('duration') or self.render_group_duration(previous))
+                    selected_continuation=(clip['path'],previous_duration,transition['overlap'],profile['video_variant'],float(clip.get('trim_start') or 0))
+                else:
+                    self.statusBar().showMessage('Attach or queue the preceding group first, or set this join to Cut.',10000);return
         block_durations = [self.render_group_duration(group) for group,items in grouped_segments] if extensions else [float(request['duration'])]
         if extensions and any(not 4<=length<=15 for length in block_durations):
             QMessageBox.information(self,'Video extensions','Set each bracketed block length between 4 and 15 seconds using the timeline length control.')
@@ -4746,6 +4756,7 @@ class MainWindow(QMainWindow):
             if selected_continuation:
                 from .video_extensions import continuation_reference
                 path,duration,overlap,mode,trim_start=selected_continuation
+                if continuation_job is not None:path=continuation_job.output_path
                 reference=continuation_reference(path,duration,overlap,trim_start=trim_start)
                 if mode!='ref2va':reference.pop('audio_path',None)
                 conditioning.insert(0,reference)
@@ -4806,7 +4817,8 @@ class MainWindow(QMainWindow):
                 source='local',model='MiniMax H3',kind='Video',mode=profile['video_variant'],
                 details=f"{request['width']} × {request['height']} · {request['duration']} s · {request['steps']} steps",
                 progress=event,cancel=video_cancel,started=started,cancelled=cancelled,
-                workspace_key=preview_key,generation_number=generation)
+                workspace_key=preview_key,generation_number=generation,render_group=grouped_segments[0][0],
+                dependencies=(continuation_job.id,) if continuation_job is not None else ())
             return
         from .video_extensions import continuation_reference, blend_blocks, add_block_thumbnails
         from .local_generation import LOCAL_PROGRESS
@@ -4857,7 +4869,7 @@ class MainWindow(QMainWindow):
                     progress=event, cancel=block_cancel, started=started, cancelled=cancelled,
                     group_id=group_id, group_title=group_title,
                     dependencies=(previous.id,) if previous else (), intermediate=True,
-                    workspace_key=preview_key,generation_number=generation)
+                    workspace_key=preview_key,generation_number=generation,render_group=grouped_segments[index][0])
                 blocks.append(job)
         finally:
             self.render_queue.set_paused(was_paused)
