@@ -85,7 +85,8 @@ run_remote_request(value['request'],value['target'],lambda event:None,None,60)
         host.network_render.close();host.render_queue.shutdown();host.close()
 
 
-def test_reopened_client_auto_attaches_host_without_starting_pending_work(tmp_path,monkeypatch):
+@pytest.mark.parametrize('recovery',['receipt','snapshot'])
+def test_reopened_client_auto_attaches_host_without_starting_pending_work(tmp_path,monkeypatch,recovery):
     from ltx_prompt_director.models import Segment
     import av,numpy as np
     from shiboken6 import isValid
@@ -133,15 +134,33 @@ def test_reopened_client_auto_attaches_host_without_starting_pending_work(tmp_pa
         first.close();wait_for(lambda:not first._pending_disk_jobs)
         QTest.qWait(150)
         assert original.state=='Rendering' and not original.cancel.is_set()
-        # Simulate a crash before the queue's next scheduled snapshot: receipt recovers it.
-        (tmp_path/'projects/render-queue.json').unlink(missing_ok=True)
+        from uuid import UUID
+        UUID(request_id)
+        if recovery=='receipt':
+            # Simulate a crash before the queue's next scheduled snapshot.
+            (tmp_path/'projects/render-queue.json').unlink(missing_ok=True)
+        else:
+            # Clean close/restart must recover from the snapshot alone, with
+            # no receipt and no ability to rebuild the host's resolved inputs.
+            from ltx_prompt_director.remote_jobs import receipt_directory
+            (receipt_directory()/(request_id+'.json')).unlink()
+            path=tmp_path/'projects/render-queue.json'
+            snapshot=json.loads(path.read_text())
+            snapshot['jobs'][0]['portable']['continuation']=dict(path=str(tmp_path/'unavailable.mp4'),duration=4,overlap=22/24)
+            path.write_text(json.dumps(snapshot))
         with patch.object(ui.MainWindow,'restore_startup_workspace'):
             second=ui.MainWindow();second._close_saves_queued=True
         wait_for(lambda:not second.queue_store.restoring)
         assert len(second.render_queue.jobs)==1
         pending=second.render_queue.enqueue(lambda:seen.append('unexpected pending render'),(),lambda result:None,lambda error:None,title='Never submitted',source='network',kind='Video')
         second.open_render_project(ident);wait_for(lambda:second.current_project_id==ident)
-        second.network_render._peer(peer);second.queue_store.check_remote()
+        reconnect_peer=dict(peer,name='Renamed host',features=[])
+        # Another Director has the same display name; only the GUID owner
+        # may be resumed. The unrelated peer is deliberately tried first.
+        wrong=dict(reconnect_peer,id='unrelated',token=second.network_render.token,
+                   url=f'ws://127.0.0.1:{second.network_render.server.socket.getsockname()[1]}')
+        second.network_render._peer(wrong);second.network_render._peer(reconnect_peer)
+        second.queue_store.check_remote()
         wait_for(lambda:second.render_queue.active is not None and second.project_preview_panel.latent_player.active)
         assert second.render_queue.paused and len(seen)==1
         assert second.render_queue.active.portable['remote_request_id']==request_id

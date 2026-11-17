@@ -54,7 +54,8 @@ def load_queue_with_receipts(path):
         try:receipt=json.loads(source.read_text(encoding='utf-8'))
         except (OSError,ValueError):continue
         record=receipt.get('record')
-        if not record or not (path.parent/(record.get('project_id','')+'.meta.json')).is_file():continue
+        if not record:continue
+        if record['id'] not in by_id and not (path.parent/(record.get('project_id','')+'.meta.json')).is_file():continue
         if receipt.get('status') in {'failed','cancelled'}:
             if record['id'] not in by_id:
                 row=copy.deepcopy(record);row['state']='Failed' if receipt['status']=='failed' else 'Cancelled'
@@ -62,7 +63,15 @@ def load_queue_with_receipts(path):
         if receipt.get('status') in {'created','submitted','downloaded','cancel_requested'}:
             row=by_id.get(record['id'])
             if row is None:value.setdefault('jobs',[]).append(record);by_id[record['id']]=record
+            row.setdefault('portable',{}).setdefault('remote_request_id',receipt['request_id'])
             receipts[receipt['request_id']]=receipt
+    # The queue snapshot is itself a durable receipt. A separate receipt may
+    # be absent after interrupted writes, migration or restoring a backup.
+    for row in value.get('jobs',[]):
+        request_id=row.get('portable',{}).get('remote_request_id')
+        if row.get('source')=='network' and request_id and row.get('state') in {'Waiting','Rendering','Cancelling'}:
+            receipts.setdefault(request_id,dict(request_id=request_id,record=copy.deepcopy(row),
+                target=copy.deepcopy(row.get('remote_target',{})),status='submitted'))
     value['remote_receipts']=receipts
     return value
 

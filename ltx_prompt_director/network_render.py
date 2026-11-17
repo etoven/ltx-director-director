@@ -182,12 +182,12 @@ def run_remote_request(request,target,on_event,cancel,timeout):
     receipt=receipt or dict(request_id=request_id,record=record,target={'name':target.get('name'),'url':target['url']},status='created')
     if record:save_receipt(request_id,receipt)  # durable identity before host submission
     root=data_root()/'remote'/request_id;root.mkdir(parents=True,exist_ok=True,mode=0o700)
-    files={};payload=map_files({key:value for key,value in request.items() if key!='profile'},files,root)
+    resume_only=bool((record or {}).get('portable',{}).get('remote_resume_only'))
+    files={};payload={} if resume_only else map_files({key:value for key,value in request.items() if key!='profile'},files,root)
     profile=request.get('profile',{})
     payload['controls']={key:value for key,value in profile.items() if key in {'video_width','video_height','video_duration','video_steps','video_seed','video_sampler','video_preview_mode','video_preview_every','image_width','image_height','steps','preview_every'}}
     payload['mode']=profile.get('video_variant','')
     action='resume';started=time.monotonic();announced=False
-    resume_only=bool((record or {}).get('portable',{}).get('remote_resume_only'))
     try:
         while not timeout or time.monotonic()-started<timeout:
             if _detaching():raise ClientDetached('Client detached; the host render continues.')

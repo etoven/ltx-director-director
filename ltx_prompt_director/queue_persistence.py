@@ -153,19 +153,25 @@ class QueueStore(QObject):
                     if job.finished:job.finished(result)
                     self.queue.changed.emit();continue
             if self.queue.active is not None or ident in self.remote_probing:continue
-            peers=[peer for peer in self.owner.network_render.peers.values()
-                   if peer.get('name')==receipt.get('target',{}).get('name') and FEATURE in peer.get('features',[])]
-            if len(peers)!=1:continue
-            target=copy.deepcopy(peers[0]);self.remote_probing.add(ident)
-            def probe(ident=ident,target=target,receipt=receipt):
+            # The host must confirm ownership of the request GUID. Names can
+            # change or collide; old discovery records may lack feature data.
+            peers=copy.deepcopy(list(self.owner.network_render.peers.values()))
+            if not peers:continue
+            saved=receipt.get('target',{})
+            peers.sort(key=lambda peer:(peer.get('id')!=saved.get('id'),peer.get('url')!=saved.get('url'),peer.get('name')!=saved.get('name')))
+            self.remote_probing.add(ident)
+            def probe(ident=ident,peers=peers,receipt=receipt):
                 from .network_render import probe_remote,cancel_remote
-                try:
-                    cancelled=receipt.get('status')=='cancel_requested'
-                    found=cancel_remote(target,receipt['request_id']) if cancelled else probe_remote(target,receipt['request_id'])
-                    self.remote_checked.emit((ident,target,found,cancelled))
-                except Exception:
-                    try:self.remote_checked.emit((ident,target,False,False))
-                    except RuntimeError:pass
+                for target in peers:
+                    try:
+                        if not probe_remote(target,receipt['request_id']):continue
+                        target['features']=list(set(target.get('features',[]))|{FEATURE})
+                        cancelled=receipt.get('status')=='cancel_requested'
+                        found=cancel_remote(target,receipt['request_id']) if cancelled else True
+                        self.remote_checked.emit((ident,target,found,cancelled));return
+                    except Exception:continue
+                try:self.remote_checked.emit((ident,{},False,False))
+                except RuntimeError:pass
             threading.Thread(target=probe,daemon=True).start()
         if not self.remote_pending:self.remote_timer.stop()
 
@@ -202,8 +208,9 @@ class QueueStore(QObject):
             key=str(owner.session_keys.get(provider) or owner.settings.value(provider+'_key','') or '')
             tool=ArtworkTool(provider,spec['model'],key,{**profile,**spec.get('config',{})})
         def started():
-            if job.source=='network':
-                peers=[peer for peer in owner.network_render.peers.values() if peer['name']==job.remote_target.get('name')]
+            if job.source=='network' and not spec.get('remote_resume_only'):
+                peers=[peer for peer in owner.network_render.peers.values() if peer.get('id')==job.remote_target.get('id')]
+                if not peers:peers=[peer for peer in owner.network_render.peers.values() if peer['name']==job.remote_target.get('name')]
                 if len(peers)!=1:raise RuntimeError('Reconnect to '+job.remote_target.get('name','the rendering computer')+' before resuming this job.')
                 job.remote_target=copy.deepcopy(peers[0])
             if str(owner.current_project_id or '')==job.project_id:
@@ -247,6 +254,12 @@ class QueueStore(QObject):
             owner.statusBar().showMessage(str(error),12000);stopped()
         def factory(cancel,mapping):
             def operation():
+                if job.source=='network' and spec.get('remote_resume_only'):
+                    # The host already owns the resolved inputs and seed. Only
+                    # reconnect; local media/checkpoints need not still exist.
+                    from .network_render import run_remote_request
+                    from .local_generation import LOCAL_PROGRESS
+                    return run_remote_request({},job.remote_target,LOCAL_PROGRESS.get(),cancel,86400)
                 if spec['type']=='artwork':
                     from .artwork_tools import render_artwork
                     return render_artwork([copy.deepcopy(spec['record'])],tool)
