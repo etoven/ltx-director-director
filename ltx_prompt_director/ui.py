@@ -1115,6 +1115,7 @@ class ProjectPreviewPanel(QWidget):
         self._rendering = False
         self._source_generation = 0
         self.current_frame = None
+        self._generation_autoplay=True
         self.player = QMediaPlayer(self)
         self.audio = QAudioOutput(self)
         self.audio.setMuted(False)

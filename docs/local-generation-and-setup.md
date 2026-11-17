@@ -103,3 +103,7 @@ Queued MiniMax and Flux jobs reuse compatible loaded checkpoints. Director relea
 New projects are saved immediately with an Untitled placeholder. The first successful prompt Generate or Refine supplies a descriptive project name when you have not named it yourself. **Save All**, the double-disk button beside Save, saves edits in all open projects while keeping your current workspace visible.
 
 Click a render-queue tile to open its project. Drag waiting jobs using the insertion line; invalid dependency moves are marked in red. Queue history and pending jobs survive reopening. The restored queue starts paused so you can review it before resuming; interrupted renders restart from the beginning. Queue export buttons use your configured Downloads location and appear in Recent exports. Use **Shift+S** for Save and **Shift+A** for Save All.
+
+### Reconnecting to a remote render
+
+With a176 on both computers, an accepted MiniMax or Flux render keeps running on the host if the client disconnects, closes, or crashes. Reopen the client and let it discover the same host: it automatically reconnects to the existing job and receives its latest preview, progress and result. Work that finishes while the client is offline remains available for retrieval. Other jobs that were never submitted stay paused. Use **Cancel** to stop the host job deliberately. Keep the host program running; restarting the host itself still interrupts inference.

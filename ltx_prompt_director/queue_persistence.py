@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 import tempfile
 import threading
-from PySide6.QtCore import QObject,QTimer
+from PySide6.QtCore import QObject,QTimer,Signal,Slot
 from .render_queue import RenderJob
 
 _SECRET={'api_key','hf_token','access_token','refresh_token','authorization','token','key','session_keys'}
@@ -38,17 +38,26 @@ def write_snapshot(path,value):
         with os.fdopen(handle,'w',encoding='utf-8') as stream:
             json.dump(value,stream,ensure_ascii=False);stream.flush();os.fsync(stream.fileno())
         os.replace(temporary,path)
+        if "jobs" in value:
+            from .remote_jobs import prune_receipts
+            prune_receipts(value)
     finally:Path(temporary).unlink(missing_ok=True)
 
 
 class QueueStore(QObject):
+    remote_checked=Signal(object)
     def __init__(self,owner,path):
         super().__init__(owner);self.owner=owner;self.queue=owner.render_queue;self.path=Path(path)
-        self.frozen=False;self.restoring=self.path.is_file();self.writing=False;self.dirty=False;self.final_snapshot=None
+        from .remote_jobs import receipt_directory,load_queue_with_receipts
+        self.remote_pending={};self.remote_probing=set()
+        self.remote_timer=QTimer(self);self.remote_timer.setInterval(1500);self.remote_timer.timeout.connect(self.check_remote)
+        self.remote_checked.connect(self.remote_check_done)
+        owner.network_render.peer_found.connect(self.peer_ready)
+        self.frozen=False;self.restoring=self.path.is_file() or any(receipt_directory().glob('*.json'));self.writing=False;self.dirty=False;self.final_snapshot=None
         self.timer=QTimer(self);self.timer.setSingleShot(True);self.timer.setInterval(500);self.timer.timeout.connect(self.flush)
         self.queue.changed.connect(self.changed)
         if self.restoring:
-            owner.start_disk_job(lambda:json.loads(self.path.read_text(encoding='utf-8')),(),self.restore,self.restore_failed,serialized=True)
+            owner.start_disk_job(load_queue_with_receipts,(self.path,),self.restore,self.restore_failed,serialized=True)
 
     def restore_failed(self,message):
         self.restoring=False
@@ -90,6 +99,7 @@ class QueueStore(QObject):
 
     def freeze(self):
         if self.frozen:return
+        self.remote_timer.stop()
         self.timer.stop();self.final_snapshot=self.snapshot();self.frozen=True
         if not self.restoring:self.flush()
 
@@ -97,6 +107,7 @@ class QueueStore(QObject):
         try:
             if value.get('version')!=1:raise ValueError('Unsupported render queue snapshot version')
             existing={job.id for job in self.queue.jobs}
+            receipts=value.get('remote_receipts',{})
             restored=[]
             for row in value.get('jobs',[]):
                 if row.get('id') in existing:continue
@@ -110,6 +121,8 @@ class QueueStore(QObject):
                         job.state='Failed';job.error='Interrupted legacy/incoming render; submit it again from its project.'
                 elif job.state=='Cancelling':job.state='Cancelled'
                 self.bind(job);restored.append(job)
+                request_id=job.portable.get('remote_request_id')
+                if request_id in receipts:self.remote_pending[job.id]=receipts[request_id]
             self.queue.jobs[:0]=restored
             self.queue._removed_states.update(value.get('removedStates',{}))
             self.queue._removed_outputs.update(value.get('removedOutputs',{}))
@@ -119,7 +132,62 @@ class QueueStore(QObject):
             for row in range(panel.list.count()):
                 if panel.list.item(row).data(256).id==value.get('selected'):panel.list.setCurrentRow(row);break
             panel.list.verticalScrollBar().setValue(int(value.get('scroll',0)))
+            if self.remote_pending:self.remote_timer.start();self.check_remote()
         except (TypeError,ValueError,KeyError) as error:self.restore_failed(error)
+
+    @Slot(object)
+    def peer_ready(self,peer):
+        self.check_remote()
+
+    def check_remote(self):
+        if self.frozen or self.restoring:return
+        from .remote_jobs import FEATURE
+        for ident,receipt in list(self.remote_pending.items()):
+            job=next((item for item in self.queue.jobs if item.id==ident),None)
+            if job is None or job.state=='Complete':self.remote_pending.pop(ident,None);continue
+            if receipt.get('status')=='downloaded':
+                result=receipt.get('result',{})
+                paths=[result['path']] if result.get('path') else [path for path in result.values() if isinstance(path,str)]
+                if paths and all(Path(path).is_file() for path in paths):
+                    self.remote_pending.pop(ident,None);job.state='Complete';job.percent=100;job.output_path=paths[0]
+                    if job.finished:job.finished(result)
+                    self.queue.changed.emit();continue
+            if self.queue.active is not None or ident in self.remote_probing:continue
+            peers=[peer for peer in self.owner.network_render.peers.values()
+                   if peer.get('name')==receipt.get('target',{}).get('name') and FEATURE in peer.get('features',[])]
+            if len(peers)!=1:continue
+            target=copy.deepcopy(peers[0]);self.remote_probing.add(ident)
+            def probe(ident=ident,target=target,receipt=receipt):
+                from .network_render import probe_remote,cancel_remote
+                try:
+                    cancelled=receipt.get('status')=='cancel_requested'
+                    found=cancel_remote(target,receipt['request_id']) if cancelled else probe_remote(target,receipt['request_id'])
+                    self.remote_checked.emit((ident,target,found,cancelled))
+                except Exception:
+                    try:self.remote_checked.emit((ident,target,False,False))
+                    except RuntimeError:pass
+            threading.Thread(target=probe,daemon=True).start()
+        if not self.remote_pending:self.remote_timer.stop()
+
+    @Slot(object)
+    def remote_check_done(self,result):
+        ident,target,found,cancelled=result;self.remote_probing.discard(ident)
+        if self.frozen or not found:return
+        job=next((item for item in self.queue.jobs if item.id==ident),None)
+        receipt=self.remote_pending.get(ident)
+        if job is None or receipt is None:return
+        if cancelled:
+            from .remote_jobs import save_receipt
+            receipt['status']='cancelled'
+            self.owner.start_disk_job(save_receipt,(receipt['request_id'],receipt),lambda result:None,lambda error:None,serialized=True)
+            self.remote_pending.pop(ident,None);self.queue.cancel_job(ident);self.queue.changed.emit();return
+        if self.queue.active is not None:return
+        self.remote_pending.pop(ident,None)
+        job.remote_target=target;job.portable['remote_resume_only']=True
+        job.cancel=threading.Event();job.detach=threading.Event();job.state='Waiting'
+        self.bind(job)
+        # Attach to existing host work while leaving never-submitted jobs paused.
+        self.queue._start_job(job)
 
     def bind(self,job):
         if not job.portable:return

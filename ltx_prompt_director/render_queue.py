@@ -33,6 +33,7 @@ class RenderJob:
     percent: float | None = None
     message: str = ''
     error: str = ''
+    detach: threading.Event = field(default_factory=threading.Event,repr=False)
     cancel: threading.Event = field(default_factory=threading.Event,repr=False)
     operation: object = field(default=None,repr=False)
     args: tuple = field(default_factory=tuple,repr=False)
@@ -121,6 +122,7 @@ class RenderQueue(QObject):
                       workspace_key=workspace_key,generation_number=generation_number,mode=mode,remote_target=dict(remote_target or {}),
                       render_group=str(render_group) if render_group is not None else None)
         job.portable=dict(portable or {})
+        if source=="network" and job.portable:job.portable.setdefault("remote_request_id",uuid4().hex)
         job.force_render=force_render
         job.recipe=dict(operation=operation,args=args,finished=finished,failed=failed,progress=progress,
             started=started,cancelled=cancelled,factory=replay_factory)
@@ -257,12 +259,15 @@ class RenderQueue(QObject):
             if job.started:job.started()
             def operation(*args):
                 from .local_generation import LOCAL_KEEP_LOADED
-                from .network_render import REMOTE_TARGET
+                from .network_render import REMOTE_TARGET,REMOTE_JOB_RECORD,REMOTE_DETACH
+                from .queue_persistence import clean,_FIELDS
+                record=clean({key:getattr(job,key) for key in _FIELDS}) if job.source=="network" else None
+                remote_record=REMOTE_JOB_RECORD.set(record);detach=REMOTE_DETACH.set(job.detach)
                 from .render_cache import FORCE_RENDER
                 forced=FORCE_RENDER.set(job.force_render)
                 token=LOCAL_KEEP_LOADED.set(job.source=='local');destination=REMOTE_TARGET.set(job.remote_target or None)
                 try:return job.operation(*args)
-                finally:LOCAL_KEEP_LOADED.reset(token);REMOTE_TARGET.reset(destination);FORCE_RENDER.reset(forced)
+                finally:LOCAL_KEEP_LOADED.reset(token);REMOTE_TARGET.reset(destination);FORCE_RENDER.reset(forced);REMOTE_JOB_RECORD.reset(remote_record);REMOTE_DETACH.reset(detach)
             self.executor(operation,job.args,lambda result:finish(result),lambda error:finish(error=error),progress=progress,cancel=job.cancel)
         except Exception as error:finish(error=str(error))
 
@@ -351,6 +356,7 @@ class RenderQueue(QObject):
                 recipe=original.recipe
                 if not recipe:continue
                 cancel=threading.Event()
+                portable=dict(original.portable);portable.pop("remote_request_id",None);portable.pop("remote_resume_only",None)
                 operation=(recipe['factory'](cancel,mapping) if recipe.get('factory') else recipe['operation'])
                 group=groups.setdefault(original.group_id,uuid4().hex) if original.group_id else ''
                 job=self.enqueue(operation,recipe['args'],recipe['finished'],recipe['failed'],
@@ -360,7 +366,7 @@ class RenderQueue(QObject):
                     dependencies=tuple(mapping[key].id if key in mapping else key for key in original.dependencies),
                     intermediate=original.intermediate,workspace_key=original.workspace_key,generation_number=original.generation_number,
                     mode=original.mode,remote_target=original.remote_target,render_group=original.render_group,
-                    replay_factory=recipe.get('factory'),force_render=True,portable=original.portable)
+                    replay_factory=recipe.get('factory'),force_render=True,portable=portable)
                 root=recipe.get("origin_id",original.id)
                 job.recipe["origin_id"]=root
                 mapping[original.id]=job;mapping[root]=job;created.append(job)
@@ -370,6 +376,8 @@ class RenderQueue(QObject):
     def shutdown(self):
         self.closing=True;self._gpu_retry.stop()
         if self.active is None and not self._gpu_check_pending:self._release_gpu()
-        for job in tuple(self.jobs):self.cancel_job(job.id)
+        for job in tuple(self.jobs):
+            if job is self.active and job.source=="network" and not job.cancel.is_set():job.detach.set()
+            self.cancel_job(job.id)
         from .local_session import MANAGER
         MANAGER.release_async()
