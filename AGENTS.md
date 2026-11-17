@@ -37,6 +37,13 @@ source references, and history coverage limits.
 
 ## Cost-bounded verification and delivery
 
+- Do not run extended testing unless the user explicitly requests it. Use only
+  the minimum focused verification needed for the requested change; do not run
+  broad suites, extended GPU/model renders, soak tests, repeated workflows, or
+  unrelated audits without an explicit user instruction. Publish requested fixes
+  after the focused checks and artifact-integrity checks; report broader CI
+  separately rather than extending local testing.
+
 The reference-panel audit found that isolated helper checks had missed the actual
 add/generate/save/reopen/remove workflow, while repeated broad validation delayed
 requested fixes. Treat observable user behavior and the installed artifact as the

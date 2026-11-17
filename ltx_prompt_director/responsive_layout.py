@@ -5,7 +5,8 @@ from PySide6.QtWidgets import QLayout, QWidgetItem
 
 class ControlRow(QLayout):
     def __init__(self,parent=None):
-        super().__init__(parent);self._items=[];self.setSpacing(6)
+        self._items=[]
+        super().__init__(parent);self.setSpacing(6)
 
     def addItem(self,item):self._items.append(item)
     def insertWidget(self, index, widget):
@@ -17,17 +18,23 @@ class ControlRow(QLayout):
         self._items.insert(position, QWidgetItem(widget))
         self.invalidate()
 
-    def count(self):return len(self._items)
-    def itemAt(self,index):return self._items[index] if 0<=index<len(self._items) else None
-    def takeAt(self,index):return self._items.pop(index) if 0<=index<len(self._items) else None
+    # Qt may query these virtuals during parent construction/destruction,
+    # including after Python has cleared the wrapper's instance attributes.
+    def count(self):return len(getattr(self,'_items',()))
+    def itemAt(self,index):
+        items=getattr(self,'_items',())
+        return items[index] if 0<=index<len(items) else None
+    def takeAt(self,index):
+        items=getattr(self,'_items',())
+        return items.pop(index) if 0<=index<len(items) else None
     def addStretch(self,*_):pass
     def expandingDirections(self):return Qt.Orientation(0)
     def hasHeightForWidth(self):return True
     def heightForWidth(self,width):return self._arrange(QRect(0,0,width,0),False)
     def sizeHint(self):return self.minimumSize()
     def minimumSize(self):
-        size=QSize()
-        for item in self._items:
+        size=QSize(0,0)
+        for item in getattr(self,'_items',()):
             if not item.isEmpty():size=size.expandedTo(item.minimumSize())
         left,top,right,bottom=self.getContentsMargins()
         return size+QSize(left+right,top+bottom)
@@ -39,7 +46,7 @@ class ControlRow(QLayout):
         left,top,right,bottom=self.getContentsMargins()
         area=rect.adjusted(left,top,-right,-bottom)
         x=area.left();y=area.top();height=0;gap=max(0,self.spacing())
-        for item in self._items:
+        for item in getattr(self,'_items',()):
             if item.isEmpty():continue
             size=item.sizeHint().expandedTo(item.minimumSize())
             if item.widget() is not None:

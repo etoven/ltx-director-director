@@ -18,6 +18,9 @@ from importlib.resources import files
 from pathlib import Path
 from uuid import uuid4
 
+from .video_runtime import configure_playback
+configure_playback()
+
 from PySide6.QtCore import QBuffer, QIODevice, QDateTime, QEasingCurve, QEvent, QEventLoop, QItemSelectionModel, QObject, QRunnable, QPoint, QRectF, QSettings, QSize, QStandardPaths, Qt, QThreadPool, QTimer, QUrl, QVariantAnimation, Signal, Slot
 from PySide6.QtGui import QAction, QActionGroup, QBrush, QColor, QCursor, QIcon, QImageReader, QPainter, QPen, QPixmap, QPalette, QTextCharFormat, QTextCursor, QTextOption
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer, QVideoFrame
@@ -1132,7 +1135,7 @@ class ProjectPreviewPanel(QWidget):
         for video_output in (self.video, self.fullscreen_window.video):
             video_output.export_frame_requested.connect(self.export_current_frame)
             video_output.copy_frame_requested.connect(self.copy_current_frame)
-            video_output.videoSink().videoFrameChanged.connect(self.capture_frame)
+            video_output.videoSink().videoFrameChanged.connect(self.capture_frame,Qt.ConnectionType.QueuedConnection)
         self.fullscreen_window.video.fullscreen_requested.connect(self.fullscreen_window.reject)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)
@@ -1228,7 +1231,7 @@ class ProjectPreviewPanel(QWidget):
         self.title.setText(name);self._latent_pixmap=QPixmap.fromImage(image)
         self.empty.hide();self.video.hide();self.condition_text.hide();self.latent_image.show();self.latent_image.raise_();self.fit_latent_image()
         self.export.setEnabled(False);self.fullscreen.setEnabled(False);self.play.setEnabled(False)
-        self.video.videoSink().setVideoFrame(QVideoFrame(image))
+        self.current_frame=image.copy()
 
     def fit_latent_image(self):
         if (self._static_latent_active or self.latent_player.active) and self._latent_pixmap is not None:
@@ -1244,7 +1247,14 @@ class ProjectPreviewPanel(QWidget):
             control.setVisible(not rendering)
         if rendering and self.fullscreen_window.isVisible():self.fullscreen_window.reject()
 
+    @Slot(QVideoFrame)
     def capture_frame(self, frame) -> None:
+        # Decoder callbacks queued before a source transition cannot replace a
+        # live RGB preview or force GPU-backed readback while it is sampling.
+        latent=getattr(self,'latent_player',None)
+        if latent is not None and latent.active:return
+        if self._static_latent_active and not self._awaiting_render_frame:return
+        if not frame.isValid():return
         image = frame.toImage()
         if not image.isNull():
             self.current_frame = image.copy()

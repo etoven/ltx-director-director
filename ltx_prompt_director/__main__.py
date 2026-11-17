@@ -7,6 +7,8 @@ def migrate_settings() -> None:
 
 
 def main() -> int:
+    from .video_runtime import configure_playback
+    configure_playback()
     try:
         from PySide6.QtWidgets import QApplication
         from .ui import MainWindow
