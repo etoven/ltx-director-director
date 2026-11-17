@@ -10,11 +10,11 @@ from ltx_prompt_director.ui import ProjectPreviewPanel
 
 
 def test_playback_defaults_preserve_explicit_configuration():
-    env={};configure_playback(env,'linux')
+    env={};configure_playback(env,'linux',enabled=False)
     assert env=={'QT_FFMPEG_DECODING_HW_DEVICE_TYPES':',','QT_DISABLE_HW_TEXTURES_CONVERSION':'1'}
-    env['QT_FFMPEG_DECODING_HW_DEVICE_TYPES']='cuda';configure_playback(env,'linux')
+    env['QT_FFMPEG_DECODING_HW_DEVICE_TYPES']='cuda';configure_playback(env,'linux',enabled=False)
     assert env['QT_FFMPEG_DECODING_HW_DEVICE_TYPES']=='cuda'
-    env={};configure_playback(env,'win32');assert not env
+    env={};configure_playback(env,enabled=True);assert not env
 
 
 def test_static_and_live_frames_do_not_reenter_video_sink(tmp_path):
@@ -41,3 +41,18 @@ def test_layout_virtuals_tolerate_cleared_python_storage():
     row=ControlRow();row.__dict__.pop('_items')
     assert row.count()==0 and row.itemAt(0) is None and row.takeAt(0) is None
     assert row.minimumSize().isValid()
+
+
+def test_hardware_playback_preference_persists(tmp_path):
+    from PySide6.QtCore import QSettings
+    from ltx_prompt_director.video_runtime import HARDWARE_PLAYBACK_KEY, hardware_playback_enabled
+    path=str(tmp_path/'playback.ini')
+    settings=QSettings(path,QSettings.Format.IniFormat)
+    assert not hardware_playback_enabled(settings)
+    settings.setValue(HARDWARE_PLAYBACK_KEY,True);settings.sync()
+    reopened=QSettings(path,QSettings.Format.IniFormat)
+    assert hardware_playback_enabled(reopened)
+    env={};configure_playback(env,enabled=hardware_playback_enabled(reopened));assert not env
+    reopened.setValue(HARDWARE_PLAYBACK_KEY,False);reopened.sync()
+    env={};configure_playback(env,enabled=hardware_playback_enabled(reopened))
+    assert env['QT_FFMPEG_DECODING_HW_DEVICE_TYPES']==','

@@ -2631,6 +2631,14 @@ class SettingsDialog(QDialog):
             "configured in Local models. ChatGPT plan OAuth "
             "cannot generate image files. Image API usage is billed separately."
         )
+        from .video_runtime import hardware_playback_enabled
+        self.video_hardware_acceleration = QCheckBox("Use video hardware acceleration (restart required)")
+        self.video_hardware_acceleration.setChecked(hardware_playback_enabled(settings))
+        self.video_hardware_acceleration.setToolTip(
+            "Accelerate video decoding and texture conversion using the GPU. "
+            "Off by default for playback stability. Save and restart Director to apply. "
+            "Does not change GPU use for model generation. Explicit Qt environment overrides take priority."
+        )
         self.remember = QCheckBox("Store API keys persistently on this computer")
         self.remember.setChecked(settings.value("remember_keys", False, bool))
         self.timeout = QSpinBox()
@@ -2697,6 +2705,7 @@ class SettingsDialog(QDialog):
         form.addRow("API timeout", self.timeout)
         form.addRow("Connection retries", self.retries)
         form.addRow("Retry cooldown", self.retry_cooldown)
+        form.addRow("Video playback", self.video_hardware_acceleration)
         form.addRow("UI text scale (DPI)", text_scale_row)
         form.addRow("Default download folder", save_directory_row)
         form.addRow("ComfyUI working directory", comfy_directory_row)
@@ -2736,6 +2745,8 @@ class SettingsDialog(QDialog):
         self.settings.setValue("api_timeout", self.timeout.value())
         self.settings.setValue("api_retries", self.retries.value())
         self.settings.setValue("api_retry_cooldown", self.retry_cooldown.value())
+        from .video_runtime import HARDWARE_PLAYBACK_KEY
+        self.settings.setValue(HARDWARE_PLAYBACK_KEY, self.video_hardware_acceleration.isChecked())
         self.settings.setValue("ui_text_scale", self.ui_text_scale.value())
         self.settings.setValue("segment_export_dir", self.segment_save_dir.text().strip())
         self.settings.setValue("comfy_root_dir", self.comfy_root_dir.text().strip())
