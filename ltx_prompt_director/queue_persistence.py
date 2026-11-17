@@ -1,6 +1,7 @@
 """Versioned render queue snapshots. Never serialize callables or credentials."""
 import copy
 import json
+import logging
 import os
 from pathlib import Path
 import tempfile
@@ -49,7 +50,7 @@ class QueueStore(QObject):
     def __init__(self,owner,path):
         super().__init__(owner);self.owner=owner;self.queue=owner.render_queue;self.path=Path(path)
         from .remote_jobs import receipt_directory,load_queue_with_receipts
-        self.remote_pending={};self.remote_probing=set()
+        self.remote_pending={};self.remote_probing=set();self.unrestored_rows=[]
         self.remote_timer=QTimer(self);self.remote_timer.setInterval(1500);self.remote_timer.timeout.connect(self.check_remote)
         self.remote_checked.connect(self.remote_check_done)
         owner.network_render.peer_found.connect(self.peer_ready)
@@ -61,6 +62,7 @@ class QueueStore(QObject):
 
     def restore_failed(self,message):
         self.restoring=False
+        logging.getLogger(__name__).error('Render queue could not be restored: %s',message)
         self.owner.statusBar().showMessage('Render queue could not be restored: '+str(message),12000)
         # Retain unreadable state for recovery rather than overwriting it.
         self.frozen=True
@@ -79,6 +81,7 @@ class QueueStore(QObject):
                 spec['continuation']['path']=outputs[previous]
             rows.append(row)
         panel=self.owner.render_queue_panel;selected=panel.selected_job()
+        rows.extend(copy.deepcopy(self.unrestored_rows))
         return dict(version=1,paused=self.queue.paused,jobs=rows,removedStates=dict(self.queue._removed_states),
             removedOutputs=dict(self.queue._removed_outputs),collapsedGroups=list(panel.collapsed_groups),
             selected=selected.id if selected else '',scroll=panel.list.verticalScrollBar().value())
@@ -106,21 +109,33 @@ class QueueStore(QObject):
     def restore(self,value):
         try:
             if value.get('version')!=1:raise ValueError('Unsupported render queue snapshot version')
+            self.unrestored_rows=[]
             existing={job.id for job in self.queue.jobs}
             receipts=value.get('remote_receipts',{})
             restored=[]
             for row in value.get('jobs',[]):
                 if row.get('id') in existing:continue
-                data={key:item for key,item in row.items() if key in _FIELDS}
-                data['workspace_key']=tuple(data.get('workspace_key',()))
-                data['dependencies']=tuple(data.get('dependencies',()))
-                job=RenderJob(**data)
+                try:
+                    data={key:item for key,item in row.items() if key in _FIELDS}
+                    data['workspace_key']=tuple(data.get('workspace_key',()))
+                    data['dependencies']=tuple(data.get('dependencies',()))
+                    job=RenderJob(**data)
+                except (TypeError,ValueError,KeyError) as error:
+                    # Keep unreadable records in future snapshots, without
+                    # withholding all the readable jobs from the queue.
+                    self.unrestored_rows.append(copy.deepcopy(row))
+                    logging.getLogger(__name__).error('Unreadable saved queue entry %s: %s',row.get('id','unknown'),error)
+                    continue
                 if job.state in {'Waiting','Rendering'}:
                     job.state='Waiting';job.percent=None;job.eta_seconds=None;job.message='Restored · pending'
                     if not job.portable:
                         job.state='Failed';job.error='Interrupted legacy/incoming render; submit it again from its project.'
                 elif job.state=='Cancelling':job.state='Cancelled'
-                self.bind(job);restored.append(job)
+                try:self.bind(job)
+                except Exception as error:
+                    job.state='Failed';job.error='Could not restore render inputs: '+str(error)
+                    logging.getLogger(__name__).exception('Could not restore render inputs for job %s',job.id)
+                restored.append(job)
                 request_id=job.portable.get('remote_request_id')
                 if request_id in receipts:self.remote_pending[job.id]=receipts[request_id]
             self.queue.jobs[:0]=restored

@@ -54,15 +54,18 @@ def load_queue_with_receipts(path):
         try:receipt=json.loads(source.read_text(encoding='utf-8'))
         except (OSError,ValueError):continue
         record=receipt.get('record')
-        if not record:continue
-        if record['id'] not in by_id and not (path.parent/(record.get('project_id','')+'.meta.json')).is_file():continue
+        if not isinstance(record,dict) or not record.get('id'):continue
+        # Queue recovery is independent of the project library. A missing
+        # archive/metadata file must not hide an accepted remote render.
         if receipt.get('status') in {'failed','cancelled'}:
             if record['id'] not in by_id:
                 row=copy.deepcopy(record);row['state']='Failed' if receipt['status']=='failed' else 'Cancelled'
                 row['error']=receipt.get('message','');value.setdefault('jobs',[]).append(row);by_id[row['id']]=row
-        if receipt.get('status') in {'created','submitted','downloaded','cancel_requested'}:
+        if receipt.get('status') in {'created','submitted','downloaded','cancel_requested'} and receipt.get('request_id'):
             row=by_id.get(record['id'])
-            if row is None:value.setdefault('jobs',[]).append(record);by_id[record['id']]=record
+            if row is None:
+                row=copy.deepcopy(record)
+                value.setdefault('jobs',[]).append(row);by_id[record['id']]=row
             row.setdefault('portable',{}).setdefault('remote_request_id',receipt['request_id'])
             receipts[receipt['request_id']]=receipt
     # The queue snapshot is itself a durable receipt. A separate receipt may
