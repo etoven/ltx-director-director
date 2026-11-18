@@ -4157,6 +4157,13 @@ class MainWindow(QMainWindow):
         self.add_extension_tile.setToolTip("Add a 15-second MiniMax continuation with a one-second blend")
         self.add_extension_tile.clicked.connect(self.add_video_extension)
         self.add_tile_layout.addWidget(self.add_extension_tile, 0, Qt.AlignmentFlag.AlignHCenter)
+        self.insert_blend_video_tile = QPushButton("V↔")
+        self.insert_blend_video_tile.setObjectName("addTile")
+        self.insert_blend_video_tile.setFixedSize(32, 32)
+        self.insert_blend_video_tile.setAccessibleName("Insert video for blend")
+        self.insert_blend_video_tile.setToolTip("Insert video for blend: append a 3-second text bridge and a full video, then refine the bridge")
+        self.insert_blend_video_tile.clicked.connect(self.insert_video_for_blend)
+        self.add_tile_layout.addWidget(self.insert_blend_video_tile, 0, Qt.AlignmentFlag.AlignHCenter)
         self.add_tile_layout.addStretch(1)
         track_row.addWidget(self.add_tile_wrap)
         timeline_layout.addLayout(track_row)
@@ -4832,8 +4839,8 @@ class MainWindow(QMainWindow):
                 else:
                     self.statusBar().showMessage('Attach or queue the preceding group first, or set this join to Cut.',10000);return
         block_durations = [self.render_group_duration(group) for group,items in grouped_segments] if extensions else [float(request['duration'])]
-        if extensions and any(not 4<=length<=15 for length in block_durations):
-            QMessageBox.information(self,'Video extensions','Set each bracketed block length between 4 and 15 seconds using the timeline length control.')
+        if extensions and any(not 0<length<=15 for length in block_durations):
+            QMessageBox.information(self,'Video extensions','Set each generated block to a positive length up to 15 seconds using the timeline length control.')
             return
         blend_settings=[self.extension_transition(group) for group,items in grouped_segments[1:]]
         if extensions: request['duration'] = block_durations[0]
@@ -6100,7 +6107,7 @@ class MainWindow(QMainWindow):
         if not restored:self.project_preview_panel.set_project(name, str(meta.get("previewVideoPath", "")))
         self.project_files_panel.set_project(name, project_files)
 
-    def attach_group_video(self,source_path,group,workspace=None,expected_revision=None):
+    def attach_group_video(self,source_path,group,workspace=None,expected_revision=None,*,imported_shots=None,after_attach=None):
         from .shot_sequence_widgets import import_shots
         target=workspace or (self.workspace_revision,self.current_project_id,self.project_type)
         project_id=target[1]
@@ -6134,7 +6141,7 @@ class MainWindow(QMainWindow):
                         if existing.render_group==group:
                             existing.media_path=shot.media_path;existing.preview_path=shot.preview_path
                             existing.duration=clip_length;existing.trim_start=0;existing.media_duration_frames=shot.media_duration_frames;existing.shot_trimmed=True
-                    self.refresh_timeline()
+                    self.refresh_timeline(self.timeline.currentRow())
                 if manual:
                     if active and self.workspace_engine!='shot_sequence':
                         items=[item for item in self.segments if item.render_group==group]
@@ -6144,7 +6151,7 @@ class MainWindow(QMainWindow):
                         latest['requestedLength']=clip_length
                         if group==self._active_render_group:
                             self.requested_length.blockSignals(True);self.requested_length.setValue(clip_length);self.requested_length.blockSignals(False)
-                        self.refresh_timeline()
+                        self.refresh_timeline(self.timeline.currentRow())
                     ordered=list(mapping);position=ordered.index(str(group))
                     for key in ordered[position+1:]:mapping[key]['dependencyRevision']=mapping[key].get('dependencyRevision',0)+1
             if metadata:
@@ -6159,7 +6166,12 @@ class MainWindow(QMainWindow):
             if group==self._active_render_group:self.grouped_sequence.show_group()
             self.cache_current_workspace()
             self.save_library_project(automatic=True)
-        self.start_disk_job(import_shots,([str(source_path)],project_library_path()/'previews'),ready,
+            return True
+        def attached(shots):
+            committed=ready(shots)
+            if after_attach and committed and self.current_project_id==project_id:after_attach()
+        if imported_shots is not None:attached(imported_shots)
+        else:self.start_disk_job(import_shots,([str(source_path)],project_library_path()/'previews'),attached,
             lambda message:self.statusBar().showMessage('Video attachment failed: '+str(message),12000),serialized=True)
 
     def choose_project_video(self) -> None:
@@ -7498,7 +7510,8 @@ class MainWindow(QMainWindow):
         # Completed-shot editing must never inherit a generation duration budget.
         limit = None if self.workspace_engine == "shot_sequence" else sequence_limit(self.workspace_definition)
         if self.video_extensions:
-            limits=[sequence_limit(self.render_group_definition(group)) for group in self.render_groups()]
+            limits=[self.render_group_duration(group) if self.render_group_options.get(str(group),{}).get('attachedVideoOnly')
+                    else sequence_limit(self.render_group_definition(group)) for group in self.render_groups()]
             return sum(limits) if all(value is not None for value in limits) else None
         return limit
 
@@ -7696,13 +7709,77 @@ class MainWindow(QMainWindow):
         if hasattr(self,'grouped_sequence'):self.grouped_sequence.load(record.get('groupedSequence'))
         self._group_video_revision=self.workspace_revision
 
+    def insert_video_for_blend(self):
+        if not self.workspace_engine.startswith('minimax') or self.ai_busy or getattr(self,'_blend_video_importing',False):return
+        path=choose_document_open(self,'Insert video for blend',str(Path.home()),'Videos (*.mp4 *.webm *.mov *.mkv *.avi *.m4v)')
+        if not path:return
+        if not self.current_project_id:
+            self.initialize_empty_library_project(None)
+            if not self.current_project_id:return
+        self.finish_prompt_reviews();self.store_render_group()
+        scope=(self.current_project_id,self.workspace_revision)
+        before=[s.to_dict() for s in self.segments]
+        self._blend_video_importing=True;self.insert_blend_video_tile.setEnabled(False)
+        from .shot_sequence_widgets import import_shots
+        def failed(message):
+            self._blend_video_importing=False
+            self.insert_blend_video_tile.setEnabled(not self.ai_busy)
+            self.statusBar().showMessage('Video insertion failed: '+str(message),12000)
+        def imported(shots):
+            self._blend_video_importing=False
+            self.insert_blend_video_tile.setEnabled(not self.ai_busy)
+            if not shots:return
+            if (scope!=(self.current_project_id,self.workspace_revision) or self.ai_busy
+                    or before!=[s.to_dict() for s in self.segments]):
+                self.statusBar().showMessage('Video insertion discarded because the project or timeline changed.',10000);return
+            from .blend_timing import DEFAULT_SECONDS
+            bridge_group=max((s.render_group for s in self.segments),default=-1)+1
+            video_group=bridge_group+1
+            prompt='Continue naturally from the preceding scene and transition smoothly into the following video, preserving visual continuity.'
+            context=self.capture_render_group()
+            def group_context(length,text):
+                result=copy.deepcopy(context)
+                result.setdefault('directionOptions',{})['requestedLength']=length
+                production=result.setdefault('minimaxH3',{})
+                production.update(prompt=text,sourceHash='',updatedAt='',drafts={})
+                return result
+            bridge_context=group_context(3,prompt)
+            bridge=Segment('Video blend bridge','','','text','text',prompt,3,render_group=bridge_group)
+            movie=copy.deepcopy(shots[0]);movie.render_group=video_group
+            self.render_group_options[str(bridge_group)]=dict(requestedLength=3,context=bridge_context,
+                blend='perceptual_crossfade',blendLength=DEFAULT_SECONDS,blendSide='source')
+            self.render_group_options[str(video_group)]=dict(requestedLength=movie.duration,
+                context=group_context(movie.duration,'Use the attached video unchanged.'),attachedVideoOnly=True,
+                blend='perceptual_crossfade',blendLength=DEFAULT_SECONDS,blendSide='source')
+            row=len(self.segments);self.segments.extend([bridge,movie])
+            self.video_extensions=max(0,len(self.render_groups())-1);self._group_video_revision=self.workspace_revision
+            self._active_render_group=bridge_group;self.apply_render_group(bridge_context)
+            self.refresh_video_extensions();self.refresh_timeline(row);self.mark_dirty()
+            self.render_scope.setCurrentIndex(self.render_scope.findData(bridge_group))
+            def refine():
+                self.grouped_sequence.refresh()
+                credentials=self.ai_credentials(interactive=False)
+                if not credentials:
+                    self.statusBar().showMessage('Video and bridge inserted. Configure a writing provider to refine the bridge.',12000);return
+                if self.current_segment() is None or self.current_segment().id!=bridge.id:return
+                provider,model,key=credentials
+                self.refinement_segment_id=bridge.id
+                instruction=('Refine only this 3-second text bridge after observing its incoming and outgoing continuity frames. '
+                             'Connect the existing ending appearance to the picked video opening. Preserve all timing, media and other groups.')
+                self.start_ai_worker(refine_segment_prompt,
+                    (copy.deepcopy(self.segments),row,provider,model,key,instruction,3,self.settings.value('api_timeout',400,int)),
+                    'Refining the 3-second video bridge from boundary frames…',
+                    lambda result:self.refine_prompt_finished(result,preserve_timing=True),refinement_scope='segment')
+            self.attach_group_video(path,video_group,imported_shots=shots,after_attach=refine)
+        self.start_disk_job(import_shots,([path],project_library_path()/'previews'),imported,failed,serialized=True)
+
     def add_video_extension(self) -> None:
         if not self.workspace_engine.startswith('minimax') or not self.segments:return
         if not self.video_extensions:self._group_video_revision=self.workspace_revision
         self.store_render_group()
         self.render_group_settings_changed()
         group = max(s.render_group for s in self.segments)+1
-        length = min(15.,max(4.,self.requested_length.value() or sum(s.duration for s in self.segments if s.render_group==self._active_render_group)))
+        length = min(15.,max(0.01,self.requested_length.value() or sum(s.duration for s in self.segments if s.render_group==self._active_render_group)))
         self.render_group_options[str(group)] = {'requestedLength':length,'context':self.capture_render_group()}
         segment = Segment(f'Extension {group}', '', '', 'text', 'text', '', length, render_group=group)
         self.segments.append(segment)
@@ -7715,6 +7792,7 @@ class MainWindow(QMainWindow):
         if not hasattr(self,'extension_brackets'):return
         enabled = self.workspace_engine.startswith('minimax')
         self.add_extension_tile.setVisible(enabled)
+        self.insert_blend_video_tile.setVisible(enabled)
         self.extension_brackets.setVisible(bool(self.video_extensions))
         self.extension_brackets.update();self.position_extension_boxes()
 
@@ -7796,6 +7874,7 @@ class MainWindow(QMainWindow):
             self.update_summary()
             return
         for group,items in self.render_groups().items():
+            if self.render_group_options.get(str(group),{}).get('attachedVideoOnly') and len(items)==1 and items[0].kind=='video':continue
             targets = fit_sequence([item.duration for item in items], sequence_limit(self.render_group_definition(group)))
             for item, duration in zip(items, targets): item.duration = duration
         self.video_extensions = max(0,len(self.render_groups())-1)
@@ -8747,10 +8826,11 @@ class MainWindow(QMainWindow):
         for widget in (self.prompt_scope, self.project_type_combo, self.duration_spin,
                        self.start_button, self.end_button, self.voice_options_button, self.requested_length,
                        self.timeline_approve_all, self.timeline_deny_all,
-                       self.add_tile, self.add_text_tile,
+                       self.add_tile, self.add_text_tile, self.insert_blend_video_tile,
                        self.hdr, self.sfx, self.spoken_dialog, self.reduce_music,
                        self.output_width, self.output_height, self.references_button):
             widget.setEnabled(enabled)
+        self.insert_blend_video_tile.setEnabled(enabled and not getattr(self,'_blend_video_importing',False))
         self.timeline.setDragEnabled(enabled)
         self.timeline.setAcceptDrops(enabled)
         for row in range(self.timeline.count()):
@@ -9286,7 +9366,7 @@ class MainWindow(QMainWindow):
         self.set_ai_controls_enabled(True)
         self.magic_overlay.hide_overlay()
 
-    def refine_prompt_finished(self, result: dict) -> None:
+    def refine_prompt_finished(self, result: dict, *, preserve_timing=False) -> None:
         target = self.refinement_target()
         if target:
             index, segment = target
@@ -9295,11 +9375,14 @@ class MainWindow(QMainWindow):
             segment.prompt = consume_global_refinements(str(result["prompt"]))
             segment.image_prompt = str(result.get("imagePrompt") or segment.image_prompt).strip()
             durations = [item.duration for item in self.segments]
-            durations[index] = float(result["duration"])
+            durations[index] = segment.duration if preserve_timing else float(result["duration"])
+            if preserve_timing:
+                self.minimax_prompt_text=segment.prompt
+                self.store_minimax_draft();self.store_render_group()
             if self.timeline.currentRow() == index:
                 self.refresh_segment_prompt_box(index)
             self.refresh_text_segment_previews()
-            self.animate_timeline_durations(durations)
+            if not preserve_timing:self.animate_timeline_durations(durations)
             self.statusBar().showMessage(f"Segment {index + 1} prompt refined")
             self.mark_dirty()
         self.set_ai_controls_enabled(True)

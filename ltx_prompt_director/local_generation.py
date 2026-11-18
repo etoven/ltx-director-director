@@ -147,7 +147,7 @@ def validate_profile(profile, kind):
 
 def align_h3_frames(duration, fps=24):
     requested = round(float(duration) * fps) + 1
-    if not 4 <= float(duration) <= 15: raise ValueError('H3 local generation requires a duration between 4 and 15 seconds.')
+    if not 0 < float(duration) <= 15: raise ValueError('H3 local generation requires a positive duration up to 15 seconds.')
     frames = requested + (5 - requested) % 17
     return frames
 

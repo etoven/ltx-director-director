@@ -241,7 +241,7 @@ class LocalModelsPanel(QWidget):
         self.video_height = QSpinBox(); self.video_height.setRange(256, 2048); self.video_height.setSingleStep(32); self.video_height.setValue(int(self.profile.get('video_height', 544)))
         canvas = QHBoxLayout(); canvas.addWidget(self.video_width); canvas.addWidget(QLabel('×')); canvas.addWidget(self.video_height)
         self.tabs.widget(1).layout().insertRow(4, 'Video canvas', canvas)
-        self.video_duration = QDoubleSpinBox(); self.video_duration.setRange(4, 15); self.video_duration.setValue(float(self.profile.get('video_duration', 15)))
+        self.video_duration = QDoubleSpinBox(); self.video_duration.setRange(0.01, 15); self.video_duration.setValue(float(self.profile.get('video_duration', 15)))
         self.video_duration.setSuffix(' seconds')
         self.video_duration.setToolTip('15 seconds aligns to 362 frames at 24 fps (15.08 s). 16:9 at 0.5 MP uses 960 × 544.')
         self.tabs.widget(1).layout().insertRow(5, 'Video length', self.video_duration)
