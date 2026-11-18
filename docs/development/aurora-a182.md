@@ -1,0 +1,7 @@
+# Aurora a182: render missing group videos only
+
+Video Preview's existing render-scope selector now includes **Missing group videos only**. It queues groups without an attached video file, including attachments whose files are missing, and skips groups already queued or rendering in the current workspace. Existing attachments are preserved regardless of prompt/cache age; users can choose All groups or a specific group when they want replacement renders.
+
+The option reuses the normal selected-group render path. Neighboring attached clips remain available for blend conditioning, and consecutive missing groups keep their queued predecessor dependencies. Multiple newly queued groups share one visible queue heading. The previous queue pause state and the selected Missing option are restored afterward. No blend/assembly jobs are introduced. When every group is attached or queued, Generate reports that nothing is missing without scheduling work.
+
+One focused native selector/Generate scenario passed: existing attachments, consecutive and separated gaps, a missing attachment file, repeated clicks without duplicate queued jobs, selector refresh, all-attached no-op, unchanged authored segments and preserved attachment bytes. No model render or broad suite ran. An initial fixture used an unconfigured checkpoint and blocked on setup; the corrected fixture uses the same configured-checkpoint pattern as existing queue tests. One frozen a182 wheel is used for artifact checks, installation on both machines and publication; broader CI is reported separately.

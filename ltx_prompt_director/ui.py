@@ -4682,7 +4682,7 @@ class MainWindow(QMainWindow):
         self.local_video_cancel_button.clicked.connect(self.cancel_queued_video)
         self.local_video_cancel_button.hide()
         self.render_scope=QComboBox();self.render_scope.setObjectName('videoRenderScope');self.render_scope.addItem('All groups',None)
-        self.render_scope.setToolTip('Render all groups or only the chosen group')
+        self.render_scope.setToolTip('Render all groups, a chosen group, or only groups missing an attached video. Already queued groups are skipped.')
         row.addWidget(self.local_video_generate);row.addWidget(self.render_scope); row.addWidget(self.local_video_cancel_button)
         panel.layout().insertLayout(1, row)
         self.local_video_pill = ProgressPill(panel, anchor=lambda: panel.empty if panel.video.isHidden() else panel.video)
@@ -4713,11 +4713,47 @@ class MainWindow(QMainWindow):
         groups=list(self.render_groups())
         self.render_scope.blockSignals(True);self.render_scope.clear();self.render_scope.addItem('All groups',None)
         for index,group in enumerate(groups):self.render_scope.addItem(f'Group {index+1} only',group)
+        self.render_scope.addItem('Missing group videos only','__missing_group_videos__')
         found=self.render_scope.findData(selected)
         self.render_scope.setCurrentIndex(max(0,found));self.render_scope.setVisible(len(groups)>1)
         self.render_scope.blockSignals(False)
 
+    def generate_missing_group_videos(self):
+        self.store_render_group()
+        key=self.video_preview_key()
+        queued={job.render_group for job in self.render_queue.jobs
+                if job.kind=='Video' and job.state in {'Waiting','Rendering'}
+                and (self.resolve_video_key(job.workspace_key)==key if job.workspace_key
+                     else job.project_id==str(self.current_project_id or ''))}
+        missing=[]
+        for group,items in self.render_groups().items():
+            path=self.render_group_options.get(str(group),{}).get('clip',{}).get('path','')
+            if items and not (path and Path(path).is_file()) and str(group) not in queued:missing.append(group)
+        if not missing:
+            self.statusBar().showMessage('No missing group videos: groups already have an attachment or are queued.',10000)
+            return
+        before={job.id for job in self.render_queue.jobs};was_paused=self.render_queue.paused
+        self.render_queue.set_paused(True)
+        try:
+            for group in missing:
+                self.render_scope.setCurrentIndex(self.render_scope.findData(group))
+                count=len(self.render_queue.jobs)
+                self.generate_local_video()
+                if len(self.render_queue.jobs)==count:break  # Keep the existing validation message.
+            created=[job for job in self.render_queue.jobs if job.id not in before]
+            if len(created)>1:
+                ident=uuid4().hex
+                for job in created:
+                    job.group_id=ident
+                    job.group_title=(self.current_project_name or 'Untitled video')+' · Missing group videos'
+                self.render_queue.changed.emit()
+        finally:
+            self.render_scope.setCurrentIndex(self.render_scope.findData('__missing_group_videos__'))
+            self.render_queue.set_paused(was_paused)
+
     def generate_local_video(self):
+        if self.render_scope.currentData()=='__missing_group_videos__':
+            self.generate_missing_group_videos();return
         if not self.current_project_id:
             self.initialize_empty_library_project(None)
             if not self.current_project_id:return
