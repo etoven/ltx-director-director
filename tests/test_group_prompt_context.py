@@ -84,8 +84,8 @@ def test_generate_and_refine_send_blend_image_and_explicit_first_text_instructio
     finally:GROUP_PROMPT_CONTEXT.reset(token)
     assert len(request)==1
     payload=json.dumps(request[0],ensure_ascii=False)
-    assert 'GROUP STARTING CONTINUITY' in payload and 'prompt text itself' in payload
-    assert 'Group 3 starting anchor' in payload and ('inline_data' in payload if provider=='gemini' else 'input_image' in payload)
+    assert 'GROUP STARTING AND ENDING CONTINUITY' in payload and 'prompt text itself' in payload
+    assert 'Incoming continuity frame' in payload and ('inline_data' in payload if provider=='gemini' else 'input_image' in payload)
     assert groups[2][0].prompt=='Continue the authored motion.'
 
 
@@ -118,3 +118,59 @@ def test_existing_pair_uses_sequence_compositor_for_first_blend_frame(tmp_path,m
     assert inputs[0]['anchor_source']=='composited blend start'
     assert calls==[(1/23,'perceptual_crossfade','source')]
     assert inputs[0]['source_time']==pytest.approx(4-22/24)
+
+
+@pytest.mark.parametrize('operation',['generate','refine'])
+def test_both_continuity_images_have_relational_labels_and_segment_distances(tmp_path,monkeypatch,operation):
+    owner,groups,video=owner_fixture(tmp_path)
+    groups[1]=[Segment('A','','','text','text','First action.',1,render_group=1),
+               Segment('B','','','text','text','Second action.',1,render_group=1),
+               Segment('C','','','text','text','Third action.',2,render_group=1)]
+    owner.render_group_options['2']=dict(clip=dict(path=str(video),duration=4,trim_start=0))
+    before=[s.to_dict() for items in groups.values() for s in items]
+    records=snapshot(owner,[1]);original_fingerprint=fingerprint(records)
+    token=GROUP_PROMPT_CONTEXT.set(records)
+    try:
+        images,rules=augment([],'Rules','openai',ai._mixed_reference_input)
+    finally:GROUP_PROMPT_CONTEXT.reset(token)
+    incoming=next(i for i in images if i.get('group_start_anchor'))
+    outgoing=next(i for i in images if i.get('group_end_anchor'))
+    assert [r['intervening_segment_count'] for r in incoming['segment_relationships']]==[0,1,2]
+    assert [r['intervening_segment_count'] for r in outgoing['segment_relationships']]==[2,1,0]
+    assert incoming['segment_relationships'][0]['relationship']=='Immediately before this segment; no intervening segments'
+    assert outgoing['segment_relationships'][-1]['relationship']=='Immediately after this segment; no intervening segments'
+    assert outgoing['segment_relationships'][0]['intervening_segments'][0]['prompt']=='Second action.'
+    # A missing immediate output searches farther forward and counts every
+    # authored segment across the intervening group boundary.
+    groups[3]=[Segment('Later','','','text','text','Later action.',4,render_group=3)]
+    owner.render_group_options['3']=owner.render_group_options.pop('2')
+    token=GROUP_PROMPT_CONTEXT.set(snapshot(owner,[1],[groups[1][-1].id]))
+    try:later,_=augment([],'Rules','openai',ai._mixed_reference_input)
+    finally:GROUP_PROMPT_CONTEXT.reset(token)
+    tail=next(i for i in later if i.get('group_end_anchor'))
+    assert tail['context_label']=='Later visual context'
+    assert tail['segment_relationships'][0]['intervening_segment_count']==1
+    groups.pop(3);owner.render_group_options['2']=owner.render_group_options.pop('3')
+    owner.render_group_options['2']['attachmentRevision']=3
+    assert fingerprint(snapshot(owner,[1]))!=original_fingerprint
+    baseline=fingerprint(snapshot(owner,[1]));groups[1][1].prompt='A newer intervening action.'
+    assert fingerprint(snapshot(owner,[1]))!=baseline
+    groups[1][1].prompt='Second action.'
+    request=[];monkeypatch.setattr(ai,'streaming_enabled',lambda:False)
+    output=json.dumps(dict(prompt='Preserve the action while connecting the two visual states.'))
+    def post(url,**kwargs):
+        request.append(kwargs['json'])
+        return SimpleNamespace(raise_for_status=lambda:None,json=lambda:{'output':[dict(type='message',content=[dict(type='output_text',text=output)])]})
+    monkeypatch.setattr(ai.requests,'post',post)
+    token=GROUP_PROMPT_CONTEXT.set(snapshot(owner,[1],[groups[1][1].id]))
+    try:
+        if operation=='generate':ai.build_minimax_h3_prompt(groups[1],'openai','fixture','fixture','Continue','',False,False,False,10)
+        else:ai.refine_minimax_h3_prompt(groups[1],'openai','fixture','fixture','Continue','',False,False,False,'Current authored draft.','Refine only the selected segment.',10)
+    finally:GROUP_PROMPT_CONTEXT.reset(token)
+    body=json.dumps(request[0],ensure_ascii=False)
+    assert 'Incoming continuity frame' in body and 'Outgoing continuity frame' in body
+    assert '1 intervening segments before this segment' in body and '1 intervening segments after this segment' in body
+    assert 'source_time' not in body and 'group_local_time' not in body
+    content=request[0]['input'][0]['content']
+    assert sum(i['type']=='input_image' for i in content)>=2
+    assert [s.to_dict() for items in groups.values() for s in items]==before

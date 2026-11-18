@@ -22,14 +22,14 @@ def clean(value):
     return value
 
 
-def video_spec(request,segments,references,*,continuation=None,previous_job='',workspace_type='',attachment_revision=0):
+def video_spec(request,segments,references,*,continuation=None,previous_job='',workspace_type='',attachment_revision=0,outgoing=None):
     records=[]
     for segment in segments:
         row=segment.to_dict()
         if getattr(segment,'_archive_source',None):row['_archive_source']=list(segment._archive_source)
         records.append(row)
     return dict(type='video',request=clean(copy.deepcopy(request)),segments=records,references=clean(copy.deepcopy(references)),
-                continuation=continuation,previous_job=previous_job,workspace_type=workspace_type,attachment_revision=attachment_revision)
+                continuation=continuation,previous_job=previous_job,workspace_type=workspace_type,attachment_revision=attachment_revision,outgoing=copy.deepcopy(outgoing))
 
 
 def write_snapshot(path,value):
@@ -131,6 +131,9 @@ class QueueStore(QObject):
                     if not job.portable:
                         job.state='Failed';job.error='Interrupted legacy/incoming render; submit it again from its project.'
                 elif job.state=='Cancelling':job.state='Cancelled'
+                request_id=job.portable.get('remote_request_id')
+                if job.source=='network' and request_id in receipts:
+                    job.portable['remote_resume_only']=True
                 try:self.bind(job)
                 except Exception as error:
                     job.state='Failed';job.error='Could not restore render inputs: '+str(error)
@@ -205,7 +208,7 @@ class QueueStore(QObject):
         if self.queue.active is not None:return
         self.remote_pending.pop(ident,None)
         job.remote_target=target;job.portable['remote_resume_only']=True
-        job.cancel=threading.Event();job.detach=threading.Event();job.state='Waiting'
+        job.cancel=threading.Event();job.detach=threading.Event();job.state='Waiting';job.message='Reconnecting to host render…'
         self.bind(job)
         # Attach to existing host work while leaving never-submitted jobs paused.
         self.queue._start_job(job)
@@ -223,8 +226,10 @@ class QueueStore(QObject):
             key=str(owner.session_keys.get(provider) or owner.settings.value(provider+'_key','') or '')
             tool=ArtworkTool(provider,spec['model'],key,{**profile,**spec.get('config',{})})
         def started():
-            if job.source=='network' and not spec.get('remote_resume_only'):
+            if job.source=='network':
                 peers=[peer for peer in owner.network_render.peers.values() if peer.get('id')==job.remote_target.get('id')]
+                if not peers:peers=[peer for peer in owner.network_render.peers.values() if peer.get('url')==job.remote_target.get('url')]
+                if not peers and job.remote_target.get('token'):peers=[job.remote_target]
                 if not peers:peers=[peer for peer in owner.network_render.peers.values() if peer['name']==job.remote_target.get('name')]
                 if len(peers)!=1:raise RuntimeError('Reconnect to '+job.remote_target.get('name','the rendering computer')+' before resuming this job.')
                 job.remote_target=copy.deepcopy(peers[0])
@@ -291,14 +296,17 @@ class QueueStore(QObject):
                 request=copy.deepcopy(spec['request']);request['profile']={**profile,**request.get('profile',{})}
                 conditioning=video_references(segments,[],request['duration'])
                 continuation=spec.get('continuation')
-                if continuation:
+                if continuation and (not segments or segments[0].kind=='text'):
                     from .video_extensions import continuation_reference
                     path=continuation.get('path','');previous=spec.get('previous_job')
                     parent=mapping.get(previous) or next((item for item in self.queue.jobs if item.id==previous),None)
                     if parent is not None:path=parent.output_path
                     reference=continuation_reference(path,continuation['duration'],continuation['overlap'],continuation.get('trim_start',0))
                     if request['profile'].get('video_variant')!='ref2va':reference.pop('audio_path',None)
+                    reference['blend_side']=continuation.get('side','source')
                     conditioning.insert(0,reference)
+                from .blend_conditioning import append_outgoing
+                append_outgoing(conditioning,spec.get('outgoing'),request['duration'],request['profile'].get('video_variant'))
                 request.update(conditioning=conditioning,references=copy.deepcopy(spec.get('references',[])))
                 return run_request(request,cancel=cancel)
             def execute():
@@ -309,4 +317,4 @@ class QueueStore(QObject):
             return execute
         job.operation=factory(job.cancel,{})
         job.args=();job.finished=ready;job.failed=failed;job.started=started;job.progress=progress;job.cancelled=stopped
-        job.recipe=dict(operation=job.operation,args=(),finished=ready,failed=failed,progress=progress,started=started,cancelled=stopped,factory=factory)
+        job.recipe=dict(operation=job.operation,args=(),finished=ready,failed=failed,progress=progress,started=started,cancelled=stopped,factory=factory,rebind=self.bind)

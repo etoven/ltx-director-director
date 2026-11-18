@@ -205,6 +205,7 @@ class RenderQueue(QObject):
         self._start_job(job)
 
     def _start_job(self,job):
+        if job.source=='network' and job.portable:job.portable['remote_attempted']=True
         self.active=job;job.state='Rendering';job.started_at=time.monotonic();self.changed.emit()
         def progress(event):
             if job is not self.active:return
@@ -356,7 +357,7 @@ class RenderQueue(QObject):
                 recipe=original.recipe
                 if not recipe:continue
                 cancel=threading.Event()
-                portable=dict(original.portable);portable.pop("remote_request_id",None);portable.pop("remote_resume_only",None)
+                portable=dict(original.portable);portable.pop("remote_request_id",None);portable.pop("remote_resume_only",None);portable.pop("remote_attempted",None)
                 operation=(recipe['factory'](cancel,mapping) if recipe.get('factory') else recipe['operation'])
                 group=groups.setdefault(original.group_id,uuid4().hex) if original.group_id else ''
                 job=self.enqueue(operation,recipe['args'],recipe['finished'],recipe['failed'],
@@ -367,6 +368,7 @@ class RenderQueue(QObject):
                     intermediate=original.intermediate,workspace_key=original.workspace_key,generation_number=original.generation_number,
                     mode=original.mode,remote_target=original.remote_target,render_group=original.render_group,
                     replay_factory=recipe.get('factory'),force_render=True,portable=portable)
+                if recipe.get("rebind"):recipe["rebind"](job)
                 root=recipe.get("origin_id",original.id)
                 job.recipe["origin_id"]=root
                 mapping[original.id]=job;mapping[root]=job;created.append(job)

@@ -180,3 +180,67 @@ def install_timeline_positions(pipe, references, emit):
             visual_cursor+=count
         return result
     builder.process=process
+
+
+def install_ref2va_conditioning(pipe, clips, emit, *, image_conditions=(), audio_conditions=()):
+    """Condition the generated AV timeline through H3's native latent masks.
+
+    These inputs never enter ReferenceEncoder/ref_blocks. Reference-panel
+    anchors and token packing remain independent of the generated timeline.
+    """
+    if not clips and not image_conditions and not audio_conditions:return
+    import torch
+    builder=next(unit for unit in pipe.units if type(unit).__name__=='MiniMaxH3Unit_PackedSequenceBuilder')
+    video_unit=next(unit for unit in pipe.units if type(unit).__name__=='MiniMaxH3Unit_VideoRetakeEmbedder')
+    audio_unit=next(unit for unit in pipe.units if type(unit).__name__=='MiniMaxH3Unit_AudioRetakeEmbedder')
+    original_video,original_audio=video_unit.process,audio_unit.process
+
+    def video(pipe,retake_video,frame_regions_to_retake,video_latents,height,width,num_frames,tiled,tile_size,tile_overlap):
+        result=original_video(pipe,retake_video,frame_regions_to_retake,video_latents,height,width,num_frames,tiled,tile_size,tile_overlap)
+        if not clips and not image_conditions:return result
+        anchor=result.get('input_latents_video',torch.zeros_like(video_latents))
+        mask=result.get('denoise_mask_video',torch.ones_like(video_latents))
+        times=builder._video_t_grid(video_latents.shape[2],0)/builder._FRAME_RESCALE/24
+        pipe.load_models_to_device(video_unit.onload_model_names)
+        for ref,frames in [*clips,*[(ref,[image]) for ref,image in image_conditions]]:
+            is_image=ref.get('kind')=='image'
+            if is_image:
+                tensor=pipe.preprocess_image(frames[0],torch_dtype=torch.float32,min_value=0)
+            else:
+                source_frames=pad_video_conditioning_frames(frames)
+                tensor=pipe.preprocess_video(source_frames,torch_dtype=torch.float32,min_value=0,device=pipe.device)
+            encoded=pipe.video_vae.encode_video(tensor,dtype=pipe.torch_dtype,**({'process_image':True} if is_image else dict(tiled=True,tile_size=128,tile_overlap=64))).to(video_latents)
+            start=float(ref.get('timeline_time',0));length=float(ref.get('duration',len(frames)/24))
+            if ref.get('kind')=='image':
+                indices=torch.tensor([int(torch.argmin(abs(times-start)))],dtype=torch.long)
+            else:indices=torch.where((times>=start-1e-7)&(times<start+length-1e-7))[0]
+            source_times=builder._video_t_grid(encoded.shape[2],0)/builder._FRAME_RESCALE/24
+            for target in indices.tolist():
+                source=int(torch.argmin(abs(source_times-max(0,float(times[target])-start))))
+                anchor[:,:,target]=encoded[:,:,source]
+                mask[:,:,target]=0
+            emit('log',message=f'Conditional video latents: {ref.get("name","timeline")} · {len(indices)} temporal tokens')
+            del tensor,encoded
+        result.update(input_latents_video=anchor,denoise_mask_video=mask)
+        return result
+
+    def audio(pipe,retake_audio,seconds_regions_to_retake,audio_latents):
+        result=original_audio(pipe,retake_audio,seconds_regions_to_retake,audio_latents)
+        if not audio_conditions:return result
+        from diffsynth.utils.data.audio import convert_to_stereo,resample_waveform
+        anchor=result.get('input_latents_audio',torch.zeros_like(audio_latents))
+        mask=result.get('denoise_mask_audio',torch.ones_like(audio_latents))
+        fps=pipe.audio_vae.sample_rate/pipe.audio_vae.hop_length
+        pipe.load_models_to_device(audio_unit.onload_model_names)
+        for ref,waveform,rate in audio_conditions:
+            waveform=resample_waveform(convert_to_stereo(waveform).float(),rate,pipe.audio_vae.sample_rate)
+            encoded=pipe.audio_vae.encode_audio(waveform[:2].to(pipe.device),dtype=pipe.torch_dtype).to(audio_latents)
+            start=max(0,round(float(ref.get('timeline_time',0))*fps))
+            count=min(encoded.shape[-1],max(0,math.ceil(float(ref.get('duration',waveform.shape[-1]/pipe.audio_vae.sample_rate))*fps)),audio_latents.shape[-1]-start)
+            if count>0:
+                anchor[...,start:start+count]=encoded[...,:count];mask[...,start:start+count]=0
+            emit('log',message=f'Conditional audio latents: {ref.get("name","timeline")} · {max(0,count)} temporal tokens')
+            del waveform,encoded
+        result.update(input_latents_audio=anchor,denoise_mask_audio=mask)
+        return result
+    video_unit.process=video;audio_unit.process=audio

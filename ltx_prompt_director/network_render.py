@@ -168,6 +168,8 @@ def run_remote_request(request,target,on_event,cancel,timeout):
     from .remote_jobs import FEATURE,read_receipt,save_receipt
     target=dict(target);record=REMOTE_JOB_RECORD.get()
     request_id=(record or {}).get('portable',{}).get('remote_request_id') or uuid4().hex
+    resume_only=bool((record or {}).get('portable',{}).get('remote_resume_only'))
+    if resume_only:target['features']=list(set(target.get('features',[]))|{FEATURE})
     receipt=read_receipt(request_id) if record else None
     if receipt and receipt.get('status')=='downloaded':
         result=receipt.get('result',{})
@@ -182,7 +184,6 @@ def run_remote_request(request,target,on_event,cancel,timeout):
     receipt=receipt or dict(request_id=request_id,record=record,target={'name':target.get('name'),'url':target['url']},status='created')
     if record:save_receipt(request_id,receipt)  # durable identity before host submission
     root=data_root()/'remote'/request_id;root.mkdir(parents=True,exist_ok=True,mode=0o700)
-    resume_only=bool((record or {}).get('portable',{}).get('remote_resume_only'))
     files={};payload={} if resume_only else map_files({key:value for key,value in request.items() if key!='profile'},files,root)
     profile=request.get('profile',{})
     payload['controls']={key:value for key,value in profile.items() if key in {'video_width','video_height','video_duration','video_steps','video_seed','video_sampler','video_preview_mode','video_preview_every','image_width','image_height','steps','preview_every'}}

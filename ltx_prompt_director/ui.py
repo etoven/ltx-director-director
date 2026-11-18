@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import warnings
 import zipfile
@@ -226,14 +227,19 @@ class MagicWorker(QRunnable):
 class BackgroundWorker(QRunnable):
     """Run disk work off the GUI thread; deliver results via Qt queued signals."""
 
-    def __init__(self, operation, args: tuple, cancel=None):
+    def __init__(self, operation, args: tuple, cancel=None, signals_parent=None):
         super().__init__()
         self.operation = operation
         self.args = args
         self.cancel = cancel
-        self.signals = WorkerSignals()
+        self.signals = WorkerSignals(signals_parent)
+        self.done = threading.Event()
 
     def run(self) -> None:
+        try:self._run()
+        finally:self.done.set()
+
+    def _run(self) -> None:
         cancel_token = LOCAL_CANCEL.set(self.cancel)
         token = LOCAL_PROGRESS.set(self.signals.local_event.emit)
         try:
@@ -284,7 +290,17 @@ class BackgroundCallbacks(QObject):
             if self.owner._close_after_jobs and not self.owner._pending_disk_jobs:
                 # Let the completed progress state reach the screen before dismissing it.
                 QTimer.singleShot(180, self.owner.close)
-            self.deleteLater()
+            # Do not delete the GUI-affine signal sender while its worker is
+            # still returning from emit(). Both sender and receiver belong to
+            # this GUI-owned lifetime, never to QRunnable's pool-thread teardown.
+            self.finished = self.failed = self.progress = None
+            self._dispose_when_worker_done()
+
+    def _dispose_when_worker_done(self):
+        done = getattr(self, "worker_done", None)
+        if done is not None and not done.is_set():
+            QTimer.singleShot(1, self._dispose_when_worker_done)
+        else:self.deleteLater()
 
 
 def _write_library_archive(path: str, payload: dict, segments: list[Segment], metadata_path: Path, meta: dict) -> None:
@@ -4755,12 +4771,15 @@ class MainWindow(QMainWindow):
         if selected_group is not None:request['duration']=self.render_group_duration(selected_group)
         elif not extensions and self.workspace_engine.startswith('minimax') and self.requested_length.value()>0:
             request['duration']=self.requested_length.value()
+        from .blend_conditioning import outgoing_spec,append_outgoing
+        outgoing_specs={group:outgoing_spec(self,group,items) for group,items in grouped_segments}
+        selected_incoming_side=self.extension_transition(selected_group).get('side','source') if selected_group is not None else 'source'
         selected_continuation=None
         continuation_job=None
         if selected_group is not None:
             position=next(index for index,(group,items) in enumerate(all_groups) if group==selected_group)
             transition=self.extension_transition(selected_group)
-            if position and transition['blend']!='cut' and transition['overlap']>0:
+            if position and conditioning_segments and conditioning_segments[0].kind=='text' and transition['blend']!='cut' and transition['overlap']>0:
                 previous=all_groups[position-1][0]
                 clip=self.render_group_options.get(str(previous),{}).get('clip',{})
                 continuation_job=next((job for job in reversed(self.render_queue.jobs)
@@ -4816,8 +4835,10 @@ class MainWindow(QMainWindow):
                 if continuation_job is not None:path=continuation_job.output_path
                 reference=continuation_reference(path,duration,overlap,trim_start=trim_start)
                 if mode!='ref2va':reference.pop('audio_path',None)
+                reference['blend_side']=selected_incoming_side
                 conditioning.insert(0,reference)
             from .render_cache import cached_render
+            append_outgoing(conditioning,outgoing_specs.get(grouped_segments[0][0]),request['duration'],profile['video_variant'])
             prepared={**request,'conditioning':conditioning,'references':extra_references}
             return cached_render(cache,grouped_segments[0][0],prepared,conditioning_segments,
                                  lambda:run_request(prepared,cancel=cancel),cancel)
@@ -4874,10 +4895,10 @@ class MainWindow(QMainWindow):
             continuation=None
             if selected_continuation:
                 path,length,overlap,mode,trim=selected_continuation
-                continuation=dict(path=path or '',duration=length,overlap=overlap,trim_start=trim)
+                continuation=dict(path=path or '',duration=length,overlap=overlap,trim_start=trim,side=selected_incoming_side)
             portable=video_spec(request,conditioning_segments,extra_references,continuation=continuation,
                 previous_job=continuation_job.id if continuation_job is not None else '',workspace_type=self.project_type,
-                attachment_revision=attachment_revisions[str(grouped_segments[0][0])])
+                attachment_revision=attachment_revisions[str(grouped_segments[0][0])],outgoing=outgoing_specs.get(grouped_segments[0][0]))
             self.start_render_job(operation,(),ready,failed,title=(self.current_project_name or 'Untitled video')+f' · Generation {generation}'+(f' · Group {next(i for i,(g,_) in enumerate(all_groups) if g==selected_group)+1}' if selected_group is not None else ''),
                 source='local',model='MiniMax H3',kind='Video',mode=profile['video_variant'],
                 details=f"{request['width']} × {request['height']} · {request['duration']} s · {request['steps']} steps",
@@ -4909,13 +4930,15 @@ class MainWindow(QMainWindow):
                     for segment in block_segments:
                         if segment.kind in ('image','video'):materialize_source(segment)
                     conditioning = video_references(block_segments,[],block_duration)
-                    if transition['blend'] != 'cut' and transition['overlap'] > 0:
+                    if block_segments and block_segments[0].kind=='text' and transition['blend'] != 'cut' and transition['overlap'] > 0:
                         continuation=continuation_reference(previous.output_path,previous_duration,transition['overlap'])
                         if block_profile['video_variant']!='ref2va':continuation.pop('audio_path',None)
+                        continuation['blend_side']=transition.get('side','source')
                         conditioning.insert(0,continuation)
                     from .render_cache import cached_render
                     prepared={**request,'profile':block_profile,'prompt':block_prompt,'duration':block_duration,
                               'conditioning':conditioning,'references':block_refs,'transition':transition,'dependencyRevision':dependency_revisions[str(group)]}
+                    append_outgoing(conditioning,outgoing_specs.get(group),block_duration,block_profile['video_variant'])
                     previous_result=cache.get(str(previous_group),{}).get('result',{})
                     previous_token=previous_result.get('render_token') or previous.output_path
                     result=cached_render(cache,group,prepared,block_segments,
@@ -4934,7 +4957,7 @@ class MainWindow(QMainWindow):
                 portable=video_spec({**request,'profile':group_profiles[index],'prompt':prompts[index],'duration':block_duration},
                     grouped_segments[index][1],group_references[index],continuation=continuation,
                     previous_job=previous.id if previous is not None else '',workspace_type=self.project_type,
-                    attachment_revision=attachment_revisions[str(grouped_segments[index][0])])
+                    attachment_revision=attachment_revisions[str(grouped_segments[index][0])],outgoing=outgoing_specs.get(grouped_segments[index][0]))
                 job = self.start_render_job(render_block, (), block_ready, failed,
                     title=f'Block {index + 1} · {block_duration:g} s', source='local', model='MiniMax H3', kind='Video',mode=group_profiles[index]['video_variant'],
                     details=(f"Previous block · trailing {transition['overlap']:g} s conditions time 0"
@@ -8820,7 +8843,10 @@ class MainWindow(QMainWindow):
             group_targets=list(dict.fromkeys(item.render_group for item in args[0]))
             if kind=='segment' and self.current_segment() is not None:group_targets=[self.current_segment().render_group]
         use_context=group_targets is not None and not any(word in operation.__name__ for word in ('timing','definition'))
-        continuity_context=prompt_context_snapshot(self,group_targets) if use_context else None
+        context_segments=([self.current_segment().id] if kind=='segment' and self.current_segment() is not None
+                          else [item.id for item in args[0]] if group_targets is not None else None)
+        self.ai_request_group_segment_ids=context_segments
+        continuity_context=prompt_context_snapshot(self,group_targets,context_segments) if use_context else None
         self.ai_request_group_targets=group_targets if continuity_context else None
         self.ai_request_group_fingerprint=prompt_context_fingerprint(continuity_context)
         instructions = copy.deepcopy(self.workspace_definition.get("generation_prompts", {}))
@@ -8892,9 +8918,10 @@ class MainWindow(QMainWindow):
 
     def start_disk_job(self, operation, args: tuple, finished, failed, *, serialized: bool = False, progress=None, cancel=None, allow_close_on_error=False) -> None:
         """Execute filesystem work without touching widgets outside the GUI thread."""
-        worker = BackgroundWorker(operation, args, cancel)
-        self._pending_disk_jobs += 1
         callbacks = BackgroundCallbacks(self, finished, failed, progress, allow_close_on_error)
+        worker = BackgroundWorker(operation, args, cancel, signals_parent=callbacks)
+        callbacks.worker_done = worker.done
+        self._pending_disk_jobs += 1
         worker.signals.finished.connect(callbacks.on_finished)
         worker.signals.failed.connect(callbacks.on_failed)
         worker.signals.local_event.connect(callbacks.on_local_event)
@@ -8969,7 +8996,7 @@ class MainWindow(QMainWindow):
         targets=getattr(self,'ai_request_group_targets',None)
         if targets is not None:
             from .group_prompt_context import snapshot as prompt_context_snapshot, fingerprint as prompt_context_fingerprint
-            if prompt_context_fingerprint(prompt_context_snapshot(self,targets))!=self.ai_request_group_fingerprint:
+            if prompt_context_fingerprint(prompt_context_snapshot(self,targets,getattr(self,'ai_request_group_segment_ids',None)))!=self.ai_request_group_fingerprint:
                 self.discard_obsolete_ai_result()
                 self.statusBar().showMessage('AI result discarded because its group anchor or earlier source context changed.',9000)
                 return

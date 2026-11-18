@@ -85,7 +85,7 @@ run_remote_request(value['request'],value['target'],lambda event:None,None,60)
         host.network_render.close();host.render_queue.shutdown();host.close()
 
 
-@pytest.mark.parametrize('recovery',['receipt','snapshot'])
+@pytest.mark.parametrize('recovery',['receipt','snapshot','manual'])
 def test_reopened_client_auto_attaches_host_without_starting_pending_work(tmp_path,monkeypatch,recovery):
     from ltx_prompt_director.models import Segment
     import av,numpy as np
@@ -160,15 +160,21 @@ def test_reopened_client_auto_attaches_host_without_starting_pending_work(tmp_pa
         wrong=dict(reconnect_peer,id='unrelated',token=second.network_render.token,
                    url=f'ws://127.0.0.1:{second.network_render.server.socket.getsockname()[1]}')
         second.network_render._peer(wrong);second.network_render._peer(reconnect_peer)
-        second.queue_store.check_remote()
+        if recovery=='manual':
+            second.queue_store.remote_timer.stop()
+            # Exercise the user's actual Resume queue control before automatic
+            # reattachment. Persisted credentials are deliberately unavailable.
+            second.render_queue_panel.pause.click()
+        else:second.queue_store.check_remote()
         wait_for(lambda:second.render_queue.active is not None and second.project_preview_panel.latent_player.active)
-        assert second.render_queue.paused and len(seen)==1
+        assert second.render_queue.paused==(recovery!='manual') and len(seen)==1
         assert second.render_queue.active.portable['remote_request_id']==request_id
+        if recovery=='manual':second.render_queue.set_paused(True)
         gate.set();wait_for(lambda:second.render_queue.jobs[0].state=='Complete')
         wait_for(lambda:second.render_group_options.get('0',{}).get('clip'))
         assert len(seen)==1 and len(host.render_queue.jobs)==1
         assert Path(second.render_queue.jobs[0].output_path).is_file()
-        assert pending.state=='Waiting' and second.render_queue.paused
+        if recovery!='manual':assert pending.state=='Waiting' and second.render_queue.paused
     finally:
         gate.set()
         for window in (second,first):

@@ -31,7 +31,7 @@ def continuation_reference(path, marked_duration=None, overlap=OVERLAP_SECONDS, 
     with av.open(str(path)) as media:has_audio=bool(media.streams.audio)
     reference = dict(kind='video', name=f'Previous block · trailing {overlap:g} s', path=str(path),
                 start=trim_start/24+max(0,length-overlap), duration=overlap,
-                timeline_time=0, timeline_start=0, timeline_end=overlap, continuation=True)
+                timeline_time=0, timeline_start=0, timeline_end=overlap, continuation=True,boundary='incoming',blend_frames=round(overlap*24))
     if has_audio:reference['audio_path']=str(path)
     return reference
 

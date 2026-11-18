@@ -72,7 +72,9 @@ def load_queue_with_receipts(path):
     # be absent after interrupted writes, migration or restoring a backup.
     for row in value.get('jobs',[]):
         request_id=row.get('portable',{}).get('remote_request_id')
-        if row.get('source')=='network' and request_id and row.get('state') in {'Waiting','Rendering','Cancelling'}:
+        attempted=row.get('state') in {'Rendering','Cancelling'} or row.get('portable',{}).get('remote_attempted') or row.get('portable',{}).get('remote_resume_only')
+        if row.get('source')=='network' and request_id and attempted and row.get('state') in {'Waiting','Rendering','Cancelling'}:
+            row['portable']['remote_attempted']=True
             receipts.setdefault(request_id,dict(request_id=request_id,record=copy.deepcopy(row),
                 target=copy.deepcopy(row.get('remote_target',{})),status='submitted'))
     value['remote_receipts']=receipts

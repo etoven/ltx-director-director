@@ -297,6 +297,8 @@ def video_generation(request):
     variant = profile.get('video_variant', 'ref2va' if 'ref2va' in Path(profile['video_model']).name.lower() else 'fl2va')
     from .local_conditioning import render_conditioning_inputs
     refs = render_conditioning_inputs(conditioning, request.get('references', []), variant)
+    # Timeline inputs are generated-region conditions; panel inputs are references.
+    condition_count=len(conditioning) if variant=='ref2va' else len(refs)
     for number,ref in enumerate(refs,1):
         embedded=ref.get('kind','image')=='image' and str(ref.get('image','')).startswith('data:image/')
         if ref.get('path') and not Path(ref['path']).is_file() and not embedded:
@@ -352,12 +354,13 @@ def video_generation(request):
         pipe.unit_runner = unit_runner
         from .local_conditioning import install_timeline_positions, configure_video_conditioning_encoder
         if variant == 'ref2va':
-            configure_video_conditioning_encoder(pipe, refs)
-            install_timeline_positions(pipe,refs,emit)
+            configure_video_conditioning_encoder(pipe, refs[condition_count:])
         references = []
         video_conditions = []
         image_conditions = []
-        for ref in refs:
+        audio_conditions = []
+        for ref_index,ref in enumerate(refs):
+            is_condition=ref_index<condition_count
             if ref.get('kind') == 'video':
                 frames = read_reference_video(ref['path'], height=request['height'], width=request['width'],
                     start=ref.get('start', 0), duration=ref.get('duration', 15), fps=24)
@@ -365,8 +368,11 @@ def video_generation(request):
                 if len(frames)<minimum:
                     raise ValueError('Video conditioning has no frames in the selected trim.' if minimum==1 else 'H3 video references need at least two seconds of source footage.')
                 progress(f'Video conditioning: {ref.get("name","video")} · {len(frames)} frames · source trim {ref.get("start",0):g}s')
-                if variant == 'fl2va':
+                if is_condition:
                     video_conditions.append((ref, frames))
+                    if variant=='ref2va' and ref.get('audio_path'):
+                        audio,rate=read_reference_audio(ref['audio_path'],start=ref.get('start',0),duration=ref.get('duration',15))
+                        if audio.shape[-1] and float(abs(audio).max())>1e-7:audio_conditions.append((ref,torch.from_numpy(audio),rate))
                     continue
                 reference = {'type': 'video', 'video': frames}
                 if ref.get('audio_path'):
@@ -376,13 +382,16 @@ def video_generation(request):
                 references.append(reference)
             elif ref.get('kind') == 'audio':
                 audio, rate = read_reference_audio(ref['path'], start=ref.get('start', 0), duration=ref.get('duration', 15))
+                if is_condition:
+                    if audio.shape[-1] and float(abs(audio).max())>1e-7:audio_conditions.append((ref,torch.from_numpy(audio),rate))
+                    continue
                 if audio.shape[-1] / rate < 2 and not ref.get('continuation'): raise ValueError('H3 audio references need at least two seconds of source audio.')
                 references.append({'type': 'audio', 'audio': torch.from_numpy(audio), 'sample_rate': rate})
             else:
                 image = _pil_reference(ref)
                 if image is None:raise ValueError(f'Cannot load conditioning image: {ref.get("name","image")}')
                 if 'timeline_time' in ref:image=image.resize((int(request['width']),int(request['height'])),Image.Resampling.LANCZOS)
-                if variant != 'ref2va':
+                if is_condition:
                     image_conditions.append((ref, image))
                 else:
                     references.append({'type': 'image', 'image': image})
@@ -432,6 +441,8 @@ def video_generation(request):
             ref_video_max_pixels=int(request['height']) * int(request['width']))
         if variant == 'ref2va':
             args['references'] = references
+            from .local_conditioning import install_ref2va_conditioning
+            install_ref2va_conditioning(pipe,video_conditions,emit,image_conditions=image_conditions,audio_conditions=audio_conditions)
         else:
             from .local_conditioning import install_fl2va_video_conditioning
             install_fl2va_video_conditioning(pipe, video_conditions, emit, image_conditions=image_conditions)

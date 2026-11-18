@@ -41,3 +41,29 @@ def test_restore_keeps_pending_and_failed_rows_and_orphan_remote_receipt(tmp_pat
         assert not store.frozen
     finally:
         store.frozen=True;store.timer.stop();store.remote_timer.stop();owner.close()
+
+
+def test_never_submitted_and_terminal_rows_do_not_reconnect_and_render_again_is_fresh(tmp_path,monkeypatch):
+    from ltx_prompt_director import local_generation,network_render
+    from ltx_prompt_director.remote_jobs import load_queue_with_receipts
+    guid=uuid4().hex
+    base=dict(id=uuid4().hex,title='Restore',project_id='',source='network',model='H3',kind='Video',state='Failed',
+              portable=dict(type='video',request=dict(kind='video',duration=4),remote_request_id=guid,remote_attempted=True,remote_resume_only=True))
+    waiting={**base,'id':uuid4().hex,'state':'Waiting','portable':dict(type='video',remote_request_id=uuid4().hex,request={})}
+    path=tmp_path/'render-queue.json';path.write_text(json.dumps(dict(version=1,paused=True,jobs=[base,waiting])))
+    assert not load_queue_with_receipts(path)['remote_receipts']
+    owner=Window();owner.session_keys={};owner.network_render=Network(owner)
+    def disk(op,args,finished,failed,**options):finished(op(*args))
+    owner.start_disk_job=disk;store=QueueStore(owner,path)
+    try:
+        original=owner.render_queue.jobs[0]
+        clone=owner.render_queue.render_again(original.id)[0]
+        assert clone.portable['remote_request_id']!=guid
+        assert not clone.portable.get('remote_resume_only') and not clone.portable.get('remote_attempted')
+        requests=[]
+        monkeypatch.setattr(local_generation,'run_request',lambda request,**kw:requests.append(request) or {'path':'fresh.mp4'})
+        monkeypatch.setattr(network_render,'run_remote_request',lambda *a,**kw:(_ for _ in ()).throw(AssertionError('Old resume-only recipe reused')))
+        assert clone.operation()['path']=='fresh.mp4'
+        assert requests[0]['kind']=='video'
+    finally:
+        store.frozen=True;store.timer.stop();store.remote_timer.stop();owner.close()

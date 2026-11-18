@@ -772,6 +772,10 @@ def _minimax_reference_inputs(segments: list[Segment], provider: str, reference_
 
 
 def _minimax_reference_header(item: dict) -> str:
+    if item.get('group_start_anchor') or item.get('group_end_anchor'):
+        return (item['name']+' — '+item['context_label']+' — READ-ONLY CONTEXT\n'+
+                json.dumps(dict(source_group=item.get('source_group_number',item['source_group']),source=item['anchor_source'],
+                    segment_relationships=item['segment_relationships']),ensure_ascii=False))
     metadata = {key: value for key, value in item.items() if key not in {"image", "video", "video_frames", "audio"}}
     return "REFERENCE INPUT: " + json.dumps(metadata, ensure_ascii=False)
 
