@@ -50,6 +50,9 @@ def test_insert_blend_button_attaches_full_video_refines_only_three_second_bridg
         bridge,movie=w.segments[1:]
         assert bridge.kind=='text' and bridge.duration==3 and movie.kind=='video' and movie.duration==20
         assert w.segments[0].to_dict()==original
+        assert w.workspace_engine=='minimax_references'
+        assert all(w.render_group_options[str(g)]['context']['workspaceDefinition']['engine']=='minimax_references' for g in (1,2))
+        assert w.render_group_options['0']['context']['workspaceDefinition']['engine']=='minimax_frames'
         assert all(w.extension_transition(g)['blend']=='perceptual_crossfade' for g in (1,2))
         clip=w.render_group_options['2']['clip']
         assert Path(clip['path']).is_file() and clip['duration']==20 and clip['path']==movie.media_path

@@ -7709,6 +7709,16 @@ class MainWindow(QMainWindow):
         if hasattr(self,'grouped_sequence'):self.grouped_sequence.load(record.get('groupedSequence'))
         self._group_video_revision=self.workspace_revision
 
+    def capture_extension_group(self):
+        context=self.capture_render_group()
+        reference_id=next((key for key in ('minimax_official_skill_reference','minimax_references','minimax_full_reference_guide')
+                           if self.workspace_definitions.get(key,{}).get('engine')=='minimax_references'),None)
+        definition=self.workspace_definitions.get(reference_id)
+        if definition and definition.get('engine')=='minimax_references':
+            context.update(projectType=reference_id,workspaceDefinition=copy.deepcopy(definition))
+            context['minimaxH3']['mode']='references'
+        return context
+
     def insert_video_for_blend(self):
         if not self.workspace_engine.startswith('minimax') or self.ai_busy or getattr(self,'_blend_video_importing',False):return
         path=choose_document_open(self,'Insert video for blend',str(Path.home()),'Videos (*.mp4 *.webm *.mov *.mkv *.avi *.m4v)')
@@ -7736,7 +7746,7 @@ class MainWindow(QMainWindow):
             bridge_group=max((s.render_group for s in self.segments),default=-1)+1
             video_group=bridge_group+1
             prompt='Continue naturally from the preceding scene and transition smoothly into the following video, preserving visual continuity.'
-            context=self.capture_render_group()
+            context=self.capture_extension_group()
             def group_context(length,text):
                 result=copy.deepcopy(context)
                 result.setdefault('directionOptions',{})['requestedLength']=length
@@ -7780,7 +7790,7 @@ class MainWindow(QMainWindow):
         self.render_group_settings_changed()
         group = max(s.render_group for s in self.segments)+1
         length = min(15.,max(0.01,self.requested_length.value() or sum(s.duration for s in self.segments if s.render_group==self._active_render_group)))
-        self.render_group_options[str(group)] = {'requestedLength':length,'context':self.capture_render_group()}
+        self.render_group_options[str(group)] = {'requestedLength':length,'context':self.capture_extension_group()}
         segment = Segment(f'Extension {group}', '', '', 'text', 'text', '', length, render_group=group)
         self.segments.append(segment)
         self.video_extensions = len(self.render_groups())-1
