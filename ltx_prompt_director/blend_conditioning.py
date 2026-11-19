@@ -20,6 +20,8 @@ def outgoing_spec(owner,group,segments):
 def outgoing_reference(spec,target_duration):
     from .video_extensions import duration
     import av
+    from .local_generation import align_h3_frames
+    target_duration=align_h3_frames(target_duration)/FPS
     available=max(0,duration(spec['path'])-spec.get('trim_start',0)/FPS)
     frames=blend_frames(spec['overlap'],min(available,spec['duration'],target_duration))
     if not frames:return None

@@ -292,7 +292,8 @@ def _load_video_pipeline(request):
 
 
 def video_generation(request):
-    conditioning = list(request.get('conditioning', []))
+    from .local_conditioning import align_conditioning_timeline
+    conditioning = align_conditioning_timeline(request.get('conditioning', []),request.get('duration',5))
     profile = request['profile']
     variant = profile.get('video_variant', 'ref2va' if 'ref2va' in Path(profile['video_model']).name.lower() else 'fl2va')
     from .local_conditioning import render_conditioning_inputs

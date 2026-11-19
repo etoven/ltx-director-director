@@ -13,6 +13,37 @@ def pad_video_conditioning_frames(frames):
     return frames+[frames[-1]]*(count-len(frames))
 
 
+def h3_checkpoint_frame(frame, output_frames):
+    """Nearest real H3 temporal-token position, bounded by the output."""
+    frame=max(0,min(output_frames-1,float(frame)))
+    base=math.floor(frame/17)*17
+    candidates=[base+shift+offset for shift in (-17,0,17) for offset in (0,1,5,9,13)]
+    return min((n for n in candidates if 0<=n<output_frames),key=lambda n:(abs(n-frame),n))
+
+
+def align_conditioning_timeline(conditioning, duration):
+    """Use the generated grid for saved, remote and new timeline conditions."""
+    from .local_generation import align_h3_frames
+    count=align_h3_frames(duration)
+    result=copy.deepcopy(conditioning)
+    for ref in result:
+        if 'timeline_time' not in ref:continue
+        time=float(ref['timeline_time'])
+        if ref.get('boundary')=='outgoing':
+            from .blend_timing import blend_frames
+            length=blend_frames(ref.get('duration',0),count/24)
+            if length:
+                ref.update(timeline_time=(count-length)/24,timeline_start=(count-length)/24,
+                           timeline_end=count/24,duration=length/24,blend_frames=length)
+            continue
+        if ref.get('kind','image')=='image':
+            terminal=ref.get('role')=='end' and abs(time-float(duration))<=1/24+1e-6
+            ref['timeline_time']=((count-1) if terminal else h3_checkpoint_frame(time*24,count))/24
+        else:
+            ref['timeline_time']=h3_checkpoint_frame(time*24,count)/24
+    return result
+
+
 def video_references(segments, references, duration):
     result=[];cursor=0.0
     for index,segment in enumerate(segments):

@@ -6,6 +6,7 @@ from __future__ import annotations
 from contextvars import ContextVar
 from pathlib import Path
 import json
+import math
 import os
 import queue
 import re
@@ -146,8 +147,10 @@ def validate_profile(profile, kind):
 
 
 def align_h3_frames(duration, fps=24):
-    requested = round(float(duration) * fps) + 1
-    if not 0 < float(duration) <= 15: raise ValueError('H3 local generation requires a positive duration up to 15 seconds.')
+    # A frame count is already a count: adding one expands an aligned clip
+    # by a complete 17-frame block on every round trip.
+    requested = math.ceil(float(duration) * fps - 1e-4)
+    if not 0 < float(duration) <= 362/24+1e-6: raise ValueError('H3 local generation requires a positive duration up to the aligned 15-second output.')
     frames = requested + (5 - requested) % 17
     return frames
 
