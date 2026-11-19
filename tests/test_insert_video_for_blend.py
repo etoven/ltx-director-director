@@ -87,3 +87,51 @@ def test_insert_blend_button_attaches_full_video_refines_only_three_second_bridg
         panel=LocalModelsPanel(w);assert panel.video_duration.minimum()<3;panel.dispose()
     finally:
         w.queue_store.frozen=True;w.queue_store.timer.stop();w.close()
+
+
+def test_empty_timeline_inserts_video_then_text_continuation(tmp_path,monkeypatch):
+    source=tmp_path/'opening.mp4'
+    with av.open(str(source),'w') as media:
+        stream=media.add_stream('libx264',rate=24);stream.width=32;stream.height=32;stream.pix_fmt='yuv420p'
+        for i in range(48):
+            for packet in stream.encode(av.VideoFrame.from_ndarray(np.full((32,32,3),(30,80,120),np.uint8),format='rgb24')):media.mux(packet)
+        for packet in stream.encode():media.mux(packet)
+    library=tmp_path/'projects';library.mkdir()
+    monkeypatch.setattr(ui,'project_library_path',lambda:library)
+    settings=QSettings(str(tmp_path/'settings.ini'),QSettings.Format.IniFormat)
+    with patch('ltx_prompt_director.ui.QSettings',return_value=settings),patch.object(ui.MainWindow,'restore_startup_workspace'):
+        w=ui.MainWindow();w._close_saves_queued=True
+    try:
+        w.new_project();w.set_project_type('minimax_references')
+        assert not w.segments
+        calls=[]
+        monkeypatch.setattr(ui,'choose_document_open',lambda *a:str(source))
+        monkeypatch.setattr(w,'ai_credentials',lambda **kw:('openai','fixture','fixture'))
+        monkeypatch.setattr(w,'start_ai_worker',lambda *a,**kw:calls.append((a,kw)))
+        w.insert_blend_video_tile.click();wait_for(lambda:len(calls)==1)
+        movie,text=w.segments
+        assert movie.kind=='video' and movie.render_group==0 and movie.duration==2
+        assert text.kind=='text' and text.render_group==1 and text.duration==3
+        assert w.render_group_options['0']['clip']['path']==movie.media_path
+        assert w.render_group_options['0']['attachedVideoOnly']
+        assert w.render_group_options['0']['blend']=='cut'
+        assert w.extension_transition(1)['blend']=='perceptual_crossfade'
+        assert w.current_segment().id==text.id and w.render_scope.currentData()==1
+        args,kwargs=calls[0]
+        assert args[1][1]==1 and 'no following video' in args[1][5]
+        token=GROUP_PROMPT_CONTEXT.set(snapshot(w,[1],[text.id]))
+        try:images,rules=augment([],'Continuation rules','openai',ai._mixed_reference_input)
+        finally:GROUP_PROMPT_CONTEXT.reset(token)
+        assert any(i.get('group_start_anchor') for i in images)
+        assert not any(i.get('group_end_anchor') for i in images)
+        w.refinement_segment_id=text.id;w.ai_refinement_scope='segment'
+        args[3](dict(prompt='Continue the ending motion.',duration=12,imagePrompt=''))
+        assert text.prompt=='Continue the ending motion.' and text.duration==3 and movie.duration==2
+        w.save_library_project(automatic=True);wait_for(lambda:not w._pending_disk_jobs)
+        from ltx_prompt_director.project_archive import read_project
+        payload=read_project(w.current_library_metadata()['projectPath'])
+        w.load_project_payload(payload)
+        assert [s.kind for s in w.segments]==['video','text']
+        assert w.render_group_options['0']['clip']['duration']==2
+    finally:
+        w.queue_store.frozen=True;w.queue_store.timer.stop();w.close()

@@ -4161,7 +4161,7 @@ class MainWindow(QMainWindow):
         self.insert_blend_video_tile.setObjectName("addTile")
         self.insert_blend_video_tile.setFixedSize(32, 32)
         self.insert_blend_video_tile.setAccessibleName("Insert video for blend")
-        self.insert_blend_video_tile.setToolTip("Insert video for blend: append a 3-second text bridge and a full video, then refine the bridge")
+        self.insert_blend_video_tile.setToolTip("Insert video with a 3-second continuation on an empty timeline, or a text bridge after existing groups")
         self.insert_blend_video_tile.clicked.connect(self.insert_video_for_blend)
         self.add_tile_layout.addWidget(self.insert_blend_video_tile, 0, Qt.AlignmentFlag.AlignHCenter)
         self.timeline_context_tile = QPushButton("R✦")
@@ -7826,9 +7826,12 @@ class MainWindow(QMainWindow):
                     or before!=[s.to_dict() for s in self.segments]):
                 self.statusBar().showMessage('Video insertion discarded because the project or timeline changed.',10000);return
             from .blend_timing import DEFAULT_SECONDS
-            bridge_group=max((s.render_group for s in self.segments),default=-1)+1
-            video_group=bridge_group+1
-            prompt='Continue naturally from the preceding scene and transition smoothly into the following video, preserving visual continuity.'
+            first_video=not self.segments
+            next_group=max((s.render_group for s in self.segments),default=-1)+1
+            video_group=next_group if first_video else next_group+1
+            bridge_group=next_group+1 if first_video else next_group
+            prompt=('Continue naturally from the attached video ending, preserving its visual state and motion.' if first_video else
+                    'Continue naturally from the preceding scene and transition smoothly into the following video, preserving visual continuity.')
             context=self.capture_extension_group()
             def group_context(length,text):
                 result=copy.deepcopy(context)
@@ -7843,8 +7846,10 @@ class MainWindow(QMainWindow):
                 blend='perceptual_crossfade',blendLength=DEFAULT_SECONDS,blendSide='source')
             self.render_group_options[str(video_group)]=dict(requestedLength=movie.duration,
                 context=group_context(movie.duration,'Use the attached video unchanged.'),attachedVideoOnly=True,
-                blend='perceptual_crossfade',blendLength=DEFAULT_SECONDS,blendSide='source')
-            row=len(self.segments);self.segments.extend([bridge,movie])
+                blend='cut' if first_video else 'perceptual_crossfade',
+                blendLength=0 if first_video else DEFAULT_SECONDS,blendSide='source')
+            row=len(self.segments)+(1 if first_video else 0)
+            self.segments.extend([movie,bridge] if first_video else [bridge,movie])
             self.video_extensions=max(0,len(self.render_groups())-1);self._group_video_revision=self.workspace_revision
             self._active_render_group=bridge_group;self.apply_render_group(bridge_context)
             self.refresh_video_extensions();self.refresh_timeline(row);self.mark_dirty()
@@ -7857,7 +7862,10 @@ class MainWindow(QMainWindow):
                 if self.current_segment() is None or self.current_segment().id!=bridge.id:return
                 provider,model,key=credentials
                 self.refinement_segment_id=bridge.id
-                instruction=('Refine only this 3-second text bridge after observing its incoming and outgoing continuity frames. '
+                instruction=('Refine only this 3-second text continuation after observing the incoming continuity frame from the attached video ending. '
+                             'Continue from that ending appearance and motion; there is no following video to lead into. '
+                             'Preserve all timing, media and other groups.' if first_video else
+                             'Refine only this 3-second text bridge after observing its incoming and outgoing continuity frames. '
                              'Connect the existing ending appearance to the picked video opening. Preserve all timing, media and other groups.')
                 self.start_ai_worker(refine_segment_prompt,
                     (copy.deepcopy(self.segments),row,provider,model,key,instruction,3,self.settings.value('api_timeout',400,int)),
