@@ -4164,6 +4164,13 @@ class MainWindow(QMainWindow):
         self.insert_blend_video_tile.setToolTip("Insert video for blend: append a 3-second text bridge and a full video, then refine the bridge")
         self.insert_blend_video_tile.clicked.connect(self.insert_video_for_blend)
         self.add_tile_layout.addWidget(self.insert_blend_video_tile, 0, Qt.AlignmentFlag.AlignHCenter)
+        self.timeline_context_tile = QPushButton("R✦")
+        self.timeline_context_tile.setObjectName("addTile")
+        self.timeline_context_tile.setFixedSize(32, 32)
+        self.timeline_context_tile.setAccessibleName("Complete timeline reference context")
+        self.timeline_context_tile.setToolTip("Review all groups for missing reference context, label additions and refine affected Unified prompts")
+        self.timeline_context_tile.clicked.connect(self.complete_timeline_reference_context)
+        self.add_tile_layout.addWidget(self.timeline_context_tile, 0, Qt.AlignmentFlag.AlignHCenter)
         self.add_tile_layout.addStretch(1)
         track_row.addWidget(self.add_tile_wrap)
         timeline_layout.addLayout(track_row)
@@ -4758,7 +4765,48 @@ class MainWindow(QMainWindow):
             self.render_scope.setCurrentIndex(self.render_scope.findData('__missing_group_videos__'))
             self.render_queue.set_paused(was_paused)
 
+    def generate_group_video_batch(self):
+        """Queue generated groups while retaining full-length source-only clips."""
+        self.store_render_group()
+        candidates=[]
+        for group,items in self.render_groups().items():
+            options=self.render_group_options.setdefault(str(group),{})
+            # Older projects may have an authored video but no explicit group
+            # attachment. Reuse that managed source without copying/truncating it.
+            if not options.get('clip',{}).get('path') and len(items)==1 and items[0].kind=='video':
+                source=items[0]
+                if source.media_path and Path(source.media_path).is_file():
+                    options['clip']=dict(path=source.media_path,preview_path=source.preview_path,
+                        duration=source.duration,trim_start=int(source.trim_start or 0),
+                        media_duration_frames=source.media_duration_frames)
+            source_only=options.get('attachedVideoOnly') or (options.get('clip',{}).get('path')
+                and not any(item.kind=='text' for item in items))
+            if not source_only:candidates.append(group)
+        if not candidates:
+            self.statusBar().showMessage('All groups contain existing source videos. Select a group explicitly to regenerate it.',10000);return
+        before={job.id for job in self.render_queue.jobs};was_paused=self.render_queue.paused
+        self.render_queue.set_paused(True)
+        try:
+            for group in candidates:
+                self.render_scope.setCurrentIndex(self.render_scope.findData(group))
+                count=len(self.render_queue.jobs)
+                self.generate_local_video()
+                if len(self.render_queue.jobs)==count:break
+            created=[job for job in self.render_queue.jobs if job.id not in before]
+            if len(created)>1:
+                ident=uuid4().hex
+                for job in created:
+                    job.group_id=ident
+                    job.group_title=(self.current_project_name or 'Untitled video')+' · Group renders'
+                self.render_queue.changed.emit()
+            if created:self.mark_dirty()
+        finally:
+            self.render_scope.setCurrentIndex(self.render_scope.findData(None))
+            self.render_queue.set_paused(was_paused)
+
     def generate_local_video(self):
+        if self.render_scope.currentData() is None and len(self.render_groups())>1:
+            self.generate_group_video_batch();return
         if self.render_scope.currentData()=='__missing_group_videos__':
             self.generate_missing_group_videos();return
         if not self.current_project_id:
@@ -4839,7 +4887,7 @@ class MainWindow(QMainWindow):
                 else:
                     self.statusBar().showMessage('Attach or queue the preceding group first, or set this join to Cut.',10000);return
         block_durations = [self.render_group_duration(group) for group,items in grouped_segments] if extensions else [float(request['duration'])]
-        if extensions and any(not 0<length<=15 for length in block_durations):
+        if extensions and any(not 0<length<=362/24+1e-6 for length in block_durations):
             QMessageBox.information(self,'Video extensions','Set each generated block to a positive length up to 15 seconds using the timeline length control.')
             return
         blend_settings=[self.extension_transition(group) for group,items in grouped_segments[1:]]
@@ -6700,7 +6748,7 @@ class MainWindow(QMainWindow):
         self.current_collection = parent
         self.refresh_project_library(preserve_scroll=False)
 
-    def save_library_project(self, automatic: bool = False, source_filename: str | None = None) -> None:
+    def save_library_project(self, automatic: bool = False, source_filename: str | None = None, *, quiet: bool = False) -> None:
         if not self.has_project_content and not self.current_project_id:
             if not automatic:
                 QMessageBox.information(self, "Nothing to save", "Write a prompt or add an image, video or text segment first.")
@@ -6767,7 +6815,7 @@ class MainWindow(QMainWindow):
         payload = self.project_payload(include_media=False)
         normalize_project_labels(meta)
         payload["library"] = {key: meta.get(key, "") for key in ("id", "name", "description", "collection", "savedAt", "status", "color", "tags", "tag", "archived", "notes", "previewVideoPath", "previewVideoName", "projectFiles", "workflowFiles", "downloadDirectory", "nameOrigin", "nameRevision")}
-        self.queue_project_snapshot(meta,payload,self.capture_workspace_state())
+        self.queue_project_snapshot(meta,payload,self.capture_workspace_state(),quiet=quiet)
 
     def queue_project_snapshot(self,meta,payload,workspace,*,done=None,quiet=False):
         root=project_library_path()
@@ -6809,7 +6857,8 @@ class MainWindow(QMainWindow):
                 self.show()
             if self.current_project_id==project_id:self.project_dirty=True
             elif project_id in self.project_sessions:self.project_sessions[project_id]["dirty"]=True
-            if not quiet:QMessageBox.critical(self, "Save failed", message)
+            if quiet:self.statusBar().showMessage("Project save failed: "+str(message),15000)
+            else:QMessageBox.critical(self, "Save failed", message)
             if done:done(False,str(message))
 
         self.start_disk_job(_write_library_archive,
@@ -7709,6 +7758,40 @@ class MainWindow(QMainWindow):
         if hasattr(self,'grouped_sequence'):self.grouped_sequence.load(record.get('groupedSequence'))
         self._group_video_revision=self.workspace_revision
 
+    def complete_timeline_reference_context(self):
+        if self.ai_busy or self.workspace_engine!='minimax_references' or not self.segments:return
+        credentials=self.ai_credentials()
+        if not credentials:return
+        self.finish_prompt_reviews()
+        self.prompt_surface.structured.refresh()
+        self.store_render_group()
+        from .timeline_reference_context import snapshot,fingerprint,reassess_timeline_context
+        baseline=snapshot(self);signature=fingerprint(baseline)
+        def finished(result):
+            self.set_ai_controls_enabled(True)
+            if fingerprint(snapshot(self))!=signature:
+                self.statusBar().showMessage('Timeline or references changed; context review discarded.',10000);return
+            if not result['groups']:
+                message='No additional references needed or no free reference slots.'
+                if result['unavailable']:message+=' Some source media could not be read.'
+                self.statusBar().showMessage(message,12000);return
+            for group,update in result['groups'].items():
+                self.render_group_options[group]['context']=copy.deepcopy(update['context'])
+                self.prompt_template_states[update['state_key']]=copy.deepcopy(update['state'])
+            active=result['groups'].get(str(self._active_render_group))
+            if active:
+                self.apply_render_group(active['context'])
+                self.unified_prompt.setPlainText(active['state']['last_render'])
+                self.minimax_panel.refresh_references()
+                self.prompt_surface.structured.refresh()
+            if hasattr(self,'grouped_sequence'):self.grouped_sequence.refresh()
+            self.mark_dirty();self.save_library_project(automatic=True,quiet=True)
+            self.statusBar().showMessage(f"Added {result['added']} context references across {len(result['groups'])} groups; Unified prompts refined."
+                + (' Some source media could not be read.' if result['unavailable'] else ''),15000)
+        self.start_ai_worker(reassess_timeline_context,
+            (baseline,*credentials,self.settings.value('api_timeout',400,int)),
+            'Reviewing reference context across the entire timeline…',finished,review_text=False)
+
     def capture_extension_group(self):
         context=self.capture_render_group()
         reference_id=next((key for key in ('minimax_official_skill_reference','minimax_references','minimax_full_reference_guide')
@@ -7803,6 +7886,7 @@ class MainWindow(QMainWindow):
         enabled = self.workspace_engine.startswith('minimax')
         self.add_extension_tile.setVisible(enabled)
         self.insert_blend_video_tile.setVisible(enabled)
+        self.timeline_context_tile.setVisible(self.workspace_engine=='minimax_references')
         self.extension_brackets.setVisible(bool(self.video_extensions))
         self.extension_brackets.update();self.position_extension_boxes()
 
@@ -8836,7 +8920,7 @@ class MainWindow(QMainWindow):
         for widget in (self.prompt_scope, self.project_type_combo, self.duration_spin,
                        self.start_button, self.end_button, self.voice_options_button, self.requested_length,
                        self.timeline_approve_all, self.timeline_deny_all,
-                       self.add_tile, self.add_text_tile, self.insert_blend_video_tile,
+                       self.add_tile, self.add_text_tile, self.insert_blend_video_tile, self.timeline_context_tile,
                        self.hdr, self.sfx, self.spoken_dialog, self.reduce_music,
                        self.output_width, self.output_height, self.references_button):
             widget.setEnabled(enabled)
