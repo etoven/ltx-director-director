@@ -81,11 +81,13 @@ def test_worker_exposes_only_backend_source_and_preserves_venv_interpreter(tmp_p
     monkeypatch.setenv('XDG_DATA_HOME', str(tmp_path))
     monkeypatch.setenv('PYTHONPATH', '/unrelated/gui/site-packages')
     fake_worker(monkeypatch, '''import json,os
-from ltx_prompt_director import local_generation
-print('DIRECTOR_EVENT '+json.dumps({'kind':'result','module':local_generation.__file__,
+from ltx_prompt_director import local_generation,local_conditioning
+frames=local_conditioning.align_conditioning_timeline([{'kind':'video','boundary':'outgoing','timeline_time':3,'duration':22/24}],4)
+print('DIRECTOR_EVENT '+json.dumps({'kind':'result','aligned':frames[0]['blend_frames'],'module':local_generation.__file__,
  'cwd':os.getcwd(),'search':os.environ['PYTHONPATH']}),flush=True)
 ''')
     result = local.run_request({'kind': 'probe', 'profile': {'python': sys.executable}})
+    assert result['aligned']==22
     assert result['module'].startswith(result['cwd'] + '/runtime/ltx_prompt_director/')
     assert result['search'] == result['cwd'] + '/runtime'
     assert not list(local.data_root().rglob('runtime'))

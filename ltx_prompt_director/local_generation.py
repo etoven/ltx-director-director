@@ -226,7 +226,7 @@ def _run_request(request, on_event=None, cancel=None, timeout=None, manager=None
     package = runtime / 'ltx_prompt_director'; package.mkdir(parents=True,exist_ok=True)
     source = Path(__file__).parent
     if session is None:
-        for module in (source / '__init__.py', *source.glob('local_*.py')):
+        for module in (source / '__init__.py', source / 'blend_timing.py', *source.glob('local_*.py')):
             shutil.copy2(module, package / module.name)
     env['PYTHONPATH'] = str(runtime)
     events = queue.Queue()

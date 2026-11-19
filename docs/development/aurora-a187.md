@@ -1,0 +1,3 @@
+# Aurora a187: include shared frame timing in copied inference backend
+
+The inference runtime copies backend-only modules into a private package. Include blend_timing.py alongside local_*.py because outgoing conditioning normalization imports its frame snapping. The GUI wheel already contained this module, so installed-package import checks alone did not expose the omission. The existing copied-worker transport regression now exercises actual outgoing normalization through the private package. No model render or broad suite. One frozen wheel is installed on both machines and published unchanged.
